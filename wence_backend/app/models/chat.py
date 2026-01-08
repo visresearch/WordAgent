@@ -12,6 +12,7 @@ class ChatRequest(BaseModel):
     history: List[Any] = []  # 历史消息
     model: str = "gpt-4"  # 模型
     timestamp: Optional[int] = None  # 时间戳
+    documentJson: Optional[Any] = None  # 文档 JSON 数据
 
 
 class ChatResponse(BaseModel):

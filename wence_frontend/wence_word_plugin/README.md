@@ -1,5 +1,7 @@
 # wence_word_plugin
 
+文策AI word 前端插件
+
 ## 构建项目
 
 ```bash

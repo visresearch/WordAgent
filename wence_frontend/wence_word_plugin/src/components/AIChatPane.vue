@@ -9,9 +9,14 @@
         <!-- 显示选中内容上下文 -->
         <div v-if="msg.selectionContext" class="selection-context">
           <div class="context-header">
-            <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M14 1H2a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1zM2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2H2z"/>
-              <path d="M3 4h10v1H3V4zm0 3h10v1H3V7zm0 3h6v1H3v-1z"/>
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 16 16"
+              fill="currentColor"
+            >
+              <path d="M14 1H2a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1zM2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2H2z" />
+              <path d="M3 4h10v1H3V4zm0 3h10v1H3V7zm0 3h6v1H3v-1z" />
             </svg>
             <span>选中的内容</span>
           </div>
@@ -47,18 +52,28 @@
     <div v-if="currentSelection" class="current-selection-bar">
       <div class="selection-bar-content">
         <div class="selection-bar-icon">
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M14 1H2a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1zM2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2H2z"/>
-            <path d="M3 4h10v1H3V4zm0 3h10v1H3V7zm0 3h6v1H3v-1z"/>
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 16 16"
+            fill="currentColor"
+          >
+            <path d="M14 1H2a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1zM2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2H2z" />
+            <path d="M3 4h10v1H3V4zm0 3h10v1H3V7zm0 3h6v1H3v-1z" />
           </svg>
         </div>
         <div class="selection-bar-info">
           <span class="selection-bar-preview">{{ currentSelection.preview }}</span>
           <span class="selection-bar-range">{{ currentSelection.startText }} → {{ currentSelection.endText }}</span>
         </div>
-        <button class="selection-bar-clear" @click="clearSelection" title="清除选区">
-          <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/>
+        <button class="selection-bar-clear" title="清除选区" @click="clearSelection">
+          <svg
+            width="10"
+            height="10"
+            viewBox="0 0 16 16"
+            fill="currentColor"
+          >
+            <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z" />
           </svg>
         </button>
       </div>
@@ -145,8 +160,8 @@
 </template>
 
 <script>
-import { parseDocxToJSON } from './js/docxJsonConverter.js'
-import api from './js/api.js'
+import { parseDocxToJSON } from './js/docxJsonConverter.js';
+import api from './js/api.js';
 
 export default {
   name: 'AIChatPane',

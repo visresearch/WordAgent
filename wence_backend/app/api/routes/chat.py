@@ -21,6 +21,8 @@ async def chat_request(request: ChatRequest):
     print(f"模型: {request.model}")
     print(f"历史消息数: {len(request.history)}")
     print(f"时间戳: {request.timestamp}")
+    if request.documentJson:
+        print(f"文档 JSON: {request.documentJson}")
     print("=" * 50)
     
     # TODO: 调用 AI 服务处理

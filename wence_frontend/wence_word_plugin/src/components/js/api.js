@@ -21,7 +21,7 @@ const CONFIG = {
   headers: {
     'Content-Type': 'application/json'
   }
-}
+};
 
 // ============== 工具函数 ==============
 
@@ -32,7 +32,7 @@ const CONFIG = {
  * @returns {Promise<Object>} - 响应数据或错误对象
  */
 async function request(url, options = {}) {
-  const fullURL = `${CONFIG.baseURL}${url}`
+  const fullURL = `${CONFIG.baseURL}${url}`;
   
   const fetchOptions = {
     method: options.method || 'GET',
@@ -41,30 +41,30 @@ async function request(url, options = {}) {
       ...options.headers
     },
     ...options
-  }
+  };
   
   // 如果有 body，序列化为 JSON
   if (options.body && typeof options.body === 'object') {
-    fetchOptions.body = JSON.stringify(options.body)
+    fetchOptions.body = JSON.stringify(options.body);
   }
   
   try {
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), options.timeout || CONFIG.timeout)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), options.timeout || CONFIG.timeout);
     
-    fetchOptions.signal = controller.signal
+    fetchOptions.signal = controller.signal;
     
-    const response = await fetch(fullURL, fetchOptions)
-    clearTimeout(timeoutId)
+    const response = await fetch(fullURL, fetchOptions);
+    clearTimeout(timeoutId);
     
     // 解析响应
-    const contentType = response.headers.get('content-type')
-    let data
+    const contentType = response.headers.get('content-type');
+    let data;
     
     if (contentType && contentType.includes('application/json')) {
-      data = await response.json()
+      data = await response.json();
     } else {
-      data = await response.text()
+      data = await response.text();
     }
     
     if (!response.ok) {
@@ -73,14 +73,14 @@ async function request(url, options = {}) {
         error: data.message || data.error || `HTTP ${response.status}: ${response.statusText}`,
         status: response.status,
         data
-      }
+      };
     }
     
     return {
       success: true,
       data,
       status: response.status
-    }
+    };
     
   } catch (error) {
     if (error.name === 'AbortError') {
@@ -88,14 +88,14 @@ async function request(url, options = {}) {
         success: false,
         error: '请求超时，请稍后重试',
         code: 'TIMEOUT'
-      }
+      };
     }
     
     return {
       success: false,
       error: error.message || '网络请求失败',
       code: 'NETWORK_ERROR'
-    }
+    };
   }
 }
 
@@ -116,25 +116,25 @@ async function request(url, options = {}) {
  */
 async function modifyDocument(documentJson, userQuestion, options = {}) {
   if (!documentJson) {
-    return { success: false, error: '文档数据不能为空' }
+    return { success: false, error: '文档数据不能为空' };
   }
   
   if (!userQuestion || !userQuestion.trim()) {
-    return { success: false, error: '请输入您的问题或指令' }
+    return { success: false, error: '请输入您的问题或指令' };
   }
   
   const payload = {
+    message: userQuestion.trim(),  // 后端期望 message 字段
     documentJson,
-    question: userQuestion.trim(),
     timestamp: Date.now(),
     ...options.extraData
-  }
+  };
   
   return await request('/api/chat/request', {
     method: 'POST',
     body: payload,
     timeout: options.timeout || 60000  // 文档处理可能需要更长时间
-  })
+  });
 }
 
 /**
@@ -148,21 +148,22 @@ async function modifyDocument(documentJson, userQuestion, options = {}) {
  */
 async function chat(message, history = [], options = {}) {
   if (!message || !message.trim()) {
-    return { success: false, error: '消息不能为空' }
+    return { success: false, error: '消息不能为空' };
   }
   
   const payload = {
     message: message.trim(),
     history,
     model: options.model || 'gpt-4',
+    documentJson: options.documentJson || null,  // 文档 JSON 数据
     timestamp: Date.now()
-  }
+  };
   
   return await request('/api/chat/request', {
     method: 'POST',
     body: payload,
     timeout: options.timeout || CONFIG.timeout
-  })
+  });
 }
 
 /**
@@ -177,9 +178,9 @@ async function chat(message, history = [], options = {}) {
  * @returns {Object} - 包含 abort 方法的控制对象
  */
 function chatStream(message, options = {}) {
-  const { onMessage, onError, onComplete, model = 'gpt-4', documentJson = null, history = [] } = options
+  const { onMessage, onError, onComplete, model = 'gpt-4', documentJson = null, history = [] } = options;
   
-  const controller = new AbortController()
+  const controller = new AbortController();
   
   const execute = async () => {
     try {
@@ -195,43 +196,51 @@ function chatStream(message, options = {}) {
           timestamp: Date.now()
         }),
         signal: controller.signal
-      })
+      });
       
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
       
-      const reader = response.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
       
       while (true) {
-        const { done, value } = await reader.read()
+        const { done, value } = await reader.read();
         
         if (done) {
-          if (onComplete) onComplete()
-          break
+          if (onComplete) {
+            onComplete();
+          }
+          break;
         }
         
-        buffer += decoder.decode(value, { stream: true })
+        buffer += decoder.decode(value, { stream: true });
         
         // 处理 SSE 格式
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
         
         for (const line of lines) {
           if (line.startsWith('data: ')) {
-            const data = line.slice(6)
+            const data = line.slice(6);
             if (data === '[DONE]') {
-              if (onComplete) onComplete()
-              return
+              if (onComplete) {
+                onComplete();
+              }
+              return;
             }
             try {
-              const parsed = JSON.parse(data)
-              if (onMessage) onMessage(parsed)
+              const parsed = JSON.parse(data);
+              if (onMessage) {
+                onMessage(parsed);
+              }
             } catch (e) {
               // 如果不是 JSON，直接传递文本
-              if (onMessage) onMessage({ content: data })
+              if (onMessage) {
+                onMessage({ content: data });
+              }
             }
           }
         }
@@ -239,16 +248,18 @@ function chatStream(message, options = {}) {
       
     } catch (error) {
       if (error.name !== 'AbortError') {
-        if (onError) onError(error)
+        if (onError) {
+          onError(error);
+        }
       }
     }
-  }
+  };
   
-  execute()
+  execute();
   
   return {
     abort: () => controller.abort()
-  }
+  };
 }
 
 /**
@@ -261,7 +272,7 @@ async function healthCheck() {
   return await request('/api/health', {
     method: 'GET',
     timeout: 5000
-  })
+  });
 }
 
 /**
@@ -272,7 +283,7 @@ async function healthCheck() {
 async function getModels() {
   return await request('/api/models', {
     method: 'GET'
-  })
+  });
 }
 
 /**
@@ -281,13 +292,13 @@ async function getModels() {
  */
 function updateConfig(newConfig) {
   if (newConfig.baseURL) {
-    CONFIG.baseURL = newConfig.baseURL
+    CONFIG.baseURL = newConfig.baseURL;
   }
   if (newConfig.timeout) {
-    CONFIG.timeout = newConfig.timeout
+    CONFIG.timeout = newConfig.timeout;
   }
   if (newConfig.headers) {
-    CONFIG.headers = { ...CONFIG.headers, ...newConfig.headers }
+    CONFIG.headers = { ...CONFIG.headers, ...newConfig.headers };
   }
 }
 
@@ -296,7 +307,7 @@ function updateConfig(newConfig) {
  * @returns {Object} - 当前配置
  */
 function getConfig() {
-  return { ...CONFIG }
+  return { ...CONFIG };
 }
 
 // ============== 导出 ==============
@@ -315,7 +326,7 @@ export default {
   
   // 底层请求方法（供扩展使用）
   request
-}
+};
 
 // 也支持命名导出
 export {
@@ -327,4 +338,4 @@ export {
   updateConfig,
   getConfig,
   request
-}
+};
