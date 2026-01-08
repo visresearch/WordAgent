@@ -1,0 +1,3 @@
+"""
+WenCe AI Writing Assistant
+"""

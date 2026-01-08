@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<JsPlugin>
+  <ApiVersion>1.0.0</ApiVersion>
+  <Name>WenceAI</Name>
+  <Description>WenCe AI Writing Assistant</Description>
+</JsPlugin>
