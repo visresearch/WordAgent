@@ -125,6 +125,7 @@ async function modifyDocument(documentJson, userQuestion, options = {}) {
   
   const payload = {
     message: userQuestion.trim(),  // 后端期望 message 字段
+    mode: options.mode || 'agent',  // 模式：agent 或 ask（必选）
     documentJson,
     timestamp: Date.now(),
     ...options.extraData
@@ -153,6 +154,7 @@ async function chat(message, history = [], options = {}) {
   
   const payload = {
     message: message.trim(),
+    mode: options.mode || 'agent',  // 模式：agent 或 ask（必选）
     history,
     model: options.model || 'gpt-4',
     documentJson: options.documentJson || null,  // 文档 JSON 数据
@@ -281,7 +283,7 @@ async function healthCheck() {
  * @returns {Promise<Object>} - 模型列表
  */
 async function getModels() {
-  return await request('/api/models', {
+  return await request('/api/chat/models', {
     method: 'GET'
   });
 }

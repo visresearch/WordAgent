@@ -11,7 +11,7 @@ from app.api import api_router
 
 app = FastAPI(
     title=settings.APP_NAME,
-    description="文测 AI 写作助手后端服务",
+    description="文策 AI 写作助手后端服务",
     version=settings.VERSION,
     openapi_url=f"{settings.API_PREFIX}/openapi.json",
     docs_url=f"{settings.API_PREFIX}/docs",

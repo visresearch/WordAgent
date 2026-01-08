@@ -100,15 +100,23 @@
                 Ask
               </option>
             </select>
-            <select v-model="selectedModel" class="toolbar-select">
-              <option value="gpt-4">
-                GPT-4
+            <select 
+              v-model="selectedModel" 
+              class="toolbar-select" 
+              :disabled="modelsLoading"
+            >
+              <option v-if="modelsLoading" value="" disabled>
+                加载中...
               </option>
-              <option value="gpt-3.5">
-                GPT-3.5
+              <option v-else-if="availableModels.length === 0" value="" disabled>
+                选择模型
               </option>
-              <option value="claude">
-                Claude
+              <option
+                v-for="model in availableModels"
+                :key="model.id"
+                :value="model.id"
+              >
+                {{ model.name }}
               </option>
             </select>
           </div>
@@ -169,7 +177,9 @@ export default {
     return {
       inputText: '',
       mode: 'agent',
-      selectedModel: 'gpt-4',
+      selectedModel: '',
+      availableModels: [],  // 可用模型列表
+      modelsLoading: false,  // 模型加载状态
       messages: [
         {
           role: 'assistant',
@@ -189,12 +199,41 @@ export default {
     });
     // 启动选区监听
     this.startSelectionWatch();
+    // 页面加载时获取模型列表
+    this.loadModels();
   },
   beforeUnmount() {
     // 清理定时器
     this.stopSelectionWatch();
   },
   methods: {
+    /**
+     * 加载可用模型列表
+     */
+    async loadModels() {
+      console.log('loadModels 被调用');
+      this.modelsLoading = true;
+      try {
+        console.log('开始请求模型列表...');
+        const result = await api.getModels();
+        console.log('模型列表响应:', result);
+        if (result.success && result.data?.models && result.data.models.length > 0) {
+          this.availableModels = result.data.models;
+        } else {
+          console.warn('获取模型列表失败:', result.error);
+          // 请求失败显示 Auto
+          this.availableModels = [{ id: 'auto', name: 'Auto' }];
+          this.selectedModel = 'auto';
+        }
+      } catch (error) {
+        console.error('加载模型列表失败:', error);
+        // 请求失败显示 Auto
+        this.availableModels = [{ id: 'auto', name: 'Auto' }];
+        this.selectedModel = 'auto';
+      }
+      this.modelsLoading = false;
+    },
+    
     /**
      * 开始监听Word选区变化
      */
@@ -340,48 +379,82 @@ export default {
       this.isLoading = true;
       this.scrollToBottom();
       
+      // 创建 AI 消息占位，记录其索引
+      const aiMessageIndex = this.messages.length;
+      this.messages.push({
+        role: 'assistant',
+        content: '',
+        modifiedJson: null
+      });
+      
       try {
-        let result;
+        // 使用流式接口
+        const response = await fetch('http://localhost:3880/api/chat/stream', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            message: userMessage,
+            mode: this.mode,
+            model: this.selectedModel || 'auto',
+            documentJson: documentJson,
+            history: this.messages.slice(0, -1).slice(-10),  // 排除刚添加的空消息
+            timestamp: Date.now()
+          })
+        });
         
-        if (documentJson) {
-          // 有选中内容时，发送文档修改请求
-          result = await api.modifyDocument(documentJson, userMessage, {
-            extraData: {
-              mode: this.mode,
-              model: this.selectedModel
-            }
-          });
-        } else {
-          // 没有选中内容时，发送普通聊天请求
-          result = await api.chat(userMessage, this.messages.slice(-10), {
-            model: this.selectedModel
-          });
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
         }
         
-        if (result.success) {
-          const responseContent = result.data?.message || result.data?.response || result.data?.content || '收到回复';
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        
+        while (true) {
+          const { done, value } = await reader.read();
           
-          this.messages.push({
-            role: 'assistant',
-            content: responseContent,
-            modifiedJson: result.data?.modifiedJson  // 存储修改后的JSON，供后续应用
-          });
+          if (done) break;
           
-          // 清除已使用的选区
+          buffer += decoder.decode(value, { stream: true });
+          
+          // 解析 SSE 数据
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const data = line.slice(6);
+              
+              if (data === '[DONE]') {
+                break;
+              }
+              
+              try {
+                const parsed = JSON.parse(data);
+                if (parsed.content) {
+                  // 通过索引更新，触发 Vue 响应式
+                  this.messages[aiMessageIndex].content += parsed.content;
+                  this.scrollToBottom();
+                } else if (parsed.error) {
+                  this.messages[aiMessageIndex].content += `\n\n错误: ${parsed.error}`;
+                }
+              } catch (e) {
+                // 忽略解析错误
+              }
+            }
+          }
+        }
+        
+        // 清除已使用的选区
+        if (documentJson) {
           this.clearSelection();
-        } else {
-          this.messages.push({
-            role: 'assistant',
-            content: `请求失败：${result.error || '未知错误'}。请检查后端服务是否已启动。`
-          });
         }
         
       } catch (error) {
         console.error('发送请求失败:', error);
-        this.messages.push({
-          role: 'assistant',
-          content: `网络错误：${error.message}。请确保后端服务运行在 localhost:3880`
-        });
+        this.messages[aiMessageIndex].content = `网络错误：${error.message}。请确保后端服务运行在 localhost:3880`;
       }
       
       this.isLoading = false;
@@ -682,8 +755,8 @@ export default {
 
 /* 选中内容上下文样式 */
 .selection-context {
-  background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
-  border: 1px solid rgba(102, 126, 234, 0.3);
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.85) 0%, rgba(108, 115, 200, 0.85) 100%);
+  border: 1px solid rgba(102, 126, 234, 0.5);
   border-radius: 6px;
   padding: 8px;
   margin-bottom: 8px;
@@ -694,7 +767,7 @@ export default {
   display: flex;
   align-items: center;
   gap: 4px;
-  color: #667eea;
+  color: rgba(255, 255, 255, 0.95);
   font-weight: 500;
   margin-bottom: 4px;
 }
@@ -719,7 +792,7 @@ export default {
 }
 
 .context-range {
-  color: #666;
+  color: rgba(255, 255, 255, 0.8);
   font-size: 10px;
   display: flex;
   align-items: center;
@@ -727,7 +800,7 @@ export default {
 }
 
 .context-stats {
-  color: #999;
+  color: rgba(255, 255, 255, 0.7);
   margin-left: auto;
 }
 

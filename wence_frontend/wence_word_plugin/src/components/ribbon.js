@@ -21,18 +21,11 @@ function OnAction(control) {
       {
         let tsId = window.Application.PluginStorage.getItem('ai_taskpane_id');
         if (!tsId) {
-          let tskpane = window.Application.CreateTaskPane(Util.GetUrlPath() + Util.GetRouterHash() + '/aichat');
+          let tskpane = window.Application.CreateTaskPane(Util.GetUrlPath() + Util.GetRouterHash() + '/aichat', '文策AI助手');
           let id = tskpane.ID;
           window.Application.PluginStorage.setItem('ai_taskpane_id', id);
           tskpane.DockPosition = window.Application.Enum.msoCTPDockPositionRight;
           tskpane.Width = 350;
-          // 尝试多种方式隐藏官方标题栏
-          if (typeof tskpane.ShowCaption !== 'undefined') {
-            tskpane.ShowCaption = false;
-          }
-          if (typeof tskpane.Title !== 'undefined') {
-            tskpane.Title = '';
-          }
           tskpane.Visible = true;
         } else {
           let tskpane = window.Application.GetTaskPane(tsId);
@@ -44,17 +37,11 @@ function OnAction(control) {
       {
         let tsId = window.Application.PluginStorage.getItem('setting_taskpane_id');
         if (!tsId) {
-          let tskpane = window.Application.CreateTaskPane(Util.GetUrlPath() + Util.GetRouterHash() + '/setting');
+          let tskpane = window.Application.CreateTaskPane(Util.GetUrlPath() + Util.GetRouterHash() + '/setting', '文策AI助手 - 设置');
           let id = tskpane.ID;
           window.Application.PluginStorage.setItem('setting_taskpane_id', id);
           tskpane.DockPosition = window.Application.Enum.msoCTPDockPositionRight;
           tskpane.Width = 350;
-          if (typeof tskpane.ShowCaption !== 'undefined') {
-            tskpane.ShowCaption = false;
-          }
-          if (typeof tskpane.Title !== 'undefined') {
-            tskpane.Title = '';
-          }
           tskpane.Visible = true;
         } else {
           let tskpane = window.Application.GetTaskPane(tsId);
