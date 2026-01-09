@@ -168,7 +168,7 @@
 </template>
 
 <script>
-import { parseDocxToJSON } from './js/docxJsonConverter.js';
+import { parseDocxToJSON, generateDocxFromJSON } from './js/docxJsonConverter.js';
 import api from './js/api.js';
 
 export default {
@@ -190,7 +190,8 @@ export default {
       lastReadJSON: null,  // 存储上次读取的文档JSON
       currentSelection: null,  // 当前选中的内容信息
       currentSelectionJSON: null,  // 当前选中内容的完整JSON
-      selectionCheckInterval: null  // 选区检查定时器
+      selectionCheckInterval: null,  // 选区检查定时器
+      currentStreamCtrl: null  // 当前流式请求控制器
     };
   },
   mounted() {
@@ -387,78 +388,39 @@ export default {
         modifiedJson: null
       });
       
-      try {
-        // 使用流式接口
-        const response = await fetch('http://localhost:3880/api/chat/stream', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            message: userMessage,
-            mode: this.mode,
-            model: this.selectedModel || 'auto',
-            documentJson: documentJson,
-            history: this.messages.slice(0, -1).slice(-10),  // 排除刚添加的空消息
-            timestamp: Date.now()
-          })
-        });
+      // 使用 api.js 封装的流式接口
+      const streamCtrl = api.chatStream(userMessage, {
+        mode: this.mode,
+        model: this.selectedModel || 'auto',
+        documentJson: documentJson,
+        history: this.messages.slice(0, -1).slice(-10),  // 排除刚添加的空消息
         
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-        
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-        
-        while (true) {
-          const { done, value } = await reader.read();
-          
-          if (done) break;
-          
-          buffer += decoder.decode(value, { stream: true });
-          
-          // 解析 SSE 数据
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-          
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              const data = line.slice(6);
-              
-              if (data === '[DONE]') {
-                break;
-              }
-              
-              try {
-                const parsed = JSON.parse(data);
-                if (parsed.content) {
-                  // 通过索引更新，触发 Vue 响应式
-                  this.messages[aiMessageIndex].content += parsed.content;
-                  this.scrollToBottom();
-                } else if (parsed.error) {
-                  this.messages[aiMessageIndex].content += `\n\n错误: ${parsed.error}`;
-                }
-              } catch (e) {
-                // 忽略解析错误
-              }
-            }
+        onMessage: (data) => {
+          if (data.content) {
+            this.messages[aiMessageIndex].content += data.content;
+            this.scrollToBottom();
+          } else if (data.error) {
+            this.messages[aiMessageIndex].content += `\n\n错误: ${data.error}`;
           }
-        }
+        },
         
-        // 清除已使用的选区
-        if (documentJson) {
-          this.clearSelection();
-        }
+        onError: (error) => {
+          console.error('发送请求失败:', error);
+          this.messages[aiMessageIndex].content = `网络错误：${error.message}。请确保后端服务运行在 localhost:3880`;
+        },
         
-      } catch (error) {
-        console.error('发送请求失败:', error);
-        this.messages[aiMessageIndex].content = `网络错误：${error.message}。请确保后端服务运行在 localhost:3880`;
-      }
+        onComplete: () => {
+          // 清除已使用的选区
+          if (documentJson) {
+            this.clearSelection();
+          }
+          this.isLoading = false;
+          this.scrollToBottom();
+        }
+      });
       
-      this.isLoading = false;
-      this.scrollToBottom();
+      // 保存控制器以便需要时中断请求
+      this.currentStreamCtrl = streamCtrl;
     },
     scrollToBottom() {
       this.$nextTick(() => {
@@ -477,20 +439,79 @@ export default {
           return;
         }
         
-        // 获取当前选区
-        const selection = window.Application.Selection;
+        // 尝试解析 JSON（如果 AI 返回的是带格式的 JSON）
+        let jsonData = null;
         
-        // 在当前光标位置插入文本
-        selection.TypeText(content);
+        // 检查是否是 JSON 或包含 JSON 代码块
+        if (content.includes('```json')) {
+          // 提取 JSON 代码块
+          const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
+          if (jsonMatch) {
+            try {
+              jsonData = JSON.parse(jsonMatch[1]);
+            } catch (e) {
+              console.log('JSON 代码块解析失败，使用纯文本模式');
+            }
+          }
+        } else if (content.trim().startsWith('{') && content.trim().endsWith('}')) {
+          // 尝试直接解析 JSON
+          try {
+            jsonData = JSON.parse(content);
+          } catch (e) {
+            console.log('不是有效 JSON，使用纯文本模式');
+          }
+        }
         
-        // 插入一个换行
-        selection.TypeParagraph();
-        
-        console.log('文本已成功插入到Word文档');
+        // 如果是有效的文档 JSON，使用 generateDocxFromJSON 生成
+        if (jsonData && (jsonData.paragraphs || jsonData.tables)) {
+          console.log('检测到文档 JSON，使用格式化输出');
+          
+          // 在当前光标位置插入
+          const selection = window.Application.Selection;
+          const insertPos = selection.Range.Start;
+          
+          // 使用导入的 generateDocxFromJSON 生成文档
+          const result = generateDocxFromJSON(jsonData, doc);
+          
+          if (result.success) {
+            console.log('带格式的文档内容已成功插入');
+          } else {
+            console.error('生成文档失败:', result.error);
+            // 回退到纯文本插入
+            this.insertPlainText(content);
+          }
+        } else {
+          // 纯文本插入
+          this.insertPlainText(content);
+        }
 
       } catch (error) {
         console.error('插入文本失败:', error);
         alert('插入失败，请确保已打开Word文档');
+      }
+    },
+    
+    /**
+     * 插入纯文本（作为后备方案）
+     */
+    insertPlainText(content) {
+      try {
+        const selection = window.Application.Selection;
+        
+        // 清理可能的 JSON 代码块标记
+        let cleanContent = content;
+        if (content.includes('```json')) {
+          // 如果包含 JSON 代码块但解析失败，提取其中的文本
+          cleanContent = content.replace(/```json\s*/g, '').replace(/```/g, '');
+        }
+        
+        // 在当前光标位置插入文本
+        selection.TypeText(cleanContent);
+        selection.TypeParagraph();
+        
+        console.log('纯文本已成功插入到Word文档');
+      } catch (error) {
+        console.error('插入纯文本失败:', error);
       }
     },
     hidePane() {

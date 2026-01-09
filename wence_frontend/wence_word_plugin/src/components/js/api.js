@@ -102,73 +102,6 @@ async function request(url, options = {}) {
 // ============== API 方法 ==============
 
 /**
- * 修改文档 API
- * 发送用户选中内容的 JSON 和用户问题到后端处理
- * 
- * @param {Object} documentJson - 解析后的文档 JSON 数据
- * @param {string} userQuestion - 用户的问题/指令
- * @param {Object} options - 可选配置
- * @returns {Promise<Object>} - 处理结果
- * 
- * 返回格式：
- * 成功: { success: true, data: { modifiedJson: {...}, message: '...' } }
- * 失败: { success: false, error: '错误信息' }
- */
-async function modifyDocument(documentJson, userQuestion, options = {}) {
-  if (!documentJson) {
-    return { success: false, error: '文档数据不能为空' };
-  }
-  
-  if (!userQuestion || !userQuestion.trim()) {
-    return { success: false, error: '请输入您的问题或指令' };
-  }
-  
-  const payload = {
-    message: userQuestion.trim(),  // 后端期望 message 字段
-    mode: options.mode || 'agent',  // 模式：agent 或 ask（必选）
-    documentJson,
-    timestamp: Date.now(),
-    ...options.extraData
-  };
-  
-  return await request('/api/chat/request', {
-    method: 'POST',
-    body: payload,
-    timeout: options.timeout || 60000  // 文档处理可能需要更长时间
-  });
-}
-
-/**
- * 普通聊天 API
- * 发送普通对话消息
- * 
- * @param {string} message - 用户消息
- * @param {Array} history - 历史消息（可选）
- * @param {Object} options - 可选配置
- * @returns {Promise<Object>} - 聊天回复
- */
-async function chat(message, history = [], options = {}) {
-  if (!message || !message.trim()) {
-    return { success: false, error: '消息不能为空' };
-  }
-  
-  const payload = {
-    message: message.trim(),
-    mode: options.mode || 'agent',  // 模式：agent 或 ask（必选）
-    history,
-    model: options.model || 'gpt-4',
-    documentJson: options.documentJson || null,  // 文档 JSON 数据
-    timestamp: Date.now()
-  };
-  
-  return await request('/api/chat/request', {
-    method: 'POST',
-    body: payload,
-    timeout: options.timeout || CONFIG.timeout
-  });
-}
-
-/**
  * 流式聊天 API（支持 SSE）
  * 用于实时接收 AI 回复
  * 
@@ -180,7 +113,7 @@ async function chat(message, history = [], options = {}) {
  * @returns {Object} - 包含 abort 方法的控制对象
  */
 function chatStream(message, options = {}) {
-  const { onMessage, onError, onComplete, model = 'gpt-4', documentJson = null, history = [] } = options;
+  const { onMessage, onError, onComplete, mode = 'agent', model = 'auto', documentJson = null, history = [] } = options;
   
   const controller = new AbortController();
   
@@ -191,10 +124,10 @@ function chatStream(message, options = {}) {
         headers: CONFIG.headers,
         body: JSON.stringify({
           message: message.trim(),
+          mode,
           model,
           documentJson,
           history,
-          stream: true,
           timestamp: Date.now()
         }),
         signal: controller.signal
@@ -316,8 +249,6 @@ function getConfig() {
 
 export default {
   // API 方法
-  modifyDocument,
-  chat,
   chatStream,
   healthCheck,
   getModels,
@@ -332,8 +263,6 @@ export default {
 
 // 也支持命名导出
 export {
-  modifyDocument,
-  chat,
   chatStream,
   healthCheck,
   getModels,

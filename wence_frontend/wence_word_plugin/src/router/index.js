@@ -17,6 +17,11 @@ const router = createRouter({
       path: '/setting',
       name: '设置',
       component: () => import('../components/SettingPane.vue')
+    },
+    {
+      path: '/debug',
+      name: '调试',
+      component: () => import('../components/TaskPane.vue')
     }
   ]
 });

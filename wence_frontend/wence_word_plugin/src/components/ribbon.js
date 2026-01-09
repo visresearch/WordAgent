@@ -49,6 +49,22 @@ function OnAction(control) {
         }
       }
       break;
+    case 'btnShowDebug':
+      {
+        let tsId = window.Application.PluginStorage.getItem('debug_taskpane_id');
+        if (!tsId) {
+          let tskpane = window.Application.CreateTaskPane(Util.GetUrlPath() + Util.GetRouterHash() + '/debug', '调试面板');
+          let id = tskpane.ID;
+          window.Application.PluginStorage.setItem('debug_taskpane_id', id);
+          tskpane.DockPosition = window.Application.Enum.msoCTPDockPositionRight;
+          tskpane.Width = 400;
+          tskpane.Visible = true;
+        } else {
+          let tskpane = window.Application.GetTaskPane(tsId);
+          tskpane.Visible = !tskpane.Visible;
+        }
+      }
+      break;
     default:
       break;
   }
@@ -59,9 +75,11 @@ function GetImage(control) {
   const eleId = control.Id;
   switch (eleId) {
     case 'btnShowAIChat':
-      return 'images/robot.png';
+      return 'images/robot.svg';
     case 'btnShowSetting':
       return 'images/setting.svg';
+    case 'btnShowDebug':
+      return 'images/debug.svg';
     default:
   }
   return 'images/newFromTemp.svg';
