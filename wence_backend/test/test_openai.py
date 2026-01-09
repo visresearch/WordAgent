@@ -7,7 +7,7 @@ from openai import AsyncOpenAI
 # 配置
 API_KEY = "sk-l4ET3MWX8vsqAVqv0tXt5o1bbc7sh5L1fDV7oV66oDPrxLlQ"
 BASE_URL = "https://api.chatanywhere.tech"
-MODEL = "gpt-4"
+MODEL = "gpt-5"
 
 
 async def test_stream():

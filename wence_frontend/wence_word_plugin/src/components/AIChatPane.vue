@@ -36,7 +36,7 @@
           v-if="msg.role === 'assistant'"
           class="insert-btn"
           title="输出到Word文档"
-          @click="insertToWord(msg.content)"
+          @click="insertToWord(msg)"
         >
           📄 输出文档
         </button>
@@ -385,7 +385,7 @@ export default {
       this.messages.push({
         role: 'assistant',
         content: '',
-        modifiedJson: null
+        documentJson: null  // 保存文档 JSON 数据
       });
       
       // 使用 api.js 封装的流式接口
@@ -396,7 +396,17 @@ export default {
         history: this.messages.slice(0, -1).slice(-10),  // 排除刚添加的空消息
         
         onMessage: (data) => {
-          if (data.content) {
+          if (data.type === 'text' && data.content) {
+            // 文本消息：显示给用户看
+            this.messages[aiMessageIndex].content += data.content;
+            this.scrollToBottom();
+          } else if (data.type === 'json' && data.content) {
+            // JSON 数据：保存用于文档转换，显示提示
+            this.messages[aiMessageIndex].documentJson = data.content;
+            this.messages[aiMessageIndex].content += '\n\n✅ 已生成格式化文档，点击下方按钮输出到 Word';
+            this.scrollToBottom();
+          } else if (data.content) {
+            // 兼容旧格式（没有 type 字段）
             this.messages[aiMessageIndex].content += data.content;
             this.scrollToBottom();
           } else if (data.error) {
@@ -430,7 +440,7 @@ export default {
         }
       });
     },
-    insertToWord(content) {
+    insertToWord(msg) {
       try {
         // 获取当前活动文档
         const doc = window.Application.ActiveDocument;
@@ -439,26 +449,30 @@ export default {
           return;
         }
         
-        // 尝试解析 JSON（如果 AI 返回的是带格式的 JSON）
-        let jsonData = null;
+        // 优先使用已保存的 documentJson
+        let jsonData = msg.documentJson || null;
+        const content = msg.content || '';
         
-        // 检查是否是 JSON 或包含 JSON 代码块
-        if (content.includes('```json')) {
-          // 提取 JSON 代码块
-          const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
-          if (jsonMatch) {
-            try {
-              jsonData = JSON.parse(jsonMatch[1]);
-            } catch (e) {
-              console.log('JSON 代码块解析失败，使用纯文本模式');
+        // 如果没有预存的 JSON，尝试从内容解析
+        if (!jsonData) {
+          // 检查是否是 JSON 或包含 JSON 代码块
+          if (content.includes('```json')) {
+            // 提取 JSON 代码块
+            const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
+            if (jsonMatch) {
+              try {
+                jsonData = JSON.parse(jsonMatch[1]);
+              } catch (e) {
+                console.log('JSON 代码块解析失败，使用纯文本模式');
+              }
             }
-          }
-        } else if (content.trim().startsWith('{') && content.trim().endsWith('}')) {
-          // 尝试直接解析 JSON
-          try {
-            jsonData = JSON.parse(content);
-          } catch (e) {
-            console.log('不是有效 JSON，使用纯文本模式');
+          } else if (content.trim().startsWith('{') && content.trim().endsWith('}')) {
+            // 尝试直接解析 JSON
+            try {
+              jsonData = JSON.parse(content);
+            } catch (e) {
+              console.log('不是有效 JSON，使用纯文本模式');
+            }
           }
         }
         
@@ -593,6 +607,7 @@ export default {
 
 .message-content {
   word-wrap: break-word;
+  white-space: pre-wrap;
 }
 
 .insert-btn {

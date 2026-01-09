@@ -2,7 +2,9 @@
   <div class="global">
     <div class="divItem">
       <h2>🛠️ 调试面板</h2>
-      <p style="color: #666; font-size: 13px;">按 <span style="font-weight: bolder">"F12"</span> 可以打开调试器</p>
+      <p style="color: #666; font-size: 13px;">
+        按 <span style="font-weight: bolder">"F12"</span> 可以打开调试器
+      </p>
     </div>
     <hr />
     
@@ -10,22 +12,30 @@
     <div class="divItem">
       <h3>📄 文档内容解析</h3>
       <div class="button-group">
-        <button class="btn btn-primary" @click="parseSelection">解析选中内容</button>
-        <button class="btn btn-success" @click="parseFullDocument">解析全文</button>
+        <button class="btn btn-primary" @click="parseSelection">
+          解析选中内容
+        </button>
+        <button class="btn btn-success" @click="parseFullDocument">
+          解析全文
+        </button>
       </div>
     </div>
 
     <!-- 复制/下载功能 -->
-    <div class="divItem" v-if="parsedData">
+    <div v-if="parsedData" class="divItem">
       <h3>📋 导出操作</h3>
       <div class="button-group">
-        <button class="btn btn-warning" @click="copyToClipboard">复制到剪贴板</button>
-        <button class="btn btn-info" @click="downloadJSON">下载JSON文件</button>
+        <button class="btn btn-warning" @click="copyToClipboard">
+          复制到剪贴板
+        </button>
+        <button class="btn btn-info" @click="downloadJSON">
+          下载JSON文件
+        </button>
       </div>
     </div>
 
     <!-- 解析结果展示 -->
-    <div class="divItem" v-if="parsedData">
+    <div v-if="parsedData" class="divItem">
       <h4>解析结果：</h4>
       <div class="stats">
         <span>段落: {{ parsedData.paragraphs?.length || 0 }}</span>
@@ -39,14 +49,16 @@
     </div>
 
     <!-- 状态提示 -->
-    <div class="divItem" v-if="statusMessage">
-      <div :class="['status-message', statusType]">{{ statusMessage }}</div>
+    <div v-if="statusMessage" class="divItem">
+      <div :class="['status-message', statusType]">
+        {{ statusMessage }}
+      </div>
     </div>
   </div>
 </template>
 
 <script>
-import { parseDocxToJSON } from './js/docxJsonConverter.js'
+import { parseDocxToJSON } from './js/docxJsonConverter.js';
 
 export default {
   name: 'TaskPane',
@@ -55,164 +67,164 @@ export default {
       parsedData: null,
       statusMessage: '',
       statusType: 'info'
-    }
+    };
   },
   computed: {
     formattedJSON() {
-      return this.parsedData ? JSON.stringify(this.parsedData, null, 2) : ''
+      return this.parsedData ? JSON.stringify(this.parsedData, null, 2) : '';
     }
   },
   methods: {
     // 显示状态消息
     showStatus(message, type = 'info') {
-      this.statusMessage = message
-      this.statusType = type
+      this.statusMessage = message;
+      this.statusType = type;
       setTimeout(() => {
-        this.statusMessage = ''
-      }, 3000)
+        this.statusMessage = '';
+      }, 3000);
     },
 
     // 解析选中内容
     parseSelection() {
       try {
-        const app = window.Application
+        const app = window.Application;
         if (!app) {
-          this.showStatus('WPS 环境未就绪', 'error')
-          return
+          this.showStatus('WPS 环境未就绪', 'error');
+          return;
         }
 
-        const selection = app.Selection
+        const selection = app.Selection;
         if (!selection || !selection.Range) {
-          this.showStatus('请先选中文档内容', 'error')
-          return
+          this.showStatus('请先选中文档内容', 'error');
+          return;
         }
 
-        const text = selection.Text || ''
+        const text = selection.Text || '';
         if (!text || text.trim().length === 0) {
-          this.showStatus('选中内容为空', 'error')
-          return
+          this.showStatus('选中内容为空', 'error');
+          return;
         }
 
-        const result = parseDocxToJSON(selection.Range)
+        const result = parseDocxToJSON(selection.Range);
         if (result.error) {
-          this.showStatus(result.error, 'error')
-          return
+          this.showStatus(result.error, 'error');
+          return;
         }
 
-        this.parsedData = result
-        this.showStatus(`解析成功！共 ${result.paragraphs?.length || 0} 个段落`, 'success')
+        this.parsedData = result;
+        this.showStatus(`解析成功！共 ${result.paragraphs?.length || 0} 个段落`, 'success');
       } catch (e) {
-        console.error('解析选中内容出错:', e)
-        this.showStatus('解析出错: ' + e.message, 'error')
+        console.error('解析选中内容出错:', e);
+        this.showStatus('解析出错: ' + e.message, 'error');
       }
     },
 
     // 解析全文
     parseFullDocument() {
       try {
-        const app = window.Application
+        const app = window.Application;
         if (!app) {
-          this.showStatus('WPS 环境未就绪', 'error')
-          return
+          this.showStatus('WPS 环境未就绪', 'error');
+          return;
         }
 
-        const doc = app.ActiveDocument
+        const doc = app.ActiveDocument;
         if (!doc) {
-          this.showStatus('请先打开文档', 'error')
-          return
+          this.showStatus('请先打开文档', 'error');
+          return;
         }
 
-        const content = doc.Content
+        const content = doc.Content;
         if (!content) {
-          this.showStatus('无法获取文档内容', 'error')
-          return
+          this.showStatus('无法获取文档内容', 'error');
+          return;
         }
 
-        const result = parseDocxToJSON(content)
+        const result = parseDocxToJSON(content);
         if (result.error) {
-          this.showStatus(result.error, 'error')
-          return
+          this.showStatus(result.error, 'error');
+          return;
         }
 
-        this.parsedData = result
-        this.showStatus(`解析成功！共 ${result.paragraphs?.length || 0} 个段落`, 'success')
+        this.parsedData = result;
+        this.showStatus(`解析成功！共 ${result.paragraphs?.length || 0} 个段落`, 'success');
       } catch (e) {
-        console.error('解析全文出错:', e)
-        this.showStatus('解析出错: ' + e.message, 'error')
+        console.error('解析全文出错:', e);
+        this.showStatus('解析出错: ' + e.message, 'error');
       }
     },
 
     // 复制到剪贴板
     async copyToClipboard() {
       if (!this.parsedData) {
-        this.showStatus('请先解析文档内容', 'error')
-        return
+        this.showStatus('请先解析文档内容', 'error');
+        return;
       }
 
-      const jsonString = JSON.stringify(this.parsedData, null, 2)
+      const jsonString = JSON.stringify(this.parsedData, null, 2);
       
       try {
         // 优先使用 Clipboard API
         if (navigator.clipboard && navigator.clipboard.writeText) {
-          await navigator.clipboard.writeText(jsonString)
-          this.showStatus('已复制到剪贴板！', 'success')
-          return
+          await navigator.clipboard.writeText(jsonString);
+          this.showStatus('已复制到剪贴板！', 'success');
+          return;
         }
 
         // 降级方案：使用 execCommand
-        const textarea = document.createElement('textarea')
-        textarea.value = jsonString
-        textarea.style.position = 'fixed'
-        textarea.style.left = '-9999px'
-        document.body.appendChild(textarea)
-        textarea.select()
+        const textarea = document.createElement('textarea');
+        textarea.value = jsonString;
+        textarea.style.position = 'fixed';
+        textarea.style.left = '-9999px';
+        document.body.appendChild(textarea);
+        textarea.select();
         
-        const success = document.execCommand('copy')
-        document.body.removeChild(textarea)
+        const success = document.execCommand('copy');
+        document.body.removeChild(textarea);
         
         if (success) {
-          this.showStatus('已复制到剪贴板！', 'success')
+          this.showStatus('已复制到剪贴板！', 'success');
         } else {
-          this.showStatus('复制失败，请手动复制', 'error')
+          this.showStatus('复制失败，请手动复制', 'error');
         }
       } catch (e) {
-        console.error('复制失败:', e)
-        this.showStatus('复制失败: ' + e.message, 'error')
+        console.error('复制失败:', e);
+        this.showStatus('复制失败: ' + e.message, 'error');
       }
     },
 
     // 下载JSON文件
     downloadJSON() {
       if (!this.parsedData) {
-        this.showStatus('请先解析文档内容', 'error')
-        return
+        this.showStatus('请先解析文档内容', 'error');
+        return;
       }
 
       try {
-        const jsonString = JSON.stringify(this.parsedData, null, 2)
-        const blob = new Blob([jsonString], { type: 'application/json;charset=utf-8' })
-        const url = URL.createObjectURL(blob)
+        const jsonString = JSON.stringify(this.parsedData, null, 2);
+        const blob = new Blob([jsonString], { type: 'application/json;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
         
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-        const filename = `document_${timestamp}.json`
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        const filename = `document_${timestamp}.json`;
         
-        const link = document.createElement('a')
-        link.href = url
-        link.download = filename
-        link.style.display = 'none'
-        document.body.appendChild(link)
-        link.click()
-        document.body.removeChild(link)
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
         
-        URL.revokeObjectURL(url)
-        this.showStatus(`已下载: ${filename}`, 'success')
+        URL.revokeObjectURL(url);
+        this.showStatus(`已下载: ${filename}`, 'success');
       } catch (e) {
-        console.error('下载失败:', e)
-        this.showStatus('下载失败: ' + e.message, 'error')
+        console.error('下载失败:', e);
+        this.showStatus('下载失败: ' + e.message, 'error');
       }
     }
   }
-}
+};
 </script>
 
 <style scoped>
