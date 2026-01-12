@@ -66,6 +66,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = True
+        extra = "ignore"  # 忽略 .env 中多余的字段
 
 
 # 全局配置实例
