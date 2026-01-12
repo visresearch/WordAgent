@@ -2,8 +2,34 @@
 应用配置
 """
 
+import os
+import sys
+from pathlib import Path
 from typing import List
 from pydantic_settings import BaseSettings
+
+
+def get_data_dir() -> Path:
+    """获取数据目录"""
+    # 环境变量优先
+    data_dir = os.environ.get("WENCE_DATA_DIR")
+    if data_dir:
+        return Path(data_dir)
+    
+    # 打包后的路径
+    if getattr(sys, 'frozen', False):
+        return Path(sys.executable).parent / "data"
+    
+    # 开发环境
+    return Path(__file__).parent.parent.parent / "data"
+
+
+def get_database_url() -> str:
+    """获取数据库 URL"""
+    data_dir = get_data_dir()
+    data_dir.mkdir(parents=True, exist_ok=True)
+    db_path = data_dir / "wence_ai.db"
+    return f"sqlite+aiosqlite:///{db_path}"
 
 
 class Settings(BaseSettings):
@@ -22,10 +48,20 @@ class Settings(BaseSettings):
     # CORS 配置
     CORS_ORIGINS: List[str] = ["*"]
     
-    # AI 模型配置
-    DEFAULT_MODEL: str = "gpt-4"
+    # AI 模型配置 - OpenAI
+    OPENAI_DEFAULT_MODEL: str = "gpt-4o"
     OPENAI_API_KEY: str = ""
     OPENAI_BASE_URL: str = ""
+    
+    # 智谱
+    ZHIPU_API_KEY: str = ""
+    ZHIPU_DEFAULT_MODEL: str = "glm-4.7"
+    
+    # SQLite 数据库配置（嵌入式，无需安装）
+    # 动态获取，支持打包后运行
+    @property
+    def database_url(self) -> str:
+        return get_database_url()
     
     class Config:
         env_file = ".env"

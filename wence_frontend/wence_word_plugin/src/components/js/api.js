@@ -221,6 +221,71 @@ async function getModels() {
   });
 }
 
+// ============== 聊天历史 API ==============
+
+/**
+ * 获取指定文档的聊天历史
+ * 
+ * @param {string} docId - 文档唯一标识符
+ * @param {Object} options - 选项
+ * @param {number} options.limit - 返回消息数量限制
+ * @param {number} options.offset - 偏移量
+ * @returns {Promise<Object>} - 历史消息列表
+ */
+async function getChatHistory(docId, options = {}) {
+  const { limit = 50, offset = 0 } = options;
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  return await request(`/api/chat/history/${encodeURIComponent(docId)}?${params}`, {
+    method: 'GET'
+  });
+}
+
+/**
+ * 保存聊天消息
+ * 
+ * @param {Object} messageData - 消息数据
+ * @param {string} messageData.docId - 文档唯一标识符
+ * @param {string} messageData.docName - 文档名称
+ * @param {string} messageData.role - 消息角色（user/assistant）
+ * @param {string} messageData.content - 消息内容
+ * @param {Object} messageData.documentJson - AI 生成的文档 JSON
+ * @param {Object} messageData.selectionContext - 选区上下文
+ * @param {string} messageData.model - 使用的模型
+ * @param {string} messageData.mode - 使用的模式
+ * @returns {Promise<Object>} - 保存结果
+ */
+async function saveMessage(messageData) {
+  return await request('/api/chat/history/save', {
+    method: 'POST',
+    body: messageData
+  });
+}
+
+/**
+ * 清空指定文档的聊天历史
+ * 
+ * @param {string} docId - 文档唯一标识符
+ * @returns {Promise<Object>} - 操作结果
+ */
+async function clearChatHistory(docId) {
+  return await request(`/api/chat/history/${encodeURIComponent(docId)}`, {
+    method: 'DELETE'
+  });
+}
+
+/**
+ * 获取所有有聊天记录的文档列表
+ * 
+ * @param {number} limit - 返回数量限制
+ * @returns {Promise<Object>} - 文档列表
+ */
+async function getDocuments(limit = 100) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  return await request(`/api/chat/documents?${params}`, {
+    method: 'GET'
+  });
+}
+
 /**
  * 更新配置
  * @param {Object} newConfig - 新的配置项
@@ -253,6 +318,12 @@ export default {
   healthCheck,
   getModels,
   
+  // 聊天历史 API
+  getChatHistory,
+  saveMessage,
+  clearChatHistory,
+  getDocuments,
+  
   // 配置方法
   updateConfig,
   getConfig,
@@ -266,6 +337,10 @@ export {
   chatStream,
   healthCheck,
   getModels,
+  getChatHistory,
+  saveMessage,
+  clearChatHistory,
+  getDocuments,
   updateConfig,
   getConfig,
   request

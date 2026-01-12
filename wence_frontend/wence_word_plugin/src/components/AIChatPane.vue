@@ -1,6 +1,13 @@
 <template>
   <div class="ai-chat-container">
     <div ref="messagesContainer" class="chat-messages">
+      <!-- 空状态显示 -->
+      <div v-if="messages.length === 0 && !isLoading" class="empty-state">
+        <svg class="empty-icon" viewBox="0 0 1144 1024" xmlns="http://www.w3.org/2000/svg">
+          <path d="M1080.018824 582.354824c-23.009882 129.505882-139.023059 227.930353-278.648471 227.930352H329.968941c-140.167529 0-256.602353-99.267765-278.889412-229.616941A47.164235 47.164235 0 0 1 0 533.684706l-0.060235-181.067294c0-26.021647 21.082353-47.164235 47.164235-47.164236C47.164235 153.419294 173.778824 30.117647 329.968941 30.117647h471.401412C957.620706 30.117647 1084.235294 153.419294 1084.235294 305.453176v6.625883a47.164235 47.164235 0 0 1 60.235294 45.296941v181.067294a47.164235 47.164235 0 0 1-64.451764 43.91153zM330.029176 144.865882c-91.136 0-164.984471 71.920941-164.98447 160.587294v229.496471c0 88.726588 73.848471 160.647529 165.044706 160.647529h471.341176c91.136 0 165.044706-71.920941 165.044706-160.647529v-229.496471c0-88.666353-73.908706-160.587294-165.044706-160.587294H329.968941zM400.685176 259.614118c39.092706 0 70.716235 31.623529 70.716236 70.656v122.819764a70.716235 70.716235 0 0 1-141.432471 0V330.270118c0-39.032471 31.683765-70.656 70.716235-70.656z m329.968942 0c39.092706 0 70.716235 31.623529 70.716235 70.656v122.819764a70.716235 70.716235 0 1 1-141.372235 0V330.270118c0-39.032471 31.623529-70.656 70.656-70.656zM420.502588 993.882353a137.697882 137.697882 0 0 1-137.637647-137.697882h565.669647a137.697882 137.697882 0 0 1-137.697882 137.697882h-290.334118z" fill="currentColor"/>
+        </svg>
+        <span class="empty-text">我能做什么？</span>
+      </div>
       <div
         v-for="(msg, index) in messages"
         :key="index" 
@@ -30,21 +37,17 @@
           </div>
         </div>
         <div class="message-content">
-          {{ msg.content }}
+          <span v-if="msg.role === 'assistant' && !msg.content && isLoading" class="typing">AI正在思考中...</span>
+          <span v-else>{{ msg.content }}</span>
         </div>
         <button
-          v-if="msg.role === 'assistant'"
+          v-if="msg.role === 'assistant' && msg.documentJson"
           class="insert-btn"
           title="输出到Word文档"
           @click="insertToWord(msg)"
         >
           📄 输出文档
         </button>
-      </div>
-      <div v-if="isLoading" class="message ai-message">
-        <div class="message-content typing">
-          AI正在思考中...
-        </div>
       </div>
     </div>
 
@@ -92,33 +95,53 @@
         ></textarea>
         <div class="input-toolbar">
           <div class="toolbar-left">
-            <select v-model="mode" class="toolbar-select">
-              <option value="agent">
-                Agent
-              </option>
-              <option value="ask">
-                Ask
-              </option>
-            </select>
-            <select 
-              v-model="selectedModel" 
-              class="toolbar-select" 
-              :disabled="modelsLoading"
-            >
-              <option v-if="modelsLoading" value="" disabled>
-                加载中...
-              </option>
-              <option v-else-if="availableModels.length === 0" value="" disabled>
-                选择模型
-              </option>
-              <option
-                v-for="model in availableModels"
-                :key="model.id"
-                :value="model.id"
-              >
-                {{ model.name }}
-              </option>
-            </select>
+            <!-- 模式选择 -->
+            <div class="custom-select" :class="{ open: modeDropdownOpen }">
+              <div class="select-trigger" @click="toggleModeDropdown">
+                <span>{{ mode === 'agent' ? 'Agent' : 'Ask' }}</span>
+                <svg class="select-arrow" width="8" height="8" viewBox="0 0 12 12">
+                  <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+                </svg>
+              </div>
+              <div class="select-dropdown">
+                <div 
+                  class="select-option" 
+                  :class="{ active: mode === 'agent' }"
+                  @click="selectMode('agent')"
+                >
+                  Agent
+                </div>
+                <div 
+                  class="select-option" 
+                  :class="{ active: mode === 'ask' }"
+                  @click="selectMode('ask')"
+                >
+                  Ask
+                </div>
+              </div>
+            </div>
+            
+            <!-- 模型选择 -->
+            <div class="custom-select" :class="{ open: modelDropdownOpen, disabled: modelsLoading }">
+              <div class="select-trigger" @click="toggleModelDropdown">
+                <span v-if="modelsLoading">加载中...</span>
+                <span v-else>{{ selectedModelName }}</span>
+                <svg class="select-arrow" width="8" height="8" viewBox="0 0 12 12">
+                  <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+                </svg>
+              </div>
+              <div class="select-dropdown model-dropdown">
+                <div 
+                  v-for="model in availableModels"
+                  :key="model.id"
+                  class="select-option"
+                  :class="{ active: selectedModel === model.id }"
+                  @click="selectModel(model.id)"
+                >
+                  {{ model.name }}
+                </div>
+              </div>
+            </div>
           </div>
           <div class="toolbar-right">
             <div class="btn-wrapper">
@@ -140,8 +163,9 @@
             </div>
             <div class="btn-wrapper">
               <button 
+                v-if="!isLoading"
                 class="send-btn" 
-                :disabled="!inputText.trim() || isLoading" 
+                :disabled="!inputText.trim()" 
                 @click="sendMessage"
               >
                 <svg
@@ -158,7 +182,22 @@
                   />
                 </svg>
               </button>
-              <span class="tooltip">发送</span>
+              <button 
+                v-else
+                class="stop-btn" 
+                @click="stopGeneration"
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                >
+                  <circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5" fill="none" />
+                  <rect x="5" y="5" width="6" height="6" rx="0.5" fill="currentColor" />
+                </svg>
+              </button>
+              <span class="tooltip">{{ isLoading ? '终止' : '发送' }}</span>
             </div>
           </div>
         </div>
@@ -180,19 +219,25 @@ export default {
       selectedModel: '',
       availableModels: [],  // 可用模型列表
       modelsLoading: false,  // 模型加载状态
-      messages: [
-        {
-          role: 'assistant',
-          content: '您好！我是AI写作助手，可以帮助您修改和优化文档内容。选中Word中的内容后，告诉我您想要如何修改。'
-        }
-      ],
+      messages: [],
       isLoading: false,
       lastReadJSON: null,  // 存储上次读取的文档JSON
       currentSelection: null,  // 当前选中的内容信息
       currentSelectionJSON: null,  // 当前选中内容的完整JSON
       selectionCheckInterval: null,  // 选区检查定时器
-      currentStreamCtrl: null  // 当前流式请求控制器
+      currentStreamCtrl: null,  // 当前流式请求控制器
+      currentDocId: null,  // 当前文档的唯一标识符
+      currentDocName: null,  // 当前文档名称
+      historyLoading: false,  // 历史记录加载状态
+      modeDropdownOpen: false,  // 模式下拉框状态
+      modelDropdownOpen: false  // 模型下拉框状态
     };
+  },
+  computed: {
+    selectedModelName() {
+      const model = this.availableModels.find(m => m.id === this.selectedModel);
+      return model ? model.name : '选择模型';
+    }
   },
   mounted() {
     this.$nextTick(() => {
@@ -202,12 +247,210 @@ export default {
     this.startSelectionWatch();
     // 页面加载时获取模型列表
     this.loadModels();
+    // 初始化文档标识并加载历史
+    this.initDocumentAndLoadHistory();
+    // 点击其他地方关闭下拉框
+    document.addEventListener('click', this.closeDropdowns);
   },
   beforeUnmount() {
     // 清理定时器
     this.stopSelectionWatch();
+    // 移除点击监听
+    document.removeEventListener('click', this.closeDropdowns);
   },
   methods: {
+    /**
+     * 切换模式下拉框
+     */
+    toggleModeDropdown(e) {
+      e.stopPropagation();
+      this.modelDropdownOpen = false;
+      this.modeDropdownOpen = !this.modeDropdownOpen;
+    },
+    
+    /**
+     * 切换模型下拉框
+     */
+    toggleModelDropdown(e) {
+      if (this.modelsLoading) return;
+      e.stopPropagation();
+      this.modeDropdownOpen = false;
+      this.modelDropdownOpen = !this.modelDropdownOpen;
+    },
+    
+    /**
+     * 选择模式
+     */
+    selectMode(value) {
+      this.mode = value;
+      this.modeDropdownOpen = false;
+    },
+    
+    /**
+     * 选择模型
+     */
+    selectModel(id) {
+      this.selectedModel = id;
+      this.modelDropdownOpen = false;
+    },
+    
+    /**
+     * 关闭所有下拉框
+     */
+    closeDropdowns() {
+      this.modeDropdownOpen = false;
+      this.modelDropdownOpen = false;
+    },
+    /**
+     * 终止生成
+     */
+    stopGeneration() {
+      if (this.currentStreamCtrl) {
+        this.currentStreamCtrl.abort();
+        this.currentStreamCtrl = null;
+      }
+      this.isLoading = false;
+    },
+    
+    /**
+     * 初始化文档标识并加载历史记录
+     */
+    async initDocumentAndLoadHistory() {
+      try {
+        // 获取当前文档信息
+        const docInfo = this.getDocumentInfo();
+        if (docInfo) {
+          this.currentDocId = docInfo.docId;
+          this.currentDocName = docInfo.docName;
+          // 加载历史记录
+          await this.loadChatHistory();
+        }
+      } catch (e) {
+        console.warn('初始化文档信息失败:', e);
+      }
+    },
+    
+    /**
+     * 获取当前 Word 文档的唯一标识信息
+     */
+    getDocumentInfo() {
+      try {
+        const doc = window.Application?.ActiveDocument;
+        if (!doc) {
+          return null;
+        }
+        
+        // 使用文档的完整路径作为唯一标识
+        // 如果是未保存的文档，使用文档名称 + 创建时间
+        const fullPath = doc.FullName || '';
+        const docName = doc.Name || 'Untitled';
+        
+        let docId;
+        if (fullPath && fullPath !== docName) {
+          // 已保存的文档，使用完整路径的 hash
+          docId = this.hashString(fullPath);
+        } else {
+          // 未保存的文档，使用名称 + 时间戳（存储在本地）
+          const storedId = window.Application.PluginStorage.getItem(`unsaved_doc_${docName}`);
+          if (storedId) {
+            docId = storedId;
+          } else {
+            docId = `unsaved_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            window.Application.PluginStorage.setItem(`unsaved_doc_${docName}`, docId);
+          }
+        }
+        
+        return { docId, docName };
+      } catch (e) {
+        console.warn('获取文档信息失败:', e);
+        return null;
+      }
+    },
+    
+    /**
+     * 简单的字符串 hash 函数
+     */
+    hashString(str) {
+      let hash = 0;
+      for (let i = 0; i < str.length; i++) {
+        const char = str.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash = hash & hash;
+      }
+      return 'doc_' + Math.abs(hash).toString(36);
+    },
+    
+    /**
+     * 加载当前文档的聊天历史
+     */
+    async loadChatHistory() {
+      if (!this.currentDocId) {
+        return;
+      }
+      
+      this.historyLoading = true;
+      try {
+        const result = await api.getChatHistory(this.currentDocId, { limit: 50 });
+        if (result.success && result.data?.messages) {
+          // 转换后端格式为前端格式
+          this.messages = result.data.messages.map(msg => ({
+            role: msg.role,
+            content: msg.content,
+            documentJson: msg.documentJson || null,
+            selectionContext: msg.selectionContext || null
+          }));
+          this.scrollToBottom();
+        }
+      } catch (e) {
+        console.warn('加载历史记录失败:', e);
+      }
+      this.historyLoading = false;
+    },
+    
+    /**
+     * 保存消息到后端
+     */
+    async saveMessageToHistory(role, content, documentJson = null, selectionContext = null) {
+      if (!this.currentDocId) {
+        return;
+      }
+      
+      try {
+        await api.saveMessage({
+          docId: this.currentDocId,
+          docName: this.currentDocName,
+          role,
+          content,
+          documentJson,
+          selectionContext,
+          model: this.selectedModel || 'auto',
+          mode: this.mode
+        });
+      } catch (e) {
+        console.warn('保存消息失败:', e);
+      }
+    },
+    
+    /**
+     * 清空当前文档的聊天历史
+     */
+    async clearChatHistory() {
+      if (!this.currentDocId) {
+        this.messages = [];
+        return;
+      }
+      
+      try {
+        const result = await api.clearChatHistory(this.currentDocId);
+        if (result.success) {
+          this.messages = [];
+        }
+      } catch (e) {
+        console.warn('清空历史记录失败:', e);
+        this.messages = [];
+      }
+    },
+    
     /**
      * 加载可用模型列表
      */
@@ -220,6 +463,7 @@ export default {
         console.log('模型列表响应:', result);
         if (result.success && result.data?.models && result.data.models.length > 0) {
           this.availableModels = result.data.models;
+          this.selectedModel = 'auto';
         } else {
           console.warn('获取模型列表失败:', result.error);
           // 请求失败显示 Auto
@@ -377,6 +621,9 @@ export default {
         this.autoResize();
       });
 
+      // 保存用户消息到历史
+      this.saveMessageToHistory('user', userMessage, null, selectionContext);
+
       this.isLoading = true;
       this.scrollToBottom();
       
@@ -403,7 +650,7 @@ export default {
           } else if (data.type === 'json' && data.content) {
             // JSON 数据：保存用于文档转换，显示提示
             this.messages[aiMessageIndex].documentJson = data.content;
-            this.messages[aiMessageIndex].content += '\n\n✅ 已生成格式化文档，点击下方按钮输出到 Word';
+            // this.messages[aiMessageIndex].content += '\n\n✅ 已生成格式化文档，点击下方按钮输出到 Word';
             this.scrollToBottom();
           } else if (data.content) {
             // 兼容旧格式（没有 type 字段）
@@ -426,6 +673,12 @@ export default {
           }
           this.isLoading = false;
           this.scrollToBottom();
+          
+          // 保存 AI 回复到历史
+          const aiMsg = this.messages[aiMessageIndex];
+          if (aiMsg.content) {
+            this.saveMessageToHistory('assistant', aiMsg.content, aiMsg.documentJson, null);
+          }
         }
       });
       
@@ -582,6 +835,29 @@ export default {
   gap: 8px;
 }
 
+/* 空状态样式 */
+.empty-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  opacity: 0.5;
+}
+
+.empty-icon {
+  width: 64px;
+  height: 64px;
+  color: #999;
+}
+
+.empty-text {
+  font-size: 14px;
+  color: #999;
+  font-weight: 500;
+}
+
 .message {
   max-width: 90%;
   padding: 6px 8px;
@@ -643,7 +919,6 @@ export default {
   background: white;
   border: 1px solid #e0e0e0;
   border-radius: 8px;
-  overflow: hidden;
 }
 
 .chat-input {
@@ -717,31 +992,104 @@ export default {
   visibility: visible;
 }
 
-.toolbar-select {
-  padding: 1px 3px;
-  font-size: 9px;
-  background: #f8f8f8;
-  border: 1px solid #e0e0e0;
-  border-radius: 3px;
+/* 自定义下拉组件 */
+.custom-select {
+  position: relative;
+  display: inline-flex;
+  font-size: 8px;
+}
+
+.custom-select.disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.select-trigger {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 4px;
   color: #666;
   cursor: pointer;
-  outline: none;
-  -webkit-appearance: none;
-  -moz-appearance: none;
-  appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%23666' d='M0 2l4 4 4-4z'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 3px center;
-  padding-right: 12px;
+  border-radius: 3px;
+  transition: color 0.2s;
+}
+
+.select-trigger:hover {
+  color: #667eea;
+}
+
+.custom-select.open .select-trigger {
+  color: #667eea;
+}
+
+.select-arrow {
+  transition: transform 0.2s;
+}
+
+.custom-select.open .select-arrow {
+  transform: rotate(180deg);
+}
+
+.select-dropdown {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  min-width: 100%;
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  padding: 2px 0;
+  margin-bottom: 4px;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(4px);
+  transition: opacity 0.15s, visibility 0.15s, transform 0.15s;
+  z-index: 100;
+}
+
+.custom-select.open .select-dropdown {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+.model-dropdown {
+  min-width: 100px;
+}
+
+.select-option {
+  padding: 2px 10px;
+  color: #333;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+
+.select-option:hover {
+  background: #f5f5f5;
+}
+
+.select-option.active {
+  color: #667eea;
+  background: #f0f4ff;
+}
+
+/* 保留旧样式兼容 */
+.toolbar-select option {
+  background: white;
+  color: #333;
+  padding: 4px 8px;
 }
 
 .toolbar-select:hover {
-  border-color: #ccc;
+  color: #667eea;
 }
 
 .toolbar-select:focus {
-  border-color: #667eea;
   outline: none;
+  color: #667eea;
 }
 
 .setting-btn {
@@ -787,6 +1135,26 @@ export default {
 .send-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+.stop-btn {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: #e74c3c;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.stop-btn:hover {
+  background: #fef0ef;
+  color: #c0392b;
 }
 
 /* 选中内容上下文样式 */

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<JsPlugin>
+  <ApiVersion>1.0.0</ApiVersion>
+  <Name>WenceAI</Name>
+  <Version>1.0.0</Version>
+  <Description>文策 AI 写作助手 - 智能写作、润色、翻译</Description>
+  <Author>WenCe Team</Author>
+  <Url></Url>
+  <HelpUrl></HelpUrl>
+  <IconUrl>images/logo.png</IconUrl>
+  
+  <!-- WPS 文字支持 -->
+  <Applications>
+    <Application Name="wps">
+      <RibbonXml>ribbon.xml</RibbonXml>
+      <TaskPanes>
+        <TaskPane Label="文策AI助手" Url="../index.html" Width="380" Visible="false" />
+      </TaskPanes>
+    </Application>
+  </Applications>
+</JsPlugin>

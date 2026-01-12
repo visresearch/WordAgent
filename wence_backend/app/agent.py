@@ -159,7 +159,8 @@ CHAT_PROMPT = """你是 AI 写作助手，帮助用户解答问题。
 async def process_writing_request_stream(
     message: str,
     document_json: dict | None = None,
-    history: list | None = None
+    history: list | None = None,
+    model: str | None = None
 ) -> AsyncGenerator[str, None]:
     """
     处理写作请求（流式版本 + Tool Calling）
@@ -167,7 +168,17 @@ async def process_writing_request_stream(
     输出两种类型的 SSE 消息：
     - type: text - 显示给用户的文字说明
     - type: json - 生成的文档 JSON（用于输出到 Word）
+    
+    Args:
+        message: 用户消息
+        document_json: 用户选中的文档 JSON
+        history: 历史消息
+        model: 用户选择的模型（auto 或具体模型 ID）
     """
+    # 确定使用的模型
+    use_model = model if model and model != "auto" else settings.OPENAI_DEFAULT_MODEL
+    print(f"[Agent] 使用模型: {use_model}")
+    
     try:
         client = AsyncOpenAI(
             api_key=settings.OPENAI_API_KEY,
@@ -176,7 +187,7 @@ async def process_writing_request_stream(
         
         # ===== Step 1: 意图识别 =====
         intent_response = await client.chat.completions.create(
-            model=settings.DEFAULT_MODEL,
+            model=use_model,
             messages=[
                 {"role": "system", "content": ROUTER_PROMPT},
                 {"role": "user", "content": message}
@@ -259,10 +270,10 @@ async def process_writing_request_stream(
             explain_messages.append({"role": "user", "content": user_content})
             
             response1 = await client.chat.completions.create(
-                model=settings.DEFAULT_MODEL,
+                model=use_model,
                 messages=explain_messages,
                 stream=True,
-                max_tokens=200  # 限制说明文字长度
+                # max_tokens=800  # 允许更长的说明文字，移除参数限制
             )
             
             text_content = ""
@@ -276,7 +287,7 @@ async def process_writing_request_stream(
             
             # ===== 第二次调用：强制调用 tool 生成文档 =====
             response2 = await client.chat.completions.create(
-                model=settings.DEFAULT_MODEL,
+                model=use_model,
                 messages=messages,
                 tools=TOOLS,
                 tool_choice={"type": "function", "function": {"name": "generate_document"}},
@@ -322,7 +333,7 @@ async def process_writing_request_stream(
         else:
             # 普通聊天模式，不使用 tools
             response = await client.chat.completions.create(
-                model=settings.DEFAULT_MODEL,
+                model=use_model,
                 messages=messages,
                 stream=True
             )

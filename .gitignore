@@ -28,3 +28,9 @@ wps-addon-publish
 
 # python
 __pycache__
+*.db
+
+# 环境变量
+.env
+.env.local
+.env.*.local
