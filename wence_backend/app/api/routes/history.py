@@ -132,3 +132,18 @@ async def get_documents(
         return DocumentsResponse(success=True, documents=documents)
     except Exception as e:
         return DocumentsResponse(success=False, documents=[], error=str(e))
+
+
+@router.delete("/history", response_model=CommonResponse)
+async def clear_all_history(
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    清空所有文档的聊天历史
+    """
+    try:
+        service = ChatHistoryService(db)
+        count = await service.clear_all_history()
+        return CommonResponse(success=True, message=f"已清空所有历史记录，共删除 {count} 条消息")
+    except Exception as e:
+        return CommonResponse(success=False, error=str(e))

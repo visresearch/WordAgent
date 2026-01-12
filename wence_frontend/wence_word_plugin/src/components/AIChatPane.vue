@@ -1,53 +1,110 @@
 <template>
   <div class="ai-chat-container">
     <div ref="messagesContainer" class="chat-messages">
+      <!-- 显示历史记录按钮 -->
+      <div v-if="hasHistory && !historyLoaded" class="history-hint" @click="loadAndShowHistory">
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+        >
+          <circle cx="12" cy="12" r="10" />
+          <polyline points="12 6 12 12 16 14" />
+        </svg>
+        <span>显示历史聊天记录</span>
+      </div>
       <!-- 空状态显示 -->
       <div v-if="messages.length === 0 && !isLoading" class="empty-state">
         <svg class="empty-icon" viewBox="0 0 1144 1024" xmlns="http://www.w3.org/2000/svg">
-          <path d="M1080.018824 582.354824c-23.009882 129.505882-139.023059 227.930353-278.648471 227.930352H329.968941c-140.167529 0-256.602353-99.267765-278.889412-229.616941A47.164235 47.164235 0 0 1 0 533.684706l-0.060235-181.067294c0-26.021647 21.082353-47.164235 47.164235-47.164236C47.164235 153.419294 173.778824 30.117647 329.968941 30.117647h471.401412C957.620706 30.117647 1084.235294 153.419294 1084.235294 305.453176v6.625883a47.164235 47.164235 0 0 1 60.235294 45.296941v181.067294a47.164235 47.164235 0 0 1-64.451764 43.91153zM330.029176 144.865882c-91.136 0-164.984471 71.920941-164.98447 160.587294v229.496471c0 88.726588 73.848471 160.647529 165.044706 160.647529h471.341176c91.136 0 165.044706-71.920941 165.044706-160.647529v-229.496471c0-88.666353-73.908706-160.587294-165.044706-160.587294H329.968941zM400.685176 259.614118c39.092706 0 70.716235 31.623529 70.716236 70.656v122.819764a70.716235 70.716235 0 0 1-141.432471 0V330.270118c0-39.032471 31.683765-70.656 70.716235-70.656z m329.968942 0c39.092706 0 70.716235 31.623529 70.716235 70.656v122.819764a70.716235 70.716235 0 1 1-141.372235 0V330.270118c0-39.032471 31.623529-70.656 70.656-70.656zM420.502588 993.882353a137.697882 137.697882 0 0 1-137.637647-137.697882h565.669647a137.697882 137.697882 0 0 1-137.697882 137.697882h-290.334118z" fill="currentColor"/>
+          <path d="M1080.018824 582.354824c-23.009882 129.505882-139.023059 227.930353-278.648471 227.930352H329.968941c-140.167529 0-256.602353-99.267765-278.889412-229.616941A47.164235 47.164235 0 0 1 0 533.684706l-0.060235-181.067294c0-26.021647 21.082353-47.164235 47.164235-47.164236C47.164235 153.419294 173.778824 30.117647 329.968941 30.117647h471.401412C957.620706 30.117647 1084.235294 153.419294 1084.235294 305.453176v6.625883a47.164235 47.164235 0 0 1 60.235294 45.296941v181.067294a47.164235 47.164235 0 0 1-64.451764 43.91153zM330.029176 144.865882c-91.136 0-164.984471 71.920941-164.98447 160.587294v229.496471c0 88.726588 73.848471 160.647529 165.044706 160.647529h471.341176c91.136 0 165.044706-71.920941 165.044706-160.647529v-229.496471c0-88.666353-73.908706-160.587294-165.044706-160.587294H329.968941zM400.685176 259.614118c39.092706 0 70.716235 31.623529 70.716236 70.656v122.819764a70.716235 70.716235 0 0 1-141.432471 0V330.270118c0-39.032471 31.683765-70.656 70.716235-70.656z m329.968942 0c39.092706 0 70.716235 31.623529 70.716235 70.656v122.819764a70.716235 70.716235 0 1 1-141.372235 0V330.270118c0-39.032471 31.623529-70.656 70.656-70.656zM420.502588 993.882353a137.697882 137.697882 0 0 1-137.637647-137.697882h565.669647a137.697882 137.697882 0 0 1-137.697882 137.697882h-290.334118z" fill="currentColor" />
         </svg>
         <span class="empty-text">我能做什么？</span>
       </div>
+      <!-- 消息容器：包含消息框和操作图标 -->
       <div
         v-for="(msg, index) in messages"
         :key="index" 
-        :class="['message', msg.role === 'user' ? 'user-message' : 'ai-message']"
+        :class="['message-wrapper', msg.role === 'user' ? 'user-wrapper' : 'ai-wrapper']"
       >
-        <!-- 显示选中内容上下文 -->
-        <div v-if="msg.selectionContext" class="selection-context">
-          <div class="context-header">
-            <svg
-              width="12"
-              height="12"
-              viewBox="0 0 16 16"
-              fill="currentColor"
-            >
-              <path d="M14 1H2a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1zM2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2H2z" />
-              <path d="M3 4h10v1H3V4zm0 3h10v1H3V7zm0 3h6v1H3v-1z" />
-            </svg>
-            <span>选中的内容</span>
+        <div :class="['message', msg.role === 'user' ? 'user-message' : 'ai-message']">
+          <!-- 显示选中内容上下文 -->
+          <div v-if="msg.selectionContext" class="selection-context">
+            <div class="context-header">
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 16 16"
+                fill="currentColor"
+              >
+                <path d="M14 1H2a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1zM2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2H2z" />
+                <path d="M3 4h10v1H3V4zm0 3h10v1H3V7zm0 3h6v1H3v-1z" />
+              </svg>
+              <span>选中的内容</span>
+            </div>
+            <div class="context-preview">
+              <span class="context-text">{{ msg.selectionContext.preview }}</span>
+              <span v-if="msg.selectionContext.hasMore" class="context-more">...</span>
+            </div>
+            <div class="context-range">
+              {{ msg.selectionContext.startText }} → {{ msg.selectionContext.endText }}
+              <span class="context-stats">({{ msg.selectionContext.charCount }} 字符)</span>
+            </div>
           </div>
-          <div class="context-preview">
-            <span class="context-text">{{ msg.selectionContext.preview }}</span>
-            <span v-if="msg.selectionContext.hasMore" class="context-more">...</span>
-          </div>
-          <div class="context-range">
-            {{ msg.selectionContext.startText }} → {{ msg.selectionContext.endText }}
-            <span class="context-stats">({{ msg.selectionContext.charCount }} 字符)</span>
+          <div class="message-content">
+            <span v-if="msg.role === 'assistant' && !msg.content && isLoading" class="typing">AI正在思考中...</span>
+            <!-- 用户消息直接显示文本 -->
+            <span v-else-if="msg.role === 'user'">{{ msg.content }}</span>
+            <!-- AI 消息使用 Markdown 渲染 -->
+            <div v-else class="markdown-body" v-html="renderMarkdown(msg.content)"></div>
           </div>
         </div>
-        <div class="message-content">
-          <span v-if="msg.role === 'assistant' && !msg.content && isLoading" class="typing">AI正在思考中...</span>
-          <span v-else>{{ msg.content }}</span>
+        <!-- AI 消息的操作图标按钮（在消息框外下方） -->
+        <div v-if="msg.role === 'assistant' && msg.content && !isLoading" class="message-icon-actions">
+          <div v-if="msg.documentJson" class="icon-btn-wrapper">
+            <button class="icon-btn" @click="insertToWord(msg)">
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 16 16"
+                fill="currentColor"
+              >
+                <path d="M14 4.5V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2h5.5L14 4.5zM10 4a1 1 0 0 0 1 1h2.5L10 1.5V4z" />
+              </svg>
+            </button>
+            <span class="icon-tooltip">输出文档</span>
+          </div>
+          <div class="icon-btn-wrapper">
+            <button class="icon-btn" @click="retryMessage(index)">
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 16 16"
+                fill="currentColor"
+              >
+                <path d="M11.534 7h3.932a.25.25 0 0 1 .192.41l-1.966 2.36a.25.25 0 0 1-.384 0l-1.966-2.36a.25.25 0 0 1 .192-.41zm-11 2h3.932a.25.25 0 0 0 .192-.41L2.692 6.23a.25.25 0 0 0-.384 0L.342 8.59A.25.25 0 0 0 .534 9z" />
+                <path fill-rule="evenodd" d="M8 3c-1.552 0-2.94.707-3.857 1.818a.5.5 0 1 1-.771-.636A6.002 6.002 0 0 1 13.917 7H12.9A5.002 5.002 0 0 0 8 3zM3.1 9a5.002 5.002 0 0 0 8.757 2.182.5.5 0 1 1 .771.636A6.002 6.002 0 0 1 2.083 9H3.1z" />
+              </svg>
+            </button>
+            <span class="icon-tooltip">重试</span>
+          </div>
+          <div v-if="index > 0" class="icon-btn-wrapper">
+            <button class="icon-btn" @click="revertToMessage(index)">
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 16 16"
+                fill="currentColor"
+              >
+                <path fill-rule="evenodd" d="M8 3a5 5 0 1 1-4.546 2.914.5.5 0 0 0-.908-.417A6 6 0 1 0 8 2v1z" />
+                <path d="M8 4.466V.534a.25.25 0 0 0-.41-.192L5.23 2.308a.25.25 0 0 0 0 .384l2.36 1.966A.25.25 0 0 0 8 4.466z" />
+              </svg>
+            </button>
+            <span class="icon-tooltip">还原</span>
+          </div>
         </div>
-        <button
-          v-if="msg.role === 'assistant' && msg.documentJson"
-          class="insert-btn"
-          title="输出到Word文档"
-          @click="insertToWord(msg)"
-        >
-          📄 输出文档
-        </button>
       </div>
     </div>
 
@@ -99,8 +156,20 @@
             <div class="custom-select" :class="{ open: modeDropdownOpen }">
               <div class="select-trigger" @click="toggleModeDropdown">
                 <span>{{ mode === 'agent' ? 'Agent' : 'Ask' }}</span>
-                <svg class="select-arrow" width="8" height="8" viewBox="0 0 12 12">
-                  <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+                <svg
+                  class="select-arrow"
+                  width="8"
+                  height="8"
+                  viewBox="0 0 12 12"
+                >
+                  <path
+                    d="M3 4.5L6 7.5L9 4.5"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    fill="none"
+                  />
                 </svg>
               </div>
               <div class="select-dropdown">
@@ -126,8 +195,20 @@
               <div class="select-trigger" @click="toggleModelDropdown">
                 <span v-if="modelsLoading">加载中...</span>
                 <span v-else>{{ selectedModelName }}</span>
-                <svg class="select-arrow" width="8" height="8" viewBox="0 0 12 12">
-                  <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+                <svg
+                  class="select-arrow"
+                  width="8"
+                  height="8"
+                  viewBox="0 0 12 12"
+                >
+                  <path
+                    d="M3 4.5L6 7.5L9 4.5"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    fill="none"
+                  />
                 </svg>
               </div>
               <div class="select-dropdown model-dropdown">
@@ -193,8 +274,22 @@
                   viewBox="0 0 16 16"
                   fill="none"
                 >
-                  <circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5" fill="none" />
-                  <rect x="5" y="5" width="6" height="6" rx="0.5" fill="currentColor" />
+                  <circle
+                    cx="8"
+                    cy="8"
+                    r="7"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                    fill="none"
+                  />
+                  <rect
+                    x="5"
+                    y="5"
+                    width="6"
+                    height="6"
+                    rx="0.5"
+                    fill="currentColor"
+                  />
                 </svg>
               </button>
               <span class="tooltip">{{ isLoading ? '终止' : '发送' }}</span>
@@ -209,6 +304,15 @@
 <script>
 import { parseDocxToJSON, generateDocxFromJSON } from './js/docxJsonConverter.js';
 import api from './js/api.js';
+import MarkdownIt from 'markdown-it';
+
+// 初始化 markdown-it 实例
+const md = new MarkdownIt({
+  html: false,        // 禁用 HTML 标签（安全考虑）
+  breaks: true,       // 把\n转换为<br>
+  linkify: true,      // 自动识别链接
+  typographer: true   // 启用排版优化
+});
 
 export default {
   name: 'AIChatPane',
@@ -229,6 +333,8 @@ export default {
       currentDocId: null,  // 当前文档的唯一标识符
       currentDocName: null,  // 当前文档名称
       historyLoading: false,  // 历史记录加载状态
+      hasHistory: false,  // 是否有历史记录可加载
+      historyLoaded: false,  // 是否已加载历史记录
       modeDropdownOpen: false,  // 模式下拉框状态
       modelDropdownOpen: false  // 模型下拉框状态
     };
@@ -260,6 +366,137 @@ export default {
   },
   methods: {
     /**
+     * 渲染 Markdown 内容
+     */
+    renderMarkdown(content) {
+      if (!content) {
+        return '';
+      }
+      // 去除空的 ```json 代码块（防止出现空黑框）
+      let cleaned = content.replace(/```json\s*```/g, '');
+      return md.render(cleaned);
+    },
+    
+    /**
+     * 重试生成 - 重新发送上一条用户消息
+     */
+    async retryMessage(aiMessageIndex) {
+      if (this.isLoading) {
+        return;
+      }
+      
+      // 找到这条 AI 消息对应的用户消息（上一条）
+      let userMessageIndex = aiMessageIndex - 1;
+      while (userMessageIndex >= 0 && this.messages[userMessageIndex].role !== 'user') {
+        userMessageIndex--;
+      }
+      
+      if (userMessageIndex < 0) {
+        console.warn('找不到对应的用户消息');
+        return;
+      }
+      
+      const userMsg = this.messages[userMessageIndex];
+      const userMessage = userMsg.content;
+      const selectionContext = userMsg.selectionContext || null;
+      
+      // 删除当前 AI 消息
+      this.messages.splice(aiMessageIndex, 1);
+      
+      // 重新发送请求
+      this.isLoading = true;
+      this.scrollToBottom();
+      
+      // 创建新的 AI 消息占位
+      const newAiMessageIndex = this.messages.length;
+      this.messages.push({
+        role: 'assistant',
+        content: '',
+        documentJson: null
+      });
+      
+      // 用于检测并过滤 JSON 输出
+      let jsonDetected = false;
+      
+      // 使用 api.js 封装的流式接口
+      const streamCtrl = api.chatStream(userMessage, {
+        mode: this.mode,
+        model: this.selectedModel || 'auto',
+        documentJson: this.currentSelectionJSON,
+        history: this.messages.slice(0, -1).slice(-10),
+        
+        onMessage: (data) => {
+          if (data.type === 'text' && data.content) {
+            if (jsonDetected) {
+              return;
+            }
+            
+            const content = data.content;
+            const currentContent = this.messages[newAiMessageIndex].content;
+            const combined = currentContent + content;
+            
+            // 检测 JSON 开始的多种模式
+            if (content.includes('{"') || content.includes('{\n') || content.includes('"paragraphs"') || content.includes('"text":')) {
+              jsonDetected = true;
+              console.log('[Filter] 检测到 JSON 输出，停止显示');
+              return;
+            }
+            
+            if (combined.trim().startsWith('{') && (combined.includes('"paragraphs"') || combined.includes('"text"'))) {
+              jsonDetected = true;
+              console.log('[Filter] 检测到累积内容为 JSON，停止显示');
+              return;
+            }
+            
+            this.messages[newAiMessageIndex].content += content;
+            this.scrollToBottom();
+          } else if (data.type === 'json' && data.content) {
+            this.messages[newAiMessageIndex].documentJson = data.content;
+            // 移除"正在生成文档"的临时提示
+            const currentContent = this.messages[newAiMessageIndex].content;
+            if (currentContent.includes('⏳ 正在生成文档...')) {
+              this.messages[newAiMessageIndex].content = currentContent.replace(/\n*⏳ 正在生成文档\.\.\./, '');
+            }
+            this.scrollToBottom();
+          }
+        },
+        
+        onError: (error) => {
+          console.error('重试请求失败:', error);
+          this.messages[newAiMessageIndex].content = `网络错误：${error.message}`;
+        },
+        
+        onComplete: () => {
+          this.isLoading = false;
+          this.scrollToBottom();
+          
+          // 保存新的 AI 回复到历史
+          const aiMsg = this.messages[newAiMessageIndex];
+          if (aiMsg.content) {
+            this.saveMessageToHistory('assistant', aiMsg.content, aiMsg.documentJson, null);
+          }
+        }
+      });
+      
+      this.currentStreamCtrl = streamCtrl;
+    },
+    
+    /**
+     * 还原到某条消息 - 删除该消息之后的所有消息
+     */
+    async revertToMessage(messageIndex) {
+      if (this.isLoading) {
+        return;
+      }
+      
+      // 删除该消息之后的所有消息
+      this.messages = this.messages.slice(0, messageIndex + 1);
+      
+      // 注意：这里只是前端删除，历史记录保留在后端
+      // 如果需要同步删除后端记录，需要额外的 API 支持
+    },
+    
+    /**
      * 切换模式下拉框
      */
     toggleModeDropdown(e) {
@@ -272,7 +509,9 @@ export default {
      * 切换模型下拉框
      */
     toggleModelDropdown(e) {
-      if (this.modelsLoading) return;
+      if (this.modelsLoading) {
+        return;
+      }
       e.stopPropagation();
       this.modeDropdownOpen = false;
       this.modelDropdownOpen = !this.modelDropdownOpen;
@@ -313,7 +552,7 @@ export default {
     },
     
     /**
-     * 初始化文档标识并加载历史记录
+     * 初始化文档标识并检查是否有历史记录
      */
     async initDocumentAndLoadHistory() {
       try {
@@ -322,12 +561,38 @@ export default {
         if (docInfo) {
           this.currentDocId = docInfo.docId;
           this.currentDocName = docInfo.docName;
-          // 加载历史记录
-          await this.loadChatHistory();
+          // 检查是否有历史记录（只获取1条来判断）
+          await this.checkHasHistory();
         }
       } catch (e) {
         console.warn('初始化文档信息失败:', e);
       }
+    },
+    
+    /**
+     * 检查当前文档是否有历史聊天记录
+     */
+    async checkHasHistory() {
+      if (!this.currentDocId) {
+        this.hasHistory = false;
+        return;
+      }
+      
+      try {
+        const result = await api.getChatHistory(this.currentDocId, { limit: 1 });
+        this.hasHistory = result.success && result.data?.messages && result.data.messages.length > 0;
+      } catch (e) {
+        console.warn('检查历史记录失败:', e);
+        this.hasHistory = false;
+      }
+    },
+    
+    /**
+     * 点击显示历史记录
+     */
+    async loadAndShowHistory() {
+      await this.loadChatHistory();
+      this.historyLoaded = true;
     },
     
     /**
@@ -399,6 +664,7 @@ export default {
             documentJson: msg.documentJson || null,
             selectionContext: msg.selectionContext || null
           }));
+          this.historyLoaded = true;
           this.scrollToBottom();
         }
       } catch (e) {
@@ -617,6 +883,7 @@ export default {
       
       this.messages.push(userMsgObj);
       this.inputText = '';
+      this.historyLoaded = true;  // 用户开始发消息，隐藏历史提示
       this.$nextTick(() => {
         this.autoResize();
       });
@@ -635,6 +902,9 @@ export default {
         documentJson: null  // 保存文档 JSON 数据
       });
       
+      // 用于检测并过滤 JSON 输出
+      let jsonDetected = false;
+      
       // 使用 api.js 封装的流式接口
       const streamCtrl = api.chatStream(userMessage, {
         mode: this.mode,
@@ -644,18 +914,48 @@ export default {
         
         onMessage: (data) => {
           if (data.type === 'text' && data.content) {
-            // 文本消息：显示给用户看
-            this.messages[aiMessageIndex].content += data.content;
+            // 一旦检测到 JSON，后续所有文本都跳过
+            if (jsonDetected) {
+              return;
+            }
+            
+            const content = data.content;
+            // 检测当前内容或累积内容是否包含 JSON 结构
+            const currentContent = this.messages[aiMessageIndex].content;
+            const combined = currentContent + content;
+            
+            // 检测 JSON 开始的多种模式
+            if (content.includes('{"') || content.includes('{\n') || content.includes('{ \n') || content.includes('"paragraphs"') || content.includes('"text":')) {
+              // 检测到 JSON 内容，停止显示
+              jsonDetected = true;
+              console.log('[Filter] 检测到 JSON 输出，停止显示后续内容');
+              return;
+            }
+            
+            // 检测是否是 JSON 的开头
+            if (combined.trim().startsWith('{') && (combined.includes('"paragraphs"') || combined.includes('"text"'))) {
+              jsonDetected = true;
+              console.log('[Filter] 检测到累积内容为 JSON，停止显示');
+              return;
+            }
+            
+            this.messages[aiMessageIndex].content += content;
             this.scrollToBottom();
           } else if (data.type === 'json' && data.content) {
-            // JSON 数据：保存用于文档转换，显示提示
+            // JSON 数据：保存用于文档转换
             this.messages[aiMessageIndex].documentJson = data.content;
-            // this.messages[aiMessageIndex].content += '\n\n✅ 已生成格式化文档，点击下方按钮输出到 Word';
+            // 移除"正在生成文档"的临时提示
+            const currentContent = this.messages[aiMessageIndex].content;
+            if (currentContent.includes('⏳ 正在生成文档...')) {
+              this.messages[aiMessageIndex].content = currentContent.replace(/\n*⏳ 正在生成文档\.\.\./, '');
+            }
             this.scrollToBottom();
-          } else if (data.content) {
-            // 兼容旧格式（没有 type 字段）
-            this.messages[aiMessageIndex].content += data.content;
-            this.scrollToBottom();
+          } else if (data.content && typeof data.content === 'string') {
+            // 兼容旧格式（没有 type 字段），但只接受字符串
+            if (!jsonDetected) {
+              this.messages[aiMessageIndex].content += data.content;
+              this.scrollToBottom();
+            }
           } else if (data.error) {
             this.messages[aiMessageIndex].content += `\n\n错误: ${data.error}`;
           }
@@ -835,6 +1135,29 @@ export default {
   gap: 8px;
 }
 
+/* 历史记录提示样式 */
+.history-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 12px;
+  margin-bottom: 4px;
+  color: #666;
+  font-size: 13px;
+  cursor: pointer;
+  transition: color 0.2s ease;
+  user-select: none;
+}
+
+.history-hint:hover {
+  color: #1a73e8;
+}
+
+.history-hint svg {
+  flex-shrink: 0;
+}
+
 /* 空状态样式 */
 .empty-state {
   flex: 1;
@@ -856,6 +1179,22 @@ export default {
   font-size: 14px;
   color: #999;
   font-weight: 500;
+}
+
+/* 消息容器 */
+.message-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+}
+
+.user-wrapper {
+  align-items: flex-end;
+}
+
+.ai-wrapper {
+  align-items: flex-start;
 }
 
 .message {
@@ -883,25 +1222,196 @@ export default {
 
 .message-content {
   word-wrap: break-word;
-  white-space: pre-wrap;
 }
 
-.insert-btn {
-  display: block;
-  margin-top: 6px;
-  padding: 3px 6px;
+/* Markdown 渲染样式 - 使用 :deep() 穿透 scoped 限制 */
+.message-content :deep(.markdown-body) {
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.message-content :deep(.markdown-body) p {
+  margin: 0 0 8px 0;
+}
+
+.message-content :deep(.markdown-body) p:last-child {
+  margin-bottom: 0;
+}
+
+.message-content :deep(.markdown-body) h1,
+.message-content :deep(.markdown-body) h2,
+.message-content :deep(.markdown-body) h3,
+.message-content :deep(.markdown-body) h4,
+.message-content :deep(.markdown-body) h5,
+.message-content :deep(.markdown-body) h6 {
+  margin: 12px 0 8px 0;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.message-content :deep(.markdown-body) h1 { font-size: 1.4em; }
+.message-content :deep(.markdown-body) h2 { font-size: 1.25em; }
+.message-content :deep(.markdown-body) h3 { font-size: 1.1em; }
+.message-content :deep(.markdown-body) h4,
+.message-content :deep(.markdown-body) h5,
+.message-content :deep(.markdown-body) h6 { font-size: 1em; }
+
+.message-content :deep(.markdown-body) ul,
+.message-content :deep(.markdown-body) ol {
+  margin: 6px 0;
+  padding-left: 24px;
+  list-style-position: outside;
+}
+
+.message-content :deep(.markdown-body) ul {
+  list-style-type: disc;
+}
+
+.message-content :deep(.markdown-body) ol {
+  list-style-type: decimal;
+}
+
+.message-content :deep(.markdown-body) li {
+  margin: 4px 0;
+  padding-left: 4px;
+}
+
+.message-content :deep(.markdown-body) code {
+  background: rgba(0, 0, 0, 0.06);
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+  font-size: 0.9em;
+}
+
+.message-content :deep(.markdown-body) pre {
+  background: #1e1e1e;
+  color: #d4d4d4;
+  padding: 10px;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 8px 0;
+}
+
+.message-content :deep(.markdown-body) pre code {
+  background: none;
+  padding: 0;
+  color: inherit;
   font-size: 11px;
-  background: #f0f0f0;
+  line-height: 1.4;
+}
+
+.message-content :deep(.markdown-body) blockquote {
+  margin: 8px 0;
+  padding: 4px 12px;
+  border-left: 3px solid #667eea;
+  background: rgba(102, 126, 234, 0.08);
+  color: #555;
+}
+
+.message-content :deep(.markdown-body) a {
+  color: #667eea;
+  text-decoration: none;
+}
+
+.message-content :deep(.markdown-body) a:hover {
+  text-decoration: underline;
+}
+
+.message-content :deep(.markdown-body) table {
+  border-collapse: collapse;
+  margin: 8px 0;
+  width: 100%;
+}
+
+.message-content :deep(.markdown-body) th,
+.message-content :deep(.markdown-body) td {
   border: 1px solid #ddd;
+  padding: 6px 8px;
+  text-align: left;
+}
+
+.message-content :deep(.markdown-body) th {
+  background: #f5f5f5;
+  font-weight: 600;
+}
+
+.message-content :deep(.markdown-body) hr {
+  border: none;
+  border-top: 1px solid #ddd;
+  margin: 12px 0;
+}
+
+.message-content :deep(.markdown-body) strong {
+  font-weight: 700;
+  color: #222;
+}
+
+.message-content :deep(.markdown-body) em {
+  font-style: italic;
+}
+
+/* AI 消息外部图标按钮 */
+.message-icon-actions {
+  display: flex;
+  flex-direction: row;
+  gap: 2px;
+  margin-left: 4px;
+}
+
+.icon-btn-wrapper {
+  position: relative;
+}
+
+.icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: transparent;
+  border: none;
   border-radius: 4px;
   cursor: pointer;
-  transition: all 0.2s;
+  color: #999;
+  transition: all 0.15s ease;
 }
 
-.insert-btn:hover {
-  background: #e0e0e0;
-  border-color: #667eea;
-  color: #667eea;
+.icon-btn:hover {
+  background: #f0f0f0;
+  color: #333;
+}
+
+.icon-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* 图标按钮的 tooltip */
+.icon-tooltip {
+  position: absolute;
+  left: 50%;
+  bottom: 100%;
+  transform: translateX(-50%);
+  padding: 3px 6px;
+  background: white;
+  color: #333;
+  font-size: 10px;
+  border-radius: 4px;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.2s, visibility 0.2s;
+  pointer-events: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  border: 1px solid #e0e0e0;
+  margin-bottom: 4px;
+}
+
+.icon-btn-wrapper:hover .icon-tooltip {
+  opacity: 1;
+  visibility: visible;
 }
 
 .typing {

@@ -154,6 +154,30 @@ class ChatHistoryService:
         await self.db.flush()
         return True
     
+    async def clear_all_history(self) -> int:
+        """
+        清空所有文档的聊天历史
+        
+        Returns:
+            删除的消息数量
+        """
+        from sqlalchemy import delete, func
+        
+        # 统计消息数量
+        count_result = await self.db.execute(
+            select(func.count(ChatMessage.id))
+        )
+        count = count_result.scalar() or 0
+        
+        # 删除所有消息
+        await self.db.execute(delete(ChatMessage))
+        
+        # 删除所有文档记录
+        await self.db.execute(delete(Document))
+        
+        await self.db.flush()
+        return count
+
     async def get_all_documents(self, limit: int = 100) -> List[dict]:
         """
         获取所有有聊天记录的文档列表

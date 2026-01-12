@@ -5,8 +5,8 @@
 
 from typing import AsyncGenerator
 import json
-from openai import AsyncOpenAI
 from app.core.config import settings
+from app.services.llm_client import get_llm_client, resolve_model
 
 
 # ============== Tool 定义 ==============
@@ -175,15 +175,13 @@ async def process_writing_request_stream(
         history: 历史消息
         model: 用户选择的模型（auto 或具体模型 ID）
     """
-    # 确定使用的模型
-    use_model = model if model and model != "auto" else settings.OPENAI_DEFAULT_MODEL
+    # 确定使用的模型（支持多平台）
+    use_model = resolve_model(model)
     print(f"[Agent] 使用模型: {use_model}")
     
     try:
-        client = AsyncOpenAI(
-            api_key=settings.OPENAI_API_KEY,
-            base_url=settings.OPENAI_BASE_URL if settings.OPENAI_BASE_URL else None
-        )
+        # 根据模型自动选择对应平台的客户端
+        client = get_llm_client(use_model)
         
         # ===== Step 1: 意图识别 =====
         intent_response = await client.chat.completions.create(
@@ -265,7 +263,7 @@ async def process_writing_request_stream(
         # ===== Step 4: 调用 LLM =====
         if use_tools:
             # ===== 第一次调用：流式输出文字说明 =====
-            explain_prompt = system_prompt + "\n\n请先简要说明你将如何处理这个请求（1-2句话），不要输出JSON或调用工具。"
+            explain_prompt = system_prompt + "\n\n请先简要说明你将如何处理这个请求（1-2句话），不要输出JSON或调用工具。只用自然语言回答。"
             explain_messages = [{"role": "system", "content": explain_prompt}]
             explain_messages.append({"role": "user", "content": user_content})
             
@@ -277,15 +275,30 @@ async def process_writing_request_stream(
             )
             
             text_content = ""
+            json_detected = False
             async for chunk in response1:
                 if chunk.choices and chunk.choices[0].delta.content:
                     content = chunk.choices[0].delta.content
                     text_content += content
-                    yield f"data: {json.dumps({'type': 'text', 'content': content}, ensure_ascii=False)}\n\n"
+                    
+                    # 检测是否输出了 JSON（模型没有遵循指令）
+                    trimmed = text_content.strip()
+                    if trimmed.startswith('{') and ('"paragraphs"' in trimmed or '"text"' in trimmed):
+                        json_detected = True
+                        print(f"[Agent] 检测到模型输出了 JSON，跳过显示")
+                        continue
+                    
+                    if not json_detected:
+                        yield f"data: {json.dumps({'type': 'text', 'content': content}, ensure_ascii=False)}\n\n"
             
             print(f"[Agent] 说明文字: {text_content[:100]}...")
             
+            # 发送"正在生成文档"提示
+            generating_msg = '\n\n⏳ 正在生成文档...'
+            yield f"data: {json.dumps({'type': 'text', 'content': generating_msg}, ensure_ascii=False)}\n\n"
+            
             # ===== 第二次调用：强制调用 tool 生成文档 =====
+            print(f"[Agent] 开始第二次调用（tool calling）...")
             response2 = await client.chat.completions.create(
                 model=use_model,
                 messages=messages,
@@ -293,6 +306,7 @@ async def process_writing_request_stream(
                 tool_choice={"type": "function", "function": {"name": "generate_document"}},
                 stream=True
             )
+            print(f"[Agent] 第二次调用已创建，开始收集 tool calls...")
             
             # 收集 tool call 数据
             tool_calls_data = {}
@@ -301,6 +315,10 @@ async def process_writing_request_stream(
                 delta = chunk.choices[0].delta if chunk.choices else None
                 if not delta:
                     continue
+                
+                # 调试：打印 delta 内容
+                if hasattr(delta, 'content') and delta.content:
+                    print(f"[Agent Debug] delta.content: {delta.content[:100] if delta.content else 'None'}...")
                 
                 # 处理 tool calls
                 if delta.tool_calls:
@@ -316,8 +334,11 @@ async def process_writing_request_stream(
                             if tc.function.arguments:
                                 tool_calls_data[idx]["arguments"] += tc.function.arguments
             
+            print(f"[Agent] 收集到 {len(tool_calls_data)} 个 tool calls")
+            
             # 处理收集到的 tool calls
             for idx, tc_data in tool_calls_data.items():
+                print(f"[Agent] Tool #{idx}: name={tc_data['name']}, args_len={len(tc_data['arguments'])}")
                 if tc_data["name"] == "generate_document":
                     try:
                         doc_json = json.loads(tc_data["arguments"])
