@@ -55,7 +55,18 @@ class Settings(BaseSettings):
     
     # 智谱
     ZHIPU_API_KEY: str = ""
+    ZHIPU_BASE_URL: str = ""
     ZHIPU_DEFAULT_MODEL: str = "glm-4.7"
+
+    # 千问
+    QWEN_API_KEY: str = ""
+    QWEN_BASE_URL: str = ""
+    QWEN_DEFAULT_MODEL: str = "qwen-plus"
+
+    # Ollama
+    OLLAMA_API_KEY: str = "anystring"  # Ollama 不需要真正的 API Key，但必须提供一个字符串
+    OLLAMA_BASE_URL: str = "http://localhost:11434/v1"
+    OLLAMA_DEFAULT_MODEL: str = "qwen2.5:7b"
     
     # SQLite 数据库配置（嵌入式，无需安装）
     # 动态获取，支持打包后运行

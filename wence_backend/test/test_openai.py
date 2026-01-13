@@ -4,10 +4,15 @@
 import asyncio
 from openai import AsyncOpenAI
 
-# 配置
-API_KEY = "sk-l4ET3MWX8vsqAVqv0tXt5o1bbc7sh5L1fDV7oV66oDPrxLlQ"
-BASE_URL = "https://api.chatanywhere.tech"
-MODEL = "gpt-5"
+# # 配置
+# API_KEY = "sk-l4ET3MWX8vsqAVqv0tXt5o1bbc7sh5L1fDV7oV66oDPrxLlQ"
+# BASE_URL = "https://api.chatanywhere.tech"
+# MODEL = "gpt-5"
+
+API_KEY = ""
+BASE_URL = "http://localhost:11434/v1"
+# MODEL = "qwen2.5:7b"  # 或 deepseek-r1:7b
+MODEL = "deepseek-r1:7b"  # 或 deepseek-r1:7b
 
 
 async def test_stream():

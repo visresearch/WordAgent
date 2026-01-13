@@ -60,12 +60,12 @@ MODEL_TO_PROVIDER: Dict[str, str] = {
 
 def get_providers() -> Dict[str, LLMProvider]:
     """获取所有提供商配置"""
-    
+
     # 处理 OpenAI base_url
     openai_base_url = settings.OPENAI_BASE_URL or "https://api.openai.com/v1"
     if not openai_base_url.endswith("/v1") and not openai_base_url.endswith("/v1/"):
         openai_base_url = openai_base_url.rstrip("/") + "/v1"
-    
+
     return {
         "openai": LLMProvider(
             name="OpenAI",
@@ -77,13 +77,17 @@ def get_providers() -> Dict[str, LLMProvider]:
         "zhipu": LLMProvider(
             name="智谱AI",
             api_key=settings.ZHIPU_API_KEY,
-            base_url="https://open.bigmodel.cn/api/paas/v4/",
+            base_url=settings.ZHIPU_BASE_URL,
             default_model=settings.ZHIPU_DEFAULT_MODEL,
             model_prefixes=["glm-", "chatglm-", "codegeex-"]
         ),
-        # 可以继续添加更多平台...
-        # "anthropic": LLMProvider(...),
-        # "deepseek": LLMProvider(...),
+        "qwen": LLMProvider(
+            name="千问AI",
+            api_key=settings.QWEN_API_KEY,
+            base_url=settings.QWEN_BASE_URL,
+            default_model=settings.QWEN_DEFAULT_MODEL,
+            model_prefixes=["qwen-"]
+        )
     }
 
 

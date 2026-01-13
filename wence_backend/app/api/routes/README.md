@@ -1,6 +1,6 @@
 # WenCe AI 后端 API 文档
 
-> Base URL: `http://localhost:8000/api`
+> Base URL: `http://localhost:3880/api`
 
 ---
 

@@ -8,7 +8,8 @@ from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from app.models.chat import ChatRequest, ChatResponse, ModelsResponse, ModelInfo
 from app.core.config import settings
-from app.agent import process_writing_request_stream  # 暂时不用真实 AI
+# 使用纯 LangChain 版本（完美流式输出）
+from app.agent_langchain import process_writing_request_stream
 
 router = APIRouter()
 
@@ -167,7 +168,8 @@ async def generate_stream(request: ChatRequest):
         message=request.message,
         document_json=request.documentJson,
         history=request.history,
-        model=request.model  # 传递用户选择的模型
+        model=request.model,  # 传递用户选择的模型
+        mode=request.mode  # 传递对话模式
     ):
         yield chunk
 

@@ -227,6 +227,25 @@
           <div class="toolbar-right">
             <div class="btn-wrapper">
               <button 
+                class="add-selection-btn" 
+                @click="addSelectionManually"
+                title="添加选区"
+              >
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                >
+                  <rect x="2" y="2" width="12" height="12" rx="2" stroke-width="1.5" />
+                  <path d="M8 5v6M5 8h6" stroke-width="1.5" stroke-linecap="round" />
+                </svg>
+              </button>
+              <span class="tooltip">添加选区</span>
+            </div>
+            <div class="btn-wrapper">
+              <button 
                 class="setting-btn" 
                 @click="openSetting"
               >
@@ -328,7 +347,6 @@ export default {
       lastReadJSON: null,  // 存储上次读取的文档JSON
       currentSelection: null,  // 当前选中的内容信息
       currentSelectionJSON: null,  // 当前选中内容的完整JSON
-      selectionCheckInterval: null,  // 选区检查定时器
       currentStreamCtrl: null,  // 当前流式请求控制器
       currentDocId: null,  // 当前文档的唯一标识符
       currentDocName: null,  // 当前文档名称
@@ -349,8 +367,6 @@ export default {
     this.$nextTick(() => {
       this.autoResize();
     });
-    // 启动选区监听
-    this.startSelectionWatch();
     // 页面加载时获取模型列表
     this.loadModels();
     // 初始化文档标识并加载历史
@@ -359,8 +375,6 @@ export default {
     document.addEventListener('click', this.closeDropdowns);
   },
   beforeUnmount() {
-    // 清理定时器
-    this.stopSelectionWatch();
     // 移除点击监听
     document.removeEventListener('click', this.closeDropdowns);
   },
@@ -664,6 +678,15 @@ export default {
             documentJson: msg.documentJson || null,
             selectionContext: msg.selectionContext || null
           }));
+          
+          // 恢复上一次使用的 model 和 mode
+          if (result.data.lastUsedModel) {
+            this.selectedModel = result.data.lastUsedModel;
+          }
+          if (result.data.lastUsedMode) {
+            this.mode = result.data.lastUsedMode;
+          }
+          
           this.historyLoaded = true;
           this.scrollToBottom();
         }
@@ -746,92 +769,104 @@ export default {
     },
     
     /**
-     * 开始监听Word选区变化
+     * 手动添加选区（点击按钮触发）
      */
-    startSelectionWatch() {
-      // 每500ms检查一次选区
-      this.selectionCheckInterval = setInterval(() => {
-        this.updateCurrentSelection();
-      }, 500);
-    },
-    
-    /**
-     * 停止监听选区
-     */
-    stopSelectionWatch() {
-      if (this.selectionCheckInterval) {
-        clearInterval(this.selectionCheckInterval);
-        this.selectionCheckInterval = null;
-      }
-    },
-    
-    /**
-     * 更新当前选区信息
-     */
-    updateCurrentSelection() {
+    addSelectionManually() {
+      console.log('[AIChatPane] 手动触发添加选区');
+      
       try {
         const selection = window.Application?.Selection;
         if (!selection) {
-          this.currentSelection = null;
-          this.currentSelectionJSON = null;
+          console.warn('[Selection] 无法获取选区');
+          alert('无法获取选区，请确保在 WPS Word 中选中了文本');
           return;
         }
-        
+
         const range = selection.Range;
         if (!range) {
-          this.currentSelection = null;
-          this.currentSelectionJSON = null;
+          console.warn('[Selection] 无法获取范围');
+          alert('无法获取选区范围');
           return;
         }
-        
+
         const text = range.Text || '';
         const cleanedText = text.replace(/[\r\n\u0007\f]/g, ' ').trim();
-        
-        // 如果没有选中内容或只选了一个字符（光标）
+
+        // 检查是否有有效的选中内容
         if (!cleanedText || cleanedText.length < 2) {
-          this.currentSelection = null;
-          this.currentSelectionJSON = null;
+          console.warn('[Selection] 没有选中有效内容');
+          alert('请先在文档中选中文本内容');
           return;
         }
-        
+
+        console.log('[Selection] 选中内容长度:', cleanedText.length);
+
         // 解析选中内容为JSON
         const jsonData = parseDocxToJSON(range);
         if (jsonData.error) {
-          console.warn('解析选区失败:', jsonData.error);
+          console.error('[Selection] 解析选区失败:', jsonData.error);
+          alert('解析选中内容失败: ' + jsonData.error);
           return;
         }
-        
-        this.currentSelectionJSON = jsonData;
-        
+
         // 生成预览信息
         const maxPreviewLen = 50;
         let preview = cleanedText;
         let hasMore = false;
-        
+
         if (preview.length > maxPreviewLen) {
           preview = preview.substring(0, maxPreviewLen);
           hasMore = true;
         }
-        
+
         // 获取开始和结束文字
         const startText = cleanedText.substring(0, Math.min(10, cleanedText.length));
         const endText = cleanedText.length > 10 
           ? cleanedText.substring(cleanedText.length - 10) 
           : cleanedText;
-        
-        this.currentSelection = {
+
+        const selectionInfo = {
           preview: preview + (hasMore ? '...' : ''),
           startText: startText + (cleanedText.length > 10 ? '...' : ''),
           endText: (cleanedText.length > 20 ? '...' : '') + endText,
           charCount: cleanedText.length,
-          hasMore
+          hasMore,
+          jsonData: jsonData
         };
-        
-      } catch (e) {
-        console.warn('获取选区信息失败:', e);
-        this.currentSelection = null;
-        this.currentSelectionJSON = null;
+
+        console.log('[Selection] 选区信息已生成:', {
+          preview: selectionInfo.preview,
+          charCount: selectionInfo.charCount
+        });
+
+        // 直接调用处理方法
+        this.handleSelectionAdd(selectionInfo);
+      } catch (error) {
+        console.error('[Selection] 处理选区失败:', error);
+        alert('处理选中内容时出错: ' + error.message);
       }
+    },
+    
+    /**
+     * 处理添加的选区
+     * @param {Object} selectionInfo - 选区信息对象
+     */
+    handleSelectionAdd(selectionInfo) {
+      console.log('[AIChatPane] 收到选区信息:', selectionInfo);
+      
+      // 更新当前选区信息
+      this.currentSelection = {
+        preview: selectionInfo.preview,
+        startText: selectionInfo.startText,
+        endText: selectionInfo.endText,
+        charCount: selectionInfo.charCount,
+        hasMore: selectionInfo.hasMore
+      };
+      
+      // 更新选区JSON数据
+      this.currentSelectionJSON = selectionInfo.jsonData;
+      
+      console.log('[AIChatPane] 选区已设置，字符数:', selectionInfo.charCount);
     },
     
     /**
@@ -1618,6 +1653,26 @@ export default {
 }
 
 .setting-btn:hover {
+  background: #f0f0f0;
+  color: #667eea;
+}
+
+.add-selection-btn {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: #888;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.add-selection-btn:hover {
   background: #f0f0f0;
   color: #667eea;
 }

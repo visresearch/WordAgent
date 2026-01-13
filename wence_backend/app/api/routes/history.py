@@ -32,6 +32,8 @@ class HistoryResponse(BaseModel):
     """历史记录响应"""
     success: bool
     messages: List[dict] = []
+    lastUsedModel: Optional[str] = None  # 最后使用的模型
+    lastUsedMode: Optional[str] = None  # 最后使用的模式
     error: Optional[str] = None
 
 
@@ -69,7 +71,14 @@ async def get_chat_history(
     try:
         service = ChatHistoryService(db)
         messages = await service.get_history(doc_id, limit, offset)
-        return HistoryResponse(success=True, messages=messages)
+        # 获取最后使用的 model 和 mode
+        last_settings = await service.get_last_used_settings(doc_id)
+        return HistoryResponse(
+            success=True,
+            messages=messages,
+            lastUsedModel=last_settings.get('model'),
+            lastUsedMode=last_settings.get('mode')
+        )
     except Exception as e:
         return HistoryResponse(success=False, messages=[], error=str(e))
 

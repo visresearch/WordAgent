@@ -127,6 +127,42 @@ class ChatHistoryService:
         
         return [msg.to_dict() for msg in messages]
     
+    async def get_last_used_settings(self, doc_id: str) -> dict:
+        """
+        获取指定文档最后使用的 model 和 mode
+        
+        Args:
+            doc_id: 文档唯一标识符
+        
+        Returns:
+            包含 model 和 mode 的字典
+        """
+        # 先查找文档
+        doc_result = await self.db.execute(
+            select(Document).where(Document.doc_id == doc_id)
+        )
+        document = doc_result.scalar_one_or_none()
+        
+        if not document:
+            return {'model': None, 'mode': None}
+        
+        # 查询最后一条消息，获取其 model 和 mode
+        result = await self.db.execute(
+            select(ChatMessage)
+            .where(ChatMessage.document_id == document.id)
+            .order_by(desc(ChatMessage.created_at))
+            .limit(1)
+        )
+        last_message = result.scalar_one_or_none()
+        
+        if not last_message:
+            return {'model': None, 'mode': None}
+        
+        return {
+            'model': last_message.model,
+            'mode': last_message.mode
+        }
+    
     async def clear_history(self, doc_id: str) -> bool:
         """
         清空指定文档的聊天历史

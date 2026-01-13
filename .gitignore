@@ -29,6 +29,30 @@ wps-addon-publish
 # python
 __pycache__
 *.db
+*.pyc
+*.pyo
+*.pyd
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+
+# PyInstaller
+build/
+dist/
+*.spec.backup
+*.manifest
+*.exe.config
+
+# Packaging
+package/
+*.deb
+*.AppImage
+*.rpm
+*.tar.gz
+*.zip
+
+# uv
+.venv/
 
 # 环境变量
 .env
