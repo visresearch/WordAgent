@@ -58,3 +58,5 @@ package/
 .env
 .env.local
 .env.*.local
+
+.~*.docx

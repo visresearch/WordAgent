@@ -35,13 +35,24 @@ def get_static_dir() -> Path:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
-    # 启动时初始化数据库
-    await init_db()
-    print("✅ 数据库初始化完成")
+    try:
+        # 启动时初始化数据库
+        await init_db()
+        print("✅ 数据库初始化完成")
+    except Exception as e:
+        print(f"❌ 数据库初始化失败: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
+    
     yield
-    # 关闭时清理资源
-    await close_db()
-    print("✅ 数据库连接已关闭")
+    
+    try:
+        # 关闭时清理资源
+        await close_db()
+        print("✅ 数据库连接已关闭")
+    except Exception as e:
+        print(f"⚠️ 数据库关闭出错: {e}")
 
 
 app = FastAPI(

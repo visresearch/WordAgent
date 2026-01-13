@@ -1,22 +1,18 @@
 """
-多 Agent 协作系统 - 使用 LangGraph
-重构版本：更好的状态管理、可观测性和扩展性
+多 Agent 协作系统 - 使用纯 LangChain（无 LangGraph）
+优势：完美的流式输出 + 简单清晰的代码结构
 """
 
-from typing import TypedDict, Annotated, Sequence, Literal, Optional
-from typing_extensions import TypedDict
-import operator
-from langgraph.graph import StateGraph, END
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, AIMessage
-from langchain_core.tools import tool
+from typing import AsyncGenerator
 from langchain_openai import ChatOpenAI
-from langchain_anthropic import ChatAnthropic
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+from langchain_core.tools import tool
 from pydantic import BaseModel, Field
+from typing import Optional
 import json
-import asyncio
 
 from app.core.config import settings
-from app.services.llm_client import resolve_model
+from app.services.llm_client import resolve_model, LLMClientManager
 
 
 # ============== Pydantic 模型定义（用于 Tool Schema）==============
@@ -73,21 +69,6 @@ class DocumentOutput(BaseModel):
     tables: Optional[list[Table]] = Field(None, description="表格数组（可选）")
 
 
-# ============== 状态定义 ==============
-
-class AgentState(TypedDict):
-    """Agent 状态"""
-    messages: Annotated[Sequence[BaseMessage], operator.add]
-    task_type: str  # content, format, chat
-    user_request: str
-    document_json: dict | None
-    history: list | None
-    model: str
-    mode: str
-    streaming_buffer: str  # 用于流式输出
-    document_output: dict | None  # 生成的文档 JSON
-
-
 # ============== Tool 定义 ==============
 
 @tool
@@ -104,7 +85,6 @@ def generate_document(document: DocumentOutput) -> dict:
     Returns:
         文档 JSON 对象
     """
-    # 转换 Pydantic 模型为 dict
     return document.model_dump()
 
 
@@ -161,58 +141,114 @@ CHAT_PROMPT = """你是 AI 写作助手，帮助用户解答问题。
 直接用文字回答，不需要调用工具。"""
 
 
-# ============== Node 函数 ==============
+# ============== 创建 LLM 实例 ==============
 
-def router_node(state: AgentState) -> AgentState:
-    """路由节点：判断任务类型"""
-    mode = state.get("mode", "agent")
+def create_llm(model_name: str) -> ChatOpenAI:
+    """创建 LLM 实例，使用 llm_client 统一管理配置"""
+    # 获取模型对应的提供商信息
+    provider_info = LLMClientManager.get_provider_info(model_name)
     
-    # 如果是 ask 模式，直接使用 chat
-    if mode == "ask":
-        print(f"[Router] Ask 模式，使用 chat")
-        return {**state, "task_type": "chat"}
+    return ChatOpenAI(
+        model=model_name,
+        openai_api_key=provider_info.api_key,
+        openai_api_base=provider_info.base_url,
+        temperature=0.7,
+    )
+
+
+# ============== 主处理函数 ==============
+
+async def process_writing_request_stream(
+    message: str,
+    document_json: dict | None = None,
+    history: list | None = None,
+    model: str | None = None,
+    mode: str | None = None
+) -> AsyncGenerator[str, None]:
+    """
+    使用纯 LangChain 处理写作请求（流式输出）
     
-    # 创建 LLM
-    model_name = resolve_model(state["model"])
-    llm = _create_llm(model_name)
+    Args:
+        message: 用户消息
+        document_json: 用户选中的文档 JSON
+        history: 历史消息
+        model: 用户选择的模型
+        mode: 对话模式（agent/ask）
     
-    # 调用路由
-    messages = [
-        SystemMessage(content=ROUTER_PROMPT),
-        HumanMessage(content=state["user_request"])
-    ]
+    Yields:
+        SSE 格式的流式输出
+    """
+    print(f"[LangChain Agent] 开始处理请求")
+    print(f"[LangChain Agent] 模式: {mode}")
     
-    response = llm.invoke(messages)
-    task_type = response.content.strip().lower()
+    model_name = resolve_model(model or "auto")
+    llm = create_llm(model_name)
     
-    # 验证并修正任务类型
-    if task_type not in ["content", "format", "chat"]:
-        msg_lower = state["user_request"].lower()
-        if any(kw in msg_lower for kw in ["润色", "优化", "改进", "重写", "改写", "扩写", "缩写", "翻译"]):
-            task_type = "content"
-        elif any(kw in msg_lower for kw in ["格式", "排版", "字体", "字号", "对齐"]):
-            task_type = "format"
-        else:
+    try:
+        # ===== Step 1: 意图识别（Router）=====
+        if mode == "ask":
             task_type = "chat"
-    
-    print(f"[Router] 任务类型: {task_type}")
-    return {**state, "task_type": task_type}
+            print(f"[Router] Ask 模式，强制使用 chat agent")
+        else:
+            messages = [
+                SystemMessage(content=ROUTER_PROMPT),
+                HumanMessage(content=message)
+            ]
+            
+            response = await llm.ainvoke(messages)
+            task_type = response.content.strip().lower()
+            
+            # 验证并修正任务类型
+            if task_type not in ["content", "format", "chat"]:
+                msg_lower = message.lower()
+                if any(kw in msg_lower for kw in ["润色", "优化", "改进", "重写", "改写", "扩写", "缩写", "翻译"]):
+                    task_type = "content"
+                elif any(kw in msg_lower for kw in ["格式", "排版", "字体", "字号", "对齐"]):
+                    task_type = "format"
+                else:
+                    task_type = "chat"
+            
+            print(f"[Router] 任务类型: {task_type}")
+        
+        # ===== Step 2: 选择对应的 Agent 处理 =====
+        if task_type == "content":
+            async for chunk in process_content_agent(llm, message, document_json, history):
+                yield chunk
+        elif task_type == "format":
+            async for chunk in process_format_agent(llm, message, document_json, history):
+                yield chunk
+        else:
+            async for chunk in process_chat_agent(llm, message, document_json, history):
+                yield chunk
+        
+        yield "data: [DONE]\n\n"
+        
+    except Exception as e:
+        print(f"[LangChain Error] {e}")
+        import traceback
+        traceback.print_exc()
+        yield f"data: {json.dumps({'type': 'text', 'content': f'错误: {str(e)}'}, ensure_ascii=False)}\n\n"
+        yield "data: [DONE]\n\n"
 
 
-def content_agent_node(state: AgentState) -> AgentState:
-    """内容处理 Agent"""
+# ============== Content Agent ==============
+
+async def process_content_agent(
+    llm: ChatOpenAI,
+    message: str,
+    document_json: dict | None,
+    history: list | None
+) -> AsyncGenerator[str, None]:
+    """内容处理 Agent（流式）"""
     print(f"[ContentAgent] 开始处理")
     
-    model_name = resolve_model(state["model"])
-    llm = _create_llm(model_name)
-    # 绑定工具，让 LLM 自然决定何时调用（先输出说明，再调用工具）
     llm_with_tools = llm.bind_tools([generate_document])
     
     # 构建消息
     messages = [SystemMessage(content=CONTENT_PROMPT)]
     
     # 添加历史
-    for msg in (state.get("history") or [])[-6:]:
+    for msg in (history or [])[-6:]:
         if isinstance(msg, dict) and "role" in msg and "content" in msg:
             if msg["role"] == "user":
                 messages.append(HumanMessage(content=msg["content"]))
@@ -220,14 +256,13 @@ def content_agent_node(state: AgentState) -> AgentState:
                 messages.append(AIMessage(content=msg["content"]))
     
     # 构建用户消息
-    user_content = state["user_request"]
-    if state.get("document_json"):
-        doc_json = state["document_json"]
+    user_content = message
+    if document_json:
         simplified = {
-            "text": doc_json.get("text", ""),
+            "text": document_json.get("text", ""),
             "paragraphs": []
         }
-        for para in doc_json.get("paragraphs", []):
+        for para in document_json.get("paragraphs", []):
             simplified["paragraphs"].append({
                 "text": para.get("text", ""),
                 "alignment": para.get("alignment", "left"),
@@ -240,83 +275,68 @@ def content_agent_node(state: AgentState) -> AgentState:
                 "styleName": para.get("styleName", ""),
                 "runs": para.get("runs", [])
             })
-        if doc_json.get("tables"):
-            simplified["tables"] = doc_json["tables"]
+        if document_json.get("tables"):
+            simplified["tables"] = document_json["tables"]
         
-        user_content = f"文档结构（格式属性必须原样复制）：\n```json\n{json.dumps(simplified, ensure_ascii=False, indent=2)}\n```\n\n用户要求：{state['user_request']}"
+        user_content = f"文档结构（格式属性必须原样复制）：\n```json\n{json.dumps(simplified, ensure_ascii=False, indent=2)}\n```\n\n用户要求：{message}"
     
     messages.append(HumanMessage(content=user_content))
     
-    # 调用 LLM
-    response = llm_with_tools.invoke(messages)
-    
-    # 调试：打印完整响应
-    print(f"[ContentAgent] Response type: {type(response)}")
-    print(f"[ContentAgent] Response content: {response.content[:200] if response.content else 'None'}")
-    print(f"[ContentAgent] Has tool_calls: {bool(response.tool_calls)}")
-    if response.tool_calls:
-        print(f"[ContentAgent] Tool calls count: {len(response.tool_calls)}")
-        for i, tc in enumerate(response.tool_calls):
-            print(f"[ContentAgent] Tool call {i}: name={tc.get('name')}, args keys={list(tc.get('args', {}).keys())}")
-    
-    # 处理工具调用
-    document_output = None
-    if response.tool_calls:
-        for tool_call in response.tool_calls:
-            if tool_call["name"] == "generate_document":
-                args = tool_call["args"]
-                print(f"[ContentAgent] Tool args: {json.dumps(args, ensure_ascii=False)[:500]}")
-                
-                # 检查参数结构
-                if isinstance(args, dict):
-                    # 如果 args 直接包含 paragraphs
-                    if "paragraphs" in args:
-                        document_output = args
-                    # 如果 args 包含 document 对象
-                    elif "document" in args:
-                        document_output = args["document"]
-                    else:
-                        print(f"[ContentAgent Error] Unexpected args structure: {list(args.keys())}")
-                        document_output = args
-                
-                if document_output:
-                    para_count = len(document_output.get('paragraphs', []))
-                    print(f"[ContentAgent] 生成了 {para_count} 段落")
-                else:
-                    print(f"[ContentAgent Error] document_output is None")
-    
-    # LLM 会自然输出说明文字，直接使用
-    return {
-        **state,
-        "streaming_buffer": response.content or "",
-        "document_output": document_output
-    }
+    # 🔥 流式调用 LLM
+    async for chunk in llm_with_tools.astream(messages):
+        # 输出文字内容（打字机效果）
+        if chunk.content:
+            yield f"data: {json.dumps({'type': 'text', 'content': chunk.content}, ensure_ascii=False)}\n\n"
+        
+        # 处理工具调用
+        if hasattr(chunk, 'tool_calls') and chunk.tool_calls:
+            for tool_call in chunk.tool_calls:
+                if tool_call.get("name") == "generate_document":
+                    args = tool_call.get("args", {})
+                    
+                    # 检查参数结构
+                    document_output = None
+                    if isinstance(args, dict):
+                        if "paragraphs" in args:
+                            document_output = args
+                        elif "document" in args:
+                            document_output = args["document"]
+                        else:
+                            document_output = args
+                    
+                    if document_output:
+                        para_count = len(document_output.get('paragraphs', []))
+                        print(f"[ContentAgent] 生成了 {para_count} 段落")
+                        yield f"data: {json.dumps({'type': 'json', 'content': document_output}, ensure_ascii=False)}\n\n"
 
 
-def format_agent_node(state: AgentState) -> AgentState:
-    """格式处理 Agent"""
+# ============== Format Agent ==============
+
+async def process_format_agent(
+    llm: ChatOpenAI,
+    message: str,
+    document_json: dict | None,
+    history: list | None
+) -> AsyncGenerator[str, None]:
+    """格式处理 Agent（流式）"""
     print(f"[FormatAgent] 开始处理")
     
-    model_name = resolve_model(state["model"])
-    llm = _create_llm(model_name)
-    # 绑定工具，让 LLM 自然决定何时调用（先输出说明，再调用工具）
     llm_with_tools = llm.bind_tools([generate_document])
     
-    # 构建消息（类似 content_agent_node）
+    # 构建消息（类似 Content Agent）
     messages = [SystemMessage(content=FORMAT_PROMPT)]
     
-    for msg in (state.get("history") or [])[-6:]:
+    for msg in (history or [])[-6:]:
         if isinstance(msg, dict) and "role" in msg and "content" in msg:
             if msg["role"] == "user":
                 messages.append(HumanMessage(content=msg["content"]))
             else:
                 messages.append(AIMessage(content=msg["content"]))
     
-    user_content = state["user_request"]
-    if state.get("document_json"):
-        doc_json = state["document_json"]
+    user_content = message
+    if document_json:
         simplified = {
-            "text": doc_json.get("text", ""),
+            "text": document_json.get("text", ""),
             "paragraphs": [
                 {
                     "text": para.get("text", ""),
@@ -330,300 +350,66 @@ def format_agent_node(state: AgentState) -> AgentState:
                     "styleName": para.get("styleName", ""),
                     "runs": para.get("runs", [])
                 }
-                for para in doc_json.get("paragraphs", [])
+                for para in document_json.get("paragraphs", [])
             ]
         }
-        user_content = f"文档结构：\n```json\n{json.dumps(simplified, ensure_ascii=False, indent=2)}\n```\n\n用户要求：{state['user_request']}"
+        user_content = f"文档结构：\n```json\n{json.dumps(simplified, ensure_ascii=False, indent=2)}\n```\n\n用户要求：{message}"
     
     messages.append(HumanMessage(content=user_content))
     
-    response = llm_with_tools.invoke(messages)
-    
-    # 调试：打印响应
-    print(f"[FormatAgent] Response content: {response.content[:200] if response.content else 'None'}")
-    print(f"[FormatAgent] Has tool_calls: {bool(response.tool_calls)}")
-    
-    document_output = None
-    if response.tool_calls:
-        for tool_call in response.tool_calls:
-            if tool_call["name"] == "generate_document":
-                args = tool_call["args"]
-                
-                # 检查参数结构
-                if isinstance(args, dict):
-                    if "paragraphs" in args:
-                        document_output = args
-                    elif "document" in args:
-                        document_output = args["document"]
-                    else:
-                        document_output = args
-                
-                if document_output:
-                    para_count = len(document_output.get('paragraphs', []))
-                    print(f"[FormatAgent] 生成了 {para_count} 段落")
-    
-    # LLM 会自然输出说明文字，直接使用
-    return {
-        **state,
-        "streaming_buffer": response.content or "",
-        "document_output": document_output
-    }
+    # 🔥 流式调用 LLM
+    async for chunk in llm_with_tools.astream(messages):
+        if chunk.content:
+            yield f"data: {json.dumps({'type': 'text', 'content': chunk.content}, ensure_ascii=False)}\n\n"
+        
+        if hasattr(chunk, 'tool_calls') and chunk.tool_calls:
+            for tool_call in chunk.tool_calls:
+                if tool_call.get("name") == "generate_document":
+                    args = tool_call.get("args", {})
+                    document_output = None
+                    if isinstance(args, dict):
+                        if "paragraphs" in args:
+                            document_output = args
+                        elif "document" in args:
+                            document_output = args["document"]
+                        else:
+                            document_output = args
+                    
+                    if document_output:
+                        para_count = len(document_output.get('paragraphs', []))
+                        print(f"[FormatAgent] 生成了 {para_count} 段落")
+                        yield f"data: {json.dumps({'type': 'json', 'content': document_output}, ensure_ascii=False)}\n\n"
 
 
-def chat_agent_node(state: AgentState) -> AgentState:
-    """聊天 Agent"""
+# ============== Chat Agent ==============
+
+async def process_chat_agent(
+    llm: ChatOpenAI,
+    message: str,
+    document_json: dict | None,
+    history: list | None
+) -> AsyncGenerator[str, None]:
+    """聊天 Agent（流式）"""
     print(f"[ChatAgent] 开始处理")
-    
-    model_name = resolve_model(state["model"])
-    llm = _create_llm(model_name)
     
     messages = [SystemMessage(content=CHAT_PROMPT)]
     
-    for msg in (state.get("history") or [])[-6:]:
+    for msg in (history or [])[-6:]:
         if isinstance(msg, dict) and "role" in msg and "content" in msg:
             if msg["role"] == "user":
                 messages.append(HumanMessage(content=msg["content"]))
             else:
                 messages.append(AIMessage(content=msg["content"]))
     
-    user_content = state["user_request"]
-    if state.get("document_json"):
-        doc_text = state["document_json"].get("text", "")
+    user_content = message
+    if document_json:
+        doc_text = document_json.get("text", "")
         if doc_text:
-            user_content = f"文档内容：\n{doc_text[:1000]}\n\n用户问题：{state['user_request']}"  # 注意这个长度限制，避免过长的输入导致模型崩溃
-                                                                                               # 后期考虑增加分段输入或者摘要输入的功能
+            user_content = f"文档内容：\n{doc_text[:1000]}\n\n用户问题：{message}"
     
     messages.append(HumanMessage(content=user_content))
     
-    response = llm.invoke(messages)
-    
-    return {
-        **state,
-        "streaming_buffer": response.content,
-        "document_output": None
-    }
-
-
-def route_by_task(state: AgentState) -> Literal["content_agent", "format_agent", "chat_agent"]:
-    """根据任务类型路由到不同的 agent"""
-    task_type = state.get("task_type", "chat")
-    if task_type == "content":
-        return "content_agent"
-    elif task_type == "format":
-        return "format_agent"
-    else:
-        return "chat_agent"
-
-
-def _create_llm(model_name: str):
-    """创建 LLM 实例"""
-
-    # 默认使用 OpenAI 兼容接口
-    return ChatOpenAI(
-        model=model_name,
-        openai_api_key=settings.OPENAI_API_KEY,
-        openai_api_base=settings.OPENAI_BASE_URL,
-        temperature=0.7,
-        streaming=True  # 🔥 关键：启用流式输出
-    )
-
-
-# ============== 创建 Graph ==============
-
-def create_agent_graph():
-    """创建 Agent 工作流图"""
-    workflow = StateGraph(AgentState)
-    
-    # 添加节点
-    workflow.add_node("router", router_node)
-    workflow.add_node("content_agent", content_agent_node)
-    workflow.add_node("format_agent", format_agent_node)
-    workflow.add_node("chat_agent", chat_agent_node)
-    
-    # 设置入口点
-    workflow.set_entry_point("router")
-    
-    # 添加条件边
-    workflow.add_conditional_edges(
-        "router",
-        route_by_task,
-        {
-            "content_agent": "content_agent",
-            "format_agent": "format_agent",
-            "chat_agent": "chat_agent"
-        }
-    )
-    
-    # 所有 agent 完成后结束
-    workflow.add_edge("content_agent", END)
-    workflow.add_edge("format_agent", END)
-    workflow.add_edge("chat_agent", END)
-    
-    return workflow.compile()
-
-
-# ============== 主处理函数 ==============
-
-async def process_writing_request_langgraph(
-    message: str,
-    document_json: dict | None = None,
-    history: list | None = None,
-    model: str | None = None,
-    mode: str | None = None
-):
-    """
-    使用 LangGraph 处理写作请求
-    
-    Args:
-        message: 用户消息
-        document_json: 用户选中的文档 JSON
-        history: 历史消息
-        model: 用户选择的模型
-        mode: 对话模式（agent/ask）
-    
-    Yields:
-        SSE 格式的流式输出
-    """
-    print(f"[LangGraph] 开始处理请求")
-    print(f"[LangGraph] 模式: {mode}")
-    
-    # 创建 graph
-    app = create_agent_graph()
-    
-    # 初始状态
-    initial_state = {
-        "messages": [],
-        "task_type": "",
-        "user_request": message,
-        "document_json": document_json,
-        "history": history,
-        "model": model or "auto",
-        "mode": mode or "agent",
-        "streaming_buffer": "",
-        "document_output": None
-    }
-    
-    try:
-        # 运行 graph
-        result = await app.ainvoke(initial_state)
-        
-        # 输出文字说明
-        if result.get("streaming_buffer"):
-            yield f"data: {json.dumps({'type': 'text', 'content': result['streaming_buffer']}, ensure_ascii=False)}\n\n"
-        
-        # 输出文档 JSON
-        if result.get("document_output"):
-            yield f"data: {json.dumps({'type': 'json', 'content': result['document_output']}, ensure_ascii=False)}\n\n"
-        
-        yield "data: [DONE]\n\n"
-        
-    except Exception as e:
-        print(f"[LangGraph Error] {e}")
-        import traceback
-        traceback.print_exc()
-        yield f"data: {json.dumps({'type': 'text', 'content': f'错误: {str(e)}'}, ensure_ascii=False)}\n\n"
-        yield "data: [DONE]\n\n"
-
-
-# ============== 流式版本（使用 astream_events）==============
-
-async def process_writing_request_stream(
-    message: str,
-    document_json: dict | None = None,
-    history: list | None = None,
-    model: str | None = None,
-    mode: str | None = None
-):
-    """
-    使用 LangGraph 处理写作请求（流式版本，实时输出 token）
-    
-    使用 astream_events() API 获取 LLM 的实时 token 流
-    """
-    print(f"[LangGraph Stream] 开始处理请求")
-    
-    app = create_agent_graph()
-    
-    initial_state = {
-        "messages": [],
-        "task_type": "",
-        "user_request": message,
-        "document_json": document_json,
-        "history": history,
-        "model": model or "auto",
-        "mode": mode or "agent",
-        "streaming_buffer": "",
-        "document_output": None
-    }
-    
-    try:
-        # 使用 astream_events 获取实时 token 流（v2 API）
-        accumulated_text = ""
-        final_document_output = None
-        
-        async for event in app.astream_events(initial_state, version="v2"):
-            event_type = event.get("event")
-            event_name = event.get("name", "")
-            
-            # 打印所有事件（调试用）
-            print(f"[Event] {event_type} | name={event_name}")
-            
-            # 捕获 LLM 流式输出的每个 token
-            if event_type == "on_chat_model_stream":
-                chunk = event.get("data", {}).get("chunk")
-                if chunk and hasattr(chunk, "content") and chunk.content:
-                    # 实时输出每个 token
-                    accumulated_text += chunk.content
-                    yield f"data: {json.dumps({'type': 'text', 'content': chunk.content}, ensure_ascii=False)}\n\n"
-            
-            # 捕获工具调用结束
-            elif event_type == "on_tool_end":
-                tool_name = event.get("name")
-                if tool_name == "generate_document":
-                    output = event.get("data", {}).get("output")
-                    if output:
-                        final_document_output = output
-                        print(f"[Stream] 捕获到工具输出，段落数: {len(output.get('paragraphs', []))}")
-            
-            # 捕获节点完成
-            elif event_type == "on_chain_end":
-                chain_name = event.get("name")
-                output = event.get("data", {}).get("output")
-                
-                # 调试：打印完整 output 结构
-                if chain_name in ["content_agent", "format_agent", "chat_agent"]:
-                    print(f"[Stream] {chain_name} 结束，output keys: {list(output.keys()) if isinstance(output, dict) else type(output)}")
-                
-                # 处理 content_agent 和 format_agent
-                if chain_name in ["content_agent", "format_agent"]:
-                    if output and isinstance(output, dict):
-                        # 输出文字说明
-                        if output.get("streaming_buffer"):
-                            text = output["streaming_buffer"]
-                            yield f"data: {json.dumps({'type': 'text', 'content': text}, ensure_ascii=False)}\n\n"
-                            print(f"[Stream] 输出文字: {text[:50]}...")
-                        
-                        # 保存 document_output
-                        if output.get("document_output"):
-                            final_document_output = output["document_output"]
-                            print(f"[Stream] 捕获文档输出")
-                
-                # 处理 chat_agent
-                elif chain_name == "chat_agent":
-                    if output and isinstance(output, dict):
-                        if output.get("streaming_buffer"):
-                            text = output["streaming_buffer"]
-                            yield f"data: {json.dumps({'type': 'text', 'content': text}, ensure_ascii=False)}\n\n"
-                            print(f"[Stream] Chat 输出: {text[:50]}...")
-        
-        # 输出最终的文档 JSON
-        if final_document_output:
-            yield f"data: {json.dumps({'type': 'json', 'content': final_document_output}, ensure_ascii=False)}\n\n"
-        
-        yield "data: [DONE]\n\n"
-        
-    except Exception as e:
-        print(f"[LangGraph Error] {e}")
-        import traceback
-        traceback.print_exc()
-        yield f"data: {json.dumps({'type': 'text', 'content': f'错误: {str(e)}'}, ensure_ascii=False)}\n\n"
-        yield "data: [DONE]\n\n"
+    # 🔥 流式调用 LLM（打字机效果）
+    async for chunk in llm.astream(messages):
+        if chunk.content:
+            yield f"data: {json.dumps({'type': 'text', 'content': chunk.content}, ensure_ascii=False)}\n\n"

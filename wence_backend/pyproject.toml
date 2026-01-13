@@ -70,15 +70,46 @@ packages = ["app"]
 [tool.black]
 line-length = 120
 target-version = ["py310", "py311"]
+skip-string-normalization = false  # 统一使用双引号
+skip-magic-trailing-comma = false
 
 [tool.ruff]
 line-length = 120
 target-version = "py310"
-select = ["E", "F", "I", "N", "W", "UP"]
-ignore = ["E501"]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "I",   # isort (import sorting)
+    "N",   # pep8-naming
+    "W",   # pycodestyle warnings
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "SIM", # flake8-simplify
+]
+ignore = [
+    "E501",  # line too long (black handles this)
+    "B008",  # do not perform function calls in argument defaults
+]
+
+[tool.ruff.per-file-ignores]
+"__init__.py" = ["F401"]  # unused imports in __init__.py
+
+[tool.ruff.isort]
+known-first-party = ["app"]
+
+[tool.ruff.isort]
+known-first-party = ["app"]
 
 [tool.mypy]
 python_version = "3.10"
 warn_return_any = true
 warn_unused_configs = true
+disallow_untyped_defs = false
+ignore_missing_imports = true
+show_error_codes = true
+pretty = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
 disallow_untyped_defs = false

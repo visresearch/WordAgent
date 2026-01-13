@@ -15,8 +15,9 @@ DATABASE_URL = settings.database_url
 engine = create_async_engine(
     DATABASE_URL,
     echo=settings.DEBUG,  # 开发时打印 SQL
-    # SQLite 特定配置
-    connect_args={"check_same_thread": False}
+    pool_pre_ping=True,  # 检查连接是否有效
+    pool_recycle=3600,  # 1小时后回收连接
+    # SQLite aiosqlite 不需要 check_same_thread
 )
 
 # 创建异步会话工厂

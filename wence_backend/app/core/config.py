@@ -26,10 +26,20 @@ def get_data_dir() -> Path:
 
 def get_database_url() -> str:
     """获取数据库 URL"""
-    data_dir = get_data_dir()
-    data_dir.mkdir(parents=True, exist_ok=True)
-    db_path = data_dir / "wence_ai.db"
-    return f"sqlite+aiosqlite:///{db_path}"
+    try:
+        data_dir = get_data_dir()
+        data_dir.mkdir(parents=True, exist_ok=True, mode=0o755)
+        db_path = data_dir / "wence_ai.db"
+        # 确保数据库路径是绝对路径
+        return f"sqlite+aiosqlite:///{db_path.absolute()}"
+    except Exception as e:
+        # 如果创建失败，使用临时目录
+        import tempfile
+        temp_dir = Path(tempfile.gettempdir()) / "wence_ai"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        db_path = temp_dir / "wence_ai.db"
+        print(f"Warning: Using temp directory for database: {db_path}")
+        return f"sqlite+aiosqlite:///{db_path.absolute()}"
 
 
 class Settings(BaseSettings):
@@ -41,7 +51,7 @@ class Settings(BaseSettings):
     API_PREFIX: str = "/api"
     
     # 服务配置
-    HOST: str = "0.0.0.0"
+    HOST: str = "127.0.0.1"  # 默认只监听本地，避免安全问题
     PORT: int = 3880
     DEBUG: bool = True
     

@@ -9,7 +9,7 @@ from fastapi.responses import StreamingResponse
 from app.models.chat import ChatRequest, ChatResponse, ModelsResponse, ModelInfo
 from app.core.config import settings
 # 使用纯 LangChain 版本（完美流式输出）
-from app.agent_langchain import process_writing_request_stream
+from app.agent import process_writing_request_stream
 
 router = APIRouter()
 

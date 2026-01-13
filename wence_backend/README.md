@@ -9,6 +9,10 @@ uv sync
 uv run python main.py
 ```
 
+```bash
+black . --exclude '/(\.venv|build|dist)/'
+```
+
 ## 文档
 
 
