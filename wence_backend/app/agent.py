@@ -96,50 +96,35 @@ def generate_document(document: DocumentOutput) -> dict:
 # ============== System Prompts ==============
 
 ROUTER_PROMPT = """分析用户请求，返回以下任务类型之一（只返回单词）：
-- content: 润色、优化、改进、重写、改写、扩写、缩写、翻译
-- format: 格式调整、排版、字体、字号、对齐、缩进
+- content: 润色、优化、改进、重写、改写、扩写、缩写、翻译、格式调整、排版、字体、字号、对齐、缩进
 - chat: 普通对话、问答、解释说明"""
 
-CONTENT_PROMPT = """你是专业的文档内容处理专家，负责润色、重写、翻译等任务。
+CONTENT_PROMPT = """你是专业的文档处理专家，负责润色、重写、翻译、格式调整等所有文档相关任务。
 
-【工作流程 - 必须严格遵守】
-第一步：先用2-3句话说明你要做什么修改，帮助用户理解你的思路
-例如："我将把实习目的从3点扩写为6点，保持原有格式和语言风格，增加更多细节和具体说明..."
+🔴【强制要求 - 必须遵守】🔴
+你必须完成以下两步，缺一不可：
+第一步：用2-3句话说明你要做什么修改
+第二步：调用 generate_document 工具生成完整的文档 JSON
 
-第二步：立即调用 generate_document 工具生成完整的文档 JSON
+⚠️ 重要：禁止直接输出 JSON 文本！必须通过工具调用返回 JSON！
+⚠️ 如果你输出 ```json 代码块，用户将无法看到修改后的文档！
+⚠️ 你必须使用 generate_document 函数工具来返回结果！
 
-⚠️ 注意：两步都必须完成！先输出文字说明，再调用工具。
-
-【核心原则】格式属性必须100%复制原值！
-除非用户明确说"改格式"、"调整格式"等，否则所有格式属性必须与原文档完全一致。
+【格式原则】
+- 如果用户只要求改内容：所有格式属性（fontName, fontSize, alignment 等）必须100%原样复制
+- 如果用户要求改格式：可以修改格式属性，但文本内容保持不变
 
 【必须原样复制的格式属性】
 段落级别：alignment, lineSpacing, indentFirstLine, indentLeft, indentRight, spaceBefore, spaceAfter, styleName
 Run级别：fontName, fontSize, bold, italic, underline, color 等
 
-【你只能修改的内容】
+【你可以修改的内容】
 - runs 里的 text 字段（文字内容）
 - paragraphs 里的 text 字段（段落完整文本）
+- 如果用户要求改格式，则可以修改格式属性
 
 【扩写新增段落时】
 新段落要沿用相邻段落的完整格式。"""
-
-FORMAT_PROMPT = """你是文档格式专家，负责调整文档的排版格式。
-
-【工作流程 - 必须严格遵守】
-第一步：先用2-3句话说明你要做的格式调整，例如：
-"我将把所有段落改为居中对齐，标题设置为黑体加粗，正文字号调整为14号..."
-
-第二步：立即调用 generate_document 工具生成调整后的文档 JSON
-
-⚠️ 注意：两步都必须完成！先输出文字说明，再调用工具。
-
-可调整的格式属性：
-- alignment: 对齐方式 (left/center/right/justify)
-- runs 中的格式：fontName(字体), fontSize(字号), bold(加粗), italic(斜体), color(颜色)
-- styleName: 段落样式
-
-注意：保持文本内容不变，只修改格式属性。"""
 
 CHAT_PROMPT = """你是 AI 写作助手，帮助用户解答问题。
 如果用户想修改文档，引导他们使用具体的功能（润色、重写、翻译、格式调整等）。
@@ -203,12 +188,11 @@ async def process_writing_request_stream(
             task_type = response.content.strip().lower()
 
             # 验证并修正任务类型
-            if task_type not in ["content", "format", "chat"]:
+            if task_type not in ["content", "chat"]:
                 msg_lower = message.lower()
-                if any(kw in msg_lower for kw in ["润色", "优化", "改进", "重写", "改写", "扩写", "缩写", "翻译"]):
+                # 任何文档相关操作都归类为 content
+                if any(kw in msg_lower for kw in ["润色", "优化", "改进", "重写", "改写", "扩写", "缩写", "翻译", "格式", "排版", "字体", "字号", "对齐", "缩进"]):
                     task_type = "content"
-                elif any(kw in msg_lower for kw in ["格式", "排版", "字体", "字号", "对齐"]):
-                    task_type = "format"
                 else:
                     task_type = "chat"
 
@@ -217,9 +201,6 @@ async def process_writing_request_stream(
         # ===== Step 2: 选择对应的 Agent 处理 =====
         if task_type == "content":
             async for chunk in process_content_agent(llm, message, document_json, history):
-                yield chunk
-        elif task_type == "format":
-            async for chunk in process_format_agent(llm, message, document_json, history):
                 yield chunk
         else:
             async for chunk in process_chat_agent(llm, message, document_json, history):
@@ -245,7 +226,13 @@ async def process_content_agent(
     """内容处理 Agent（流式）"""
     print("[ContentAgent] 开始处理")
 
-    llm_with_tools = llm.bind_tools([generate_document])
+    # 强制调用工具 - 使用 "required" 确保必须调用工具
+    llm_with_tools = llm.bind_tools(
+        [generate_document],
+        tool_choice="required"  # OpenAI API 新格式：必须调用工具
+    )
+    
+    print("[ContentAgent] 已设置强制调用工具模式: required")
 
     # 构建消息
     messages = [SystemMessage(content=CONTENT_PROMPT)]
@@ -284,103 +271,59 @@ async def process_content_agent(
 
     messages.append(HumanMessage(content=user_content))
 
-    # 🔥 流式调用 LLM
+    print(f"[ContentAgent] 消息数量: {len(messages)}")
+    print(f"[ContentAgent] 工具已绑定: {llm_with_tools.bound}")
+
+    # 🔥 改用累积方式处理流式工具调用
+    # 因为工具参数在流式模式下是逐步传输的，需要完整收集
+    text_chunks = []
+    tool_call_chunks = []
+    
     async for chunk in llm_with_tools.astream(messages):
         # 输出文字内容（打字机效果）
         if chunk.content:
+            text_chunks.append(chunk.content)
+            print(f"[ContentAgent] 文本块: {chunk.content[:50]}...")
             yield f"data: {json.dumps({'type': 'text', 'content': chunk.content}, ensure_ascii=False)}\n\n"
 
-        # 处理工具调用
+        # 收集工具调用（流式模式下需要累积）
         if hasattr(chunk, "tool_calls") and chunk.tool_calls:
-            for tool_call in chunk.tool_calls:
-                if tool_call.get("name") == "generate_document":
-                    args = tool_call.get("args", {})
-
-                    # 检查参数结构
-                    document_output = None
-                    if isinstance(args, dict):
-                        if "paragraphs" in args:
-                            document_output = args
-                        elif "document" in args:
-                            document_output = args["document"]
-                        else:
-                            document_output = args
-
-                    if document_output:
-                        para_count = len(document_output.get("paragraphs", []))
-                        print(f"[ContentAgent] 生成了 {para_count} 段落")
-                        yield f"data: {json.dumps({'type': 'json', 'content': document_output}, ensure_ascii=False)}\n\n"
-
-
-# ============== Format Agent ==============
-
-
-async def process_format_agent(
-    llm: ChatOpenAI, message: str, document_json: dict | None, history: list | None
-) -> AsyncGenerator[str, None]:
-    """格式处理 Agent（流式）"""
-    print("[FormatAgent] 开始处理")
-
-    llm_with_tools = llm.bind_tools([generate_document])
-
-    # 构建消息（类似 Content Agent）
-    messages = [SystemMessage(content=FORMAT_PROMPT)]
-
-    for msg in (history or [])[-6:]:
-        if isinstance(msg, dict) and "role" in msg and "content" in msg:
-            if msg["role"] == "user":
-                messages.append(HumanMessage(content=msg["content"]))
+            for tc in chunk.tool_calls:
+                if tc.get("name") == "generate_document":  # 只处理有名称的
+                    tool_call_chunks.append(tc)
+                    print(f"[ContentAgent] 收集工具调用块: {tc.get('id', 'no-id')}")
+    
+    # 处理累积的工具调用
+    if tool_call_chunks:
+        print(f"[ContentAgent] 共收集到 {len(tool_call_chunks)} 个工具调用块")
+        # 使用最后一个完整的工具调用（包含完整参数）
+        final_tool_call = tool_call_chunks[-1]
+        args = final_tool_call.get("args", {})
+        
+        print(f"[ContentAgent] 最终 args 类型: {type(args)}")
+        print(f"[ContentAgent] 最终 args 内容: {json.dumps(args, ensure_ascii=False)[:500]}...")
+        
+        # 检查参数结构
+        document_output = None
+        if isinstance(args, dict) and args:  # 确保 args 不为空
+            if "paragraphs" in args:
+                document_output = args
+                print(f"[ContentAgent] ✅ 找到 paragraphs")
+            elif "document" in args and isinstance(args["document"], dict):
+                document_output = args["document"]
+                print(f"[ContentAgent] ✅ 找到 document 字段")
             else:
-                messages.append(AIMessage(content=msg["content"]))
+                print(f"[ContentAgent] ⚠️ args keys: {list(args.keys())}")
+        
+        if document_output and "paragraphs" in document_output:
+            para_count = len(document_output.get("paragraphs", []))
+            print(f"[ContentAgent] ✅ 成功生成 {para_count} 个段落")
+            yield f"data: {json.dumps({'type': 'json', 'content': document_output}, ensure_ascii=False)}\n\n"
+        else:
+            print(f"[ContentAgent] ❌ 没有有效的文档输出")
+    else:
+        print(f"[ContentAgent] ⚠️ 警告：没有收集到工具调用")
 
-    user_content = message
-    if document_json:
-        simplified = {
-            "text": document_json.get("text", ""),
-            "paragraphs": [
-                {
-                    "text": para.get("text", ""),
-                    "alignment": para.get("alignment", "left"),
-                    "lineSpacing": para.get("lineSpacing"),
-                    "indentLeft": para.get("indentLeft"),
-                    "indentRight": para.get("indentRight"),
-                    "indentFirstLine": para.get("indentFirstLine"),
-                    "spaceBefore": para.get("spaceBefore"),
-                    "spaceAfter": para.get("spaceAfter"),
-                    "styleName": para.get("styleName", ""),
-                    "runs": para.get("runs", []),
-                }
-                for para in document_json.get("paragraphs", [])
-            ],
-        }
-        user_content = (
-            f"文档结构：\n```json\n{json.dumps(simplified, ensure_ascii=False, indent=2)}\n```\n\n用户要求：{message}"
-        )
-
-    messages.append(HumanMessage(content=user_content))
-
-    # 🔥 流式调用 LLM
-    async for chunk in llm_with_tools.astream(messages):
-        if chunk.content:
-            yield f"data: {json.dumps({'type': 'text', 'content': chunk.content}, ensure_ascii=False)}\n\n"
-
-        if hasattr(chunk, "tool_calls") and chunk.tool_calls:
-            for tool_call in chunk.tool_calls:
-                if tool_call.get("name") == "generate_document":
-                    args = tool_call.get("args", {})
-                    document_output = None
-                    if isinstance(args, dict):
-                        if "paragraphs" in args:
-                            document_output = args
-                        elif "document" in args:
-                            document_output = args["document"]
-                        else:
-                            document_output = args
-
-                    if document_output:
-                        para_count = len(document_output.get("paragraphs", []))
-                        print(f"[FormatAgent] 生成了 {para_count} 段落")
-                        yield f"data: {json.dumps({'type': 'json', 'content': document_output}, ensure_ascii=False)}\n\n"
 
 
 # ============== Chat Agent ==============
