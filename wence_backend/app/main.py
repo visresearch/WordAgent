@@ -4,31 +4,32 @@ WenCe AI Writing Assistant - FastAPI 应用
 
 import os
 import sys
-from pathlib import Path
 from contextlib import asynccontextmanager
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
-from app.core.config import settings
-from app.core.db import init_db, close_db
 from app.api import api_router
+from app.core.config import settings
+from app.core.db import close_db, init_db
 
 
 def get_static_dir() -> Path:
     """获取静态文件目录"""
     # 打包后的路径
-    if getattr(sys, 'frozen', False):
+    if getattr(sys, "frozen", False):
         base = Path(sys.executable).parent
     else:
         # 开发环境
         base = Path(__file__).parent.parent
-    
+
     static_dir = os.environ.get("WENCE_STATIC_DIR")
     if static_dir:
         return Path(static_dir)
-    
+
     return base / "static"
 
 
@@ -42,11 +43,12 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"❌ 数据库初始化失败: {e}")
         import traceback
+
         traceback.print_exc()
         raise
-    
+
     yield
-    
+
     try:
         # 关闭时清理资源
         await close_db()
@@ -84,7 +86,7 @@ if STATIC_DIR.exists():
     plugin_dir = STATIC_DIR / "plugin"
     if plugin_dir.exists():
         app.mount("/plugin", StaticFiles(directory=str(plugin_dir)), name="plugin")
-    
+
     # 挂载前端静态资源
     assets_dir = STATIC_DIR / "assets"
     if assets_dir.exists():
@@ -100,5 +102,5 @@ async def root():
     return {
         "message": f"{settings.APP_NAME} is running",
         "docs": f"{settings.API_PREFIX}/docs",
-        "plugin": "/plugin/manifest.xml"
+        "plugin": "/plugin/manifest.xml",
     }

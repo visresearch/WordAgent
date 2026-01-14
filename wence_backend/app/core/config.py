@@ -5,7 +5,7 @@
 import os
 import sys
 from pathlib import Path
-from typing import List
+
 from pydantic_settings import BaseSettings
 
 
@@ -15,11 +15,11 @@ def get_data_dir() -> Path:
     data_dir = os.environ.get("WENCE_DATA_DIR")
     if data_dir:
         return Path(data_dir)
-    
+
     # 打包后的路径
-    if getattr(sys, 'frozen', False):
+    if getattr(sys, "frozen", False):
         return Path(sys.executable).parent / "data"
-    
+
     # 开发环境
     return Path(__file__).parent.parent.parent / "data"
 
@@ -32,9 +32,10 @@ def get_database_url() -> str:
         db_path = data_dir / "wence_ai.db"
         # 确保数据库路径是绝对路径
         return f"sqlite+aiosqlite:///{db_path.absolute()}"
-    except Exception as e:
+    except Exception:
         # 如果创建失败，使用临时目录
         import tempfile
+
         temp_dir = Path(tempfile.gettempdir()) / "wence_ai"
         temp_dir.mkdir(parents=True, exist_ok=True)
         db_path = temp_dir / "wence_ai.db"
@@ -44,25 +45,25 @@ def get_database_url() -> str:
 
 class Settings(BaseSettings):
     """应用配置"""
-    
+
     # 基本信息
     APP_NAME: str = "WenCe AI Writing Assistant API"
     VERSION: str = "1.0.0"
     API_PREFIX: str = "/api"
-    
+
     # 服务配置
     HOST: str = "127.0.0.1"  # 默认只监听本地，避免安全问题
     PORT: int = 3880
     DEBUG: bool = True
-    
+
     # CORS 配置
-    CORS_ORIGINS: List[str] = ["*"]
-    
+    CORS_ORIGINS: list[str] = ["*"]
+
     # AI 模型配置 - OpenAI
     OPENAI_DEFAULT_MODEL: str = "gpt-4o"
     OPENAI_API_KEY: str = ""
     OPENAI_BASE_URL: str = ""
-    
+
     # 智谱
     ZHIPU_API_KEY: str = ""
     ZHIPU_BASE_URL: str = ""
@@ -77,13 +78,13 @@ class Settings(BaseSettings):
     OLLAMA_API_KEY: str = "anystring"  # Ollama 不需要真正的 API Key，但必须提供一个字符串
     OLLAMA_BASE_URL: str = "http://localhost:11434/v1"
     OLLAMA_DEFAULT_MODEL: str = "qwen2.5:7b"
-    
+
     # SQLite 数据库配置（嵌入式，无需安装）
     # 动态获取，支持打包后运行
     @property
     def database_url(self) -> str:
         return get_database_url()
-    
+
     class Config:
         env_file = ".env"
         case_sensitive = True

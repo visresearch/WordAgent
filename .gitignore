@@ -32,7 +32,6 @@ __pycache__
 *.pyc
 *.pyo
 *.pyd
-.Python
 pip-log.txt
 pip-delete-this-directory.txt
 
@@ -53,6 +52,9 @@ package/
 
 # uv
 .venv/
+
+# ruff
+.ruff_cache/
 
 # 环境变量
 .env

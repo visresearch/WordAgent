@@ -9,8 +9,14 @@ uv sync
 uv run python main.py
 ```
 
+## 代码规范
+
 ```bash
-black . --exclude '/(\.venv|build|dist)/'
+# Install Ruff globally.
+uv tool install ruff@latest
+
+ruff check   # Lint all files in the current directory.
+ruff format  # Format all files in the current directory.
 ```
 
 ## 文档

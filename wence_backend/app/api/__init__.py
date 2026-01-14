@@ -3,6 +3,7 @@ WenCe AI Writing Assistant - API 模块
 """
 
 from fastapi import APIRouter
+
 from app.api.routes import chat, health, history, models
 
 api_router = APIRouter()

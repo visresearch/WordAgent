@@ -1,4 +1,5 @@
 import os
+
 from dotenv import load_dotenv
 from zai import ZhipuAiClient
 
@@ -12,17 +13,11 @@ client = ZhipuAiClient(api_key=os.getenv("ZHIPU_API_KEY"))
 response = client.chat.completions.create(
     model="glm-4.7",
     messages=[
-        {
-            "role": "system",
-            "content": "你是一个有用的AI助手。"
-        },
-        {
-            "role": "user",
-            "content": "你好，请介绍一下自己。"
-        }
+        {"role": "system", "content": "你是一个有用的AI助手。"},
+        {"role": "user", "content": "你好，请介绍一下自己。"},
     ],
     temperature=0.6,
-    stream=True  # 开启流式输出
+    stream=True,  # 开启流式输出
 )
 
 # 流式获取回复

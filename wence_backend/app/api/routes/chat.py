@@ -3,13 +3,13 @@
 """
 
 import json
-import asyncio
+
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
-from app.models.chat import ChatRequest, ChatResponse, ModelsResponse, ModelInfo
-from app.core.config import settings
+
 # 使用纯 LangChain 版本（完美流式输出）
 from app.agent import process_writing_request_stream
+from app.models.chat import ChatRequest
 
 router = APIRouter()
 
@@ -169,7 +169,7 @@ async def generate_stream(request: ChatRequest):
         document_json=request.documentJson,
         history=request.history,
         model=request.model,  # 传递用户选择的模型
-        mode=request.mode  # 传递对话模式
+        mode=request.mode,  # 传递对话模式
     ):
         yield chunk
 
@@ -202,9 +202,5 @@ async def chat_stream(request: ChatRequest):
     return StreamingResponse(
         generate_stream(request),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"
-        }
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
     )

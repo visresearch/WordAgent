@@ -1,15 +1,15 @@
 from openai import OpenAI
 
 client = OpenAI(
-    api_key="sk-l4ET3MWX8vsqAVqv0tXt5o1bbc7sh5L1fDV7oV66oDPrxLlQ",
-    base_url="https://api.chatanywhere.tech/v1/")
+    api_key="sk-l4ET3MWX8vsqAVqv0tXt5o1bbc7sh5L1fDV7oV66oDPrxLlQ", base_url="https://api.chatanywhere.tech/v1/"
+)
 
 models = client.models.list()
 
 for m in models:
     print(m)
 
-'''
+"""
 Model(id='gpt-5-ca', created=1715367049, object='model', owned_by='ca')
 Model(id='gpt-5-mini-2025-08-07', created=1715367049, object='model', owned_by='openai')
 Model(id='gpt-4o-mini', created=1715367049, object='model', owned_by='openai')
@@ -182,4 +182,4 @@ Model(id='grok-3-reasoner', created=1706048358, object='model', owned_by='ca')
 Model(id='gpt-5.1-ca', created=1715367049, object='model', owned_by='ca')
 Model(id='gpt-3.5-turbo-16k', created=1683758102, object='model', owned_by='openai')
 Model(id='o1-mini-2024-09-12', created=1706048358, object='model', owned_by='openai')
-'''
+"""
