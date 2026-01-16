@@ -22,13 +22,11 @@ MODEL_WHITELIST: dict[str, dict[str, str]] = {
     # OpenAI 系列
     "gpt-4o": {"name": "GPT-4o", "provider": "OpenAI"},
     "gpt-5-mini": {"name": "GPT-5 mini", "provider": "OpenAI"},
-    "gpt-4-turbo": {"name": "GPT-4 Turbo", "provider": "OpenAI"},
     "gpt-5": {"name": "GPT-5", "provider": "OpenAI"},
     "gpt-5.1": {"name": "GPT-5.1", "provider": "OpenAI"},
     "gpt-5.2": {"name": "GPT-5.2", "provider": "OpenAI"},
     # Claude 系列
     "claude-haiku-4-5-20251001": {"name": "Claude Haiku 4.5", "provider": "Anthropic"},
-    "claude-haiku-4-5-20251001-thinking": {"name": "Claude Haiku 4.5 Thinking", "provider": "Anthropic"},
     "claude-sonnet-4-5-20250929": {"name": "Claude Sonnet 4.5", "provider": "Anthropic"},
     "claude-sonnet-4-5-20250929-thinking": {"name": "Claude Sonnet 4.5 Thinking", "provider": "Anthropic"},
     "claude-opus-4-20250514-thinking": {"name": "Claude Opus 4 Thinking", "provider": "Anthropic"},
@@ -37,16 +35,17 @@ MODEL_WHITELIST: dict[str, dict[str, str]] = {
     # Gemini 系列
     "gemini-2.5-pro": {"name": "Gemini 2.5 Pro", "provider": "Google"},
     "gemini-2.5-flash": {"name": "Gemini 2.5 Flash", "provider": "Google"},
-    "gemini-3-pro-preview": {"name": "Gemini 3 Pro Preview", "provider": "Google"},
+    "gemini-3-pro-preview": {"name": "Gemini 3 Pro (Preview)", "provider": "Google"},
     # DeepSeek 系列
     "deepseek-r1": {"name": "DeepSeek R1", "provider": "DeepSeek"},
     "deepseek-v3": {"name": "DeepSeek V3", "provider": "DeepSeek"},
     "deepseek-v3.2-thinking": {"name": "DeepSeek V3.2 Thinking", "provider": "DeepSeek"},
     # 智谱 GLM 系列
-    "glm-4.5": {"name": "GLM-4.5", "provider": "智谱AI"},
-    "glm-4.5-air": {"name": "GLM-4.5 Air", "provider": "智谱AI"},
-    "glm-4.6": {"name": "GLM-4.6", "provider": "智谱AI"},
     "glm-4.7": {"name": "GLM-4.7", "provider": "智谱AI"},
+    # 千问 Qwen 系列
+    "qwen-plus": {"name": "Qwen Plus", "provider": "千问AI"},
+    "qwen-turbo": {"name": "Qwen Turbo", "provider": "千问AI"},
+    "qwen-max": {"name": "Qwen Max", "provider": "千问AI"},
 }
 
 
@@ -72,8 +71,8 @@ def get_platforms() -> list[PlatformConfig]:
 
     return [
         PlatformConfig(name="OpenAI", api_key=settings.OPENAI_API_KEY, base_url=openai_base_url),
-        # 智谱使用 OpenAI 兼容接口
-        PlatformConfig(name="智谱AI", api_key=settings.ZHIPU_API_KEY, base_url="https://open.bigmodel.cn/api/paas/v4/"),
+        PlatformConfig(name="智谱AI", api_key=settings.ZHIPU_API_KEY, base_url=settings.ZHIPU_BASE_URL),
+        PlatformConfig(name="千问AI", api_key=settings.QWEN_API_KEY, base_url=settings.QWEN_BASE_URL),
         # 可以继续添加更多平台...
     ]
 

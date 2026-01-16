@@ -1164,7 +1164,7 @@ export default {
   height: 100%;
   min-height: 100vh;
   width: 100%;
-  background: #f5f5f5;
+  background: #F7F8FA;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   box-sizing: border-box;
 }
@@ -1278,17 +1278,18 @@ export default {
 
 .user-message {
   align-self: flex-end;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
+  background: #c7d1ff;
+  color: #333;
   border-bottom-right-radius: 4px;
 }
 
 .ai-message {
   align-self: flex-start;
-  background: white;
+  background: transparent;
   color: #333;
-  border-bottom-left-radius: 4px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  box-shadow: none;
+  padding: 0;
+  max-width: 100%;
 }
 
 .message-content {
@@ -1427,7 +1428,7 @@ export default {
   display: flex;
   flex-direction: row;
   gap: 2px;
-  margin-left: 4px;
+  margin-left: 0;
 }
 
 .icon-btn-wrapper {
@@ -1492,7 +1493,7 @@ export default {
 
 .chat-input-area {
   padding: 6px 10px;
-  background: #f5f5f5;
+  background: #F7F8FA;
   flex-shrink: 0;
 }
 
@@ -1760,8 +1761,8 @@ export default {
 
 /* 选中内容上下文样式 */
 .selection-context {
-  background: linear-gradient(135deg, rgba(102, 126, 234, 0.85) 0%, rgba(108, 115, 200, 0.85) 100%);
-  border: 1px solid rgba(102, 126, 234, 0.5);
+  background: #dce4ff;
+  border: 1px solid #c5d3ff;
   border-radius: 6px;
   padding: 8px;
   margin-bottom: 8px;
@@ -1772,17 +1773,17 @@ export default {
   display: flex;
   align-items: center;
   gap: 4px;
-  color: rgba(255, 255, 255, 0.95);
+  color: #5566cc;
   font-weight: 500;
   margin-bottom: 4px;
 }
 
 .context-preview {
-  background: rgba(255, 255, 255, 0.7);
+  background: white;
   border-radius: 4px;
   padding: 6px 8px;
   margin-bottom: 4px;
-  color: #444;
+  color: #333;
   line-height: 1.4;
   max-height: 60px;
   overflow: hidden;
@@ -1797,7 +1798,7 @@ export default {
 }
 
 .context-range {
-  color: rgba(255, 255, 255, 0.8);
+  color: #888;
   font-size: 10px;
   display: flex;
   align-items: center;
@@ -1805,15 +1806,15 @@ export default {
 }
 
 .context-stats {
-  color: rgba(255, 255, 255, 0.7);
+  color: #999;
   margin-left: auto;
 }
 
 /* 当前选区预览条 */
 .current-selection-bar {
-  background: linear-gradient(135deg, #f8f9ff 0%, #f5f0ff 100%);
-  border-top: 1px solid #e8e0f0;
-  border-bottom: 1px solid #e8e0f0;
+  background: #F0F0F0;
+  border-top: 1px solid #D8D8D8;
+  border-bottom: 1px solid #D8D8D8;
   padding: 6px 10px;
 }
 
