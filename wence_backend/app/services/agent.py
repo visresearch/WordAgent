@@ -1,0 +1,399 @@
+"""
+文档处理 Agent - 使用 LangGraph + 流式输出
+"""
+
+import asyncio
+import json
+from collections.abc import AsyncGenerator
+
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.tools import tool
+from langchain_openai import ChatOpenAI
+from langgraph.config import get_stream_writer
+from langgraph.graph import END, START, MessagesState, StateGraph
+from pydantic import BaseModel, Field
+
+from app.services.llm_client import LLMClientManager, resolve_model
+
+# ============== Pydantic 模型定义（用于 Tool Schema）==============
+
+
+class Run(BaseModel):
+    """格式块 - 一段具有相同格式的文字"""
+
+    text: str = Field(description="文字内容")
+    fontName: str | None = Field(None, description="字体名称，如 '宋体', 'Times New Roman'")
+    fontSize: float | None = Field(None, description="字号")
+    bold: bool | None = Field(None, description="是否加粗")
+    italic: bool | None = Field(None, description="是否斜体")
+    underline: str | None = Field(None, description="下划线：none/single/double/thick")
+    color: str | None = Field(None, description="颜色，如 '#000000'")
+    highlight: str | None = Field(None, description="高亮色")
+    strikethrough: bool | None = Field(None, description="是否删除线")
+    superscript: bool | None = Field(None, description="是否上标")
+    subscript: bool | None = Field(None, description="是否下标")
+
+
+class Paragraph(BaseModel):
+    """段落"""
+
+    text: str = Field(description="段落完整文本")
+    runs: list[Run] = Field(description="格式块数组，每个 run 是一段具有相同格式的文字")
+    alignment: str | None = Field("left", description="对齐方式：left/center/right/justify")
+    lineSpacing: float | None = Field(None, description="行间距")
+    indentLeft: float | None = Field(None, description="左缩进（磅）")
+    indentRight: float | None = Field(None, description="右缩进（磅）")
+    indentFirstLine: float | None = Field(None, description="首行缩进（磅）")
+    spaceBefore: float | None = Field(None, description="段前间距（磅）")
+    spaceAfter: float | None = Field(None, description="段后间距（磅）")
+    styleName: str | None = Field(None, description="样式名称，如 '标题 1', '标题 2', '正文'")
+
+
+class Cell(BaseModel):
+    """表格单元格"""
+
+    text: str = Field(description="单元格文本")
+    rowSpan: int | None = Field(1, description="跨行数")
+    colSpan: int | None = Field(1, description="跨列数")
+    alignment: str | None = Field("left", description="水平对齐")
+    verticalAlignment: str | None = Field("top", description="垂直对齐")
+
+
+class Table(BaseModel):
+    """表格"""
+
+    rows: int = Field(description="行数")
+    columns: int = Field(description="列数")
+    cells: list[list[Cell]] = Field(description="单元格二维数组")
+    tableAlignment: str | None = Field("left", description="表格对齐：left/center/right")
+
+
+class DocumentOutput(BaseModel):
+    """文档输出结构"""
+
+    paragraphs: list[Paragraph] = Field(description="段落数组")
+    tables: list[Table] | None = Field(None, description="表格数组（可选）")
+
+
+# ============== Tool 定义 ==============
+
+
+@tool
+def generate_document(document: DocumentOutput) -> dict:
+    """
+    生成带格式的文档 JSON，用于输出到 Word 文档。
+
+    【重要】格式属性必须100%原样复制！
+    除非用户明确要求修改格式，否则所有格式属性（fontName, fontSize, alignment 等）必须与原文档完全一致。
+
+    Args:
+        document: 文档结构，包含段落和表格
+
+    Returns:
+        文档 JSON 对象
+    """
+    return document.model_dump()
+
+
+# ============== System Prompt ==============
+
+AGENT_PROMPT = """你是专业的文档处理和写作助手。你可以：
+1. 润色、重写、翻译、扩写、缩写文档内容
+2. 调整格式（字体、字号、对齐、缩进等）
+3. 回答用户的问题和进行日常对话
+
+【工具使用规则】
+- 当用户要求修改文档内容或格式时：必须调用 generate_document 工具
+- 当用户只是问问题、聊天时：直接文字回答，不调用工具
+
+🔴【工具调用要求 - 必须遵守】🔴
+如果调用工具，你必须：
+1. 先用2-3句话说明你要做什么修改
+2. 然后调用 generate_document 工具生成完整的文档 JSON
+
+⚠️ 禁止直接输出 JSON 文本！必须通过工具调用返回 JSON！
+
+【格式原则】
+- 如果用户只要求改内容：所有格式属性必须100%原样复制
+- 如果用户要求改格式：可以修改格式属性，但内容保持不变
+
+【必须原样复制的格式属性】
+段落级别：alignment, lineSpacing, indentFirstLine, indentLeft, indentRight, spaceBefore, spaceAfter, styleName
+Run级别：fontName, fontSize, bold, italic, underline, color 等
+
+【扩写新增段落时】
+新段落要沿用相邻段落的完整格式。"""
+
+
+# ============== 创建 LLM 实例 ==============
+
+
+def create_llm(model_name: str) -> ChatOpenAI:
+    """创建 LLM 实例，使用 llm_client 统一管理配置"""
+    provider_info = LLMClientManager.get_provider_info(model_name)
+
+    return ChatOpenAI(
+        model=model_name,
+        openai_api_key=provider_info.api_key,
+        openai_api_base=provider_info.base_url,
+        temperature=0.7,
+        streaming=True,  # 启用流式输出
+    )
+
+
+# ============== LangGraph 节点工厂 ==============
+
+
+def create_call_model_node(llm_with_tools):
+    """创建 call_model 节点（使用闭包传递 llm_with_tools）"""
+    def call_model(state: MessagesState) -> dict:
+        """调用 LLM - 支持流式输出"""
+        writer = get_stream_writer()
+        writer("🤖 正在思考...")
+        
+        response = llm_with_tools.invoke(state["messages"])
+        return {"messages": [response]}
+    
+    return call_model
+
+
+def call_tools(state: MessagesState) -> dict:
+    """执行工具调用"""
+    writer = get_stream_writer()
+    
+    last_message = state["messages"][-1]
+    results = []
+    
+    for tool_call in last_message.tool_calls:
+        writer(f"🔧 生成文档...")
+        
+        # 执行工具
+        if tool_call["name"] == "generate_document":
+            result = generate_document.invoke(tool_call["args"])
+            writer(f"✅ 文档已生成")
+            results.append(
+                ToolMessage(
+                    content=json.dumps(result, ensure_ascii=False),
+                    tool_call_id=tool_call["id"]
+                )
+            )
+    
+    return {"messages": results}
+
+
+def should_call_tools(state: MessagesState) -> str:
+    """判断是否需要调用工具"""
+    last_message = state["messages"][-1]
+    if hasattr(last_message, "tool_calls") and last_message.tool_calls:
+        return "call_tools"
+    return END
+
+
+# ============== 构建 LangGraph ==============
+
+
+def build_graph(llm_with_tools):
+    """构建 LangGraph 工作流"""
+    graph = StateGraph(MessagesState)
+    
+    # 添加节点（使用闭包传递 llm_with_tools）
+    graph.add_node("call_model", create_call_model_node(llm_with_tools))
+    graph.add_node("call_tools", call_tools)
+    
+    # 添加边
+    graph.add_edge(START, "call_model")
+    graph.add_conditional_edges(
+        "call_model",
+        should_call_tools,
+        {"call_tools": "call_tools", END: END}
+    )
+    graph.add_edge("call_tools", "call_model")  # 工具执行后回到模型
+    
+    return graph.compile()
+
+
+# ============== 主处理函数 ==============
+
+
+async def process_writing_request_stream(
+    message: str,
+    document_json: dict | None = None,
+    history: list | None = None,
+    model: str | None = None,
+    mode: str | None = None,
+) -> AsyncGenerator[str, None]:
+    """
+    使用 LangGraph 处理写作请求（流式输出）
+
+    Args:
+        message: 用户消息
+        document_json: 用户选中的文档 JSON
+        history: 历史消息
+        model: 用户选择的模型
+        mode: 对话模式（agent/ask）
+
+    Yields:
+        SSE 格式的流式输出
+    """
+    print("[LangGraph Agent] 开始处理请求")
+    print(f"[LangGraph Agent] 模式: {mode}")
+
+    model_name = resolve_model(model or "auto")
+    llm = create_llm(model_name)
+    
+    # 绑定工具到模型
+    llm_with_tools = llm.bind_tools([generate_document])
+    
+    # 构建图（传入 llm_with_tools）
+    app = build_graph(llm_with_tools)
+
+    try:
+        # 构建消息
+        messages = [SystemMessage(content=AGENT_PROMPT)]
+        
+        # 添加历史
+        for msg in (history or [])[-6:]:
+            if isinstance(msg, dict) and "role" in msg and "content" in msg:
+                if msg["role"] == "user":
+                    messages.append(HumanMessage(content=msg["content"]))
+                else:
+                    messages.append(AIMessage(content=msg["content"]))
+        
+        # 构建用户消息
+        user_content = message
+        if document_json:
+            simplified = {"text": document_json.get("text", ""), "paragraphs": []}
+            for para in document_json.get("paragraphs", []):
+                simplified["paragraphs"].append({
+                    "text": para.get("text", ""),
+                    "alignment": para.get("alignment", "left"),
+                    "lineSpacing": para.get("lineSpacing"),
+                    "indentLeft": para.get("indentLeft"),
+                    "indentRight": para.get("indentRight"),
+                    "indentFirstLine": para.get("indentFirstLine"),
+                    "spaceBefore": para.get("spaceBefore"),
+                    "spaceAfter": para.get("spaceAfter"),
+                    "styleName": para.get("styleName", ""),
+                    "runs": para.get("runs", []),
+                })
+            if document_json.get("tables"):
+                simplified["tables"] = document_json["tables"]
+            
+            user_content = f"文档结构（格式属性必须原样复制）：\n```json\n{json.dumps(simplified, ensure_ascii=False, indent=2)}\n```\n\n用户要求：{message}"
+        
+        messages.append(HumanMessage(content=user_content))
+        
+        print(f"[LangGraph Agent] 消息数量: {len(messages)}")
+        
+        # 在异步环境中使用同步的 stream
+        loop = asyncio.get_running_loop()
+        
+        # 创建队列用于在线程间传递数据
+        queue = asyncio.Queue()
+        has_tool_result = False
+        
+        def run_stream():
+            """在独立线程中运行同步的 stream"""
+            try:
+                response = app.stream(
+                    {"messages": messages},
+                    stream_mode=['messages', 'custom', 'updates']
+                )
+                
+                for stream_item in response:
+                    # 将数据放入队列
+                    asyncio.run_coroutine_threadsafe(queue.put(stream_item), loop)
+                
+                # 发送结束信号
+                asyncio.run_coroutine_threadsafe(queue.put(None), loop)
+            except Exception as e:
+                asyncio.run_coroutine_threadsafe(queue.put(("error", str(e))), loop)
+        
+        # 在线程池中启动同步 stream（不等待完成，让它并行运行）
+        import concurrent.futures
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        executor.submit(run_stream)
+        
+        # 从队列中读取并处理数据（与生产者并行）
+        while True:
+            stream_item = await queue.get()
+            
+            if stream_item is None:
+                # 结束信号
+                break
+            
+            if isinstance(stream_item, tuple) and stream_item[0] == "error":
+                raise Exception(stream_item[1])
+            
+            # stream_mode='messages' 和 'custom' 返回 tuple
+            # stream_mode='updates' 返回 dict
+            if isinstance(stream_item, tuple):
+                input_type, chunk = stream_item
+                
+                if input_type == "messages":
+                    # AI 的输出内容（流式 token）
+                    if chunk and len(chunk) > 0:
+                        msg = chunk[0]
+                        content = msg.content
+                        
+                        # 检查是否是 ToolMessage（工具返回的结果）
+                        if isinstance(msg, ToolMessage):
+                            try:
+                                doc_json = json.loads(content)
+                                if "paragraphs" in doc_json:
+                                    print(f"[LangGraph] ✅ 从 messages 流提取到工具结果")
+                                    yield f"data: {json.dumps({'type': 'json', 'content': doc_json}, ensure_ascii=False)}\n\n"
+                                    has_tool_result = True
+                                    continue
+                            except json.JSONDecodeError:
+                                pass
+                        
+                        # 检查是否是 AIMessage 且内容看起来像 JSON（工具调用后 LLM 可能直接输出 JSON）
+                        if content and content.strip().startswith('{"paragraphs"'):
+                            try:
+                                doc_json = json.loads(content)
+                                if "paragraphs" in doc_json:
+                                    print(f"[LangGraph] ✅ 从文本中提取到 JSON 文档")
+                                    yield f"data: {json.dumps({'type': 'json', 'content': doc_json}, ensure_ascii=False)}\n\n"
+                                    has_tool_result = True
+                                    continue
+                            except json.JSONDecodeError:
+                                pass
+                        
+                        # 普通文本输出
+                        if content:
+                            print(f"[LangGraph] 文本块: {content[:50]}...")
+                            yield f"data: {json.dumps({'type': 'text', 'content': content}, ensure_ascii=False)}\n\n"
+                
+                elif input_type == "custom":
+                    # 工具执行的输出内容（get_stream_writer）
+                    print(f"[LangGraph] 自定义输出: {chunk}")
+            
+            elif isinstance(stream_item, dict):
+                # updates 模式：包含节点执行的完整更新
+                for node_name, node_output in stream_item.items():
+                    if node_name == "call_tools" and "messages" in node_output:
+                        # 提取工具调用结果
+                        for msg in node_output["messages"]:
+                            if isinstance(msg, ToolMessage):
+                                try:
+                                    # ToolMessage 的 content 是 JSON 字符串
+                                    doc_json = json.loads(msg.content)
+                                    if "paragraphs" in doc_json and not has_tool_result:
+                                        print(f"[LangGraph] ✅ 从 updates 提取到工具结果")
+                                        yield f"data: {json.dumps({'type': 'json', 'content': doc_json}, ensure_ascii=False)}\n\n"
+                                        has_tool_result = True
+                                except json.JSONDecodeError:
+                                    print(f"[LangGraph] ⚠️ 工具结果不是有效JSON")
+        
+        if not has_tool_result:
+            print(f"[LangGraph] ⚠️ 未检测到工具调用结果")
+        
+        yield "data: [DONE]\n\n"
+
+    except Exception as e:
+        print(f"[LangGraph Error] {e}")
+        import traceback
+        traceback.print_exc()
+        yield f"data: {json.dumps({'type': 'text', 'content': f'错误: {str(e)}'}, ensure_ascii=False)}\n\n"
+        yield "data: [DONE]\n\n"

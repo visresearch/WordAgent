@@ -1,0 +1,23 @@
+{
+  "providers": [
+    {
+      "name": "openai",
+      "baseUrl": "https://api.chatanywhere.tech",
+      "apiKey": "sk-l4ET3MWX8vsqAVqv0tXt5o1bbc7sh5L1fDV7oV66oDPrxLlQ",
+      "models": [
+        {
+          "id": "gpt-5",
+          "name": "gpt-5",
+          "enabled": true
+        },
+        {
+          "id": "gpt-4o",
+          "name": "gpt-4o",
+          "enabled": true
+        }
+      ],
+      "enabled": true
+    }
+  ],
+  "currentProvider": ""
+}

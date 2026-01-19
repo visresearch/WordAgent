@@ -20,9 +20,11 @@ import docxJsonConverter from './docxJsonConverter.js'
 将 Word 文档内容解析为 JSON 格式。
 
 **参数：**
+
 - `range` (可选): WPS Range 对象。不传则自动获取当前选中内容。
 
 **返回值：**
+
 - 成功: JSON 数据对象
 - 失败: `{ error: '错误信息' }`
 
@@ -57,10 +59,12 @@ if (jsonData.error) {
 从 JSON 数据生成 Word 文档。
 
 **参数：**
+
 - `jsonData` (必需): 符合格式的 JSON 数据对象
 - `doc` (可选): 已存在的文档对象。不传则创建新文档。
 
 **返回值：**
+
 - 成功: `{ success: true, message: '文档生成成功！', doc: 文档对象 }`
 - 失败: `{ error: '错误信息' }`
 
@@ -86,7 +90,7 @@ const result = generateDocxFromJSON(jsonData, existingDoc)
 {
   // 纯文本内容
   text: "全文纯文本...",
-  
+
   // 段落数组
   paragraphs: [
     {
@@ -101,12 +105,12 @@ const result = generateDocxFromJSON(jsonData, existingDoc)
       styleName: "正文",       // 样式名称
       position: 100,           // 在文档中的位置
       isEmpty: false,          // 是否空段落
-      
+
       // 制表位
       tabStops: [
         { position: 100, alignment: "left", leader: "none" }
       ],
-      
+
       // 格式块数组（文本按格式分块）
       runs: [
         {
@@ -125,7 +129,7 @@ const result = generateDocxFromJSON(jsonData, existingDoc)
       ]
     }
   ],
-  
+
   // 表格数组
   tables: [
     {
@@ -134,7 +138,7 @@ const result = generateDocxFromJSON(jsonData, existingDoc)
       tableAlignment: "center", // 表格对齐
       columnWidths: [100, 100, 100, 100], // 列宽数组
       position: 500,            // 在文档中的位置
-      
+
       // 单元格二维数组
       cells: [
         [
@@ -150,7 +154,7 @@ const result = generateDocxFromJSON(jsonData, existingDoc)
             italic: false,
             width: 100,
             height: 30,
-            
+
             // 复杂格式时的段落数组（可选）
             paragraphs: [
               {
@@ -164,7 +168,7 @@ const result = generateDocxFromJSON(jsonData, existingDoc)
       ]
     }
   ],
-  
+
   // 图片数组
   images: [
     {
@@ -175,19 +179,19 @@ const result = generateDocxFromJSON(jsonData, existingDoc)
       tempPath: "/tmp/wps_img_xxx.png", // 导出的临时路径
       altText: "图片说明",
       saved: true,             // 是否成功导出
-      
+
       // 浮动图片特有属性
       left: 100,               // 左边距
       top: 200,                // 上边距
       wrapType: "square"       // 环绕方式
     }
   ],
-  
+
   // 域代码数组
   fields: [
     { type: 13, code: "TOC ...", start: 0, end: 100 }
   ],
-  
+
   // 是否包含目录
   hasTOC: false,
   tocFieldCode: ""
@@ -208,9 +212,9 @@ const doc = window.Application.ActiveDocument
 const jsonData = parseDocxToJSON(doc.Content)
 
 // 2. 可以修改 JSON 数据
-jsonData.paragraphs.forEach(para => {
-  para.runs.forEach(run => {
-    run.fontSize = 14  // 统一改为14号字
+jsonData.paragraphs.forEach((para) => {
+  para.runs.forEach((run) => {
+    run.fontSize = 14 // 统一改为14号字
   })
 })
 
@@ -241,7 +245,7 @@ URL.revokeObjectURL(url)
 
 ```javascript
 // 假设已通过 FileReader 读取了 JSON 文件内容
-const jsonString = '...'  // 文件内容
+const jsonString = '...' // 文件内容
 const jsonData = JSON.parse(jsonString)
 
 const result = generateDocxFromJSON(jsonData)
@@ -257,7 +261,7 @@ const jsonData = parseDocxToJSON(doc.Content)
 
 jsonData.tables.forEach((table, index) => {
   console.log(`表格 ${index + 1}: ${table.rows}行 x ${table.columns}列`)
-  
+
   table.cells.forEach((row, rowIndex) => {
     row.forEach((cell, colIndex) => {
       if (cell.rowSpan > 0 && cell.colSpan > 0) {
@@ -313,6 +317,7 @@ cell: {
 - **临时文件**: 位于 WPS 临时目录，需手动清理
 
 清理临时图片：
+
 ```bash
 # Linux
 rm -f ~/.local/share/Kingsoft/office6/templates/wps/zh_CN/wps_img_*.png
@@ -324,6 +329,7 @@ del /q %APPDATA%\kingsoft\office6\templates\wps\zh_CN\wps_img_*.png
 ### 5. 特殊字符
 
 自动清理以下字符：
+
 - `\u0007` - 表格单元格结束符
 - `\u0001` - 域占位符
 - `\f` - 分页符
@@ -337,18 +343,18 @@ del /q %APPDATA%\kingsoft\office6\templates\wps\zh_CN\wps_img_*.png
 
 ```javascript
 import {
-  getAlignmentName,      // 对齐值 -> 名称
-  getAlignmentValue,     // 对齐名称 -> 值
-  getRGBColor,           // 颜色值 -> #RRGGBB
-  parseRGBColor,         // #RRGGBB -> 颜色值
-  cleanText,             // 清理特殊字符
-  cleanCellText          // 清理单元格文本
+  getAlignmentName, // 对齐值 -> 名称
+  getAlignmentValue, // 对齐名称 -> 值
+  getRGBColor, // 颜色值 -> #RRGGBB
+  parseRGBColor, // #RRGGBB -> 颜色值
+  cleanText, // 清理特殊字符
+  cleanCellText // 清理单元格文本
 } from './docxJsonConverter.js'
 
 // 示例
-const alignName = getAlignmentName(1)  // "center"
-const alignValue = getAlignmentValue("center")  // 1
-const hexColor = getRGBColor(255)  // "#ff0000"
+const alignName = getAlignmentName(1) // "center"
+const alignValue = getAlignmentValue('center') // 1
+const hexColor = getRGBColor(255) // "#ff0000"
 ```
 
 ---

@@ -19,14 +19,30 @@
       <!-- 空状态显示 -->
       <div v-if="messages.length === 0 && !isLoading" class="empty-state">
         <svg class="empty-icon" viewBox="0 0 1144 1024" xmlns="http://www.w3.org/2000/svg">
-          <path d="M1080.018824 582.354824c-23.009882 129.505882-139.023059 227.930353-278.648471 227.930352H329.968941c-140.167529 0-256.602353-99.267765-278.889412-229.616941A47.164235 47.164235 0 0 1 0 533.684706l-0.060235-181.067294c0-26.021647 21.082353-47.164235 47.164235-47.164236C47.164235 153.419294 173.778824 30.117647 329.968941 30.117647h471.401412C957.620706 30.117647 1084.235294 153.419294 1084.235294 305.453176v6.625883a47.164235 47.164235 0 0 1 60.235294 45.296941v181.067294a47.164235 47.164235 0 0 1-64.451764 43.91153zM330.029176 144.865882c-91.136 0-164.984471 71.920941-164.98447 160.587294v229.496471c0 88.726588 73.848471 160.647529 165.044706 160.647529h471.341176c91.136 0 165.044706-71.920941 165.044706-160.647529v-229.496471c0-88.666353-73.908706-160.587294-165.044706-160.587294H329.968941zM400.685176 259.614118c39.092706 0 70.716235 31.623529 70.716236 70.656v122.819764a70.716235 70.716235 0 0 1-141.432471 0V330.270118c0-39.032471 31.683765-70.656 70.716235-70.656z m329.968942 0c39.092706 0 70.716235 31.623529 70.716235 70.656v122.819764a70.716235 70.716235 0 1 1-141.372235 0V330.270118c0-39.032471 31.623529-70.656 70.656-70.656zM420.502588 993.882353a137.697882 137.697882 0 0 1-137.637647-137.697882h565.669647a137.697882 137.697882 0 0 1-137.697882 137.697882h-290.334118z" fill="currentColor" />
+          <path
+            d="M1080.018824 582.354824c-23.009882 129.505882-139.023059 227.930353-278.648471 227.930352H329.968941c-140.167529 0-256.602353-99.267765-278.889412-229.616941A47.164235 47.164235 0 0 1 0 533.684706l-0.060235-181.067294c0-26.021647 21.082353-47.164235 47.164235-47.164236C47.164235 153.419294 173.778824 30.117647 329.968941 30.117647h471.401412C957.620706 30.117647 1084.235294 153.419294 1084.235294 305.453176v6.625883a47.164235 47.164235 0 0 1 60.235294 45.296941v181.067294a47.164235 47.164235 0 0 1-64.451764 43.91153zM330.029176 144.865882c-91.136 0-164.984471 71.920941-164.98447 160.587294v229.496471c0 88.726588 73.848471 160.647529 165.044706 160.647529h471.341176c91.136 0 165.044706-71.920941 165.044706-160.647529v-229.496471c0-88.666353-73.908706-160.587294-165.044706-160.587294H329.968941zM400.685176 259.614118c39.092706 0 70.716235 31.623529 70.716236 70.656v122.819764a70.716235 70.716235 0 0 1-141.432471 0V330.270118c0-39.032471 31.683765-70.656 70.716235-70.656z m329.968942 0c39.092706 0 70.716235 31.623529 70.716235 70.656v122.819764a70.716235 70.716235 0 1 1-141.372235 0V330.270118c0-39.032471 31.623529-70.656 70.656-70.656zM420.502588 993.882353a137.697882 137.697882 0 0 1-137.637647-137.697882h565.669647a137.697882 137.697882 0 0 1-137.697882 137.697882h-290.334118z"
+            fill="currentColor"
+          />
         </svg>
         <div class="empty-text-container">
           <span class="empty-text">我能做什么</span>
           <a href="https://cmcblog.netlify.app/" target="_blank" class="help-icon">
             <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
-              <circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" stroke-width="1.5"/>
-              <path d="M8 12v-1M8 9V8a1.5 1.5 0 0 1 1-1.415A1.5 1.5 0 1 0 6.5 5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              <circle
+                cx="8"
+                cy="8"
+                r="7"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+              />
+              <path
+                d="M8 12v-1M8 9V8a1.5 1.5 0 0 1 1-1.415A1.5 1.5 0 1 0 6.5 5"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+              />
             </svg>
           </a>
         </div>
@@ -34,7 +50,7 @@
       <!-- 消息容器：包含消息框和操作图标 -->
       <div
         v-for="(msg, index) in messages"
-        :key="index" 
+        :key="index"
         :class="['message-wrapper', msg.role === 'user' ? 'user-wrapper' : 'ai-wrapper']"
       >
         <div :class="['message', msg.role === 'user' ? 'user-message' : 'ai-message']">
@@ -47,7 +63,9 @@
                 viewBox="0 0 16 16"
                 fill="currentColor"
               >
-                <path d="M14 1H2a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1zM2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2H2z" />
+                <path
+                  d="M14 1H2a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1zM2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2H2z"
+                />
                 <path d="M3 4h10v1H3V4zm0 3h10v1H3V7zm0 3h6v1H3v-1z" />
               </svg>
               <span>选中的内容</span>
@@ -62,7 +80,10 @@
             </div>
           </div>
           <div class="message-content">
-            <span v-if="msg.role === 'assistant' && !msg.content && isLoading" class="typing">AI正在思考中...</span>
+            <span
+              v-if="msg.role === 'assistant' && !msg.content && isLoading"
+              class="typing"
+            >AI正在思考中...</span>
             <!-- 用户消息直接显示文本 -->
             <span v-else-if="msg.role === 'user'">{{ msg.content }}</span>
             <!-- AI 消息使用 Markdown 渲染 -->
@@ -70,7 +91,10 @@
           </div>
         </div>
         <!-- AI 消息的操作图标按钮（在消息框外下方） -->
-        <div v-if="msg.role === 'assistant' && msg.content && !isLoading" class="message-icon-actions">
+        <div
+          v-if="msg.role === 'assistant' && msg.content && !isLoading"
+          class="message-icon-actions"
+        >
           <div v-if="msg.documentJson" class="icon-btn-wrapper">
             <button class="icon-btn" @click="insertToWord(msg)">
               <svg
@@ -79,10 +103,32 @@
                 viewBox="0 0 16 16"
                 fill="currentColor"
               >
-                <path d="M14 4.5V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2h5.5L14 4.5zM10 4a1 1 0 0 0 1 1h2.5L10 1.5V4z" />
+                <path
+                  fill-rule="evenodd"
+                  d="M6 12.5a.5.5 0 0 0 .5.5h8a.5.5 0 0 0 .5-.5v-9a.5.5 0 0 0-.5-.5h-8a.5.5 0 0 0-.5.5v2a.5.5 0 0 1-1 0v-2A1.5 1.5 0 0 1 6.5 2h8A1.5 1.5 0 0 1 16 3.5v9a1.5 1.5 0 0 1-1.5 1.5h-8A1.5 1.5 0 0 1 5 12.5v-2a.5.5 0 0 1 1 0v2z"
+                />
+                <path
+                  fill-rule="evenodd"
+                  d="M.146 8.354a.5.5 0 0 1 0-.708l3-3a.5.5 0 1 1 .708.708L1.707 7.5H10.5a.5.5 0 0 1 0 1H1.707l2.147 2.146a.5.5 0 0 1-.708.708l-3-3z"
+                />
               </svg>
             </button>
-            <span class="icon-tooltip">输出文档</span>
+            <span class="icon-tooltip">输出</span>
+          </div>
+          <div class="icon-btn-wrapper">
+            <button class="icon-btn" @click="copyToClipboard(msg.content)">
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 16 16"
+                fill="currentColor"
+              >
+                <path
+                  d="M14 4.5V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2h5.5L14 4.5zM10 4a1 1 0 0 0 1 1h2.5L10 1.5V4z"
+                />
+              </svg>
+            </button>
+            <span class="icon-tooltip">复制</span>
           </div>
           <div class="icon-btn-wrapper">
             <button class="icon-btn" @click="retryMessage(index)">
@@ -92,8 +138,13 @@
                 viewBox="0 0 16 16"
                 fill="currentColor"
               >
-                <path d="M11.534 7h3.932a.25.25 0 0 1 .192.41l-1.966 2.36a.25.25 0 0 1-.384 0l-1.966-2.36a.25.25 0 0 1 .192-.41zm-11 2h3.932a.25.25 0 0 0 .192-.41L2.692 6.23a.25.25 0 0 0-.384 0L.342 8.59A.25.25 0 0 0 .534 9z" />
-                <path fill-rule="evenodd" d="M8 3c-1.552 0-2.94.707-3.857 1.818a.5.5 0 1 1-.771-.636A6.002 6.002 0 0 1 13.917 7H12.9A5.002 5.002 0 0 0 8 3zM3.1 9a5.002 5.002 0 0 0 8.757 2.182.5.5 0 1 1 .771.636A6.002 6.002 0 0 1 2.083 9H3.1z" />
+                <path
+                  d="M11.534 7h3.932a.25.25 0 0 1 .192.41l-1.966 2.36a.25.25 0 0 1-.384 0l-1.966-2.36a.25.25 0 0 1 .192-.41zm-11 2h3.932a.25.25 0 0 0 .192-.41L2.692 6.23a.25.25 0 0 0-.384 0L.342 8.59A.25.25 0 0 0 .534 9z"
+                />
+                <path
+                  fill-rule="evenodd"
+                  d="M8 3c-1.552 0-2.94.707-3.857 1.818a.5.5 0 1 1-.771-.636A6.002 6.002 0 0 1 13.917 7H12.9A5.002 5.002 0 0 0 8 3zM3.1 9a5.002 5.002 0 0 0 8.757 2.182.5.5 0 1 1 .771.636A6.002 6.002 0 0 1 2.083 9H3.1z"
+                />
               </svg>
             </button>
             <span class="icon-tooltip">重试</span>
@@ -106,8 +157,13 @@
                 viewBox="0 0 16 16"
                 fill="currentColor"
               >
-                <path fill-rule="evenodd" d="M8 3a5 5 0 1 1-4.546 2.914.5.5 0 0 0-.908-.417A6 6 0 1 0 8 2v1z" />
-                <path d="M8 4.466V.534a.25.25 0 0 0-.41-.192L5.23 2.308a.25.25 0 0 0 0 .384l2.36 1.966A.25.25 0 0 0 8 4.466z" />
+                <path
+                  fill-rule="evenodd"
+                  d="M8 3a5 5 0 1 1-4.546 2.914.5.5 0 0 0-.908-.417A6 6 0 1 0 8 2v1z"
+                />
+                <path
+                  d="M8 4.466V.534a.25.25 0 0 0-.41-.192L5.23 2.308a.25.25 0 0 0 0 .384l2.36 1.966A.25.25 0 0 0 8 4.466z"
+                />
               </svg>
             </button>
             <span class="icon-tooltip">还原</span>
@@ -126,7 +182,9 @@
             viewBox="0 0 16 16"
             fill="currentColor"
           >
-            <path d="M14 1H2a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1zM2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2H2z" />
+            <path
+              d="M14 1H2a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1zM2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2H2z"
+            />
             <path d="M3 4h10v1H3V4zm0 3h10v1H3V7zm0 3h6v1H3v-1z" />
           </svg>
         </div>
@@ -141,7 +199,9 @@
             viewBox="0 0 16 16"
             fill="currentColor"
           >
-            <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z" />
+            <path
+              d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"
+            />
           </svg>
         </button>
       </div>
@@ -149,9 +209,9 @@
 
     <div class="chat-input-area">
       <div class="input-container">
-        <textarea 
+        <textarea
           ref="chatInput"
-          v-model="inputText" 
+          v-model="inputText"
           placeholder="描述下一步要构建的内容"
           class="chat-input"
           rows="1"
@@ -181,15 +241,15 @@
                 </svg>
               </div>
               <div class="select-dropdown">
-                <div 
-                  class="select-option" 
+                <div
+                  class="select-option"
                   :class="{ active: mode === 'agent' }"
                   @click="selectMode('agent')"
                 >
                   Agent
                 </div>
-                <div 
-                  class="select-option" 
+                <div
+                  class="select-option"
                   :class="{ active: mode === 'ask' }"
                   @click="selectMode('ask')"
                 >
@@ -197,9 +257,12 @@
                 </div>
               </div>
             </div>
-            
+
             <!-- 模型选择 -->
-            <div class="custom-select" :class="{ open: modelDropdownOpen, disabled: modelsLoading }">
+            <div
+              class="custom-select"
+              :class="{ open: modelDropdownOpen, disabled: modelsLoading }"
+            >
               <div class="select-trigger" @click="toggleModelDropdown">
                 <span v-if="modelsLoading">加载中...</span>
                 <span v-else>{{ selectedModelName }}</span>
@@ -220,7 +283,7 @@
                 </svg>
               </div>
               <div class="select-dropdown model-dropdown">
-                <div 
+                <div
                   v-for="model in availableModels"
                   :key="model.id"
                   class="select-option"
@@ -234,11 +297,7 @@
           </div>
           <div class="toolbar-right">
             <div class="btn-wrapper">
-              <button 
-                class="add-selection-btn" 
-                @click="addSelectionManually"
-                title="添加选区"
-              >
+              <button class="add-selection-btn" title="添加选区" @click="addSelectionManually">
                 <svg
                   width="12"
                   height="12"
@@ -246,34 +305,24 @@
                   fill="none"
                   stroke="currentColor"
                 >
-                  <rect x="2" y="2" width="12" height="12" rx="2" stroke-width="1.5" />
+                  <rect
+                    x="2"
+                    y="2"
+                    width="12"
+                    height="12"
+                    rx="2"
+                    stroke-width="1.5"
+                  />
                   <path d="M8 5v6M5 8h6" stroke-width="1.5" stroke-linecap="round" />
                 </svg>
               </button>
               <span class="tooltip">添加选区</span>
             </div>
             <div class="btn-wrapper">
-              <button 
-                class="setting-btn" 
-                @click="openSetting"
-              >
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                >
-                  <path d="M12 15a3 3 0 100-6 3 3 0 000 6z" stroke="currentColor" stroke-width="2" />
-                  <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09a1.65 1.65 0 00-1.08-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09a1.65 1.65 0 001.51-1.08 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06a1.65 1.65 0 001.82.33h.08a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82v.08a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" stroke="currentColor" stroke-width="2" />
-                </svg>
-              </button>
-              <span class="tooltip">设置</span>
-            </div>
-            <div class="btn-wrapper">
-              <button 
+              <button
                 v-if="!isLoading"
-                class="send-btn" 
-                :disabled="!inputText.trim()" 
+                class="send-btn"
+                :disabled="!inputText.trim()"
                 @click="sendMessage"
               >
                 <svg
@@ -290,11 +339,7 @@
                   />
                 </svg>
               </button>
-              <button 
-                v-else
-                class="stop-btn" 
-                @click="stopGeneration"
-              >
+              <button v-else class="stop-btn" @click="stopGeneration">
                 <svg
                   width="14"
                   height="14"
@@ -335,10 +380,10 @@ import MarkdownIt from 'markdown-it';
 
 // 初始化 markdown-it 实例
 const md = new MarkdownIt({
-  html: false,        // 禁用 HTML 标签（安全考虑）
-  breaks: true,       // 把\n转换为<br>
-  linkify: true,      // 自动识别链接
-  typographer: true   // 启用排版优化
+  html: false, // 禁用 HTML 标签（安全考虑）
+  breaks: true, // 把\n转换为<br>
+  linkify: true, // 自动识别链接
+  typographer: true // 启用排版优化
 });
 
 export default {
@@ -348,26 +393,26 @@ export default {
       inputText: '',
       mode: 'agent',
       selectedModel: '',
-      availableModels: [],  // 可用模型列表
-      modelsLoading: false,  // 模型加载状态
+      availableModels: [], // 可用模型列表
+      modelsLoading: false, // 模型加载状态
       messages: [],
       isLoading: false,
-      lastReadJSON: null,  // 存储上次读取的文档JSON
-      currentSelection: null,  // 当前选中的内容信息
-      currentSelectionJSON: null,  // 当前选中内容的完整JSON
-      currentStreamCtrl: null,  // 当前流式请求控制器
-      currentDocId: null,  // 当前文档的唯一标识符
-      currentDocName: null,  // 当前文档名称
-      historyLoading: false,  // 历史记录加载状态
-      hasHistory: false,  // 是否有历史记录可加载
-      historyLoaded: false,  // 是否已加载历史记录
-      modeDropdownOpen: false,  // 模式下拉框状态
-      modelDropdownOpen: false  // 模型下拉框状态
+      lastReadJSON: null, // 存储上次读取的文档JSON
+      currentSelection: null, // 当前选中的内容信息
+      currentSelectionJSON: null, // 当前选中内容的完整JSON
+      currentStreamCtrl: null, // 当前流式请求控制器
+      currentDocId: null, // 当前文档的唯一标识符
+      currentDocName: null, // 当前文档名称
+      historyLoading: false, // 历史记录加载状态
+      hasHistory: false, // 是否有历史记录可加载
+      historyLoaded: false, // 是否已加载历史记录
+      modeDropdownOpen: false, // 模式下拉框状态
+      modelDropdownOpen: false // 模型下拉框状态
     };
   },
   computed: {
     selectedModelName() {
-      const model = this.availableModels.find(m => m.id === this.selectedModel);
+      const model = this.availableModels.find((m) => m.id === this.selectedModel);
       return model ? model.name : '选择模型';
     }
   },
@@ -388,6 +433,33 @@ export default {
   },
   methods: {
     /**
+     * 复制到剪切板
+     */
+    async copyToClipboard(content) {
+      try {
+        await navigator.clipboard.writeText(content);
+        // 可以添加一个临时提示
+        console.log('已复制到剪切板');
+      } catch (error) {
+        console.error('复制失败:', error);
+        // 降级方案：使用传统方法
+        const textarea = document.createElement('textarea');
+        textarea.value = content;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        try {
+          document.execCommand('copy');
+          console.log('已复制到剪切板（降级方案）');
+        } catch (e) {
+          console.error('降级复制也失败:', e);
+        }
+        document.body.removeChild(textarea);
+      }
+    },
+
+    /**
      * 渲染 Markdown 内容
      */
     renderMarkdown(content) {
@@ -398,7 +470,7 @@ export default {
       let cleaned = content.replace(/```json\s*```/g, '');
       return md.render(cleaned);
     },
-    
+
     /**
      * 重试生成 - 重新发送上一条用户消息
      */
@@ -406,29 +478,29 @@ export default {
       if (this.isLoading) {
         return;
       }
-      
+
       // 找到这条 AI 消息对应的用户消息（上一条）
       let userMessageIndex = aiMessageIndex - 1;
       while (userMessageIndex >= 0 && this.messages[userMessageIndex].role !== 'user') {
         userMessageIndex--;
       }
-      
+
       if (userMessageIndex < 0) {
         console.warn('找不到对应的用户消息');
         return;
       }
-      
+
       const userMsg = this.messages[userMessageIndex];
       const userMessage = userMsg.content;
       const selectionContext = userMsg.selectionContext || null;
-      
+
       // 删除当前 AI 消息
       this.messages.splice(aiMessageIndex, 1);
-      
+
       // 重新发送请求
       this.isLoading = true;
       this.scrollToBottom();
-      
+
       // 创建新的 AI 消息占位
       const newAiMessageIndex = this.messages.length;
       this.messages.push({
@@ -436,40 +508,48 @@ export default {
         content: '',
         documentJson: null
       });
-      
+
       // 用于检测并过滤 JSON 输出
       let jsonDetected = false;
-      
+
       // 使用 api.js 封装的流式接口
       const streamCtrl = api.chatStream(userMessage, {
         mode: this.mode,
         model: this.selectedModel || 'auto',
         documentJson: this.currentSelectionJSON,
         history: this.messages.slice(0, -1).slice(-10),
-        
+
         onMessage: (data) => {
           if (data.type === 'text' && data.content) {
             if (jsonDetected) {
               return;
             }
-            
+
             const content = data.content;
             const currentContent = this.messages[newAiMessageIndex].content;
             const combined = currentContent + content;
-            
+
             // 检测 JSON 开始的多种模式
-            if (content.includes('{"') || content.includes('{\n') || content.includes('"paragraphs"') || content.includes('"text":')) {
+            if (
+              content.includes('{"') ||
+              content.includes('{\n') ||
+              content.includes('"paragraphs"') ||
+              content.includes('"text":')
+            ) {
               jsonDetected = true;
               console.log('[Filter] 检测到 JSON 输出，停止显示');
               return;
             }
-            
-            if (combined.trim().startsWith('{') && (combined.includes('"paragraphs"') || combined.includes('"text"'))) {
+
+            if (
+              combined.trim().startsWith('{') &&
+              (combined.includes('"paragraphs"') || combined.includes('"text"'))
+            ) {
               jsonDetected = true;
               console.log('[Filter] 检测到累积内容为 JSON，停止显示');
               return;
             }
-            
+
             this.messages[newAiMessageIndex].content += content;
             this.scrollToBottom();
           } else if (data.type === 'json' && data.content) {
@@ -477,21 +557,24 @@ export default {
             // 移除"正在生成文档"的临时提示
             const currentContent = this.messages[newAiMessageIndex].content;
             if (currentContent.includes('⏳ 正在生成文档...')) {
-              this.messages[newAiMessageIndex].content = currentContent.replace(/\n*⏳ 正在生成文档\.\.\./, '');
+              this.messages[newAiMessageIndex].content = currentContent.replace(
+                /\n*⏳ 正在生成文档\.\.\./,
+                ''
+              );
             }
             this.scrollToBottom();
           }
         },
-        
+
         onError: (error) => {
           console.error('重试请求失败:', error);
           this.messages[newAiMessageIndex].content = `网络错误：${error.message}`;
         },
-        
+
         onComplete: () => {
           this.isLoading = false;
           this.scrollToBottom();
-          
+
           // 保存新的 AI 回复到历史
           const aiMsg = this.messages[newAiMessageIndex];
           if (aiMsg.content) {
@@ -499,10 +582,10 @@ export default {
           }
         }
       });
-      
+
       this.currentStreamCtrl = streamCtrl;
     },
-    
+
     /**
      * 还原到某条消息 - 删除该消息之后的所有消息
      */
@@ -510,14 +593,14 @@ export default {
       if (this.isLoading) {
         return;
       }
-      
+
       // 删除该消息之后的所有消息
       this.messages = this.messages.slice(0, messageIndex + 1);
-      
+
       // 注意：这里只是前端删除，历史记录保留在后端
       // 如果需要同步删除后端记录，需要额外的 API 支持
     },
-    
+
     /**
      * 切换模式下拉框
      */
@@ -526,7 +609,7 @@ export default {
       this.modelDropdownOpen = false;
       this.modeDropdownOpen = !this.modeDropdownOpen;
     },
-    
+
     /**
      * 切换模型下拉框
      */
@@ -536,9 +619,15 @@ export default {
       }
       e.stopPropagation();
       this.modeDropdownOpen = false;
+      
+      // 如果是打开下拉框，刷新模型列表
+      if (!this.modelDropdownOpen) {
+        this.loadModels();
+      }
+      
       this.modelDropdownOpen = !this.modelDropdownOpen;
     },
-    
+
     /**
      * 选择模式
      */
@@ -546,7 +635,7 @@ export default {
       this.mode = value;
       this.modeDropdownOpen = false;
     },
-    
+
     /**
      * 选择模型
      */
@@ -554,7 +643,7 @@ export default {
       this.selectedModel = id;
       this.modelDropdownOpen = false;
     },
-    
+
     /**
      * 关闭所有下拉框
      */
@@ -572,7 +661,7 @@ export default {
       }
       this.isLoading = false;
     },
-    
+
     /**
      * 初始化文档标识并检查是否有历史记录
      */
@@ -590,7 +679,7 @@ export default {
         console.warn('初始化文档信息失败:', e);
       }
     },
-    
+
     /**
      * 检查当前文档是否有历史聊天记录
      */
@@ -599,7 +688,7 @@ export default {
         this.hasHistory = false;
         return;
       }
-      
+
       try {
         const result = await api.getChatHistory(this.currentDocId, { limit: 1 });
         this.hasHistory = result.success && result.data?.messages && result.data.messages.length > 0;
@@ -608,7 +697,7 @@ export default {
         this.hasHistory = false;
       }
     },
-    
+
     /**
      * 点击显示历史记录
      */
@@ -616,7 +705,7 @@ export default {
       await this.loadChatHistory();
       this.historyLoaded = true;
     },
-    
+
     /**
      * 获取当前 Word 文档的唯一标识信息
      */
@@ -626,12 +715,12 @@ export default {
         if (!doc) {
           return null;
         }
-        
+
         // 使用文档的完整路径作为唯一标识
         // 如果是未保存的文档，使用文档名称 + 创建时间
         const fullPath = doc.FullName || '';
         const docName = doc.Name || 'Untitled';
-        
+
         let docId;
         if (fullPath && fullPath !== docName) {
           // 已保存的文档，使用完整路径的 hash
@@ -646,14 +735,14 @@ export default {
             window.Application.PluginStorage.setItem(`unsaved_doc_${docName}`, docId);
           }
         }
-        
+
         return { docId, docName };
       } catch (e) {
         console.warn('获取文档信息失败:', e);
         return null;
       }
     },
-    
+
     /**
      * 简单的字符串 hash 函数
      */
@@ -661,12 +750,12 @@ export default {
       let hash = 0;
       for (let i = 0; i < str.length; i++) {
         const char = str.charCodeAt(i);
-        hash = ((hash << 5) - hash) + char;
+        hash = (hash << 5) - hash + char;
         hash = hash & hash;
       }
       return 'doc_' + Math.abs(hash).toString(36);
     },
-    
+
     /**
      * 加载当前文档的聊天历史
      */
@@ -674,19 +763,19 @@ export default {
       if (!this.currentDocId) {
         return;
       }
-      
+
       this.historyLoading = true;
       try {
         const result = await api.getChatHistory(this.currentDocId, { limit: 50 });
         if (result.success && result.data?.messages) {
           // 转换后端格式为前端格式
-          this.messages = result.data.messages.map(msg => ({
+          this.messages = result.data.messages.map((msg) => ({
             role: msg.role,
             content: msg.content,
             documentJson: msg.documentJson || null,
             selectionContext: msg.selectionContext || null
           }));
-          
+
           // 恢复上一次使用的 model 和 mode
           if (result.data.lastUsedModel) {
             this.selectedModel = result.data.lastUsedModel;
@@ -694,7 +783,7 @@ export default {
           if (result.data.lastUsedMode) {
             this.mode = result.data.lastUsedMode;
           }
-          
+
           this.historyLoaded = true;
           this.scrollToBottom();
         }
@@ -703,7 +792,7 @@ export default {
       }
       this.historyLoading = false;
     },
-    
+
     /**
      * 保存消息到后端
      */
@@ -711,7 +800,7 @@ export default {
       if (!this.currentDocId) {
         return;
       }
-      
+
       try {
         await api.saveMessage({
           docId: this.currentDocId,
@@ -727,7 +816,7 @@ export default {
         console.warn('保存消息失败:', e);
       }
     },
-    
+
     /**
      * 清空当前文档的聊天历史
      */
@@ -736,7 +825,7 @@ export default {
         this.messages = [];
         return;
       }
-      
+
       try {
         const result = await api.clearChatHistory(this.currentDocId);
         if (result.success) {
@@ -747,7 +836,7 @@ export default {
         this.messages = [];
       }
     },
-    
+
     /**
      * 加载可用模型列表
      */
@@ -775,13 +864,13 @@ export default {
       }
       this.modelsLoading = false;
     },
-    
+
     /**
      * 手动添加选区（点击按钮触发）
      */
     addSelectionManually() {
       console.log('[AIChatPane] 手动触发添加选区');
-      
+
       try {
         const selection = window.Application?.Selection;
         if (!selection) {
@@ -829,9 +918,8 @@ export default {
 
         // 获取开始和结束文字
         const startText = cleanedText.substring(0, Math.min(10, cleanedText.length));
-        const endText = cleanedText.length > 10 
-          ? cleanedText.substring(cleanedText.length - 10) 
-          : cleanedText;
+        const endText =
+          cleanedText.length > 10 ? cleanedText.substring(cleanedText.length - 10) : cleanedText;
 
         const selectionInfo = {
           preview: preview + (hasMore ? '...' : ''),
@@ -854,14 +942,14 @@ export default {
         alert('处理选中内容时出错: ' + error.message);
       }
     },
-    
+
     /**
      * 处理添加的选区
      * @param {Object} selectionInfo - 选区信息对象
      */
     handleSelectionAdd(selectionInfo) {
       console.log('[AIChatPane] 收到选区信息:', selectionInfo);
-      
+
       // 更新当前选区信息
       this.currentSelection = {
         preview: selectionInfo.preview,
@@ -870,13 +958,13 @@ export default {
         charCount: selectionInfo.charCount,
         hasMore: selectionInfo.hasMore
       };
-      
+
       // 更新选区JSON数据
       this.currentSelectionJSON = selectionInfo.jsonData;
-      
+
       console.log('[AIChatPane] 选区已设置，字符数:', selectionInfo.charCount);
     },
-    
+
     /**
      * 清除当前选区
      */
@@ -893,7 +981,7 @@ export default {
         console.warn('取消选区失败:', e);
       }
     },
-    
+
     autoResize() {
       const textarea = this.$refs.chatInput;
       if (textarea) {
@@ -907,26 +995,26 @@ export default {
       }
 
       const userMessage = this.inputText.trim();
-      
+
       // 创建用户消息对象
       const userMsgObj = {
         role: 'user',
         content: userMessage
       };
-      
+
       // 如果有选中的内容，添加选区上下文
       let selectionContext = null;
       let documentJson = null;
-      
+
       if (this.currentSelection && this.currentSelectionJSON) {
         selectionContext = { ...this.currentSelection };
         documentJson = this.currentSelectionJSON;
         userMsgObj.selectionContext = selectionContext;
       }
-      
+
       this.messages.push(userMsgObj);
       this.inputText = '';
-      this.historyLoaded = true;  // 用户开始发消息，隐藏历史提示
+      this.historyLoaded = true; // 用户开始发消息，隐藏历史提示
       this.$nextTick(() => {
         this.autoResize();
       });
@@ -936,52 +1024,61 @@ export default {
 
       this.isLoading = true;
       this.scrollToBottom();
-      
+
       // 创建 AI 消息占位，记录其索引
       const aiMessageIndex = this.messages.length;
       this.messages.push({
         role: 'assistant',
         content: '',
-        documentJson: null  // 保存文档 JSON 数据
+        documentJson: null // 保存文档 JSON 数据
       });
-      
+
       // 用于检测并过滤 JSON 输出
       let jsonDetected = false;
-      
+
       // 使用 api.js 封装的流式接口
       const streamCtrl = api.chatStream(userMessage, {
         mode: this.mode,
         model: this.selectedModel || 'auto',
         documentJson: documentJson,
-        history: this.messages.slice(0, -1).slice(-10),  // 排除刚添加的空消息
-        
+        history: this.messages.slice(0, -1).slice(-10), // 排除刚添加的空消息
+
         onMessage: (data) => {
           if (data.type === 'text' && data.content) {
             // 一旦检测到 JSON，后续所有文本都跳过
             if (jsonDetected) {
               return;
             }
-            
+
             const content = data.content;
             // 检测当前内容或累积内容是否包含 JSON 结构
             const currentContent = this.messages[aiMessageIndex].content;
             const combined = currentContent + content;
-            
+
             // 检测 JSON 开始的多种模式
-            if (content.includes('{"') || content.includes('{\n') || content.includes('{ \n') || content.includes('"paragraphs"') || content.includes('"text":')) {
+            if (
+              content.includes('{"') ||
+              content.includes('{\n') ||
+              content.includes('{ \n') ||
+              content.includes('"paragraphs"') ||
+              content.includes('"text":')
+            ) {
               // 检测到 JSON 内容，停止显示
               jsonDetected = true;
               console.log('[Filter] 检测到 JSON 输出，停止显示后续内容');
               return;
             }
-            
+
             // 检测是否是 JSON 的开头
-            if (combined.trim().startsWith('{') && (combined.includes('"paragraphs"') || combined.includes('"text"'))) {
+            if (
+              combined.trim().startsWith('{') &&
+              (combined.includes('"paragraphs"') || combined.includes('"text"'))
+            ) {
               jsonDetected = true;
               console.log('[Filter] 检测到累积内容为 JSON，停止显示');
               return;
             }
-            
+
             this.messages[aiMessageIndex].content += content;
             this.scrollToBottom();
           } else if (data.type === 'json' && data.content) {
@@ -990,7 +1087,10 @@ export default {
             // 移除"正在生成文档"的临时提示
             const currentContent = this.messages[aiMessageIndex].content;
             if (currentContent.includes('⏳ 正在生成文档...')) {
-              this.messages[aiMessageIndex].content = currentContent.replace(/\n*⏳ 正在生成文档\.\.\./, '');
+              this.messages[aiMessageIndex].content = currentContent.replace(
+                /\n*⏳ 正在生成文档\.\.\./,
+                ''
+              );
             }
             this.scrollToBottom();
           } else if (data.content && typeof data.content === 'string') {
@@ -1003,12 +1103,13 @@ export default {
             this.messages[aiMessageIndex].content += `\n\n错误: ${data.error}`;
           }
         },
-        
+
         onError: (error) => {
           console.error('发送请求失败:', error);
-          this.messages[aiMessageIndex].content = `网络错误：${error.message}。请确保后端服务运行在 localhost:3880`;
+          this.messages[aiMessageIndex].content =
+            `网络错误：${error.message}。请确保后端服务运行在 localhost:3880`;
         },
-        
+
         onComplete: () => {
           // 清除已使用的选区
           if (documentJson) {
@@ -1016,7 +1117,7 @@ export default {
           }
           this.isLoading = false;
           this.scrollToBottom();
-          
+
           // 保存 AI 回复到历史
           const aiMsg = this.messages[aiMessageIndex];
           if (aiMsg.content) {
@@ -1024,7 +1125,7 @@ export default {
           }
         }
       });
-      
+
       // 保存控制器以便需要时中断请求
       this.currentStreamCtrl = streamCtrl;
     },
@@ -1044,11 +1145,11 @@ export default {
           alert('请先打开一个Word文档');
           return;
         }
-        
+
         // 优先使用已保存的 documentJson
         let jsonData = msg.documentJson || null;
         const content = msg.content || '';
-        
+
         // 如果没有预存的 JSON，尝试从内容解析
         if (!jsonData) {
           // 检查是否是 JSON 或包含 JSON 代码块
@@ -1071,18 +1172,18 @@ export default {
             }
           }
         }
-        
+
         // 如果是有效的文档 JSON，使用 generateDocxFromJSON 生成
         if (jsonData && (jsonData.paragraphs || jsonData.tables)) {
           console.log('检测到文档 JSON，使用格式化输出');
-          
+
           // 在当前光标位置插入
           const selection = window.Application.Selection;
           const insertPos = selection.Range.Start;
-          
+
           // 使用导入的 generateDocxFromJSON 生成文档
           const result = generateDocxFromJSON(jsonData, doc);
-          
+
           if (result.success) {
             console.log('带格式的文档内容已成功插入');
           } else {
@@ -1094,31 +1195,30 @@ export default {
           // 纯文本插入
           this.insertPlainText(content);
         }
-
       } catch (error) {
         console.error('插入文本失败:', error);
         alert('插入失败，请确保已打开Word文档');
       }
     },
-    
+
     /**
      * 插入纯文本（作为后备方案）
      */
     insertPlainText(content) {
       try {
         const selection = window.Application.Selection;
-        
+
         // 清理可能的 JSON 代码块标记
         let cleanContent = content;
         if (content.includes('```json')) {
           // 如果包含 JSON 代码块但解析失败，提取其中的文本
           cleanContent = content.replace(/```json\s*/g, '').replace(/```/g, '');
         }
-        
+
         // 在当前光标位置插入文本
         selection.TypeText(cleanContent);
         selection.TypeParagraph();
-        
+
         console.log('纯文本已成功插入到Word文档');
       } catch (error) {
         console.error('插入纯文本失败:', error);
@@ -1132,26 +1232,6 @@ export default {
           tskpane.Visible = false;
         }
       }
-    },
-    openSetting() {
-      // 调用ribbon中的设置面板打开逻辑
-      try {
-        let tsId = window.Application.PluginStorage.getItem('setting_taskpane_id');
-        if (!tsId) {
-          const baseUrl = window.location.origin + window.location.pathname.replace(/\/[^/]*$/, '');
-          let tskpane = window.Application.CreateTaskPane(baseUrl + '/#/setting');
-          let id = tskpane.ID;
-          window.Application.PluginStorage.setItem('setting_taskpane_id', id);
-          tskpane.DockPosition = window.Application.Enum.msoCTPDockPositionRight;
-          tskpane.Width = 350;
-          tskpane.Visible = true;
-        } else {
-          let tskpane = window.Application.GetTaskPane(tsId);
-          tskpane.Visible = !tskpane.Visible;
-        }
-      } catch (e) {
-        console.error('打开设置失败:', e);
-      }
     }
   }
 };
@@ -1164,7 +1244,7 @@ export default {
   height: 100%;
   min-height: 100vh;
   width: 100%;
-  background: #F7F8FA;
+  background: #f7f8fa;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   box-sizing: border-box;
 }
@@ -1321,12 +1401,20 @@ export default {
   line-height: 1.3;
 }
 
-.message-content :deep(.markdown-body) h1 { font-size: 1.4em; }
-.message-content :deep(.markdown-body) h2 { font-size: 1.25em; }
-.message-content :deep(.markdown-body) h3 { font-size: 1.1em; }
+.message-content :deep(.markdown-body) h1 {
+  font-size: 1.4em;
+}
+.message-content :deep(.markdown-body) h2 {
+  font-size: 1.25em;
+}
+.message-content :deep(.markdown-body) h3 {
+  font-size: 1.1em;
+}
 .message-content :deep(.markdown-body) h4,
 .message-content :deep(.markdown-body) h5,
-.message-content :deep(.markdown-body) h6 { font-size: 1em; }
+.message-content :deep(.markdown-body) h6 {
+  font-size: 1em;
+}
 
 .message-content :deep(.markdown-body) ul,
 .message-content :deep(.markdown-body) ol {
@@ -1474,7 +1562,9 @@ export default {
   white-space: nowrap;
   opacity: 0;
   visibility: hidden;
-  transition: opacity 0.2s, visibility 0.2s;
+  transition:
+    opacity 0.2s,
+    visibility 0.2s;
   pointer-events: none;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
   border: 1px solid #e0e0e0;
@@ -1492,8 +1582,8 @@ export default {
 }
 
 .chat-input-area {
-  padding: 6px 10px;
-  background: #F7F8FA;
+  padding: 12px 12px;
+  background: #f7f8fa;
   flex-shrink: 0;
 }
 
@@ -1562,7 +1652,9 @@ export default {
   white-space: nowrap;
   opacity: 0;
   visibility: hidden;
-  transition: opacity 0.2s, visibility 0.2s;
+  transition:
+    opacity 0.2s,
+    visibility 0.2s;
   pointer-events: none;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
   border: 1px solid #e0e0e0;
@@ -1627,7 +1719,10 @@ export default {
   opacity: 0;
   visibility: hidden;
   transform: translateY(4px);
-  transition: opacity 0.15s, visibility 0.15s, transform 0.15s;
+  transition:
+    opacity 0.15s,
+    visibility 0.15s,
+    transform 0.15s;
   z-index: 100;
 }
 
@@ -1671,26 +1766,6 @@ export default {
 
 .toolbar-select:focus {
   outline: none;
-  color: #667eea;
-}
-
-.setting-btn {
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  color: #888;
-  border: none;
-  border-radius: 3px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.setting-btn:hover {
-  background: #f0f0f0;
   color: #667eea;
 }
 
@@ -1812,9 +1887,9 @@ export default {
 
 /* 当前选区预览条 */
 .current-selection-bar {
-  background: #F0F0F0;
-  border-top: 1px solid #D8D8D8;
-  border-bottom: 1px solid #D8D8D8;
+  background: #f0f0f0;
+  border-top: 1px solid #d8d8d8;
+  border-bottom: 1px solid #d8d8d8;
   padding: 6px 10px;
 }
 

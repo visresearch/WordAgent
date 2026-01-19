@@ -2,12 +2,12 @@
   <div class="global">
     <div class="divItem">
       <h2>🛠️ 调试面板</h2>
-      <p style="color: #666; font-size: 13px;">
+      <p style="color: #666; font-size: 13px">
         按 <span style="font-weight: bolder">"F12"</span> 可以打开调试器
       </p>
     </div>
     <hr />
-    
+
     <!-- 文档解析功能 -->
     <div class="divItem">
       <h3>📄 文档内容解析</h3>
@@ -162,7 +162,7 @@ export default {
       }
 
       const jsonString = JSON.stringify(this.parsedData, null, 2);
-      
+
       try {
         // 优先使用 Clipboard API
         if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -178,10 +178,10 @@ export default {
         textarea.style.left = '-9999px';
         document.body.appendChild(textarea);
         textarea.select();
-        
+
         const success = document.execCommand('copy');
         document.body.removeChild(textarea);
-        
+
         if (success) {
           this.showStatus('已复制到剪贴板！', 'success');
         } else {
@@ -204,10 +204,10 @@ export default {
         const jsonString = JSON.stringify(this.parsedData, null, 2);
         const blob = new Blob([jsonString], { type: 'application/json;charset=utf-8' });
         const url = URL.createObjectURL(blob);
-        
+
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
         const filename = `document_${timestamp}.json`;
-        
+
         const link = document.createElement('a');
         link.href = url;
         link.download = filename;
@@ -215,7 +215,7 @@ export default {
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
-        
+
         URL.revokeObjectURL(url);
         this.showStatus(`已下载: ${filename}`, 'success');
       } catch (e) {
@@ -232,7 +232,8 @@ export default {
   font-size: 14px;
   min-height: 95%;
   padding: 10px;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 }
 
 .divItem {
@@ -289,12 +290,12 @@ hr {
 }
 
 .btn-primary {
-  background-color: #4CAF50;
+  background-color: #4caf50;
   color: white;
 }
 
 .btn-success {
-  background-color: #2196F3;
+  background-color: #2196f3;
   color: white;
 }
 

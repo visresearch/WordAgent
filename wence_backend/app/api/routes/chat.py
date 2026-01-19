@@ -8,7 +8,7 @@ from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
 # 使用纯 LangChain 版本（完美流式输出）
-from app.agent import process_writing_request_stream
+from app.services.agent import process_writing_request_stream
 from app.models.chat import ChatRequest
 
 router = APIRouter()

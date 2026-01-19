@@ -21,7 +21,10 @@ function OnAction(control) {
       {
         let tsId = window.Application.PluginStorage.getItem('ai_taskpane_id');
         if (!tsId) {
-          let tskpane = window.Application.CreateTaskPane(Util.GetUrlPath() + Util.GetRouterHash() + '/aichat', '文策AI助手');
+          let tskpane = window.Application.CreateTaskPane(
+            Util.GetUrlPath() + Util.GetRouterHash() + '/aichat',
+            '文策AI助手'
+          );
           let id = tskpane.ID;
           window.Application.PluginStorage.setItem('ai_taskpane_id', id);
           tskpane.DockPosition = window.Application.Enum.msoCTPDockPositionRight;
@@ -35,25 +38,36 @@ function OnAction(control) {
       break;
     case 'btnShowSetting':
       {
-        let tsId = window.Application.PluginStorage.getItem('setting_taskpane_id');
-        if (!tsId) {
-          let tskpane = window.Application.CreateTaskPane(Util.GetUrlPath() + Util.GetRouterHash() + '/setting', '文策AI助手 - 设置');
-          let id = tskpane.ID;
-          window.Application.PluginStorage.setItem('setting_taskpane_id', id);
-          tskpane.DockPosition = window.Application.Enum.msoCTPDockPositionRight;
-          tskpane.Width = 350;
-          tskpane.Visible = true;
-        } else {
-          let tskpane = window.Application.GetTaskPane(tsId);
-          tskpane.Visible = !tskpane.Visible;
-        }
+        // 使用 WPS 原生对话框显示设置界面
+        window.Application.ShowDialog(
+          Util.GetUrlPath() + Util.GetRouterHash() + '/setting',
+          '设置',
+          900 * window.devicePixelRatio,
+          600 * window.devicePixelRatio,
+          false
+        );
+      }
+      break;
+    case 'btnShowAbout':
+      {
+        // 使用 WPS 原生对话框显示关于界面
+        window.Application.ShowDialog(
+          Util.GetUrlPath() + Util.GetRouterHash() + '/about',
+          '关于',
+          450 * window.devicePixelRatio,
+          650 * window.devicePixelRatio,
+          false
+        );
       }
       break;
     case 'btnShowDebug':
       {
         let tsId = window.Application.PluginStorage.getItem('debug_taskpane_id');
         if (!tsId) {
-          let tskpane = window.Application.CreateTaskPane(Util.GetUrlPath() + Util.GetRouterHash() + '/debug', '调试面板');
+          let tskpane = window.Application.CreateTaskPane(
+            Util.GetUrlPath() + Util.GetRouterHash() + '/debug',
+            '调试面板'
+          );
           let id = tskpane.ID;
           window.Application.PluginStorage.setItem('debug_taskpane_id', id);
           tskpane.DockPosition = window.Application.Enum.msoCTPDockPositionRight;
@@ -78,6 +92,8 @@ function GetImage(control) {
       return 'images/robot.svg';
     case 'btnShowSetting':
       return 'images/setting.svg';
+    case 'btnShowAbout':
+      return 'images/about.svg';
     case 'btnShowDebug':
       return 'images/debug.svg';
     default:

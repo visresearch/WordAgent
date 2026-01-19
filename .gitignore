@@ -28,6 +28,7 @@ wps-addon-publish
 
 # python
 __pycache__
+data/
 *.db
 *.pyc
 *.pyo

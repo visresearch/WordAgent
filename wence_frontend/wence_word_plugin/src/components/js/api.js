@@ -1,14 +1,14 @@
 /**
  * WenCe AI Writing Assistant - API 请求库
- * 
+ *
  * 封装所有与后端的 HTTP 请求和响应处理
- * 
+ *
  * 使用方式：
  * import api from './js/api.js'
- * 
+ *
  * // 发送文档修改请求
  * const result = await api.modifyDocument(jsonData, userQuestion)
- * 
+ *
  * // 发送普通聊天请求
  * const result = await api.chat(message)
  */
@@ -17,7 +17,7 @@
 
 const CONFIG = {
   baseURL: 'http://localhost:3880',
-  timeout: 30000,  // 30秒超时
+  timeout: 30000, // 30秒超时
   headers: {
     'Content-Type': 'application/json'
   }
@@ -33,7 +33,7 @@ const CONFIG = {
  */
 async function request(url, options = {}) {
   const fullURL = `${CONFIG.baseURL}${url}`;
-  
+
   const fetchOptions = {
     method: options.method || 'GET',
     headers: {
@@ -42,31 +42,31 @@ async function request(url, options = {}) {
     },
     ...options
   };
-  
+
   // 如果有 body，序列化为 JSON
   if (options.body && typeof options.body === 'object') {
     fetchOptions.body = JSON.stringify(options.body);
   }
-  
+
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), options.timeout || CONFIG.timeout);
-    
+
     fetchOptions.signal = controller.signal;
-    
+
     const response = await fetch(fullURL, fetchOptions);
     clearTimeout(timeoutId);
-    
+
     // 解析响应
     const contentType = response.headers.get('content-type');
     let data;
-    
+
     if (contentType && contentType.includes('application/json')) {
       data = await response.json();
     } else {
       data = await response.text();
     }
-    
+
     if (!response.ok) {
       return {
         success: false,
@@ -75,13 +75,12 @@ async function request(url, options = {}) {
         data
       };
     }
-    
+
     return {
       success: true,
       data,
       status: response.status
     };
-    
   } catch (error) {
     if (error.name === 'AbortError') {
       return {
@@ -90,7 +89,7 @@ async function request(url, options = {}) {
         code: 'TIMEOUT'
       };
     }
-    
+
     return {
       success: false,
       error: error.message || '网络请求失败',
@@ -104,7 +103,7 @@ async function request(url, options = {}) {
 /**
  * 流式聊天 API（支持 SSE）
  * 用于实时接收 AI 回复
- * 
+ *
  * @param {string} message - 用户消息
  * @param {Object} options - 配置选项
  * @param {Function} options.onMessage - 收到消息时的回调
@@ -113,10 +112,18 @@ async function request(url, options = {}) {
  * @returns {Object} - 包含 abort 方法的控制对象
  */
 function chatStream(message, options = {}) {
-  const { onMessage, onError, onComplete, mode = 'agent', model = 'auto', documentJson = null, history = [] } = options;
-  
+  const {
+    onMessage,
+    onError,
+    onComplete,
+    mode = 'agent',
+    model = 'auto',
+    documentJson = null,
+    history = []
+  } = options;
+
   const controller = new AbortController();
-  
+
   const execute = async () => {
     try {
       const response = await fetch(`${CONFIG.baseURL}/api/chat/stream`, {
@@ -132,31 +139,31 @@ function chatStream(message, options = {}) {
         }),
         signal: controller.signal
       });
-      
+
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
-      
+
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
-      
+
       while (true) {
         const { done, value } = await reader.read();
-        
+
         if (done) {
           if (onComplete) {
             onComplete();
           }
           break;
         }
-        
+
         buffer += decoder.decode(value, { stream: true });
-        
+
         // 处理 SSE 格式
         const lines = buffer.split('\n');
         buffer = lines.pop() || '';
-        
+
         for (const line of lines) {
           if (line.startsWith('data: ')) {
             const data = line.slice(6);
@@ -180,7 +187,6 @@ function chatStream(message, options = {}) {
           }
         }
       }
-      
     } catch (error) {
       if (error.name !== 'AbortError') {
         if (onError) {
@@ -189,30 +195,17 @@ function chatStream(message, options = {}) {
       }
     }
   };
-  
+
   execute();
-  
+
   return {
     abort: () => controller.abort()
   };
 }
 
 /**
- * 健康检查 API
- * 检查后端服务是否可用
- * 
- * @returns {Promise<Object>} - 服务状态
- */
-async function healthCheck() {
-  return await request('/api/health', {
-    method: 'GET',
-    timeout: 5000
-  });
-}
-
-/**
  * 获取可用模型列表
- * 
+ *
  * @returns {Promise<Object>} - 模型列表
  */
 async function getModels() {
@@ -225,7 +218,7 @@ async function getModels() {
 
 /**
  * 获取指定文档的聊天历史
- * 
+ *
  * @param {string} docId - 文档唯一标识符
  * @param {Object} options - 选项
  * @param {number} options.limit - 返回消息数量限制
@@ -242,7 +235,7 @@ async function getChatHistory(docId, options = {}) {
 
 /**
  * 保存聊天消息
- * 
+ *
  * @param {Object} messageData - 消息数据
  * @param {string} messageData.docId - 文档唯一标识符
  * @param {string} messageData.docName - 文档名称
@@ -263,7 +256,7 @@ async function saveMessage(messageData) {
 
 /**
  * 清空指定文档的聊天历史
- * 
+ *
  * @param {string} docId - 文档唯一标识符
  * @returns {Promise<Object>} - 操作结果
  */
@@ -275,7 +268,7 @@ async function clearChatHistory(docId) {
 
 /**
  * 获取所有有聊天记录的文档列表
- * 
+ *
  * @param {number} limit - 返回数量限制
  * @returns {Promise<Object>} - 文档列表
  */
@@ -310,24 +303,140 @@ function getConfig() {
   return { ...CONFIG };
 }
 
+/**
+ * 获取指定 API 提供商支持的模型列表
+ * @param {Object} params - 请求参数
+ * @param {string} params.baseUrl - API 基础地址
+ * @param {string} params.apiKey - API 密钥
+ * @returns {Promise<Object>} - 返回模型列表
+ */
+async function fetchAvailableModels({ baseUrl, apiKey }) {
+  try {
+    // 先尝试调用后端代理接口
+    const result = await request('/api/chat/providers/models', {
+      method: 'POST',
+      body: {
+        base_url: baseUrl,
+        api_key: apiKey
+      }
+    });
+
+    if (result.success && result.data.models) {
+      return {
+        success: true,
+        models: result.data.models
+      };
+    }
+
+    // 如果后端代理失败，直接调用 OpenAI 兼容接口
+    const modelsUrl = baseUrl.replace(/\/$/, '') + '/models';
+    const response = await fetch(modelsUrl, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    
+    // 兼容 OpenAI 格式
+    let models = [];
+    if (data.data && Array.isArray(data.data)) {
+      models = data.data.map(m => ({
+        id: m.id,
+        name: m.id
+      }));
+    } else if (Array.isArray(data)) {
+      models = data.map(m => ({
+        id: typeof m === 'string' ? m : m.id,
+        name: typeof m === 'string' ? m : (m.name || m.id)
+      }));
+    }
+
+    return {
+      success: true,
+      models
+    };
+  } catch (error) {
+    console.error('获取模型列表失败:', error);
+    throw new Error(error.message || '获取模型列表失败');
+  }
+}
+
+// ============== 设置管理 API ==============
+
+/**
+ * 获取用户设置
+ * @returns {Promise<Object>} 设置数据
+ */
+async function getSettings() {
+  try {
+    const response = await request('/api/settings', {
+      method: 'GET'
+    });
+
+    if (!response.success) {
+      console.error('获取设置失败:', response.error);
+      return { providers: [], currentProvider: '' };
+    }
+
+    return response.data;
+  } catch (error) {
+    console.error('获取设置异常:', error);
+    return { providers: [], currentProvider: '' };
+  }
+}
+
+/**
+ * 保存用户设置
+ * @param {Object} settings - 设置数据
+ * @returns {Promise<Object>} 保存结果
+ */
+async function saveSettings(settings) {
+  try {
+    const response = await request('/api/settings', {
+      method: 'POST',
+      body: settings
+    });
+
+    if (!response.success) {
+      throw new Error(response.error || '保存设置失败');
+    }
+
+    return response;
+  } catch (error) {
+    console.error('保存设置异常:', error);
+    throw error;
+  }
+}
+
 // ============== 导出 ==============
 
 export default {
   // API 方法
   chatStream,
-  healthCheck,
   getModels,
-  
+  fetchAvailableModels,
+
   // 聊天历史 API
   getChatHistory,
   saveMessage,
   clearChatHistory,
   getDocuments,
-  
+
+  // 设置管理 API
+  getSettings,
+  saveSettings,
+
   // 配置方法
   updateConfig,
   getConfig,
-  
+
   // 底层请求方法（供扩展使用）
   request
 };
@@ -335,12 +444,14 @@ export default {
 // 也支持命名导出
 export {
   chatStream,
-  healthCheck,
   getModels,
+  fetchAvailableModels,
   getChatHistory,
   saveMessage,
   clearChatHistory,
   getDocuments,
+  getSettings,
+  saveSettings,
   updateConfig,
   getConfig,
   request

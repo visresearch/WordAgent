@@ -4,157 +4,80 @@
 """
 
 import asyncio
+import json
+from pathlib import Path
 
 from fastapi import APIRouter
 from openai import AsyncOpenAI
+from pydantic import BaseModel
 
 from app.core.config import settings
 from app.models.chat import ModelInfo, ModelsResponse
 
 router = APIRouter()
 
-
-# ============== 模型白名单配置 ==============
-# 格式: "模型ID": {"name": "显示名称", "provider": "提供商"}
-# 如果模型不在白名单中，将被过滤掉
-
-MODEL_WHITELIST: dict[str, dict[str, str]] = {
-    # OpenAI 系列
-    "gpt-4o": {"name": "GPT-4o", "provider": "OpenAI"},
-    "gpt-5-mini": {"name": "GPT-5 mini", "provider": "OpenAI"},
-    "gpt-5": {"name": "GPT-5", "provider": "OpenAI"},
-    "gpt-5.1": {"name": "GPT-5.1", "provider": "OpenAI"},
-    "gpt-5.2": {"name": "GPT-5.2", "provider": "OpenAI"},
-    # Claude 系列
-    "claude-haiku-4-5-20251001": {"name": "Claude Haiku 4.5", "provider": "Anthropic"},
-    "claude-sonnet-4-5-20250929": {"name": "Claude Sonnet 4.5", "provider": "Anthropic"},
-    "claude-sonnet-4-5-20250929-thinking": {"name": "Claude Sonnet 4.5 Thinking", "provider": "Anthropic"},
-    "claude-opus-4-20250514-thinking": {"name": "Claude Opus 4 Thinking", "provider": "Anthropic"},
-    "claude-opus-4-20250514": {"name": "Claude Opus 4", "provider": "Anthropic"},
-    "claude-opus-4-5-20251101": {"name": "Claude Opus 4.5", "provider": "Anthropic"},
-    # Gemini 系列
-    "gemini-2.5-pro": {"name": "Gemini 2.5 Pro", "provider": "Google"},
-    "gemini-2.5-flash": {"name": "Gemini 2.5 Flash", "provider": "Google"},
-    "gemini-3-pro-preview": {"name": "Gemini 3 Pro (Preview)", "provider": "Google"},
-    # DeepSeek 系列
-    "deepseek-r1": {"name": "DeepSeek R1", "provider": "DeepSeek"},
-    "deepseek-v3": {"name": "DeepSeek V3", "provider": "DeepSeek"},
-    "deepseek-v3.2-thinking": {"name": "DeepSeek V3.2 Thinking", "provider": "DeepSeek"},
-    # 智谱 GLM 系列
-    "glm-4.7": {"name": "GLM-4.7", "provider": "智谱AI"},
-    # 千问 Qwen 系列
-    "qwen-plus": {"name": "Qwen Plus", "provider": "千问AI"},
-    "qwen-turbo": {"name": "Qwen Turbo", "provider": "千问AI"},
-    "qwen-max": {"name": "Qwen Max", "provider": "千问AI"},
-}
+# 设置文件路径
+SETTINGS_FILE = Path("config/user_settings.json")
 
 
-# ============== 平台配置 ==============
+# ============== 模型名称格式化 ==============
 
 
-class PlatformConfig:
-    """平台配置"""
-
-    def __init__(self, name: str, api_key: str, base_url: str, enabled: bool = True):
-        self.name = name
-        self.api_key = api_key
-        self.base_url = base_url
-        self.enabled = enabled and bool(api_key)  # 没有 API Key 则禁用
-
-
-def get_platforms() -> list[PlatformConfig]:
-    """获取所有平台配置"""
-    # 处理 OpenAI base_url，确保以 /v1 结尾
-    openai_base_url = settings.OPENAI_BASE_URL or "https://api.openai.com/v1"
-    if not openai_base_url.endswith("/v1") and not openai_base_url.endswith("/v1/"):
-        openai_base_url = openai_base_url.rstrip("/") + "/v1"
-
-    return [
-        PlatformConfig(name="OpenAI", api_key=settings.OPENAI_API_KEY, base_url=openai_base_url),
-        PlatformConfig(name="智谱AI", api_key=settings.ZHIPU_API_KEY, base_url=settings.ZHIPU_BASE_URL),
-        PlatformConfig(name="千问AI", api_key=settings.QWEN_API_KEY, base_url=settings.QWEN_BASE_URL),
-        # 可以继续添加更多平台...
-    ]
-
-
-# ============== 模型获取逻辑 ==============
-
-
-async def fetch_models_from_platform(platform: PlatformConfig) -> list[str]:
+def format_model_name(model_id: str) -> str:
     """
-    从单个平台获取模型列表
-    返回模型 ID 列表
+    格式化模型 ID 为显示名称
+    规则：首字母大写，将 - 替换为空格
+    
+    示例：
+    - gpt-4o -> Gpt 4o
+    - claude-sonnet-4-5 -> Claude Sonnet 4 5
+    - deepseek-v3 -> Deepseek V3
     """
-    if not platform.enabled:
-        return []
+    # 将 - 替换为空格，然后每个单词首字母大写
+    words = model_id.split('-')
+    formatted_words = [word.capitalize() for word in words]
+    return ' '.join(formatted_words)
 
+
+def load_user_settings() -> dict:
+    """加载用户设置"""
     try:
-        client = AsyncOpenAI(api_key=platform.api_key, base_url=platform.base_url)
-
-        models = await client.models.list()
-        model_ids = [m.id for m in models.data]
-        print(f"✅ [{platform.name}] 获取到 {len(model_ids)} 个模型")
-        return model_ids
-
+        if SETTINGS_FILE.exists():
+            with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        return {"providers": []}
     except Exception as e:
-        print(f"⚠️ [{platform.name}] 获取模型失败: {e}")
-        return []
+        print(f"加载用户设置失败: {e}")
+        return {"providers": []}
 
 
-async def fetch_all_models() -> list[ModelInfo]:
+def get_enabled_models_from_settings() -> list[ModelInfo]:
     """
-    从所有平台获取模型，并通过白名单过滤
-    顺序严格按照白名单定义的顺序
+    从用户设置中获取已启用的模型
     """
-    platforms = get_platforms()
-
-    # 并发获取所有平台的模型
-    tasks = [fetch_models_from_platform(p) for p in platforms]
-    results = await asyncio.gather(*tasks)
-
-    # 合并所有模型 ID（去重）
-    all_model_ids = set()
-    for model_ids in results:
-        all_model_ids.update(model_ids)
-
-    print(f"📊 共获取到 {len(all_model_ids)} 个模型（去重后）")
-
-    # 按白名单顺序过滤（保持白名单中定义的顺序）
-    filtered_models = []
-    for model_id, config in MODEL_WHITELIST.items():
-        if model_id in all_model_ids:
-            filtered_models.append(
-                ModelInfo(id=model_id, name=config["name"], provider=config["provider"], description="")
-            )
-
-    print(f"✅ 白名单过滤后剩余 {len(filtered_models)} 个模型")
-    return filtered_models
-
-
-# ============== 缓存机制 ==============
-
-_models_cache: list[ModelInfo] | None = None
-_cache_time: float = 0
-CACHE_DURATION = 300  # 缓存 5 分钟
-
-
-async def get_cached_models() -> list[ModelInfo]:
-    """获取模型列表（带缓存）"""
-    global _models_cache, _cache_time
-
-    import time
-
-    current_time = time.time()
-
-    # 检查缓存是否有效
-    if _models_cache is not None and (current_time - _cache_time) < CACHE_DURATION:
-        return _models_cache
-
-    # 重新获取
-    _models_cache = await fetch_all_models()
-    _cache_time = current_time
-
-    return _models_cache
+    settings_data = load_user_settings()
+    enabled_models = []
+    
+    for provider in settings_data.get("providers", []):
+        if not provider.get("enabled", True):
+            continue
+            
+        provider_name = provider.get("name", "Unknown")
+        
+        for model in provider.get("models", []):
+            if model.get("enabled", False):
+                model_id = model.get("id", "")
+                model_name = model.get("name") or format_model_name(model_id)
+                
+                enabled_models.append(
+                    ModelInfo(
+                        id=model_id,
+                        name=model_name,
+                        provider=provider_name
+                    )
+                )
+    
+    return enabled_models
 
 
 # ============== API 路由 ==============
@@ -163,10 +86,11 @@ async def get_cached_models() -> list[ModelInfo]:
 @router.get("/models", response_model=ModelsResponse)
 async def get_models():
     """
-    获取可用模型列表（聚合多平台 + 白名单过滤）
+    获取用户启用的模型列表
+    从用户设置中读取已添加且启用的模型
     """
     try:
-        models = await get_cached_models()
+        models = get_enabled_models_from_settings()
 
         # 在列表开头添加 Auto 选项
         auto_model = ModelInfo(id="auto", name="Auto", provider="WenCe AI", description="自动选择最佳模型")
@@ -184,11 +108,8 @@ async def get_models():
 @router.post("/models/refresh")
 async def refresh_models():
     """
-    强制刷新模型缓存
+    刷新模型列表（重新从设置文件读取）
     """
-    global _models_cache, _cache_time
-    _models_cache = None
-    _cache_time = 0
-
-    models = await get_cached_models()
+    models = get_enabled_models_from_settings()
     return {"success": True, "message": f"已刷新，共 {len(models)} 个可用模型"}
+
