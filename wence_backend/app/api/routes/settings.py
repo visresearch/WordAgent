@@ -18,6 +18,7 @@ SETTINGS_FILE = Path("config/user_settings.json")
 
 class ProviderConfig(BaseModel):
     """提供商配置"""
+
     name: str
     baseUrl: str
     apiKey: str
@@ -27,6 +28,7 @@ class ProviderConfig(BaseModel):
 
 class UserSettings(BaseModel):
     """用户设置"""
+
     providers: list[ProviderConfig] = []
 
 
@@ -35,7 +37,7 @@ async def get_settings() -> UserSettings:
     """获取用户设置"""
     try:
         if SETTINGS_FILE.exists():
-            with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 return UserSettings(**data)
         # 返回默认设置
@@ -51,11 +53,11 @@ async def save_settings(settings: UserSettings):
     try:
         # 确保配置目录存在
         SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        
+
         # 保存设置
-        with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
+        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
             json.dump(settings.model_dump(), f, ensure_ascii=False, indent=2)
-        
+
         return {"message": "设置保存成功"}
     except Exception as e:
         print(f"保存设置失败: {e}")

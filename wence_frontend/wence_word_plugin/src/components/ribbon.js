@@ -28,10 +28,11 @@ function OnAction(control) {
           let id = tskpane.ID;
           window.Application.PluginStorage.setItem('ai_taskpane_id', id);
           tskpane.DockPosition = window.Application.Enum.msoCTPDockPositionRight;
-          tskpane.Width = 350;
+          tskpane.Width = window.devicePixelRatio * 500; // 不知道为啥无效
           tskpane.Visible = true;
         } else {
           let tskpane = window.Application.GetTaskPane(tsId);
+          tskpane.Width = window.devicePixelRatio * 500; // 不知道为啥无效
           tskpane.Visible = !tskpane.Visible;
         }
       }

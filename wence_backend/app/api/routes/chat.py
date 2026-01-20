@@ -13,6 +13,7 @@ from app.models.chat import ChatRequest
 
 router = APIRouter()
 
+
 async def generate_stream(request: ChatRequest):
     """生成流式响应 - 使用 Agent + Tool Calling"""
     async for chunk in process_writing_request_stream(
@@ -23,6 +24,7 @@ async def generate_stream(request: ChatRequest):
         mode=request.mode,  # 传递对话模式
     ):
         yield chunk
+
 
 @router.post("/stream")
 async def chat_stream(request: ChatRequest):

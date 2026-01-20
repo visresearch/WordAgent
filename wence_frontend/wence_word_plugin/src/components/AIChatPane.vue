@@ -81,13 +81,60 @@
           </div>
           <div class="message-content">
             <span
-              v-if="msg.role === 'assistant' && !msg.content && isLoading"
+              v-if="msg.role === 'assistant' && !msg.content && !msg.thinking && !msg.statusText && isLoading"
               class="typing"
-            >AI正在思考中...</span>
+            >💭 AI正在思考中...</span>
+            <!-- 状态提示文本 -->
+            <span
+              v-if="msg.statusText"
+              class="typing"
+            >{{ msg.statusText }}</span>
+            <!-- Thinking 内容（深度思考过程） -->
+            <div v-if="msg.thinking" class="thinking-block" :class="{ expanded: msg.thinkingExpanded }">
+              <div class="thinking-header" @click="toggleThinking(index)">
+                <svg
+                  class="thinking-icon"
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <circle cx="12" cy="12" r="10" />
+                  <path d="M12 6v6l4 2" />
+                </svg>
+                <span class="thinking-label">深度思考</span>
+                <span v-if="msg.thinkingDuration" class="thinking-duration">{{ msg.thinkingDuration }}</span>
+                <svg
+                  class="thinking-arrow"
+                  :class="{ rotated: msg.thinkingExpanded }"
+                  width="12"
+                  height="12"
+                  viewBox="0 0 16 16"
+                  fill="currentColor"
+                >
+                  <path d="M8 10.293L3.854 6.146a.5.5 0 1 1 .708-.707L8 8.879l3.438-3.44a.5.5 0 0 1 .708.708L8 10.293z" />
+                </svg>
+              </div>
+              <div v-show="msg.thinkingExpanded" class="thinking-content">
+                {{ msg.thinking }}
+              </div>
+            </div>
             <!-- 用户消息直接显示文本 -->
             <span v-else-if="msg.role === 'user'">{{ msg.content }}</span>
-            <!-- AI 消息使用 Markdown 渲染 -->
-            <div v-else class="markdown-body" v-html="renderMarkdown(msg.content)"></div>
+            <!-- AI 消息使用 contentParts 渲染，区分 status 和 text -->
+            <template v-else-if="msg.contentParts && msg.contentParts.length > 0">
+              <div v-for="(part, partIndex) in msg.contentParts" :key="partIndex">
+                <div v-if="part.type === 'status'" class="status-line">
+                  <span class="typing">{{ part.content }}</span>
+                </div>
+                <div v-else-if="part.type === 'text'" class="markdown-body" v-html="renderMarkdown(part.content)"></div>
+              </div>
+            </template>
+            <!-- 兼容旧的 content 字段 -->
+            <!-- eslint-disable-next-line vue/no-v-html -->
+            <div v-else-if="msg.content" class="markdown-body" v-html="renderMarkdown(msg.content)"></div>
           </div>
         </div>
         <!-- AI 消息的操作图标按钮（在消息框外下方） -->
@@ -472,6 +519,15 @@ export default {
     },
 
     /**
+     * 切换 thinking 内容的展开/收起状态
+     */
+    toggleThinking(index) {
+      if (this.messages[index]) {
+        this.messages[index].thinkingExpanded = !this.messages[index].thinkingExpanded;
+      }
+    },
+
+    /**
      * 重试生成 - 重新发送上一条用户消息
      */
     async retryMessage(aiMessageIndex) {
@@ -506,7 +562,13 @@ export default {
       this.messages.push({
         role: 'assistant',
         content: '',
-        documentJson: null
+        contentParts: [],
+        thinking: '',
+        thinkingExpanded: true,
+        thinkingStartTime: null,
+        thinkingDuration: '',
+        documentJson: null,
+        statusText: '' // 状态提示文本
       });
 
       // 用于检测并过滤 JSON 输出
@@ -520,7 +582,32 @@ export default {
         history: this.messages.slice(0, -1).slice(-10),
 
         onMessage: (data) => {
+          // 处理 thinking 内容（深度思考）
+          if (data.type === 'thinking' && data.content) {
+            // 记录思考开始时间
+            if (!this.messages[newAiMessageIndex].thinkingStartTime) {
+              this.messages[newAiMessageIndex].thinkingStartTime = Date.now();
+            }
+            this.messages[newAiMessageIndex].thinking += data.content;
+            this.scrollToBottom();
+            return;
+          }
+
+          if (data.type === 'status' && data.content) {
+            // 更新状态文本
+            this.messages[newAiMessageIndex].statusText = data.content;
+            this.scrollToBottom();
+            return;
+          }
+
           if (data.type === 'text' && data.content) {
+            // 收到正式内容时，计算思考耗时并收起思考块
+            if (this.messages[newAiMessageIndex].thinkingStartTime && !this.messages[newAiMessageIndex].thinkingDuration) {
+              const duration = Math.round((Date.now() - this.messages[newAiMessageIndex].thinkingStartTime) / 1000);
+              this.messages[newAiMessageIndex].thinkingDuration = `${duration}秒`;
+              this.messages[newAiMessageIndex].thinkingExpanded = false;
+            }
+            
             if (jsonDetected) {
               return;
             }
@@ -573,12 +660,18 @@ export default {
 
         onComplete: () => {
           this.isLoading = false;
+
+          // 确保 thinking 块已折叠
+          const msg = this.messages[newAiMessageIndex];
+          if (msg.thinking && msg.thinkingExpanded) {
+            msg.thinkingExpanded = false;
+          }
+
           this.scrollToBottom();
 
           // 保存新的 AI 回复到历史
-          const aiMsg = this.messages[newAiMessageIndex];
-          if (aiMsg.content) {
-            this.saveMessageToHistory('assistant', aiMsg.content, aiMsg.documentJson, null);
+          if (msg.content) {
+            this.saveMessageToHistory('assistant', msg.content, msg.documentJson, null, msg.contentParts);
           }
         }
       });
@@ -772,6 +865,7 @@ export default {
           this.messages = result.data.messages.map((msg) => ({
             role: msg.role,
             content: msg.content,
+            contentParts: msg.contentParts || [], // 恢复 contentParts
             documentJson: msg.documentJson || null,
             selectionContext: msg.selectionContext || null
           }));
@@ -796,7 +890,7 @@ export default {
     /**
      * 保存消息到后端
      */
-    async saveMessageToHistory(role, content, documentJson = null, selectionContext = null) {
+    async saveMessageToHistory(role, content, documentJson = null, selectionContext = null, contentParts = null) {
       if (!this.currentDocId) {
         return;
       }
@@ -809,6 +903,7 @@ export default {
           content,
           documentJson,
           selectionContext,
+          contentParts,
           model: this.selectedModel || 'auto',
           mode: this.mode
         });
@@ -1030,7 +1125,13 @@ export default {
       this.messages.push({
         role: 'assistant',
         content: '',
-        documentJson: null // 保存文档 JSON 数据
+        contentParts: [], // 存储消息各部分（status和text）
+        documentJson: null, // 保存文档 JSON 数据
+        thinking: '',
+        thinkingExpanded: true,
+        thinkingStartTime: null,
+        thinkingDuration: '',
+        statusText: '' // 状态提示文本
       });
 
       // 用于检测并过滤 JSON 输出
@@ -1044,7 +1145,39 @@ export default {
         history: this.messages.slice(0, -1).slice(-10), // 排除刚添加的空消息
 
         onMessage: (data) => {
+          // 处理状态消息 - 添加到contentParts
+          if (data.type === 'status' && data.content) {
+            this.messages[aiMessageIndex].contentParts.push({
+              type: 'status',
+              content: data.content
+            });
+            this.scrollToBottom();
+            return;
+          }
+
+          // 处理 thinking 内容
+          if (data.type === 'thinking' && data.content) {
+            const msg = this.messages[aiMessageIndex];
+            if (!msg.thinkingStartTime) {
+              msg.thinkingStartTime = Date.now();
+            }
+            msg.thinking += data.content;
+            // 实时更新思考时长
+            const elapsed = ((Date.now() - msg.thinkingStartTime) / 1000).toFixed(0);
+            msg.thinkingDuration = `${elapsed}秒`;
+            this.scrollToBottom();
+            return;
+          }
+
           if (data.type === 'text' && data.content) {
+            // 收到正式内容时，计算最终思考耗时并自动折叠
+            const msg = this.messages[aiMessageIndex];
+            if (msg.thinkingStartTime && msg.thinkingExpanded) {
+              const duration = Math.round((Date.now() - msg.thinkingStartTime) / 1000);
+              msg.thinkingDuration = `${duration}秒`;
+              msg.thinkingExpanded = false;
+            }
+
             // 一旦检测到 JSON，后续所有文本都跳过
             if (jsonDetected) {
               return;
@@ -1079,7 +1212,17 @@ export default {
               return;
             }
 
+            // 添加到content和contentParts
             this.messages[aiMessageIndex].content += content;
+            
+            // 添加到contentParts（累加到最后一个text部分）
+            const parts = this.messages[aiMessageIndex].contentParts;
+            if (parts.length > 0 && parts[parts.length - 1].type === 'text') {
+              parts[parts.length - 1].content += content;
+            } else {
+              parts.push({ type: 'text', content });
+            }
+            
             this.scrollToBottom();
           } else if (data.type === 'json' && data.content) {
             // JSON 数据：保存用于文档转换
@@ -1116,12 +1259,18 @@ export default {
             this.clearSelection();
           }
           this.isLoading = false;
+
+          // 确保 thinking 块已折叠（如果有的话）
+          const msg = this.messages[aiMessageIndex];
+          if (msg.thinking && msg.thinkingExpanded) {
+            msg.thinkingExpanded = false;
+          }
+
           this.scrollToBottom();
 
           // 保存 AI 回复到历史
-          const aiMsg = this.messages[aiMessageIndex];
-          if (aiMsg.content) {
-            this.saveMessageToHistory('assistant', aiMsg.content, aiMsg.documentJson, null);
+          if (msg.content) {
+            this.saveMessageToHistory('assistant', msg.content, msg.documentJson, null, msg.contentParts);
           }
         }
       });
@@ -1332,6 +1481,98 @@ export default {
   height: 100%;
 }
 
+/* Thinking 思考块样式 */
+.thinking-block {
+  margin-bottom: 8px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #f8f9fc 0%, #f0f4ff 100%);
+  border: 1px solid #e0e6f6;
+  overflow: hidden;
+  transition: all 0.3s ease;
+}
+
+.thinking-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.2s;
+}
+
+.thinking-header:hover {
+  background: rgba(102, 126, 234, 0.08);
+}
+
+.thinking-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: #667eea;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.thinking-block:not(.expanded) .thinking-icon {
+  animation: none;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.thinking-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: #5a6378;
+  flex: 1;
+}
+
+.thinking-duration {
+  font-size: 11px;
+  color: #8893a7;
+  margin-right: 4px;
+}
+
+.thinking-arrow {
+  color: #8893a7;
+  transition: transform 0.3s ease;
+}
+
+.thinking-arrow.rotated {
+  transform: rotate(180deg);
+}
+
+.thinking-content {
+  padding: 0 12px 12px 40px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #5a6378;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  max-height: 300px;
+  overflow-y: auto;
+  border-top: 1px solid #e8ecf4;
+  margin-top: 0;
+  padding-top: 10px;
+}
+
+.thinking-content::-webkit-scrollbar {
+  width: 4px;
+}
+
+.thinking-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.thinking-content::-webkit-scrollbar-thumb {
+  background: #c5cdd8;
+  border-radius: 2px;
+}
+
 /* 消息容器 */
 .message-wrapper {
   display: flex;
@@ -1346,6 +1587,31 @@ export default {
 
 .ai-wrapper {
   align-items: flex-start;
+}
+
+/* 状态消息样式 */
+.status-wrapper {
+  align-items: center;
+}
+
+.status-message {
+  width: 100%;
+  text-align: center;
+  padding: 4px 0;
+}
+
+.status-message .typing {
+  display: inline-block;
+}
+
+/* Status 行样式 */
+.status-line {
+  margin: 4px 0;
+  padding: 2px 0;
+}
+
+.status-line .typing {
+  display: block;
 }
 
 .message {
@@ -1578,7 +1844,6 @@ export default {
 
 .typing {
   color: #888;
-  font-style: italic;
 }
 
 .chat-input-area {

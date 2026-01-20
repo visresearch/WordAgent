@@ -36,7 +36,7 @@ def load_user_settings() -> dict:
     """加载用户设置"""
     try:
         if SETTINGS_FILE.exists():
-            with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
         return {"providers": []}
     except Exception as e:
@@ -50,12 +50,12 @@ def normalize_base_url(base_url: str) -> str:
     - 移除末尾的 /
     - 如果没有版本后缀（如 /v1），自动添加 /v1
     """
-    url = base_url.rstrip('/')
-    
+    url = base_url.rstrip("/")
+
     # 检查是否已有版本后缀（如 /v1, /v2 等）
-    if not re.search(r'/v\d+$', url):
-        url = url + '/v1'
-    
+    if not re.search(r"/v\d+$", url):
+        url = url + "/v1"
+
     return url
 
 
@@ -63,40 +63,40 @@ def get_providers_from_settings() -> dict[str, LLMProvider]:
     """从用户设置中获取所有已启用的提供商配置"""
     settings = load_user_settings()
     providers = {}
-    
+
     for provider_data in settings.get("providers", []):
         if not provider_data.get("enabled", True):
             continue
-            
+
         name = provider_data.get("name", "").lower()
         if not name:
             continue
-            
+
         providers[name] = LLMProvider(
             name=provider_data.get("name", ""),
             api_key=provider_data.get("apiKey", ""),
             base_url=normalize_base_url(provider_data.get("baseUrl", "")),
-            models=provider_data.get("models", [])
+            models=provider_data.get("models", []),
         )
-    
+
     return providers
 
 
 def find_provider_for_model(model_id: str) -> tuple[LLMProvider | None, str]:
     """
     根据模型 ID 找到对应的提供商
-    
+
     Returns:
         (provider, actual_model_id) - 提供商配置和实际模型ID
     """
     providers = get_providers_from_settings()
-    
+
     # 遍历所有 provider，查找包含该模型的 provider
     for provider_name, provider in providers.items():
         for model in provider.models:
             if model.get("id") == model_id and model.get("enabled", False):
                 return provider, model_id
-    
+
     # 如果没找到精确匹配，返回 None
     return None, model_id
 
@@ -104,12 +104,12 @@ def find_provider_for_model(model_id: str) -> tuple[LLMProvider | None, str]:
 def get_first_available_model() -> tuple[LLMProvider | None, str]:
     """获取第一个可用的模型"""
     providers = get_providers_from_settings()
-    
+
     for provider_name, provider in providers.items():
         for model in provider.models:
             if model.get("enabled", False):
                 return provider, model.get("id", "")
-    
+
     return None, ""
 
 
@@ -131,10 +131,10 @@ class LLMClientManager:
         """
         # 解析模型，处理 auto
         actual_model_id = cls.resolve_model(model_id)
-        
+
         # 查找对应的 provider
         provider, _ = find_provider_for_model(actual_model_id)
-        
+
         if not provider:
             raise ValueError(f"未找到模型 {actual_model_id} 对应的提供商配置，请在设置中添加")
 
@@ -143,16 +143,13 @@ class LLMClientManager:
 
         # 使用 provider name + base_url 作为缓存 key
         cache_key = f"{provider.name}:{provider.base_url}"
-        
+
         # 使用缓存
         if cache_key in cls._clients:
             return cls._clients[cache_key]
 
         # 创建新客户端
-        client = AsyncOpenAI(
-            api_key=provider.api_key, 
-            base_url=provider.base_url
-        )
+        client = AsyncOpenAI(api_key=provider.api_key, base_url=provider.base_url)
 
         cls._clients[cache_key] = client
         return client

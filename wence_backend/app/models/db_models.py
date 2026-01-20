@@ -53,6 +53,8 @@ class ChatMessage(Base):
     document_json = Column(JSON, nullable=True)
     # 选区上下文（用户选中的内容信息，可选）
     selection_context = Column(JSON, nullable=True)
+    # 结构化消息内容（包含 status 和 text 类型的部分）
+    content_parts = Column(JSON, nullable=True)
     # 使用的模型
     model = Column(String(64), nullable=True)
     # 使用的模式（agent/ask）
@@ -77,6 +79,7 @@ class ChatMessage(Base):
             "content": self.content,
             "documentJson": self.document_json,
             "selectionContext": self.selection_context,
+            "contentParts": self.content_parts,
             "model": self.model,
             "mode": self.mode,
             "createdAt": self.created_at.isoformat() if self.created_at else None,

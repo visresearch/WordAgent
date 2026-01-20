@@ -49,6 +49,7 @@ class ChatHistoryService:
         content: str,
         document_json: dict | None = None,
         selection_context: dict | None = None,
+        content_parts: list[dict] | None = None,
         model: str | None = None,
         mode: str | None = None,
         doc_name: str | None = None,
@@ -62,6 +63,7 @@ class ChatHistoryService:
             content: 消息内容
             document_json: AI 生成的文档 JSON
             selection_context: 选区上下文
+            content_parts: 结构化消息内容（包含 status 和 text 类型）
             model: 使用的模型
             mode: 使用的模式
             doc_name: 文档名称
@@ -79,6 +81,7 @@ class ChatHistoryService:
             content=content,
             document_json=document_json,
             selection_context=selection_context,
+            content_parts=content_parts,
             model=model,
             mode=mode,
         )

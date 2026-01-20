@@ -31,7 +31,7 @@
         </div>
         <div class="info-item">
           <span class="info-label">开发者</span>
-          <span class="info-value">WenCe Team</span>
+          <span class="info-value">日月星辰</span>
         </div>
       </div>
 

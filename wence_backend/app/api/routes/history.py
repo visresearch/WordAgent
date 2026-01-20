@@ -26,6 +26,7 @@ class SaveMessageRequest(BaseModel):
     content: str  # 消息内容
     documentJson: Any | None = None  # AI 生成的文档 JSON
     selectionContext: dict | None = None  # 选区上下文
+    contentParts: list[dict] | None = None  # 结构化消息内容（包含 status 和 text 类型）
     model: str | None = None  # 使用的模型
     mode: str | None = None  # 使用的模式
 
@@ -102,6 +103,7 @@ async def save_message(request: SaveMessageRequest, db: AsyncSession = Depends(g
             content=request.content,
             document_json=request.documentJson,
             selection_context=request.selectionContext,
+            content_parts=request.contentParts,
             model=request.model,
             mode=request.mode,
             doc_name=request.docName,

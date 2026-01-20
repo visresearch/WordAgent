@@ -102,22 +102,30 @@ AGENT_PROMPT = """你是专业的文档处理和写作助手。你可以：
 2. 调整格式（字体、字号、对齐、缩进等）
 3. 回答用户的问题和进行日常对话
 
-【工具使用规则】
-- 当用户要求修改文档内容或格式时：必须调用 generate_document 工具
-- 当用户只是问问题、聊天时：直接文字回答，不调用工具
+【工具使用规则 - 非常重要】
+✅ **必须调用 generate_document 工具的情况：**
+- 用户要求**生成**、**创建**、**写**任何文档内容（文章、报告、证明、论文等）
+- 用户要求**修改**、**润色**、**重写**、**翻译**现有文档
+- 用户要求**扩写**、**缩写**、**续写**文档
+- 用户要求调整文档**格式**（字体、对齐等）
+
+❌ **不调用工具的情况：**
+- 用户只是问问题（"什么是..."、"如何..."、"为什么..."）
+- 纯聊天对话（"你好"、"谢谢"）
 
 🔴【工具调用要求 - 必须遵守】🔴
-如果调用工具，你必须：
-1. 先用2-3句话说明你要做什么修改
-2. 然后调用 generate_document 工具生成完整的文档 JSON
+如果需要调用工具，你必须：
+1. 先用2-3句话说明你要做什么
+2. 然后**立即调用 generate_document 工具**生成完整的文档 JSON
 
-⚠️ 禁止直接输出 JSON 文本！必须通过工具调用返回 JSON！
+⚠️ **禁止直接输出 JSON 文本！必须通过工具调用返回 JSON！**
 
 【格式原则】
 - 如果用户只要求改内容：所有格式属性必须100%原样复制
 - 如果用户要求改格式：可以修改格式属性，但内容保持不变
+- 如果是生成新文档（无原文档）：使用默认格式（宋体12磅，左对齐，段后6磅）
 
-【必须原样复制的格式属性】
+【必须原样复制的格式属性（有原文档时）】
 段落级别：alignment, lineSpacing, indentFirstLine, indentLeft, indentRight, spaceBefore, spaceAfter, styleName
 Run级别：fontName, fontSize, bold, italic, underline, color 等
 
@@ -146,38 +154,32 @@ def create_llm(model_name: str) -> ChatOpenAI:
 
 def create_call_model_node(llm_with_tools):
     """创建 call_model 节点（使用闭包传递 llm_with_tools）"""
+
     def call_model(state: MessagesState) -> dict:
         """调用 LLM - 支持流式输出"""
-        writer = get_stream_writer()
-        writer("🤖 正在思考...")
-        
+        # writer = get_stream_writer()
+        # writer("💭 AI正在思考...")
+
         response = llm_with_tools.invoke(state["messages"])
         return {"messages": [response]}
-    
+
     return call_model
 
 
 def call_tools(state: MessagesState) -> dict:
     """执行工具调用"""
     writer = get_stream_writer()
-    
+
     last_message = state["messages"][-1]
     results = []
-    
+
     for tool_call in last_message.tool_calls:
-        writer(f"🔧 生成文档...")
-        
         # 执行工具
         if tool_call["name"] == "generate_document":
             result = generate_document.invoke(tool_call["args"])
-            writer(f"✅ 文档已生成")
-            results.append(
-                ToolMessage(
-                    content=json.dumps(result, ensure_ascii=False),
-                    tool_call_id=tool_call["id"]
-                )
-            )
-    
+            results.append(ToolMessage(content=json.dumps(result, ensure_ascii=False), tool_call_id=tool_call["id"]))
+
+    writer("✅ 文档已生成")
     return {"messages": results}
 
 
@@ -185,6 +187,7 @@ def should_call_tools(state: MessagesState) -> str:
     """判断是否需要调用工具"""
     last_message = state["messages"][-1]
     if hasattr(last_message, "tool_calls") and last_message.tool_calls:
+        print("应该调用工具")
         return "call_tools"
     return END
 
@@ -195,20 +198,16 @@ def should_call_tools(state: MessagesState) -> str:
 def build_graph(llm_with_tools):
     """构建 LangGraph 工作流"""
     graph = StateGraph(MessagesState)
-    
+
     # 添加节点（使用闭包传递 llm_with_tools）
     graph.add_node("call_model", create_call_model_node(llm_with_tools))
     graph.add_node("call_tools", call_tools)
-    
+
     # 添加边
     graph.add_edge(START, "call_model")
-    graph.add_conditional_edges(
-        "call_model",
-        should_call_tools,
-        {"call_tools": "call_tools", END: END}
-    )
+    graph.add_conditional_edges("call_model", should_call_tools, {"call_tools": "call_tools", END: END})
     graph.add_edge("call_tools", "call_model")  # 工具执行后回到模型
-    
+
     return graph.compile()
 
 
@@ -240,102 +239,116 @@ async def process_writing_request_stream(
 
     model_name = resolve_model(model or "auto")
     llm = create_llm(model_name)
-    
+
     # 绑定工具到模型
     llm_with_tools = llm.bind_tools([generate_document])
-    
+
     # 构建图（传入 llm_with_tools）
     app = build_graph(llm_with_tools)
 
     try:
         # 构建消息
         messages = [SystemMessage(content=AGENT_PROMPT)]
-        
-        # 添加历史
-        for msg in (history or [])[-6:]:
-            if isinstance(msg, dict) and "role" in msg and "content" in msg:
-                if msg["role"] == "user":
-                    messages.append(HumanMessage(content=msg["content"]))
-                else:
-                    messages.append(AIMessage(content=msg["content"]))
-        
+
+        # 暂时不添加历史消息
+        # # 添加历史
+        # for msg in (history or [])[-6:]:
+        #     if isinstance(msg, dict) and "role" in msg and "content" in msg:
+        #         if msg["role"] == "user":
+        #             messages.append(HumanMessage(content=msg["content"]))
+        #         else:
+        #             messages.append(AIMessage(content=msg["content"]))
+
         # 构建用户消息
         user_content = message
         if document_json:
             simplified = {"text": document_json.get("text", ""), "paragraphs": []}
             for para in document_json.get("paragraphs", []):
-                simplified["paragraphs"].append({
-                    "text": para.get("text", ""),
-                    "alignment": para.get("alignment", "left"),
-                    "lineSpacing": para.get("lineSpacing"),
-                    "indentLeft": para.get("indentLeft"),
-                    "indentRight": para.get("indentRight"),
-                    "indentFirstLine": para.get("indentFirstLine"),
-                    "spaceBefore": para.get("spaceBefore"),
-                    "spaceAfter": para.get("spaceAfter"),
-                    "styleName": para.get("styleName", ""),
-                    "runs": para.get("runs", []),
-                })
+                simplified["paragraphs"].append(
+                    {
+                        "text": para.get("text", ""),
+                        "alignment": para.get("alignment", "left"),
+                        "lineSpacing": para.get("lineSpacing"),
+                        "indentLeft": para.get("indentLeft"),
+                        "indentRight": para.get("indentRight"),
+                        "indentFirstLine": para.get("indentFirstLine"),
+                        "spaceBefore": para.get("spaceBefore"),
+                        "spaceAfter": para.get("spaceAfter"),
+                        "styleName": para.get("styleName", ""),
+                        "runs": para.get("runs", []),
+                    }
+                )
             if document_json.get("tables"):
                 simplified["tables"] = document_json["tables"]
-            
-            user_content = f"文档结构（格式属性必须原样复制）：\n```json\n{json.dumps(simplified, ensure_ascii=False, indent=2)}\n```\n\n用户要求：{message}"
-        
+
+            user_content = f"文档结构（格式属性必须原样复制）：\n```json\n{json.dumps(simplified, ensure_ascii=False, indent=2)}\n```\n\n用户要求：{message}\n\n⚠️ 你必须调用 generate_document 工具返回修改后的完整文档！"
+
         messages.append(HumanMessage(content=user_content))
-        
+
         print(f"[LangGraph Agent] 消息数量: {len(messages)}")
-        
+
         # 在异步环境中使用同步的 stream
         loop = asyncio.get_running_loop()
-        
+
         # 创建队列用于在线程间传递数据
         queue = asyncio.Queue()
         has_tool_result = False
-        
+
         def run_stream():
             """在独立线程中运行同步的 stream"""
             try:
-                response = app.stream(
-                    {"messages": messages},
-                    stream_mode=['messages', 'custom', 'updates']
-                )
-                
+                response = app.stream({"messages": messages}, stream_mode=["messages", "custom", "updates"])
+
                 for stream_item in response:
                     # 将数据放入队列
                     asyncio.run_coroutine_threadsafe(queue.put(stream_item), loop)
-                
+
                 # 发送结束信号
                 asyncio.run_coroutine_threadsafe(queue.put(None), loop)
             except Exception as e:
                 asyncio.run_coroutine_threadsafe(queue.put(("error", str(e))), loop)
-        
+
         # 在线程池中启动同步 stream（不等待完成，让它并行运行）
         import concurrent.futures
+
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         executor.submit(run_stream)
-        
+
         # 从队列中读取并处理数据（与生产者并行）
         while True:
             stream_item = await queue.get()
-            
+
             if stream_item is None:
                 # 结束信号
                 break
-            
+
             if isinstance(stream_item, tuple) and stream_item[0] == "error":
                 raise Exception(stream_item[1])
-            
+
             # stream_mode='messages' 和 'custom' 返回 tuple
             # stream_mode='updates' 返回 dict
             if isinstance(stream_item, tuple):
                 input_type, chunk = stream_item
-                
+
                 if input_type == "messages":
                     # AI 的输出内容（流式 token）
                     if chunk and len(chunk) > 0:
                         msg = chunk[0]
                         content = msg.content
-                        
+
+                        # 检查是否有 reasoning_content（thinking 内容）
+                        # DeepSeek R1 等模型会在 additional_kwargs 中返回思考过程
+                        # if hasattr(msg, "additional_kwargs"):
+                        #     reasoning = msg.additional_kwargs.get("reasoning_content", "")
+                        #     if reasoning:
+                        #         yield f"data: {json.dumps({'type': 'thinking', 'content': reasoning}, ensure_ascii=False)}\n\n"
+
+                        # 检查 AIMessage 是否决定调用工具
+                        # if isinstance(msg, AIMessage) and hasattr(msg, "tool_calls") and msg.tool_calls:
+                        #     tool_names = [tc.get("name", "unknown") for tc in msg.tool_calls]
+                        #     print(f"[LangGraph] 🎯 模型决定调用工具: {tool_names}")
+                        #     yield f"data: {json.dumps({'type': 'status', 'content': '🎯 AI决定生成文档...'}, ensure_ascii=False)}\n\n"
+
                         # 检查是否是 ToolMessage（工具返回的结果）
                         if isinstance(msg, ToolMessage):
                             try:
@@ -347,31 +360,40 @@ async def process_writing_request_stream(
                                     continue
                             except json.JSONDecodeError:
                                 pass
-                        
+
                         # 检查是否是 AIMessage 且内容看起来像 JSON（工具调用后 LLM 可能直接输出 JSON）
-                        if content and content.strip().startswith('{"paragraphs"'):
-                            try:
-                                doc_json = json.loads(content)
-                                if "paragraphs" in doc_json:
-                                    print(f"[LangGraph] ✅ 从文本中提取到 JSON 文档")
-                                    yield f"data: {json.dumps({'type': 'json', 'content': doc_json}, ensure_ascii=False)}\n\n"
-                                    has_tool_result = True
-                                    continue
-                            except json.JSONDecodeError:
-                                pass
-                        
+                        # if content and content.strip().startswith('{"paragraphs"'):
+                        #     try:
+                        #         doc_json = json.loads(content)
+                        #         if "paragraphs" in doc_json:
+                        #             print(f"[LangGraph] ✅ 从文本中提取到 JSON 文档")
+                        #             yield f"data: {json.dumps({'type': 'json', 'content': doc_json}, ensure_ascii=False)}\n\n"
+                        #             has_tool_result = True
+                        #             continue
+                        #     except json.JSONDecodeError:
+                        #         pass
+
                         # 普通文本输出
                         if content:
                             # print(f"[LangGraph] 文本块: {content[:50]}...")
                             yield f"data: {json.dumps({'type': 'text', 'content': content}, ensure_ascii=False)}\n\n"
-                
+
                 elif input_type == "custom":
                     # 工具执行的输出内容（get_stream_writer）
                     print(f"[LangGraph] 自定义输出: {chunk}")
-            
+                    # 将状态消息发送给前端
+                    if chunk:
+                        yield f"data: {json.dumps({'type': 'status', 'content': str(chunk)}, ensure_ascii=False)}\n\n"
+
             elif isinstance(stream_item, dict):
                 # updates 模式：包含节点执行的完整更新
                 for node_name, node_output in stream_item.items():
+                    # 检测节点状态变化（用于调试）
+                    if node_name == "call_model":
+                        print(f"[LangGraph] 进入 call_model 节点")
+                    elif node_name == "call_tools":
+                        print(f"[LangGraph] 进入 call_tools 节点")
+
                     if node_name == "call_tools" and "messages" in node_output:
                         # 提取工具调用结果
                         for msg in node_output["messages"]:
@@ -385,15 +407,16 @@ async def process_writing_request_stream(
                                         has_tool_result = True
                                 except json.JSONDecodeError:
                                     print(f"[LangGraph] ⚠️ 工具结果不是有效JSON")
-        
+
         if not has_tool_result:
             print(f"[LangGraph] ⚠️ 未检测到工具调用结果")
-        
+
         yield "data: [DONE]\n\n"
 
     except Exception as e:
         print(f"[LangGraph Error] {e}")
         import traceback
+
         traceback.print_exc()
         yield f"data: {json.dumps({'type': 'text', 'content': f'错误: {str(e)}'}, ensure_ascii=False)}\n\n"
         yield "data: [DONE]\n\n"

@@ -1,8 +1,6 @@
 from openai import OpenAI
 
-client = OpenAI(
-    api_key="sk-1f2d30db7d96449daabee21123fbf09b", base_url="http://localhost:11434/v1"
-)
+client = OpenAI(api_key="sk-1f2d30db7d96449daabee21123fbf09b", base_url="http://localhost:11434/v1")
 
 models = client.models.list()
 

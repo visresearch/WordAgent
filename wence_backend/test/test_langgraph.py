@@ -65,9 +65,9 @@ def call_model(state: MessagesState):
 def call_tools(state: MessagesState):
     """执行工具调用"""
     from langchain_core.messages import ToolMessage
-    
+
     writer = get_stream_writer()
-    
+
     last_message = state["messages"][-1]
     results = []
     for tool_call in last_message.tool_calls:
@@ -121,13 +121,10 @@ if __name__ == "__main__":
     for q in questions:
         print(f"\n问题: {q}")
         print(f"回答: ", end="", flush=True)
-        
+
         # 使用 stream 方法进行流式处理
-        response = app.stream(
-            {"messages": [HumanMessage(content=q)]},
-            stream_mode=['messages', 'custom']
-        )
-        
+        response = app.stream({"messages": [HumanMessage(content=q)]}, stream_mode=["messages", "custom"])
+
         for input_type, chunk in response:
             if input_type == "messages":
                 # AI 的输出内容（流式 token）
@@ -138,5 +135,5 @@ if __name__ == "__main__":
             elif input_type == "custom":
                 # 工具执行的输出内容
                 print(f"\n{chunk}", end="", flush=True)
-        
+
         print("\n" + "-" * 30)
