@@ -362,7 +362,7 @@ async def process_writing_request_stream(
                         
                         # 普通文本输出
                         if content:
-                            print(f"[LangGraph] 文本块: {content[:50]}...")
+                            # print(f"[LangGraph] 文本块: {content[:50]}...")
                             yield f"data: {json.dumps({'type': 'text', 'content': content}, ensure_ascii=False)}\n\n"
                 
                 elif input_type == "custom":

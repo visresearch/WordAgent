@@ -1,15 +1,22 @@
 """
 多平台 LLM 客户端管理
 根据模型 ID 自动选择对应的 API 配置
+从用户设置文件读取 provider 配置
 """
 
+import json
+import re
 from dataclasses import dataclass
+from pathlib import Path
 
 from openai import AsyncOpenAI
 
-from app.core.config import settings
+# ============== 配置文件路径 ==============
 
-# ============== 平台配置 ==============
+SETTINGS_FILE = Path("config/user_settings.json")
+
+
+# ============== 数据结构 ==============
 
 
 @dataclass
@@ -19,92 +26,91 @@ class LLMProvider:
     name: str
     api_key: str
     base_url: str
-    default_model: str
-    model_prefixes: list[str]  # 用于识别属于该平台的模型
+    models: list[dict]  # 该 provider 下的模型列表
 
 
-# 模型 ID 到提供商的映射（精确匹配优先）
-MODEL_TO_PROVIDER: dict[str, str] = {
-    # OpenAI 系列
-    "gpt-4o": "openai",
-    "gpt-4-turbo": "openai",
-    "gpt-5": "openai",
-    "gpt-5-mini": "openai",
-    "gpt-5.1": "openai",
-    "gpt-5.2": "openai",
-    # Claude 系列（通过 OpenAI 兼容接口）
-    "claude-haiku-4-5-20251001": "openai",
-    "claude-haiku-4-5-20251001-thinking": "openai",
-    "claude-sonnet-4-5-20250929": "openai",
-    "claude-sonnet-4-5-20250929-thinking": "openai",
-    "claude-opus-4-20250514": "openai",
-    "claude-opus-4-20250514-thinking": "openai",
-    "claude-opus-4-5-20251101": "openai",
-    # Gemini 系列（通过 OpenAI 兼容接口）
-    "gemini-2.5-pro": "openai",
-    "gemini-2.5-flash": "openai",
-    "gemini-3-pro-preview": "openai",
-    # DeepSeek 系列（通过 OpenAI 兼容接口）
-    "deepseek-r1": "openai",
-    "deepseek-v3": "openai",
-    "deepseek-v3.2-thinking": "openai",
-    # 智谱 GLM 系列
-    "glm-4.5": "zhipu",
-    "glm-4.5-air": "zhipu",
-    "glm-4.6": "zhipu",
-    "glm-4.7": "zhipu",
-}
+# ============== 配置读取 ==============
 
 
-def get_providers() -> dict[str, LLMProvider]:
-    """获取所有提供商配置"""
-
-    # 处理 OpenAI base_url
-    openai_base_url = settings.OPENAI_BASE_URL or "https://api.openai.com/v1"
-    if not openai_base_url.endswith("/v1") and not openai_base_url.endswith("/v1/"):
-        openai_base_url = openai_base_url.rstrip("/") + "/v1"
-
-    return {
-        "openai": LLMProvider(
-            name="OpenAI",
-            api_key=settings.OPENAI_API_KEY,
-            base_url=openai_base_url,
-            default_model=settings.OPENAI_DEFAULT_MODEL,
-            model_prefixes=["gpt-", "o1-", "claude-", "gemini-", "deepseek-"],
-        ),
-        "zhipu": LLMProvider(
-            name="智谱AI",
-            api_key=settings.ZHIPU_API_KEY,
-            base_url=settings.ZHIPU_BASE_URL,
-            default_model=settings.ZHIPU_DEFAULT_MODEL,
-            model_prefixes=["glm-", "chatglm-", "codegeex-"],
-        ),
-        "qwen": LLMProvider(
-            name="千问AI",
-            api_key=settings.QWEN_API_KEY,
-            base_url=settings.QWEN_BASE_URL,
-            default_model=settings.QWEN_DEFAULT_MODEL,
-            model_prefixes=["qwen-"],
-        ),
-    }
+def load_user_settings() -> dict:
+    """加载用户设置"""
+    try:
+        if SETTINGS_FILE.exists():
+            with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        return {"providers": []}
+    except Exception as e:
+        print(f"加载用户设置失败: {e}")
+        return {"providers": []}
 
 
-def get_provider_for_model(model_id: str) -> str:
-    """根据模型 ID 获取对应的提供商名称"""
+def normalize_base_url(base_url: str) -> str:
+    """
+    标准化 base_url
+    - 移除末尾的 /
+    - 如果没有版本后缀（如 /v1），自动添加 /v1
+    """
+    url = base_url.rstrip('/')
+    
+    # 检查是否已有版本后缀（如 /v1, /v2 等）
+    if not re.search(r'/v\d+$', url):
+        url = url + '/v1'
+    
+    return url
 
-    # 1. 精确匹配
-    if model_id in MODEL_TO_PROVIDER:
-        return MODEL_TO_PROVIDER[model_id]
 
-    # 2. 前缀匹配
-    providers = get_providers()
+def get_providers_from_settings() -> dict[str, LLMProvider]:
+    """从用户设置中获取所有已启用的提供商配置"""
+    settings = load_user_settings()
+    providers = {}
+    
+    for provider_data in settings.get("providers", []):
+        if not provider_data.get("enabled", True):
+            continue
+            
+        name = provider_data.get("name", "").lower()
+        if not name:
+            continue
+            
+        providers[name] = LLMProvider(
+            name=provider_data.get("name", ""),
+            api_key=provider_data.get("apiKey", ""),
+            base_url=normalize_base_url(provider_data.get("baseUrl", "")),
+            models=provider_data.get("models", [])
+        )
+    
+    return providers
+
+
+def find_provider_for_model(model_id: str) -> tuple[LLMProvider | None, str]:
+    """
+    根据模型 ID 找到对应的提供商
+    
+    Returns:
+        (provider, actual_model_id) - 提供商配置和实际模型ID
+    """
+    providers = get_providers_from_settings()
+    
+    # 遍历所有 provider，查找包含该模型的 provider
     for provider_name, provider in providers.items():
-        for prefix in provider.model_prefixes:
-            if model_id.lower().startswith(prefix.lower()):
-                return provider_name
+        for model in provider.models:
+            if model.get("id") == model_id and model.get("enabled", False):
+                return provider, model_id
+    
+    # 如果没找到精确匹配，返回 None
+    return None, model_id
 
-    # 3. 默认使用 OpenAI（因为很多第三方转发服务用 OpenAI 兼容接口）
-    return "openai"
+
+def get_first_available_model() -> tuple[LLMProvider | None, str]:
+    """获取第一个可用的模型"""
+    providers = get_providers_from_settings()
+    
+    for provider_name, provider in providers.items():
+        for model in provider.models:
+            if model.get("enabled", False):
+                return provider, model.get("id", "")
+    
+    return None, ""
 
 
 class LLMClientManager:
@@ -123,44 +129,48 @@ class LLMClientManager:
         Returns:
             配置好的 AsyncOpenAI 客户端
         """
-        provider_name = get_provider_for_model(model_id)
-
-        # 使用缓存
-        if provider_name in cls._clients:
-            return cls._clients[provider_name]
-
-        # 创建新客户端
-        providers = get_providers()
-        provider = providers.get(provider_name)
-
+        # 解析模型，处理 auto
+        actual_model_id = cls.resolve_model(model_id)
+        
+        # 查找对应的 provider
+        provider, _ = find_provider_for_model(actual_model_id)
+        
         if not provider:
-            raise ValueError(f"未知的提供商: {provider_name}")
+            raise ValueError(f"未找到模型 {actual_model_id} 对应的提供商配置，请在设置中添加")
 
         if not provider.api_key:
             raise ValueError(f"提供商 {provider.name} 未配置 API Key")
 
-        client = AsyncOpenAI(api_key=provider.api_key, base_url=provider.base_url)
+        # 使用 provider name + base_url 作为缓存 key
+        cache_key = f"{provider.name}:{provider.base_url}"
+        
+        # 使用缓存
+        if cache_key in cls._clients:
+            return cls._clients[cache_key]
 
-        cls._clients[provider_name] = client
+        # 创建新客户端
+        client = AsyncOpenAI(
+            api_key=provider.api_key, 
+            base_url=provider.base_url
+        )
+
+        cls._clients[cache_key] = client
         return client
 
     @classmethod
-    def get_provider_info(cls, model_id: str) -> LLMProvider:
+    def get_provider_info(cls, model_id: str) -> LLMProvider | None:
         """获取模型对应的提供商信息"""
-        provider_name = get_provider_for_model(model_id)
-        providers = get_providers()
-        return providers.get(provider_name)
+        actual_model_id = cls.resolve_model(model_id)
+        provider, _ = find_provider_for_model(actual_model_id)
+        return provider
 
     @classmethod
     def get_default_model(cls) -> str:
-        """获取默认模型"""
-        # 优先使用 OpenAI
-        if settings.OPENAI_API_KEY:
-            return settings.OPENAI_DEFAULT_MODEL
-        # 其次使用智谱
-        if settings.ZHIPU_API_KEY:
-            return settings.ZHIPU_DEFAULT_MODEL
-        # 默认
+        """获取默认模型（第一个启用的模型）"""
+        provider, model_id = get_first_available_model()
+        if model_id:
+            return model_id
+        # 兜底返回
         return "gpt-4o"
 
     @classmethod

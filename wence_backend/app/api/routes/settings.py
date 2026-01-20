@@ -28,7 +28,6 @@ class ProviderConfig(BaseModel):
 class UserSettings(BaseModel):
     """用户设置"""
     providers: list[ProviderConfig] = []
-    currentProvider: str = ""
 
 
 @router.get("/settings")

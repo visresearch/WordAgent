@@ -312,7 +312,7 @@ function getConfig() {
  */
 async function fetchAvailableModels({ baseUrl, apiKey }) {
   try {
-    // 先尝试调用后端代理接口
+    // 通过后端代理接口获取模型列表
     const result = await request('/api/chat/providers/models', {
       method: 'POST',
       body: {
@@ -321,47 +321,16 @@ async function fetchAvailableModels({ baseUrl, apiKey }) {
       }
     });
 
-    if (result.success && result.data.models) {
+    // result.data 是后端返回的 JSON：{ success, models } 或 { success, error, models }
+    if (result.success && result.data?.success && result.data?.models) {
       return {
         success: true,
         models: result.data.models
       };
     }
 
-    // 如果后端代理失败，直接调用 OpenAI 兼容接口
-    const modelsUrl = baseUrl.replace(/\/$/, '') + '/models';
-    const response = await fetch(modelsUrl, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json'
-      }
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    
-    // 兼容 OpenAI 格式
-    let models = [];
-    if (data.data && Array.isArray(data.data)) {
-      models = data.data.map(m => ({
-        id: m.id,
-        name: m.id
-      }));
-    } else if (Array.isArray(data)) {
-      models = data.map(m => ({
-        id: typeof m === 'string' ? m : m.id,
-        name: typeof m === 'string' ? m : (m.name || m.id)
-      }));
-    }
-
-    return {
-      success: true,
-      models
-    };
+    // 请求失败
+    throw new Error(result.data?.error || result.error || '获取模型列表失败');
   } catch (error) {
     console.error('获取模型列表失败:', error);
     throw new Error(error.message || '获取模型列表失败');
@@ -382,13 +351,13 @@ async function getSettings() {
 
     if (!response.success) {
       console.error('获取设置失败:', response.error);
-      return { providers: [], currentProvider: '' };
+      return { providers: [] };
     }
 
     return response.data;
   } catch (error) {
     console.error('获取设置异常:', error);
-    return { providers: [], currentProvider: '' };
+    return { providers: [] };
   }
 }
 

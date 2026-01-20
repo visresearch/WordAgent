@@ -54,8 +54,8 @@ function OnAction(control) {
         window.Application.ShowDialog(
           Util.GetUrlPath() + Util.GetRouterHash() + '/about',
           '关于',
-          450 * window.devicePixelRatio,
-          650 * window.devicePixelRatio,
+          900 * window.devicePixelRatio,
+          600 * window.devicePixelRatio,
           false
         );
       }

@@ -238,7 +238,10 @@
                     class="model-item"
                     :class="{ 'is-added': isModelAdded(provider, model.id) }"
                   >
-                    <span class="model-name">{{ model.name || model.id }}</span>
+                    <div class="model-info">
+                      <span class="model-name">{{ model.name || model.id }}</span>
+                      <span class="model-id">{{ model.id }}</span>
+                    </div>
                     <button 
                       v-if="!isModelAdded(provider, model.id)"
                       class="btn-add-model"
@@ -270,7 +273,10 @@
                     :key="model.id" 
                     class="model-item"
                   >
-                    <span class="model-name">{{ model.name || model.id }}</span>
+                    <div class="model-info">
+                      <span class="model-name">{{ model.name || model.id }}</span>
+                      <span class="model-id">{{ model.id }}</span>
+                    </div>
                     <div class="model-actions">
                       <label class="switch switch-sm">
                         <input v-model="model.enabled" type="checkbox" @change="saveSettings" />
@@ -293,15 +299,8 @@
 
               <!-- 无模型提示 -->
               <div v-if="(!provider.models || provider.models.length === 0) && (!provider.availableModels || provider.availableModels.length === 0)" class="no-models-hint">
-                <svg
-                  width="32"
-                  height="32"
-                  viewBox="0 0 16 16"
-                  fill="currentColor"
-                  opacity="0.3"
-                >
-                  <path d="M6 12.5a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 0 1h-3a.5.5 0 0 1-.5-.5ZM3 8.062C3 6.76 4.235 5.765 5.53 5.886a26.58 26.58 0 0 0 4.94 0C11.765 5.765 13 6.76 13 8.062v1.157a.933.933 0 0 1-.765.935c-.845.147-2.34.346-4.235.346-1.895 0-3.39-.2-4.235-.346A.933.933 0 0 1 3 9.219V8.062Z" />
-                  <path d="M8.5 1.866a1 1 0 1 0-1 0V3h-2A4.5 4.5 0 0 0 1 7.5V8a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1v1a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-1a1 1 0 0 0 1-1V9a1 1 0 0 0-1-1v-.5A4.5 4.5 0 0 0 10.5 3h-2V1.866ZM14 7.5V13a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V7.5A3.5 3.5 0 0 1 5.5 4h5A3.5 3.5 0 0 1 14 7.5Z" />
+                <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M7 11H5V9H7M14 7H11.38L13.29 9H14V9.75L15.87 11.71C15.95 11.5 16 11.25 16 11V9C16 7.9 15.11 7 14 7M4.45 2.62L3 4L5.86 7H5C3.9 7 3 7.9 3 9V17H5V13H7V17H9V10.3L10 11.34V17H12V13.45L19.55 21.38L21 20M20.9 17H21V15H20V9H21V7H17V9H18V13.95Z" />
                 </svg>
                 <p>暂无模型，请点击"获取模型列表"或"自定义模型"</p>
               </div>
@@ -310,15 +309,8 @@
 
           <!-- 空状态 -->
           <div v-if="settings.providers.length === 0" class="empty-state">
-            <svg
-              width="64"
-              height="64"
-              viewBox="0 0 16 16"
-              fill="currentColor"
-              opacity="0.2"
-            >
-              <path d="M6 12.5a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 0 1h-3a.5.5 0 0 1-.5-.5ZM3 8.062C3 6.76 4.235 5.765 5.53 5.886a26.58 26.58 0 0 0 4.94 0C11.765 5.765 13 6.76 13 8.062v1.157a.933.933 0 0 1-.765.935c-.845.147-2.34.346-4.235.346-1.895 0-3.39-.2-4.235-.346A.933.933 0 0 1 3 9.219V8.062Zm4.542-.827a.25.25 0 0 0-.217.068l-.92.9a24.767 24.767 0 0 1-1.871-.183.25.25 0 0 0-.068.495c.55.076 1.232.149 2.02.193a.25.25 0 0 0 .189-.071l.754-.736.847 1.71a.25.25 0 0 0 .404.062l.932-.97a25.286 25.286 0 0 0 1.922-.188.25.25 0 0 0-.068-.495c-.538.074-1.207.145-1.98.189a.25.25 0 0 0-.166.076l-.754.785-.842-1.7a.25.25 0 0 0-.182-.135Z" />
-              <path d="M8.5 1.866a1 1 0 1 0-1 0V3h-2A4.5 4.5 0 0 0 1 7.5V8a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1v1a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-1a1 1 0 0 0 1-1V9a1 1 0 0 0-1-1v-.5A4.5 4.5 0 0 0 10.5 3h-2V1.866ZM14 7.5V13a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V7.5A3.5 3.5 0 0 1 5.5 4h5A3.5 3.5 0 0 1 14 7.5Z" />
+            <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M7 11H5V9H7M14 7H11.38L13.29 9H14V9.75L15.87 11.71C15.95 11.5 16 11.25 16 11V9C16 7.9 15.11 7 14 7M4.45 2.62L3 4L5.86 7H5C3.9 7 3 7.9 3 9V17H5V13H7V17H9V10.3L10 11.34V17H12V13.45L19.55 21.38L21 20M20.9 17H21V15H20V9H21V7H17V9H18V13.95Z" />
             </svg>
             <p class="empty-text">
               暂无配置的提供商，点击上方"添加提供商"开始配置
@@ -440,7 +432,7 @@ export default {
     },
     async fetchModelsForProvider(index) {
       const provider = this.settings.providers[index];
-      
+
       if (!provider.apiKey || !provider.baseUrl) {
         alert('请先填写 API Key 和 Base URL');
         return;
@@ -1001,9 +993,20 @@ export default {
   border-bottom: none;
 }
 
+.model-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .model-name {
   font-size: 13px;
   color: #333;
+}
+
+.model-id {
+  font-size: 11px;
+  color: #888;
   font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
 }
 
@@ -1124,11 +1127,12 @@ export default {
   flex-direction: column;
   align-items: center;
   padding: 32px 16px;
-  color: #999;
+  color: #bbb;
 }
 
 .no-models-hint svg {
   margin-bottom: 12px;
+  opacity: 0.5;
 }
 
 .no-models-hint p {
@@ -1141,11 +1145,13 @@ export default {
   text-align: center;
   padding: 64px 24px;
   background: white;
+  color: #bbb;
   border: 1px dashed #e0e0e0;
   border-radius: 12px;
 }
 
 .empty-state svg {
+  opacity: 0.4;
   margin-bottom: 16px;
 }
 
