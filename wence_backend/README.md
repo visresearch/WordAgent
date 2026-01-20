@@ -1,6 +1,6 @@
 # WenCe AI 后端服务
 
-智能写作助手后端 API 服务，基于 FastAPI + LangChain 构建。
+智能写作助手后端 API 服务，基于 FastAPI + LangChain + LangGraph + SQLite构建。
 
 ## 快速开始
 
@@ -25,33 +25,18 @@ ruff format  # Format all files in the current directory.
 
 ## 打包发布
 
-### Linux
-
 ```bash
-# 构建 DEB + AppImage
-./build_linux.sh all
-
-# 只构建 DEB
-./build_linux.sh deb
-
-# 只构建 AppImage
-./build_linux.sh appimage
+cd wence_backend/deploy
+pyinstaller wence.spec
 ```
 
-### Windows
+打包生成的可执行文件在`wence_backend/deploy/dist`目录下
 
-```powershell
-# 构建 EXE + Installer
-.\build_windows.ps1 -Type all
-
-# 只构建 EXE
-.\build_windows.ps1 -Type exe
-
-# 只构建 Installer
-.\build_windows.ps1 -Type installer
-```
-
-详细说明请查看 [BUILD.md](BUILD.md)。
+| 运行环境 | 输出文件 | 文件名示例 |
+|---------|---------|-----------|
+| Linux | ELF 二进制文件 | `wence-ai` (无扩展名) |
+| Windows | PE 可执行文件 | `wence-ai.exe` |
+| macOS | Mach-O 可执行文件 | `wence-ai` (无扩展名) |
 
 ## 项目结构
 
@@ -80,19 +65,3 @@ wence_backend/
 - **数据库**: SQLite + SQLAlchemy
 - **打包**: PyInstaller + uv
 
-## 开发
-
-```bash
-# 运行测试
-pytest
-
-# 代码格式化
-black .
-
-# 类型检查
-mypy app/
-```
-
-## License
-
-MIT

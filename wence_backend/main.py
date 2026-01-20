@@ -13,7 +13,7 @@ from pathlib import Path
 
 def get_base_path():
     """获取基础路径，支持 PyInstaller 打包后运行"""
-    if getattr(sys, 'frozen', False):
+    if getattr(sys, "frozen", False):
         # PyInstaller 打包后运行
         return Path(sys._MEIPASS)
     else:
@@ -25,32 +25,34 @@ def start_frontend():
     """启动前端静态文件服务器"""
     try:
         base_path = get_base_path()
-        
+
         # PyInstaller 打包后在 frontend 目录
         frontend_build_dir = base_path / "frontend"
-        
+
         # 如果打包目录不存在，尝试开发环境路径
         if not frontend_build_dir.exists():
-            frontend_build_dir = Path(__file__).parent.parent / "wence_frontend" / "wence_word_plugin" / "wps-addon-build"
-        
+            frontend_build_dir = (
+                Path(__file__).parent.parent / "wence_frontend" / "wence_word_plugin" / "wps-addon-build"
+            )
+
         if not frontend_build_dir.exists():
             print("⚠️  前端构建目录不存在，跳过启动前端服务")
             return
-        
+
         print(f"🎨 启动前端插件服务器 (端口 3889)...")
         print(f"📂 静态文件目录: {frontend_build_dir}")
-        
+
         # 使用 Python 内置 HTTP 服务器提供静态文件
         import http.server
         import socketserver
-        
+
         os.chdir(frontend_build_dir)
-        
+
         handler = http.server.SimpleHTTPRequestHandler
         with socketserver.TCPServer(("", 3889), handler) as httpd:
             print(f"✅ 前端服务启动成功: http://localhost:3889")
             httpd.serve_forever()
-            
+
     except Exception as e:
         print(f"⚠️  前端服务启动失败: {e}")
 
@@ -82,6 +84,7 @@ def start_api_server():
 
 
 if __name__ == "__main__":
+
     def signal_handler(sig, frame):
         print("\n正在安全关闭服务...")
         sys.exit(0)
@@ -89,9 +92,14 @@ if __name__ == "__main__":
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    print("=" * 60)
-    print("🤖 WenCe AI Writing Assistant")
-    print("=" * 60)
+    print(r"""
+██╗    ██╗███████╗███╗   ██╗ ██████╗███████╗     █████╗ ██╗
+██║    ██║██╔════╝████╗  ██║██╔════╝██╔════╝    ██╔══██╗██║
+██║ █╗ ██║█████╗  ██╔██╗ ██║██║     █████╗      ███████║██║
+██║███╗██║██╔══╝  ██║╚██╗██║██║     ██╔══╝      ██╔══██║██║
+╚███╔███╔╝███████╗██║ ╚████║╚██████╗███████╗    ██║  ██║██║
+ ╚══╝╚══╝ ╚══════╝╚═╝  ╚═══╝ ╚═════╝╚══════╝    ╚═╝  ╚═╝╚═╝
+    """)
 
     try:
         # 在主线程启动 API 服务
@@ -101,8 +109,8 @@ if __name__ == "__main__":
         time.sleep(1)
 
         # 在后台线程启动前端服务
-        frontend_thread = threading.Thread(target=start_frontend, daemon=True)
-        frontend_thread.start()
+        # frontend_thread = threading.Thread(target=start_frontend, daemon=True)
+        # frontend_thread.start()
     except KeyboardInterrupt:
         print("\n👋 程序已退出")
         sys.exit(0)

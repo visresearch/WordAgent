@@ -8,7 +8,7 @@ on:
 
 jobs:
   build-linux:
-    name: Build Linux Packages
+    name: Build Linux Binary
     runs-on: ubuntu-latest
     
     steps:
@@ -28,24 +28,29 @@ jobs:
       - name: Install dependencies
         working-directory: wence_backend
         run: |
-          uv pip install --system -e ".[build]"
+          uv sync
+          uv pip install pyinstaller
       
-      - name: Build packages
+      - name: Build binary with PyInstaller
         working-directory: wence_backend
         run: |
-          chmod +x build_linux.sh
-          ./build_linux.sh all
+          pyinstaller deploy/wence.spec --clean --noconfirm
+      
+      - name: Package binary
+        working-directory: wence_backend
+        run: |
+          mkdir -p package
+          cp dist/wence-ai package/wence-ai-linux-x86_64
+          chmod +x package/wence-ai-linux-x86_64
       
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: linux-packages
-          path: |
-            wence_backend/package/*.deb
-            wence_backend/package/*.AppImage
+          name: linux-binary
+          path: wence_backend/package/wence-ai-linux-x86_64
   
   build-windows:
-    name: Build Windows Packages
+    name: Build Windows Binary
     runs-on: windows-latest
     
     steps:
@@ -62,26 +67,28 @@ jobs:
           irm https://astral.sh/uv/install.ps1 | iex
           echo "$env:USERPROFILE\.cargo\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
       
-      - name: Install NSIS
-        run: |
-          choco install nsis -y
-      
       - name: Install dependencies
         working-directory: wence_backend
         run: |
-          uv pip install --system -e ".[build]"
+          uv sync
+          uv pip install pyinstaller
       
-      - name: Build packages
+      - name: Build binary with PyInstaller
         working-directory: wence_backend
         run: |
-          .\build_windows.ps1 -Type all
+          pyinstaller deploy/wence.spec --clean --noconfirm
+      
+      - name: Package binary
+        working-directory: wence_backend
+        run: |
+          New-Item -ItemType Directory -Force -Path package
+          Copy-Item dist/wence-ai.exe package/wence-ai-windows-x86_64.exe
       
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: windows-packages
-          path: |
-            wence_backend/package/*.exe
+          name: windows-binary
+          path: wence_backend/package/wence-ai-windows-x86_64.exe
   
   create-release:
     name: Create Release
@@ -108,8 +115,8 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            artifacts/linux-packages/*
-            artifacts/windows-packages/*
+            artifacts/linux-binary/*
+            artifacts/windows-binary/*
           draft: false
           prerelease: false
           generate_release_notes: true

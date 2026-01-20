@@ -944,7 +944,11 @@ export default {
         console.log('模型列表响应:', result);
         if (result.success && result.data?.models && result.data.models.length > 0) {
           this.availableModels = result.data.models;
-          this.selectedModel = 'auto';
+          // 只在当前选中的模型在新列表中不存在时才重置为 auto
+          const modelExists = this.availableModels.some(m => m.id === this.selectedModel);
+          if (!modelExists) {
+            this.selectedModel = 'auto';
+          }
         } else {
           console.warn('获取模型列表失败:', result.error);
           // 请求失败显示 Auto

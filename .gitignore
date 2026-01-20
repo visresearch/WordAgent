@@ -11,7 +11,6 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
-wps-addon-build
 wps-addon-publish
 *.local
 
@@ -28,13 +27,14 @@ wps-addon-publish
 
 # python
 __pycache__
-data/
 *.db
 *.pyc
 *.pyo
 *.pyd
 pip-log.txt
 pip-delete-this-directory.txt
+data/
+test/
 
 # PyInstaller
 build/

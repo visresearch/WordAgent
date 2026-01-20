@@ -115,10 +115,6 @@
                 </span>
               </div>
               <div class="provider-actions">
-                <label class="switch" @click.stop>
-                  <input v-model="provider.enabled" type="checkbox" />
-                  <span class="slider"></span>
-                </label>
                 <button class="action-btn delete" title="删除" @click.stop="removeProvider(pIndex)">
                   <svg
                     width="14"
