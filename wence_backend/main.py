@@ -109,8 +109,8 @@ if __name__ == "__main__":
         time.sleep(1)
 
         # 在后台线程启动前端服务
-        # frontend_thread = threading.Thread(target=start_frontend, daemon=True)
-        # frontend_thread.start()
+        frontend_thread = threading.Thread(target=start_frontend, daemon=True)
+        frontend_thread.start()
     except KeyboardInterrupt:
         print("\n👋 程序已退出")
         sys.exit(0)

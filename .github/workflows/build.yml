@@ -40,14 +40,14 @@ jobs:
         working-directory: wence_backend
         run: |
           mkdir -p package
-          cp dist/wence-ai package/wence-ai-linux-x86_64
-          chmod +x package/wence-ai-linux-x86_64
+          cp dist/wence_ai package/wence_ai-linux-x86_64
+          chmod +x package/wence_ai-linux-x86_64
       
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: linux-binary
-          path: wence_backend/package/wence-ai-linux-x86_64
+          path: wence_backend/package/wence_ai-linux-x86_64
   
   build-windows:
     name: Build Windows Binary
@@ -82,13 +82,13 @@ jobs:
         working-directory: wence_backend
         run: |
           New-Item -ItemType Directory -Force -Path package
-          Copy-Item dist/wence-ai.exe package/wence-ai-windows-x86_64.exe
+          Copy-Item dist/wence_ai.exe package/wence_ai-windows-x86_64.exe
       
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: windows-binary
-          path: wence_backend/package/wence-ai-windows-x86_64.exe
+          path: wence_backend/package/wence_ai-windows-x86_64.exe
   
   create-release:
     name: Create Release

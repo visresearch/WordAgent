@@ -27,7 +27,7 @@ ruff format  # Format all files in the current directory.
 
 ```bash
 cd wence_backend/deploy
-pyinstaller wence.spec
+uv run pyinstaller wence.spec
 ```
 
 打包生成的可执行文件在`wence_backend/deploy/dist`目录下
