@@ -1,28 +1,76 @@
 """
 WenCe AI Writing Assistant - 入口文件
-支持启动 GUI 界面和 FastAPI 服务
+启动 FastAPI 服务和前端插件
 """
 
 import sys
-import argparse
+import signal
 import threading
-import uvicorn
+import time
+import os
+from pathlib import Path
+
+
+def get_base_path():
+    """获取基础路径，支持 PyInstaller 打包后运行"""
+    if getattr(sys, 'frozen', False):
+        # PyInstaller 打包后运行
+        return Path(sys._MEIPASS)
+    else:
+        # 正常 Python 运行
+        return Path(__file__).parent
+
+
+def start_frontend():
+    """启动前端静态文件服务器"""
+    try:
+        base_path = get_base_path()
+        
+        # PyInstaller 打包后在 frontend 目录
+        frontend_build_dir = base_path / "frontend"
+        
+        # 如果打包目录不存在，尝试开发环境路径
+        if not frontend_build_dir.exists():
+            frontend_build_dir = Path(__file__).parent.parent / "wence_frontend" / "wence_word_plugin" / "wps-addon-build"
+        
+        if not frontend_build_dir.exists():
+            print("⚠️  前端构建目录不存在，跳过启动前端服务")
+            return
+        
+        print(f"🎨 启动前端插件服务器 (端口 3889)...")
+        print(f"📂 静态文件目录: {frontend_build_dir}")
+        
+        # 使用 Python 内置 HTTP 服务器提供静态文件
+        import http.server
+        import socketserver
+        
+        os.chdir(frontend_build_dir)
+        
+        handler = http.server.SimpleHTTPRequestHandler
+        with socketserver.TCPServer(("", 3889), handler) as httpd:
+            print(f"✅ 前端服务启动成功: http://localhost:3889")
+            httpd.serve_forever()
+            
+    except Exception as e:
+        print(f"⚠️  前端服务启动失败: {e}")
 
 
 def start_api_server():
     """启动 FastAPI 服务"""
     try:
+        import uvicorn
         from app.core.config import settings
+        from app.main import app
 
         print("🚀 启动 WenCe AI Writing Assistant API 服务...")
         print(f"📍 访问地址: http://{settings.HOST}:{settings.PORT}")
-        print(f"📚 API 文档: http://{settings.HOST}:{settings.PORT}{settings.API_PREFIX}/docs")
 
+        # 打包后直接使用 app 对象，而不是字符串导入
         uvicorn.run(
-            "app.main:app",
+            app,
             host=settings.HOST,
             port=settings.PORT,
-            reload=False,  # GUI 模式下禁用热重载
+            reload=False,
             log_level="info",
             access_log=True,
         )
@@ -33,56 +81,7 @@ def start_api_server():
         traceback.print_exc()
 
 
-def start_gui():
-    """启动 GUI 界面"""
-    try:
-        from PySide6.QtCore import Qt
-        from PySide6.QtWidgets import QApplication
-        from qfluentwidgets import setTheme, Theme, setThemeColor
-
-        from gui.views.main_window import MainWindow
-
-        print("🎨 启动 GUI 界面...")
-
-        # 启用高DPI缩放
-        QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
-
-        app = QApplication(sys.argv)
-
-        # 设置主题
-        setTheme(Theme.AUTO)
-        setThemeColor("#0078D4")  # 微软蓝色
-
-        # 创建主窗口
-        window = MainWindow()
-        window.show()
-
-        print("✅ GUI 界面启动成功")
-
-        sys.exit(app.exec())
-
-    except Exception as e:
-        print(f"❌ GUI 启动失败: {e}")
-        import traceback
-
-        traceback.print_exc()
-        sys.exit(1)
-
-
-def start_gui_with_api():
-    """同时启动 GUI 和 API 服务"""
-    # 在后台线程启动 API 服务
-    api_thread = threading.Thread(target=start_api_server, daemon=True)
-    api_thread.start()
-
-    # 在主线程启动 GUI
-    start_gui()
-
-
-def start_api_only():
-    """仅启动 API 服务"""
-    import signal
-
+if __name__ == "__main__":
     def signal_handler(sig, frame):
         print("\n正在安全关闭服务...")
         sys.exit(0)
@@ -90,35 +89,20 @@ def start_api_only():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    start_api_server()
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="WenCe AI Writing Assistant")
-    parser.add_argument(
-        "--mode",
-        choices=["gui", "api", "both"],
-        default="both",
-        help="启动模式: gui(仅GUI), api(仅API), both(GUI+API, 默认)",
-    )
-
-    args = parser.parse_args()
-
     print("=" * 60)
     print("🤖 WenCe AI Writing Assistant")
     print("=" * 60)
 
     try:
-        if args.mode == "gui":
-            print("📋 模式: 仅 GUI 界面")
-            start_gui()
-        elif args.mode == "api":
-            print("📋 模式: 仅 API 服务")
-            start_api_only()
-        else:  # both
-            print("📋 模式: GUI + API 服务")
-            start_gui_with_api()
+        # 在主线程启动 API 服务
+        start_api_server()
 
+        # 后端先启动
+        time.sleep(1)
+
+        # 在后台线程启动前端服务
+        frontend_thread = threading.Thread(target=start_frontend, daemon=True)
+        frontend_thread.start()
     except KeyboardInterrupt:
         print("\n👋 程序已退出")
         sys.exit(0)

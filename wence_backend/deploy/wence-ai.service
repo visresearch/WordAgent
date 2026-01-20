@@ -1,0 +1,16 @@
+[Unit]
+Description=WenCe AI Writing Assistant
+After=network.target
+
+[Service]
+Type=simple
+User=%i
+WorkingDirectory=/opt/wence-ai
+ExecStart=/opt/wence-ai/wence-ai
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

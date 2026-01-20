@@ -23,7 +23,7 @@ SETTINGS_FILE = Path("config/user_settings.json")
 # ============== 模型名称格式化 ==============
 
 # 需要全大写的前缀/品牌词
-UPPERCASE_WORDS = {"gpt", "glm", "dall", "llama", "qwen", "yi", "ernie", "ppt", "cogview", "embedding"}
+UPPERCASE_WORDS = {"gpt", "glm", "dall", "llama", "yi", "ernie", "ppt", "cogview", "embedding"}
 
 
 def format_model_name(model_id: str) -> str:

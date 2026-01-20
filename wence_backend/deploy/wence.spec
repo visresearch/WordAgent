@@ -17,6 +17,12 @@ root_dir = os.path.abspath('..')
 datas = [
     ('../.env.example', '.'),  # 示例配置文件
     ('../README.md', '.'),
+    # 打包 app 模块（FastAPI 应用）
+    ('../app', 'app'),
+    # 打包前端构建目录
+    ('../../wence_frontend/wence_word_plugin/wps-addon-build', 'frontend'),
+    # 配置文件目录
+    ('../config', 'config'),
 ]
 
 # 收集隐藏导入（LangChain 和依赖库的所有模块）
@@ -60,17 +66,40 @@ hiddenimports = [
     'langchain_openai',
     'langchain_anthropic',
     'langchain_community',
+    'langgraph',
     
     # Other dependencies
     'dotenv',
     'json',
     'asyncio',
+    
+    # App 模块
+    'app',
+    'app.main',
+    'app.core',
+    'app.core.config',
+    'app.core.db',
+    'app.api',
+    'app.api.routes',
+    'app.api.routes.chat',
+    'app.api.routes.history',
+    'app.api.routes.models',
+    'app.api.routes.settings',
+    'app.services',
+    'app.services.agent',
+    'app.services.chat_history',
+    'app.services.llm_client',
+    'app.models',
+    'app.models.chat',
+    'app.models.db_models',
+    'app.models.doc',
 ]
 
 # 自动收集 langchain 的所有子模块
 hiddenimports += collect_submodules('langchain')
 hiddenimports += collect_submodules('langchain_core')
 hiddenimports += collect_submodules('langchain_openai')
+hiddenimports += collect_submodules('langgraph')
 
 # 分析入口文件
 a = Analysis(
