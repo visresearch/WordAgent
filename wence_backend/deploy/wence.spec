@@ -160,7 +160,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='wence-ai',
+    name='wence_ai',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
