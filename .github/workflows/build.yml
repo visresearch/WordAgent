@@ -9,7 +9,7 @@ on:
 jobs:
   build-linux:
     name: Build Linux Binary
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04  # 使用 Ubuntu 22.04 以兼容更多系统 (glibc 2.31)
     
     steps:
       - name: Checkout
