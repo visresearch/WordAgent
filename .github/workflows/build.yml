@@ -34,7 +34,7 @@ jobs:
       - name: Build binary with PyInstaller
         working-directory: wence_backend
         run: |
-          pyinstaller deploy/wence.spec --clean --noconfirm
+          uv run pyinstaller deploy/wence.spec --clean --noconfirm
       
       - name: Package binary
         working-directory: wence_backend
@@ -76,7 +76,7 @@ jobs:
       - name: Build binary with PyInstaller
         working-directory: wence_backend
         run: |
-          pyinstaller deploy/wence.spec --clean --noconfirm
+          uv run pyinstaller deploy/wence.spec --clean --noconfirm
       
       - name: Package binary
         working-directory: wence_backend
