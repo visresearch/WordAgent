@@ -46,10 +46,12 @@ def start_frontend():
         import http.server
         import socketserver
 
-        os.chdir(frontend_build_dir)
+        # 不改变工作目录，而是使用自定义 Handler
+        class CustomHandler(http.server.SimpleHTTPRequestHandler):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, directory=str(frontend_build_dir), **kwargs)
 
-        handler = http.server.SimpleHTTPRequestHandler
-        with socketserver.TCPServer(("", 3889), handler) as httpd:
+        with socketserver.TCPServer(("", 3889), CustomHandler) as httpd:
             print(f"✅ 前端服务启动成功: http://localhost:3889")
             httpd.serve_forever()
 
@@ -102,15 +104,21 @@ if __name__ == "__main__":
     """)
 
     try:
-        # 在主线程启动 API 服务
-        start_api_server()
+        # 在后台线程启动 API 服务
+        api_thread = threading.Thread(target=start_api_server, daemon=True)
+        api_thread.start()
 
-        # 后端先启动
+        # 等待 API 服务启动
         time.sleep(1)
 
         # 在后台线程启动前端服务
         frontend_thread = threading.Thread(target=start_frontend, daemon=True)
         frontend_thread.start()
+
+        # 主线程保持运行
+        print("\n✅ 所有服务已启动，按 Ctrl+C 退出")
+        while True:
+            time.sleep(1)
     except KeyboardInterrupt:
         print("\n👋 程序已退出")
         sys.exit(0)
