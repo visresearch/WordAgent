@@ -5,65 +5,116 @@
  * 1. parseDocxToJSON - 将 Word 文档内容解析为 JSON 格式
  * 2. generateDocxFromJSON - 从 JSON 数据生成 Word 文档
  *
- * JSON 数据结构：
+ * JSON 数据结构（精简版）：
  * {
  *   text: string,              // 纯文本内容
  *   paragraphs: [{             // 段落数组
  *     text: string,            // 段落文本
- *     alignment: string,       // 对齐: left/center/right/justify
- *     lineSpacing: number,     // 行间距
- *     indentLeft: number,      // 左缩进
- *     indentRight: number,     // 右缩进
- *     indentFirstLine: number, // 首行缩进
- *     spaceBefore: number,     // 段前间距
- *     spaceAfter: number,      // 段后间距
- *     styleName: string,       // 样式名称
- *     position: number,        // 文档中位置
- *     tabStops: [{position, alignment, leader}],
+ *     pStyle: [                // 段落样式数组（按顺序）
+ *       alignment,             // [0] 对齐: left/center/right/justify
+ *       lineSpacing,           // [1] 行间距
+ *       indentLeft,            // [2] 左缩进
+ *       indentRight,           // [3] 右缩进
+ *       indentFirstLine,       // [4] 首行缩进
+ *       spaceBefore,           // [5] 段前间距
+ *       spaceAfter,            // [6] 段后间距
+ *       styleName              // [7] 样式名称
+ *     ],
  *     runs: [{                 // 格式块数组
- *       text: string,
- *       fontName: string,
- *       fontSize: number,
- *       bold: boolean,
- *       italic: boolean,
- *       underline: string,
- *       color: string,
- *       highlight: string,
- *       strikethrough: boolean,
- *       superscript: boolean,
- *       subscript: boolean
+ *       text: string,          // 文字内容
+ *       rStyle: [              // 字符样式数组（按顺序）
+ *         fontName,            // [0] 字体名称
+ *         fontSize,            // [1] 字号
+ *         bold,                // [2] 加粗
+ *         italic,              // [3] 斜体
+ *         underline,           // [4] 下划线: none/single/double/thick
+ *         color,               // [5] 颜色: #RRGGBB
+ *         highlight,           // [6] 高亮色
+ *         strikethrough,       // [7] 删除线
+ *         superscript,         // [8] 上标
+ *         subscript            // [9] 下标
+ *       ]
  *     }]
  *   }],
  *   tables: [{                 // 表格数组
  *     rows: number,
  *     columns: number,
- *     tableAlignment: string,
- *     columnWidths: number[],
- *     position: number,
+ *     tStyle: [tableAlignment],// 表格样式数组
  *     cells: [[{               // 单元格二维数组
  *       text: string,
- *       rowSpan: number,
- *       colSpan: number,
- *       paragraphs: [{...}],   // 复杂格式时的段落数组
- *       alignment: string,
- *       verticalAlignment: string
+ *       cStyle: [              // 单元格样式数组
+ *         rowSpan,             // [0] 跨行数
+ *         colSpan,             // [1] 跨列数
+ *         alignment,           // [2] 水平对齐
+ *         verticalAlignment    // [3] 垂直对齐
+ *       ]
  *     }]]
  *   }],
- *   images: [{                 // 图片数组
- *     type: string,            // inline/floating
- *     width: number,
- *     height: number,
- *     position: number,
- *     tempPath: string,
- *     altText: string,
- *     wrapType: string         // 浮动图片环绕方式
- *   }],
- *   fields: [],                // 域代码数组
- *   hasTOC: boolean            // 是否包含目录
+ *   images: [{...}],          // 图片数组（保持不变）
+ *   fields: [],               // 域代码数组
+ *   hasTOC: boolean           // 是否包含目录
  * }
  */
 
 // ============== 格式转换辅助函数 ==============
+
+// 样式数组索引常量
+const PSTYLE = {
+  ALIGNMENT: 0,
+  LINE_SPACING: 1,
+  INDENT_LEFT: 2,
+  INDENT_RIGHT: 3,
+  INDENT_FIRST_LINE: 4,
+  SPACE_BEFORE: 5,
+  SPACE_AFTER: 6,
+  STYLE_NAME: 7
+};
+
+const RSTYLE = {
+  FONT_NAME: 0,
+  FONT_SIZE: 1,
+  BOLD: 2,
+  ITALIC: 3,
+  UNDERLINE: 4,
+  COLOR: 5,
+  HIGHLIGHT: 6,
+  STRIKETHROUGH: 7,
+  SUPERSCRIPT: 8,
+  SUBSCRIPT: 9
+};
+
+const CSTYLE = {
+  ROW_SPAN: 0,
+  COL_SPAN: 1,
+  ALIGNMENT: 2,
+  VERTICAL_ALIGNMENT: 3
+};
+
+// 默认样式值
+const DEFAULT_PSTYLE = ['left', 0, 0, 0, 0, 0, 0, ''];
+const DEFAULT_RSTYLE = ['', 12, false, false, 'none', '#000000', 'none', false, false, false];
+const DEFAULT_CSTYLE = [1, 1, 'left', 'center'];
+
+/**
+ * 创建段落样式数组
+ */
+function makePStyle(alignment, lineSpacing, indentLeft, indentRight, indentFirstLine, spaceBefore, spaceAfter, styleName) {
+  return [alignment, lineSpacing, indentLeft, indentRight, indentFirstLine, spaceBefore, spaceAfter, styleName];
+}
+
+/**
+ * 创建字符样式数组
+ */
+function makeRStyle(fontName, fontSize, bold, italic, underline, color, highlight, strikethrough, superscript, subscript) {
+  return [fontName, fontSize, bold, italic, underline, color, highlight, strikethrough, superscript, subscript];
+}
+
+/**
+ * 创建单元格样式数组
+ */
+function makeCStyle(rowSpan, colSpan, alignment, verticalAlignment) {
+  return [rowSpan, colSpan, alignment, verticalAlignment];
+}
 
 /**
  * 对齐方式：值 -> 名称
@@ -382,7 +433,7 @@ function parseCellParagraphs(cellRange, doc) {
 
         const paraData = {
           text: paraText,
-          alignment: getAlignmentName(para.Format.Alignment),
+          pStyle: [getAlignmentName(para.Format.Alignment)],  // 简化版只包含对齐
           runs: []
         };
 
@@ -413,12 +464,18 @@ function parseCellParagraphs(cellRange, doc) {
                 }
                 currentRun = {
                   text: charText,
-                  fontName: font.Name || '',
-                  fontSize: font.Size || 12,
-                  bold: font.Bold === -1 || font.Bold === true,
-                  italic: font.Italic === -1 || font.Italic === true,
-                  underline: getUnderlineName(font.Underline),
-                  color: getRGBColor(font.Color)
+                  rStyle: makeRStyle(
+                    font.Name || '',
+                    font.Size || 12,
+                    font.Bold === -1 || font.Bold === true,
+                    font.Italic === -1 || font.Italic === true,
+                    getUnderlineName(font.Underline),
+                    getRGBColor(font.Color),
+                    'none',
+                    false,
+                    false,
+                    false
+                  )
                 };
                 lastFormat = formatKey;
               } else if (currentRun) {
@@ -437,10 +494,18 @@ function parseCellParagraphs(cellRange, doc) {
           const font = paraRange.Font;
           paraData.runs.push({
             text: paraText,
-            fontName: font.Name || '',
-            fontSize: font.Size || 12,
-            bold: font.Bold === -1 || font.Bold === true,
-            italic: font.Italic === -1 || font.Italic === true
+            rStyle: makeRStyle(
+              font.Name || '',
+              font.Size || 12,
+              font.Bold === -1 || font.Bold === true,
+              font.Italic === -1 || font.Italic === true,
+              'none',
+              '#000000',
+              'none',
+              false,
+              false,
+              false
+            )
           });
         }
 
@@ -467,18 +532,8 @@ function parseTable(table) {
     columns: table.Columns.Count,
     cells: [],
     position: tableRange.Start,
-    tableWidth: table.PreferredWidth || 0,
-    tableWidthType: table.PreferredWidthType || 0,
-    tableAlignment: getTableAlignmentName(table.Rows.Alignment),
-    columnWidths: []
+    tStyle: [getTableAlignmentName(table.Rows.Alignment)]  // 表格样式数组
   };
-
-  // 获取列宽
-  try {
-    for (let c = 1; c <= table.Columns.Count; c++) {
-      tableData.columnWidths.push(table.Columns.Item(c).Width || 0);
-    }
-  } catch (e) {}
 
   // 第一阶段：收集原始单元格
   const rawCells = [];
@@ -495,14 +550,18 @@ function parseTable(table) {
         rowData.push({
           text: cellText,
           paragraphs: paragraphs.length > 0 ? paragraphs : undefined,
-          fontName: cellFont.Name || '',
-          fontSize: cellFont.Size || 12,
-          bold: cellFont.Bold === -1 || cellFont.Bold === true,
-          italic: cellFont.Italic === -1 || cellFont.Italic === true,
-          alignment: getAlignmentName(cellRange.ParagraphFormat.Alignment),
-          verticalAlignment: getCellVerticalAlignmentName(cell.VerticalAlignment),
-          width: cell.Width || 0,
-          height: cell.Height || 0,
+          rStyle: makeRStyle(
+            cellFont.Name || '',
+            cellFont.Size || 12,
+            cellFont.Bold === -1 || cellFont.Bold === true,
+            cellFont.Italic === -1 || cellFont.Italic === true,
+            'none', '#000000', 'none', false, false, false
+          ),
+          cStyle: makeCStyle(
+            1, 1,
+            getAlignmentName(cellRange.ParagraphFormat.Alignment),
+            getCellVerticalAlignmentName(cell.VerticalAlignment)
+          ),
           exists: true
         });
       } catch (e) {
@@ -550,19 +609,17 @@ function parseTable(table) {
         }
       }
 
+      const cStyle = rawCell.cStyle || DEFAULT_CSTYLE;
       rowData.push({
         text: rawCell.text,
         paragraphs: rawCell.paragraphs,
-        rowSpan,
-        colSpan,
-        fontName: rawCell.fontName,
-        fontSize: rawCell.fontSize,
-        bold: rawCell.bold,
-        italic: rawCell.italic,
-        alignment: rawCell.alignment,
-        verticalAlignment: rawCell.verticalAlignment,
-        width: rawCell.width,
-        height: rawCell.height
+        rStyle: rawCell.rStyle,
+        cStyle: makeCStyle(
+          rowSpan,
+          colSpan,
+          cStyle[CSTYLE.ALIGNMENT] || 'left',
+          cStyle[CSTYLE.VERTICAL_ALIGNMENT] || 'center'
+        )
       });
     }
     tableData.cells.push(rowData);
@@ -710,13 +767,16 @@ function parseDocxToJSON(range) {
         if (paraText.match(/^[\r\n\f\u0007]*$/)) {
           result.paragraphs.push({
             text: '',
-            alignment: getAlignmentName(para.Format.Alignment),
-            lineSpacing: para.Format.LineSpacing || 0,
-            indentLeft: para.Format.LeftIndent || 0,
-            indentRight: para.Format.RightIndent || 0,
-            indentFirstLine: para.Format.FirstLineIndent || 0,
-            spaceBefore: para.Format.SpaceBefore || 0,
-            spaceAfter: para.Format.SpaceAfter || 0,
+            pStyle: makePStyle(
+              getAlignmentName(para.Format.Alignment),
+              para.Format.LineSpacing || 0,
+              para.Format.LeftIndent || 0,
+              para.Format.RightIndent || 0,
+              para.Format.FirstLineIndent || 0,
+              para.Format.SpaceBefore || 0,
+              para.Format.SpaceAfter || 0,
+              ''
+            ),
             runs: [],
             isEmpty: true,
             position: paraStart
@@ -732,33 +792,19 @@ function parseDocxToJSON(range) {
 
         const paragraphData = {
           text: cleanText(paraText),
-          alignment: getAlignmentName(paraFormat.Alignment),
-          lineSpacing: paraFormat.LineSpacing || 0,
-          indentLeft: paraFormat.LeftIndent || 0,
-          indentRight: paraFormat.RightIndent || 0,
-          indentFirstLine: paraFormat.FirstLineIndent || 0,
-          spaceBefore: paraFormat.SpaceBefore || 0,
-          spaceAfter: paraFormat.SpaceAfter || 0,
+          pStyle: makePStyle(
+            getAlignmentName(paraFormat.Alignment),
+            paraFormat.LineSpacing || 0,
+            paraFormat.LeftIndent || 0,
+            paraFormat.RightIndent || 0,
+            paraFormat.FirstLineIndent || 0,
+            paraFormat.SpaceBefore || 0,
+            paraFormat.SpaceAfter || 0,
+            styleName
+          ),
           runs: [],
-          tabStops: [],
-          position: paraStart,
-          styleName
+          position: paraStart
         };
-
-        // 解析制表位
-        try {
-          const tabStops = paraFormat.TabStops;
-          if (tabStops && tabStops.Count > 0) {
-            for (let t = 1; t <= tabStops.Count; t++) {
-              const tab = tabStops.Item(t);
-              paragraphData.tabStops.push({
-                position: tab.Position || 0,
-                alignment: getTabAlignmentName(tab.Alignment),
-                leader: getTabLeaderName(tab.Leader)
-              });
-            }
-          }
-        } catch (e) {}
 
         // 解析 runs
         const words = paraRange.Words;
@@ -796,16 +842,18 @@ function parseDocxToJSON(range) {
               }
               currentRun = {
                 text: cleanText(wordText),
-                fontName: font.Name || '',
-                fontSize: font.Size || 0,
-                bold: font.Bold === -1 || font.Bold === true,
-                italic: font.Italic === -1 || font.Italic === true,
-                underline: getUnderlineName(font.Underline),
-                color: getRGBColor(font.Color),
-                highlight: getHighlightName(font.HighlightColorIndex),
-                strikethrough: font.StrikeThrough === -1 || font.StrikeThrough === true,
-                superscript: font.Superscript === -1 || font.Superscript === true,
-                subscript: font.Subscript === -1 || font.Subscript === true
+                rStyle: makeRStyle(
+                  font.Name || '',
+                  font.Size || 12,
+                  font.Bold === -1 || font.Bold === true,
+                  font.Italic === -1 || font.Italic === true,
+                  getUnderlineName(font.Underline),
+                  getRGBColor(font.Color),
+                  getHighlightName(font.HighlightColorIndex),
+                  font.StrikeThrough === -1 || font.StrikeThrough === true,
+                  font.Superscript === -1 || font.Superscript === true,
+                  font.Subscript === -1 || font.Subscript === true
+                )
               };
               lastFormat = formatKey;
             }
@@ -926,71 +974,27 @@ function generateTable(doc, tableData, currentPos) {
       pageWidth = pageSetup.PageWidth - pageSetup.LeftMargin - pageSetup.RightMargin;
     } catch (e) {}
 
-    const columnWidths = new Array(tableData.columns).fill(0);
-    let hasValidWidths = false;
-
-    for (const row of tableData.cells) {
-      let colIndex = 0;
-      for (const cell of row) {
-        if (cell && cell.rowSpan > 0 && cell.colSpan === 1) {
-          if (cell.width > 0 && cell.width < 9999999) {
-            if (columnWidths[colIndex] === 0) {
-              columnWidths[colIndex] = cell.width;
-              hasValidWidths = true;
-            }
-          }
-        }
-        colIndex += cell && cell.colSpan > 0 ? cell.colSpan : 1;
-      }
-    }
-
-    let totalWidth = columnWidths.reduce((sum, w) => sum + w, 0);
-
-    if (!hasValidWidths || totalWidth === 0) {
-      totalWidth = pageWidth;
-      const avgWidth = pageWidth / tableData.columns;
-      for (let i = 0; i < tableData.columns; i++) {
-        columnWidths[i] = avgWidth;
-      }
-    } else {
-      const validWidths = columnWidths.filter((w) => w > 0);
-      const avgValidWidth =
-        validWidths.length > 0
-          ? validWidths.reduce((a, b) => a + b, 0) / validWidths.length
-          : pageWidth / tableData.columns;
-      for (let i = 0; i < columnWidths.length; i++) {
-        if (columnWidths[i] === 0) {
-          columnWidths[i] = avgValidWidth;
-          totalWidth += avgValidWidth;
-        }
-      }
-    }
-
-    // 限制不超过页面宽度
-    if (totalWidth > pageWidth) {
-      const scale = pageWidth / totalWidth;
-      for (let i = 0; i < columnWidths.length; i++) {
-        columnWidths[i] = Math.floor(columnWidths[i] * scale);
-      }
-      totalWidth = pageWidth;
-    }
-
+    // 平均分配列宽
+    const avgWidth = pageWidth / tableData.columns;
+    
     table.AutoFitBehavior(0);
     try {
       table.PreferredWidthType = 3;
-      table.PreferredWidth = totalWidth;
+      table.PreferredWidth = pageWidth;
     } catch (e) {}
 
-    for (let c = 0; c < columnWidths.length && c < tableData.columns; c++) {
+    for (let c = 0; c < tableData.columns; c++) {
       try {
         const column = table.Columns.Item(c + 1);
         column.PreferredWidthType = 3;
-        column.PreferredWidth = columnWidths[c];
-        column.Width = columnWidths[c];
+        column.PreferredWidth = avgWidth;
+        column.Width = avgWidth;
       } catch (e) {}
     }
 
-    table.Rows.Alignment = getTableAlignmentValue(tableData.tableAlignment || 'center');
+    // 表格对齐
+    const tStyle = tableData.tStyle || ['center'];
+    table.Rows.Alignment = getTableAlignmentValue(tStyle[0] || 'center');
   } catch (e) {}
 
   // 填充内容
@@ -998,7 +1002,11 @@ function generateTable(doc, tableData, currentPos) {
     for (let col = 0; col < tableData.cells[row].length; col++) {
       try {
         const cellData = tableData.cells[row][col];
-        if (!cellData || cellData.rowSpan === 0 || cellData.colSpan === 0) {
+        const cStyle = cellData.cStyle || DEFAULT_CSTYLE;
+        const rowSpan = cStyle[CSTYLE.ROW_SPAN] || 1;
+        const colSpan = cStyle[CSTYLE.COL_SPAN] || 1;
+        
+        if (!cellData || rowSpan === 0 || colSpan === 0) {
           continue;
         }
 
@@ -1024,32 +1032,32 @@ function generateTable(doc, tableData, currentPos) {
               insertRange.InsertAfter(runText);
 
               const formatRange = doc.Range(endPos, endPos + runText.length);
+              const font = formatRange.Font;
+              
               try {
-                if (run.fontName) {
-                  formatRange.Font.Name = run.fontName;
+                font.Reset();  // 重置格式避免继承
+                const rStyle = run.rStyle || DEFAULT_RSTYLE;
+                if (rStyle[RSTYLE.FONT_NAME]) {
+                  font.Name = rStyle[RSTYLE.FONT_NAME];
                 }
-                if (run.fontSize) {
-                  formatRange.Font.Size = run.fontSize;
+                if (rStyle[RSTYLE.FONT_SIZE]) {
+                  font.Size = rStyle[RSTYLE.FONT_SIZE];
                 }
-                if (run.bold) {
-                  formatRange.Font.Bold = -1;
+                font.Bold = rStyle[RSTYLE.BOLD] ? -1 : 0;
+                font.Italic = rStyle[RSTYLE.ITALIC] ? -1 : 0;
+                if (rStyle[RSTYLE.UNDERLINE] && rStyle[RSTYLE.UNDERLINE] !== 'none') {
+                  font.Underline = getUnderlineValue(rStyle[RSTYLE.UNDERLINE]);
                 }
-                if (run.italic) {
-                  formatRange.Font.Italic = -1;
-                }
-                if (run.underline && run.underline !== 'none') {
-                  formatRange.Font.Underline = getUnderlineValue(run.underline);
-                }
-                if (run.color && run.color !== '#000000') {
-                  formatRange.Font.Color = parseRGBColor(run.color);
+                if (rStyle[RSTYLE.COLOR] && rStyle[RSTYLE.COLOR] !== '#000000') {
+                  font.Color = parseRGBColor(rStyle[RSTYLE.COLOR]);
                 }
               } catch (e) {}
             }
 
+            // 设置段落对齐
+            const pStyle = para.pStyle || DEFAULT_PSTYLE;
             try {
-              cellRange.ParagraphFormat.Alignment = getAlignmentValue(
-                para.alignment || cellData.alignment || 'left'
-              );
+              cellRange.ParagraphFormat.Alignment = getAlignmentValue(pStyle[PSTYLE.ALIGNMENT] || 'left');
             } catch (e) {}
 
             isFirstPara = false;
@@ -1062,25 +1070,24 @@ function generateTable(doc, tableData, currentPos) {
             }
           }
 
-          if (cellData.fontName) {
-            cellRange.Font.Name = cellData.fontName;
+          // 设置字体格式
+          const rStyle = cellData.rStyle || DEFAULT_RSTYLE;
+          const font = cellRange.Font;
+          font.Reset();  // 重置格式避免继承
+          if (rStyle[RSTYLE.FONT_NAME]) {
+            font.Name = rStyle[RSTYLE.FONT_NAME];
           }
-          if (cellData.fontSize) {
-            cellRange.Font.Size = cellData.fontSize;
+          if (rStyle[RSTYLE.FONT_SIZE]) {
+            font.Size = rStyle[RSTYLE.FONT_SIZE];
           }
-          if (cellData.bold) {
-            cellRange.Font.Bold = -1;
-          }
-          if (cellData.italic) {
-            cellRange.Font.Italic = -1;
-          }
+          font.Bold = rStyle[RSTYLE.BOLD] ? -1 : 0;
+          font.Italic = rStyle[RSTYLE.ITALIC] ? -1 : 0;
 
-          cellRange.ParagraphFormat.Alignment = getAlignmentValue(cellData.alignment || 'center');
+          // 设置对齐（使用循环开头的 cStyle）
+          cellRange.ParagraphFormat.Alignment = getAlignmentValue(cStyle[CSTYLE.ALIGNMENT] || 'center');
         }
 
-        cell.VerticalAlignment = getCellVerticalAlignmentValue(
-          cellData.verticalAlignment || 'center'
-        );
+        cell.VerticalAlignment = getCellVerticalAlignmentValue(cStyle[CSTYLE.VERTICAL_ALIGNMENT] || 'center');
       } catch (e) {}
     }
   }
@@ -1090,9 +1097,9 @@ function generateTable(doc, tableData, currentPos) {
   for (let row = 0; row < tableData.cells.length; row++) {
     for (let col = 0; col < tableData.cells[row].length; col++) {
       const cellData = tableData.cells[row][col];
-      if (cellData) {
-        const rowSpan = cellData.rowSpan || 1;
-        const colSpan = cellData.colSpan || 1;
+      if (cellData && cellData.cStyle) {
+        const rowSpan = cellData.cStyle[CSTYLE.ROW_SPAN] || 1;
+        const colSpan = cellData.cStyle[CSTYLE.COL_SPAN] || 1;
         if (rowSpan > 1 || colSpan > 1) {
           mergeTasks.push({
             startRow: row + 1,
@@ -1123,9 +1130,10 @@ function generateTable(doc, tableData, currentPos) {
  * 从 JSON 数据生成 Word 文档
  * @param {Object} jsonData - JSON 数据
  * @param {Object} doc - 已存在的文档对象（可选，默认创建新文档）
- * @returns {Object} - 成功返回 {success: true, doc}，失败返回 {error: string}
+ * @param {number} startPosition - 插入起始位置（可选，默认为当前选区位置）
+ * @returns {Object} - 成功返回 {success: true, doc, startPos, endPos}，失败返回 {error: string}
  */
-function generateDocxFromJSON(jsonData, doc) {
+function generateDocxFromJSON(jsonData, doc, startPosition = null) {
   try {
     if (!jsonData || (!jsonData.paragraphs && !jsonData.tables)) {
       return { error: 'JSON数据格式不正确' };
@@ -1175,7 +1183,16 @@ function generateDocxFromJSON(jsonData, doc) {
       }
     }
 
-    let currentPos = 0;
+    // 确定插入起始位置
+    let currentPos;
+    if (startPosition !== null && startPosition !== undefined) {
+      currentPos = startPosition;
+    } else {
+      // 默认使用当前选区位置
+      const selection = window.Application.Selection;
+      currentPos = selection ? selection.Range.Start : 0;
+    }
+    const insertStartPos = currentPos;  // 记录插入起始位置
     let paraIndex = 0;
 
     // 图片位置映射
@@ -1203,8 +1220,20 @@ function generateDocxFromJSON(jsonData, doc) {
 
       if (element.type === 'paragraph') {
         const para = element.data;
-        const paraText = (para.text || '').trim();
+        // 如果没有 text 字段，从 runs 拼接
+        const paraText = para.text ? para.text.trim() : (para.runs || []).map(r => r.text || '').join('').trim();
         const isImagePlaceholder = paraText === '/' || paraText === '[图片]';
+        
+        // 获取段落样式
+        const pStyle = para.pStyle || DEFAULT_PSTYLE;
+        const alignment = pStyle[PSTYLE.ALIGNMENT] || 'left';
+        const lineSpacing = pStyle[PSTYLE.LINE_SPACING] || 0;
+        const indentLeft = pStyle[PSTYLE.INDENT_LEFT] || 0;
+        const indentRight = pStyle[PSTYLE.INDENT_RIGHT] || 0;
+        const indentFirstLine = pStyle[PSTYLE.INDENT_FIRST_LINE] || 0;
+        const spaceBefore = pStyle[PSTYLE.SPACE_BEFORE] || 0;
+        const spaceAfter = pStyle[PSTYLE.SPACE_AFTER] || 0;
+        const styleName = pStyle[PSTYLE.STYLE_NAME] || '';
 
         // 处理图片占位符
         if (isImagePlaceholder && para.position) {
@@ -1222,7 +1251,7 @@ function generateDocxFromJSON(jsonData, doc) {
               const imgRange = doc.Range(paraStartPos, paraStartPos + 1);
               const imgPara = imgRange.Paragraphs.Item(1);
               if (imgPara && imgPara.Format) {
-                imgPara.Format.Alignment = getAlignmentValue(para.alignment || 'center');
+                imgPara.Format.Alignment = getAlignmentValue(alignment || 'center');
               }
             } catch (e) {}
 
@@ -1274,24 +1303,29 @@ function generateDocxFromJSON(jsonData, doc) {
             const insertedRange = doc.Range(currentPos, currentPos + runText.length);
             const font = insertedRange.Font;
 
-            if (run.fontName) {
-              font.Name = run.fontName;
-            }
-            if (run.fontSize) {
-              font.Size = run.fontSize;
-            }
-            font.Bold = run.bold ? -1 : 0;
-            font.Italic = run.italic ? -1 : 0;
-            font.StrikeThrough = run.strikethrough ? -1 : 0;
-            font.Superscript = run.superscript ? -1 : 0;
-            font.Subscript = run.subscript ? -1 : 0;
-            font.Underline = getUnderlineValue(run.underline);
+            // 重置字体格式，避免继承上下文格式
+            font.Reset();
 
-            if (run.color && run.color !== '#000000') {
-              font.Color = parseRGBColor(run.color);
+            // 应用字符样式
+            const rStyle = run.rStyle || DEFAULT_RSTYLE;
+            if (rStyle[RSTYLE.FONT_NAME]) {
+              font.Name = rStyle[RSTYLE.FONT_NAME];
             }
-            if (run.highlight && run.highlight !== 'none') {
-              font.HighlightColorIndex = getHighlightValue(run.highlight);
+            if (rStyle[RSTYLE.FONT_SIZE]) {
+              font.Size = rStyle[RSTYLE.FONT_SIZE];
+            }
+            font.Bold = rStyle[RSTYLE.BOLD] ? -1 : 0;
+            font.Italic = rStyle[RSTYLE.ITALIC] ? -1 : 0;
+            font.StrikeThrough = rStyle[RSTYLE.STRIKETHROUGH] ? -1 : 0;
+            font.Superscript = rStyle[RSTYLE.SUPERSCRIPT] ? -1 : 0;
+            font.Subscript = rStyle[RSTYLE.SUBSCRIPT] ? -1 : 0;
+            font.Underline = getUnderlineValue(rStyle[RSTYLE.UNDERLINE] || 'none');
+
+            if (rStyle[RSTYLE.COLOR] && rStyle[RSTYLE.COLOR] !== '#000000') {
+              font.Color = parseRGBColor(rStyle[RSTYLE.COLOR]);
+            }
+            if (rStyle[RSTYLE.HIGHLIGHT] && rStyle[RSTYLE.HIGHLIGHT] !== 'none') {
+              font.HighlightColorIndex = getHighlightValue(rStyle[RSTYLE.HIGHLIGHT]);
             }
 
             currentPos += runText.length;
@@ -1316,45 +1350,30 @@ function generateDocxFromJSON(jsonData, doc) {
             const currentPara = doc.Paragraphs.Item(paraIndex);
             const paraFormat = currentPara.Format;
 
-            if (para.styleName) {
+            if (styleName) {
               try {
-                currentPara.Style = para.styleName;
+                currentPara.Style = styleName;
               } catch (e) {}
             }
 
-            paraFormat.Alignment = getAlignmentValue(para.alignment);
-            if (para.lineSpacing && para.lineSpacing > 0) {
-              paraFormat.LineSpacing = para.lineSpacing;
+            paraFormat.Alignment = getAlignmentValue(alignment);
+            if (lineSpacing && lineSpacing > 0) {
+              paraFormat.LineSpacing = lineSpacing;
             }
-            if (para.indentLeft !== undefined) {
-              paraFormat.LeftIndent = para.indentLeft;
+            if (indentLeft !== undefined) {
+              paraFormat.LeftIndent = indentLeft;
             }
-            if (para.indentRight !== undefined) {
-              paraFormat.RightIndent = para.indentRight;
+            if (indentRight !== undefined) {
+              paraFormat.RightIndent = indentRight;
             }
-            if (para.indentFirstLine !== undefined) {
-              paraFormat.FirstLineIndent = para.indentFirstLine;
+            if (indentFirstLine !== undefined) {
+              paraFormat.FirstLineIndent = indentFirstLine;
             }
-            if (para.spaceBefore !== undefined) {
-              paraFormat.SpaceBefore = para.spaceBefore;
+            if (spaceBefore !== undefined) {
+              paraFormat.SpaceBefore = spaceBefore;
             }
-            if (para.spaceAfter !== undefined) {
-              paraFormat.SpaceAfter = para.spaceAfter;
-            }
-
-            if (para.tabStops && para.tabStops.length > 0) {
-              try {
-                paraFormat.TabStops.ClearAll();
-              } catch (e) {}
-              for (const tab of para.tabStops) {
-                try {
-                  paraFormat.TabStops.Add(
-                    tab.position,
-                    getTabAlignmentValue(tab.alignment),
-                    getTabLeaderValue(tab.leader)
-                  );
-                } catch (e) {}
-              }
+            if (spaceAfter !== undefined) {
+              paraFormat.SpaceAfter = spaceAfter;
             }
           }
         } catch (e) {}
@@ -1393,7 +1412,7 @@ function generateDocxFromJSON(jsonData, doc) {
       rgSel.Select();
     }
 
-    return { success: true, message: '文档生成成功！', doc };
+    return { success: true, message: '文档生成成功！', doc, startPos: insertStartPos, endPos: currentPos };
   } catch (error) {
     return { error: '生成文档失败: ' + error.message };
   }
@@ -1410,6 +1429,16 @@ export default {
   cleanText,
   cleanCellText,
   exportImageToTemp,
+
+  // 样式数组常量
+  PSTYLE,
+  RSTYLE,
+  CSTYLE,
+
+  // 样式数组创建函数
+  makePStyle,
+  makeRStyle,
+  makeCStyle,
 
   // 格式转换函数
   getAlignmentName,
@@ -1439,6 +1468,12 @@ export {
   cleanText,
   cleanCellText,
   exportImageToTemp,
+  PSTYLE,
+  RSTYLE,
+  CSTYLE,
+  makePStyle,
+  makeRStyle,
+  makeCStyle,
   getAlignmentName,
   getAlignmentValue,
   getTableAlignmentName,

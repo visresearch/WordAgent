@@ -19,8 +19,8 @@ datas = [
     ('../README.md', '.'),
     # 打包 app 模块（FastAPI 应用）
     ('../app', 'app'),
-    # 打包前端构建目录
-    ('../../wence_frontend/wence_word_plugin/wps-addon-build', 'frontend'),
+    # 打包前端构建目录（pnpm build 输出到 dist）
+    ('../../wence_frontend/wence_word_plugin/dist', 'frontend'),
     # 配置文件目录
     ('../config', 'config'),
 ]

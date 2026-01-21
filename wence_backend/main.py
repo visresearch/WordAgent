@@ -32,7 +32,7 @@ def start_frontend():
         # 如果打包目录不存在，尝试开发环境路径
         if not frontend_build_dir.exists():
             frontend_build_dir = (
-                Path(__file__).parent.parent / "wence_frontend" / "wence_word_plugin" / "wps-addon-build"
+                Path(__file__).parent.parent / "wence_frontend" / "wence_word_plugin" / "dist"
             )
 
         if not frontend_build_dir.exists():

@@ -12,6 +12,7 @@ node_modules
 dist
 dist-ssr
 wps-addon-publish
+wps-addon-build
 *.local
 
 # Editor directories and files
@@ -35,6 +36,8 @@ pip-log.txt
 pip-delete-this-directory.txt
 data/
 test/
+example/
+config/
 
 # PyInstaller
 build/
@@ -61,5 +64,3 @@ package/
 .env
 .env.local
 .env.*.local
-
-.~*.docx

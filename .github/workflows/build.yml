@@ -15,6 +15,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      
+      - name: Build Frontend
+        working-directory: wence_frontend/wence_word_plugin
+        run: |
+          pnpm install
+          pnpm build
+      
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -57,6 +73,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      
+      - name: Build Frontend
+        working-directory: wence_frontend/wence_word_plugin
+        run: |
+          pnpm install
+          pnpm build
+      
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -93,7 +125,7 @@ jobs:
   create-release:
     name: Create Release
     needs: [build-linux, build-windows]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     if: startsWith(github.ref, 'refs/tags/')
     
     permissions:

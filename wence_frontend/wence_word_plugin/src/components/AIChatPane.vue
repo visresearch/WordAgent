@@ -143,7 +143,7 @@
           class="message-icon-actions"
         >
           <div v-if="msg.documentJson" class="icon-btn-wrapper">
-            <button class="icon-btn" @click="insertToWord(msg)">
+            <button class="icon-btn" @click="insertToWord(msg, true)">
               <svg
                 width="14"
                 height="14"
@@ -1296,12 +1296,12 @@ export default {
               );
             }
 
-            // 自动输出到文档
+            // 自动输出到文档（插入到选区末尾）
             console.log('收到完整JSON，自动输出到文档');
             this.$nextTick(() => {
-              this.insertToWord(this.messages[aiMessageIndex]);
+              this.insertToWord(this.messages[aiMessageIndex], false);
             });
-            
+
             this.scrollToBottom();
           } else if (data.content && typeof data.content === 'string') {
             // 兼容旧格式（没有 type 字段），但只接受字符串
@@ -1353,7 +1353,12 @@ export default {
         }
       });
     },
-    insertToWord(msg) {
+    /**
+     * 插入内容到 Word 文档
+     * @param {Object} msg - 消息对象
+     * @param {boolean} insertAtCursor - true: 插入到光标位置, false: 插入到选区末尾
+     */
+    insertToWord(msg, insertAtCursor = true) {
       try {
         // 获取当前活动文档
         const doc = window.Application.ActiveDocument;
@@ -1393,38 +1398,36 @@ export default {
         if (jsonData && (jsonData.paragraphs || jsonData.tables)) {
           console.log('检测到文档 JSON，使用格式化输出');
 
-          // 在当前光标位置插入
           const selection = window.Application.Selection;
-          const insertPos = selection.Range.Start;
+          let insertPos;
 
-          // 记录插入前的文档总长度
-          const docLengthBefore = doc.Content.End;
+          if (insertAtCursor) {
+            // 按钮点击：插入到当前光标位置
+            insertPos = selection.Range.Start;
+            console.log('插入到光标位置:', insertPos);
+          } else {
+            // 默认自动输出：插入到选区末尾
+            insertPos = selection.Range.End;
+            console.log('插入到选区末尾:', insertPos, 'Start:', selection.Range.Start);
+          }
 
-          // 使用导入的 generateDocxFromJSON 生成文档
-          const result = generateDocxFromJSON(jsonData, doc);
+          // 使用导入的 generateDocxFromJSON 生成文档，传入插入位置
+          const result = generateDocxFromJSON(jsonData, doc, insertPos);
 
           if (result.success) {
             console.log('带格式的文档内容已成功插入');
-            
-            // 记录插入前的文档长度，撤销时恢复到这个长度
-            msg.docLengthBefore = docLengthBefore;
+            console.log(`实际插入范围: ${result.startPos} - ${result.endPos}`);
             
             // 为插入的内容添加批注
             try {
-              // 获取插入后的文档总长度
-              const docLengthAfter = doc.Content.End;
-              // 计算实际插入的内容长度
-              const insertedLength = docLengthAfter - docLengthBefore;
-
-              console.log(`插入位置: ${insertPos}, 插入长度: ${insertedLength}`);
-
-              // 选中刚插入的内容范围（从插入位置开始，长度为插入的内容长度）
-              const insertedRange = doc.Range(insertPos, insertPos + insertedLength);
+              // 使用返回的实际插入范围
+              const insertedRange = doc.Range(result.startPos, result.endPos);
 
               // 添加批注
               const comment = doc.Comments.Add(insertedRange, '');
               // 设置批注作者为"文策AI"
               comment.Author = '文策AI';
+              console.log('批注添加成功');
 
             } catch (e) {
               console.error('添加批注失败:', e);

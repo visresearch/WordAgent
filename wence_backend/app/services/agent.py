@@ -17,46 +17,41 @@ from app.services.llm_client import LLMClientManager, resolve_model
 
 # ============== Pydantic 模型定义（用于 Tool Schema）==============
 
+# 样式数组索引常量（与前端 docxJsonConverter.js 保持一致）
+# pStyle: [alignment, lineSpacing, indentLeft, indentRight, indentFirstLine, spaceBefore, spaceAfter, styleName]
+# rStyle: [fontName, fontSize, bold, italic, underline, color, highlight, strikethrough, superscript, subscript]
+# cStyle: [rowSpan, colSpan, alignment, verticalAlignment]
+# tStyle: [tableAlignment]
+
 
 class Run(BaseModel):
     """格式块 - 一段具有相同格式的文字"""
 
     text: str = Field(description="文字内容")
-    fontName: str | None = Field(None, description="字体名称，如 '宋体', 'Times New Roman'")
-    fontSize: float | None = Field(None, description="字号")
-    bold: bool | None = Field(None, description="是否加粗")
-    italic: bool | None = Field(None, description="是否斜体")
-    underline: str | None = Field(None, description="下划线：none/single/double/thick")
-    color: str | None = Field(None, description="颜色，如 '#000000'")
-    highlight: str | None = Field(None, description="高亮色")
-    strikethrough: bool | None = Field(None, description="是否删除线")
-    superscript: bool | None = Field(None, description="是否上标")
-    subscript: bool | None = Field(None, description="是否下标")
+    rStyle: list = Field(
+        default_factory=lambda: ["宋体", 12, False, False, "none", "#000000", "none", False, False, False],
+        description="字符样式数组: [字体, 字号, 粗体, 斜体, 下划线, 颜色, 高亮, 删除线, 上标, 下标]",
+    )
 
 
 class Paragraph(BaseModel):
     """段落"""
 
-    text: str = Field(description="段落完整文本")
-    runs: list[Run] = Field(description="格式块数组，每个 run 是一段具有相同格式的文字")
-    alignment: str | None = Field("left", description="对齐方式：left/center/right/justify")
-    lineSpacing: float | None = Field(None, description="行间距")
-    indentLeft: float | None = Field(None, description="左缩进（磅）")
-    indentRight: float | None = Field(None, description="右缩进（磅）")
-    indentFirstLine: float | None = Field(None, description="首行缩进（磅）")
-    spaceBefore: float | None = Field(None, description="段前间距（磅）")
-    spaceAfter: float | None = Field(None, description="段后间距（磅）")
-    styleName: str | None = Field(None, description="样式名称，如 '标题 1', '标题 2', '正文'")
+    text: str | None = Field(None, description="段落完整文本（可选，可从 runs 拼接）")
+    pStyle: list = Field(
+        default_factory=lambda: ["left", 12, 0, 0, 0, 0, 6, "正文"],
+        description="段落样式数组: [对齐, 行距, 左缩进, 右缩进, 首行缩进, 段前, 段后, 样式名]",
+    )
+    runs: list[Run] = Field(description="格式块数组")
 
 
 class Cell(BaseModel):
     """表格单元格"""
 
     text: str = Field(description="单元格文本")
-    rowSpan: int | None = Field(1, description="跨行数")
-    colSpan: int | None = Field(1, description="跨列数")
-    alignment: str | None = Field("left", description="水平对齐")
-    verticalAlignment: str | None = Field("top", description="垂直对齐")
+    cStyle: list = Field(
+        default_factory=lambda: [1, 1, "left", "center"], description="单元格样式数组: [跨行, 跨列, 水平对齐, 垂直对齐]"
+    )
 
 
 class Table(BaseModel):
@@ -65,14 +60,14 @@ class Table(BaseModel):
     rows: int = Field(description="行数")
     columns: int = Field(description="列数")
     cells: list[list[Cell]] = Field(description="单元格二维数组")
-    tableAlignment: str | None = Field("left", description="表格对齐：left/center/right")
+    tStyle: list = Field(default_factory=lambda: ["center"], description="表格样式数组: [表格对齐]")
 
 
 class DocumentOutput(BaseModel):
     """文档输出结构"""
 
     paragraphs: list[Paragraph] = Field(description="段落数组")
-    tables: list[Table] | None = Field(None, description="表格数组（可选）")
+    tables: list[Table] = Field(default_factory=list, description="表格数组")
 
 
 # ============== Tool 定义 ==============
@@ -92,7 +87,30 @@ def generate_document(document: DocumentOutput) -> dict:
     Returns:
         文档 JSON 对象
     """
-    return document.model_dump()
+    # 生成完整的 JSON，所有属性都有值
+    doc_dict = document.model_dump()
+
+    # 保存到 example 文件夹
+    try:
+        from pathlib import Path
+        from datetime import datetime
+
+        example_dir = Path(__file__).parent.parent.parent / "example"
+        example_dir.mkdir(exist_ok=True)
+
+        # 生成带时间戳的文件名
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_file = example_dir / f"generated_{timestamp}.json"
+
+        # 保存 JSON 文件（带缩进方便调试查看）
+        with open(output_file, "w", encoding="utf-8") as f:
+            json.dump(doc_dict, f, ensure_ascii=False, indent=2)
+
+        print(f"[生成文档] JSON 已保存到: {output_file}")
+    except Exception as e:
+        print(f"[生成文档] 保存文件失败: {e}")
+
+    return doc_dict
 
 
 # ============== System Prompt ==============
@@ -123,14 +141,17 @@ AGENT_PROMPT = """你是专业的文档处理和写作助手。你可以：
 【格式原则】
 - 如果用户只要求改内容：所有格式属性必须100%原样复制
 - 如果用户要求改格式：可以修改格式属性，但内容保持不变
-- 如果是生成新文档（无原文档）：使用默认格式（宋体12磅，左对齐，段后6磅）
+- 如果是生成新文档（无原文档）：使用默认格式
 
-【必须原样复制的格式属性（有原文档时）】
-段落级别：alignment, lineSpacing, indentFirstLine, indentLeft, indentRight, spaceBefore, spaceAfter, styleName
-Run级别：fontName, fontSize, bold, italic, underline, color 等
+【JSON 格式说明 - 数组格式节省 token】
+使用数组表示样式，按固定顺序：
+- pStyle: [对齐, 行距, 左缩进, 右缩进, 首行缩进, 段前, 段后, 样式名]
+- rStyle: [字体, 字号, 粗体, 斜体, 下划线, 颜色, 高亮, 删除线, 上标, 下标]
+- cStyle: [跨行, 跨列, 水平对齐, 垂直对齐]
+- tStyle: [表格对齐]
 
 【扩写新增段落时】
-新段落要沿用相邻段落的完整格式。"""
+新段落要沿用相邻段落的完整格式（复制 pStyle 和 rStyle）。"""
 
 
 # ============== 创建 LLM 实例 ==============
@@ -206,6 +227,9 @@ def build_graph(llm_with_tools):
     # 添加边
     graph.add_edge(START, "call_model")
     graph.add_conditional_edges("call_model", should_call_tools, {"call_tools": "call_tools", END: END})
+
+    # graph.add_edge("call_tools", END)  # 工具执行后直接结束，不再调用模型
+    graph.add_conditional_edges("call_model", should_call_tools, {"call_tools": "call_tools", END: END})
     graph.add_edge("call_tools", "call_model")  # 工具执行后回到模型
 
     return graph.compile()
@@ -262,26 +286,22 @@ async def process_writing_request_stream(
         # 构建用户消息
         user_content = message
         if document_json:
-            simplified = {"text": document_json.get("text", ""), "paragraphs": []}
+            # 使用新版数组格式，只保留必要字段
+            simplified = {"paragraphs": []}
             for para in document_json.get("paragraphs", []):
                 simplified["paragraphs"].append(
                     {
                         "text": para.get("text", ""),
-                        "alignment": para.get("alignment", "left"),
-                        "lineSpacing": para.get("lineSpacing"),
-                        "indentLeft": para.get("indentLeft"),
-                        "indentRight": para.get("indentRight"),
-                        "indentFirstLine": para.get("indentFirstLine"),
-                        "spaceBefore": para.get("spaceBefore"),
-                        "spaceAfter": para.get("spaceAfter"),
-                        "styleName": para.get("styleName", ""),
+                        "pStyle": para.get("pStyle", ["left", 12, 0, 0, 0, 0, 6, ""]),
                         "runs": para.get("runs", []),
                     }
                 )
             if document_json.get("tables"):
                 simplified["tables"] = document_json["tables"]
 
-            user_content = f"文档结构（格式属性必须原样复制）：\n```json\n{json.dumps(simplified, ensure_ascii=False, indent=2)}\n```\n\n用户要求：{message}\n\n⚠️ 你必须调用 generate_document 工具返回修改后的完整文档！"
+            # 使用压缩 JSON（无缩进、无多余空格）节省 token
+            compact_json = json.dumps(simplified, ensure_ascii=False, separators=(",", ":"))
+            user_content = f"文档JSON（pStyle/rStyle必须原样复制）：{compact_json}\n\n要求：{message}\n\n⚠️ 调用 generate_document 工具返回修改后的文档！"
 
         messages.append(HumanMessage(content=user_content))
 
