@@ -23,3 +23,9 @@ pnpm lint
 ```bash
 wpsjs debug
 ```
+
+## 开发文档
+
+- [WPS 开放平台](https://open.wps.cn/)
+- [WPSJS API 文档](https://qn.cache.wpscdn.cn/encs/doc/office_v19/index.htm)
+- [WPSJS API 文档(新)](https://open.wps.cn/previous/docs/client/wpsLoad)

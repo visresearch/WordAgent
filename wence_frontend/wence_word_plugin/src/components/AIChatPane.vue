@@ -213,7 +213,7 @@
                 />
               </svg>
             </button>
-            <span class="icon-tooltip">还原</span>
+            <span class="icon-tooltip">撤消</span>
           </div>
         </div>
       </div>
@@ -683,15 +683,67 @@ export default {
      * 还原到某条消息 - 删除该消息之后的所有消息
      */
     async revertToMessage(messageIndex) {
+      console.log(`撤销消息索引 ${messageIndex} 对应的文档内容`);
+
       if (this.isLoading) {
         return;
       }
 
-      // 删除该消息之后的所有消息
-      this.messages = this.messages.slice(0, messageIndex + 1);
+      try {
+        if (!window.Application) {
+          alert('WPS API 不可用');
+          return;
+        }
 
-      // 注意：这里只是前端删除，历史记录保留在后端
-      // 如果需要同步删除后端记录，需要额外的 API 支持
+        const doc = window.Application.ActiveDocument;
+        if (!doc) {
+          alert('请先打开一个Word文档');
+          return;
+        }
+
+        const msg = this.messages[messageIndex];
+        if (!msg) {
+          alert('消息不存在');
+          return;
+        }
+        
+        // 检查是否有记录的插入前文档长度
+        const targetLength = msg.docLengthBefore;
+        if (!targetLength) {
+          // alert('该消息没有可撤销的文档内容（可能还未输出到文档）');
+          return;
+        }
+        
+        console.log(`目标文档长度: ${targetLength}, 当前长度: ${doc.Content.End}`);
+        
+        // 一直撤销，直到文档长度恢复到插入前的长度
+        let actualUndoCount = 0;
+        const maxUndo = 500; // 安全限制
+        
+        while (doc.Content.End > targetLength && actualUndoCount < maxUndo) {
+          try {
+            const canUndo = doc.Undo();
+            if (canUndo === false || canUndo === 0) {
+              console.log('无法继续撤销');
+              break;
+            }
+            actualUndoCount++;
+          } catch (e) {
+            console.log('撤销出错:', e.message);
+            break;
+          }
+        }
+        
+        console.log(`✅ 成功撤销了 ${actualUndoCount} 次操作，当前文档长度: ${doc.Content.End}`);
+        
+        // 标记该消息的文档内容已被撤销，清除记录
+        msg.documentReverted = true;
+        delete msg.docLengthBefore;
+
+      } catch (error) {
+        console.error('撤销失败:', error);
+        alert('撤销失败: ' + error.message);
+      }
     },
 
     /**
@@ -1114,6 +1166,10 @@ export default {
       this.messages.push(userMsgObj);
       this.inputText = '';
       this.historyLoaded = true; // 用户开始发消息，隐藏历史提示
+      
+      // 立即清除选区
+      this.clearSelection();
+      
       this.$nextTick(() => {
         this.autoResize();
       });
@@ -1239,6 +1295,13 @@ export default {
                 ''
               );
             }
+
+            // 自动输出到文档
+            console.log('收到完整JSON，自动输出到文档');
+            this.$nextTick(() => {
+              this.insertToWord(this.messages[aiMessageIndex]);
+            });
+            
             this.scrollToBottom();
           } else if (data.content && typeof data.content === 'string') {
             // 兼容旧格式（没有 type 字段），但只接受字符串
@@ -1334,11 +1397,38 @@ export default {
           const selection = window.Application.Selection;
           const insertPos = selection.Range.Start;
 
+          // 记录插入前的文档总长度
+          const docLengthBefore = doc.Content.End;
+
           // 使用导入的 generateDocxFromJSON 生成文档
           const result = generateDocxFromJSON(jsonData, doc);
 
           if (result.success) {
             console.log('带格式的文档内容已成功插入');
+            
+            // 记录插入前的文档长度，撤销时恢复到这个长度
+            msg.docLengthBefore = docLengthBefore;
+            
+            // 为插入的内容添加批注
+            try {
+              // 获取插入后的文档总长度
+              const docLengthAfter = doc.Content.End;
+              // 计算实际插入的内容长度
+              const insertedLength = docLengthAfter - docLengthBefore;
+
+              console.log(`插入位置: ${insertPos}, 插入长度: ${insertedLength}`);
+
+              // 选中刚插入的内容范围（从插入位置开始，长度为插入的内容长度）
+              const insertedRange = doc.Range(insertPos, insertPos + insertedLength);
+
+              // 添加批注
+              const comment = doc.Comments.Add(insertedRange, '');
+              // 设置批注作者为"文策AI"
+              comment.Author = '文策AI';
+
+            } catch (e) {
+              console.error('添加批注失败:', e);
+            }
           } else {
             console.error('生成文档失败:', result.error);
             // 回退到纯文本插入
@@ -2207,16 +2297,17 @@ export default {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: transparent;
-  color: #999;
-  border: none;
+  background: white;
+  color: #333;
+  border: 1px solid #e0e0e0;
   border-radius: 50%;
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .selection-bar-clear:hover {
-  background: rgba(0, 0, 0, 0.1);
-  color: #666;
+  background: #f5f5f5;
+  color: #000;
+  border-color: #ccc;
 }
 </style>
