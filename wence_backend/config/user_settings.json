@@ -1,0 +1,66 @@
+{
+  "providers": [
+    {
+      "name": "openai",
+      "baseUrl": "https://api.chatanywhere.tech",
+      "apiKey": "sk-l4ET3MWX8vsqAVqv0tXt5o1bbc7sh5L1fDV7oV66oDPrxLlQ",
+      "models": [
+        {
+          "id": "gpt-5.2",
+          "name": "GPT-5.2",
+          "enabled": true
+        },
+        {
+          "id": "gpt-4o",
+          "name": "GPT-4o",
+          "enabled": true
+        },
+        {
+          "id": "deepseek-r1",
+          "name": "Deepseek R1",
+          "enabled": false
+        }
+      ],
+      "enabled": true
+    },
+    {
+      "name": "ollama",
+      "baseUrl": "http://localhost:11434/v1",
+      "apiKey": "123",
+      "models": [
+        {
+          "id": "qwen2.5:7b",
+          "name": "Qwen2.5:7b",
+          "enabled": true
+        }
+      ],
+      "enabled": true
+    },
+    {
+      "name": "zhipu",
+      "baseUrl": "https://open.bigmodel.cn/api/paas/v4/",
+      "apiKey": "41b690b26fe74fa18d57ad823d79f271.W14hEicmUiCvwrJZ",
+      "models": [
+        {
+          "id": "glm-4.7",
+          "name": "GLM-4.7",
+          "enabled": true
+        }
+      ],
+      "enabled": true
+    },
+    {
+      "name": "千问",
+      "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "apiKey": "sk-1f2d30db7d96449daabee21123fbf09b",
+      "models": [
+        {
+          "id": "qwen-plus",
+          "name": "Qwen Plus",
+          "enabled": true
+        }
+      ],
+      "enabled": true
+    }
+  ]
+}
