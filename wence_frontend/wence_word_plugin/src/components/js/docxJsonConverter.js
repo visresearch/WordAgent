@@ -7,7 +7,6 @@
  *
  * JSON 数据结构（精简版）：
  * {
- *   text: string,              // 纯文本内容
  *   paragraphs: [{             // 段落数组
  *     text: string,            // 段落文本
  *     pStyle: [                // 段落样式数组（按顺序）
@@ -27,12 +26,13 @@
  *         fontSize,            // [1] 字号
  *         bold,                // [2] 加粗
  *         italic,              // [3] 斜体
- *         underline,           // [4] 下划线: none/single/double/thick
- *         color,               // [5] 颜色: #RRGGBB
- *         highlight,           // [6] 高亮色
- *         strikethrough,       // [7] 删除线
- *         superscript,         // [8] 上标
- *         subscript            // [9] 下标
+ *         underline,           // [4] 下划线: 0=无、1=单线、3=双线、4=虚线、6=粗线、7=粗虚线、11=波浪线、27=粗波浪线
+ *         underlineColor,      // [5] 下划线颜色: #RRGGBB
+ *         color,               // [6] 字体颜色: #RRGGBB
+ *         highlight,           // [7] 高亮色: 0=无, 1-16=黑、蓝、青绿、鲜绿、粉红、红、黄、未知、深蓝、青、绿、紫罗兰、深红、深黄、深灰、浅灰
+ *         strikethrough,       // [8] 删除线
+ *         superscript,         // [9] 上标
+ *         subscript            // [10] 下标
  *       ]
  *     }]
  *   }],
@@ -67,7 +67,8 @@ const PSTYLE = {
   INDENT_FIRST_LINE: 4,
   SPACE_BEFORE: 5,
   SPACE_AFTER: 6,
-  STYLE_NAME: 7
+  STYLE_NAME: 7,
+  LINE_SPACING_RULE: 8
 };
 
 const RSTYLE = {
@@ -76,11 +77,12 @@ const RSTYLE = {
   BOLD: 2,
   ITALIC: 3,
   UNDERLINE: 4,
-  COLOR: 5,
-  HIGHLIGHT: 6,
-  STRIKETHROUGH: 7,
-  SUPERSCRIPT: 8,
-  SUBSCRIPT: 9
+  UNDERLINE_COLOR: 5,
+  COLOR: 6,
+  HIGHLIGHT: 7,
+  STRIKETHROUGH: 8,
+  SUPERSCRIPT: 9,
+  SUBSCRIPT: 10
 };
 
 const CSTYLE = {
@@ -91,8 +93,8 @@ const CSTYLE = {
 };
 
 // 默认样式值
-const DEFAULT_PSTYLE = ['left', 0, 0, 0, 0, 0, 0, ''];
-const DEFAULT_RSTYLE = ['', 12, false, false, 'none', '#000000', 'none', false, false, false];
+const DEFAULT_PSTYLE = ['left', 0, 0, 0, 0, 0, 0, '', 0];
+const DEFAULT_RSTYLE = ['', 12, false, false, 0, '#000000', '#000000', 0, false, false, false];
 const DEFAULT_CSTYLE = [1, 1, 'left', 'center'];
 
 /**
@@ -105,8 +107,8 @@ function makePStyle(alignment, lineSpacing, indentLeft, indentRight, indentFirst
 /**
  * 创建字符样式数组
  */
-function makeRStyle(fontName, fontSize, bold, italic, underline, color, highlight, strikethrough, superscript, subscript) {
-  return [fontName, fontSize, bold, italic, underline, color, highlight, strikethrough, superscript, subscript];
+function makeRStyle(fontName, fontSize, bold, italic, underline, underlineColor, color, highlight, strikethrough, superscript, subscript) {
+  return [fontName, fontSize, bold, italic, underline, underlineColor, color, highlight, strikethrough, superscript, subscript];
 }
 
 /**
@@ -231,33 +233,6 @@ function getTabLeaderValue(leader) {
 }
 
 /**
- * 下划线：值 -> 名称
- */
-function getUnderlineName(underline) {
-  if (underline === 0) {
-    return 'none';
-  }
-  if (underline === 1) {
-    return 'single';
-  }
-  if (underline === 2) {
-    return 'double';
-  }
-  if (underline === 3) {
-    return 'thick';
-  }
-  return 'none';
-}
-
-/**
- * 下划线：名称 -> 值
- */
-function getUnderlineValue(underline) {
-  const map = { none: 0, single: 1, double: 2, thick: 3 };
-  return map[underline] || 0;
-}
-
-/**
  * 颜色值 -> RGB 字符串
  */
 function getRGBColor(colorValue) {
@@ -290,58 +265,6 @@ function parseRGBColor(colorStr) {
   } catch (e) {
     return 0;
   }
-}
-
-/**
- * 高亮色：索引 -> 名称
- */
-function getHighlightName(highlightIndex) {
-  const map = {
-    0: 'none',
-    1: 'black',
-    2: 'blue',
-    3: 'cyan',
-    4: 'green',
-    5: 'magenta',
-    6: 'red',
-    7: 'yellow',
-    8: 'white',
-    9: 'darkBlue',
-    10: 'darkCyan',
-    11: 'darkGreen',
-    12: 'darkMagenta',
-    13: 'darkRed',
-    14: 'darkYellow',
-    15: 'darkGray',
-    16: 'lightGray'
-  };
-  return map[highlightIndex] || 'none';
-}
-
-/**
- * 高亮色：名称 -> 索引
- */
-function getHighlightValue(highlight) {
-  const map = {
-    none: 0,
-    black: 1,
-    blue: 2,
-    cyan: 3,
-    green: 4,
-    magenta: 5,
-    red: 6,
-    yellow: 7,
-    white: 8,
-    darkBlue: 9,
-    darkCyan: 10,
-    darkGreen: 11,
-    darkMagenta: 12,
-    darkRed: 13,
-    darkYellow: 14,
-    darkGray: 15,
-    lightGray: 16
-  };
-  return map[highlight] || 0;
 }
 
 /**
@@ -433,7 +356,17 @@ function parseCellParagraphs(cellRange, doc) {
 
         const paraData = {
           text: paraText,
-          pStyle: [getAlignmentName(para.Format.Alignment)],  // 简化版只包含对齐
+          pStyle: [
+            getAlignmentName(para.Format.Alignment),
+            para.Format.LineSpacing || 0,
+            para.Format.LeftIndent || 0,
+            para.Format.RightIndent || 0,
+            para.Format.FirstLineIndent || 0,
+            para.Format.SpaceBefore || 0,
+            para.Format.SpaceAfter || 0,
+            '',
+            para.Format.LineSpacingRule || 0
+          ],
           runs: []
         };
 
@@ -469,9 +402,10 @@ function parseCellParagraphs(cellRange, doc) {
                     font.Size || 12,
                     font.Bold === -1 || font.Bold === true,
                     font.Italic === -1 || font.Italic === true,
-                    getUnderlineName(font.Underline),
+                    font.Underline || 0,
+                    getRGBColor(font.UnderlineColor),
                     getRGBColor(font.Color),
-                    'none',
+                    0,
                     false,
                     false,
                     false
@@ -555,7 +489,7 @@ function parseTable(table) {
             cellFont.Size || 12,
             cellFont.Bold === -1 || cellFont.Bold === true,
             cellFont.Italic === -1 || cellFont.Italic === true,
-            'none', '#000000', 'none', false, false, false
+            0, '#000000', '#000000', 0, false, false, false
           ),
           cStyle: makeCStyle(
             1, 1,
@@ -647,7 +581,6 @@ function parseDocxToJSON(range) {
     }
 
     const result = {
-      text: cleanText(range.Text),
       paragraphs: [],
       tables: [],
       fields: [],
@@ -767,7 +700,7 @@ function parseDocxToJSON(range) {
         if (paraText.match(/^[\r\n\f\u0007]*$/)) {
           result.paragraphs.push({
             text: '',
-            pStyle: makePStyle(
+            pStyle: [
               getAlignmentName(para.Format.Alignment),
               para.Format.LineSpacing || 0,
               para.Format.LeftIndent || 0,
@@ -775,8 +708,9 @@ function parseDocxToJSON(range) {
               para.Format.FirstLineIndent || 0,
               para.Format.SpaceBefore || 0,
               para.Format.SpaceAfter || 0,
-              ''
-            ),
+              '',
+              para.Format.LineSpacingRule || 0
+            ],
             runs: [],
             isEmpty: true,
             position: paraStart
@@ -792,7 +726,7 @@ function parseDocxToJSON(range) {
 
         const paragraphData = {
           text: cleanText(paraText),
-          pStyle: makePStyle(
+          pStyle: [
             getAlignmentName(paraFormat.Alignment),
             paraFormat.LineSpacing || 0,
             paraFormat.LeftIndent || 0,
@@ -800,25 +734,39 @@ function parseDocxToJSON(range) {
             paraFormat.FirstLineIndent || 0,
             paraFormat.SpaceBefore || 0,
             paraFormat.SpaceAfter || 0,
-            styleName
-          ),
+            styleName,
+            paraFormat.LineSpacingRule || 0
+          ],
           runs: [],
           position: paraStart
         };
 
-        // 解析 runs
-        const words = paraRange.Words;
-        if (words && words.Count > 0) {
+        // 解析 runs - 使用Characters确保捕获Tab等特殊字符
+        const chars = paraRange.Characters;
+        if (chars && chars.Count > 0) {
           let lastFormat = null;
           let currentRun = null;
 
-          for (let j = 1; j <= words.Count; j++) {
-            const word = words.Item(j);
-            const font = word.Font;
-            const wordText = word.Text || '';
+          for (let j = 1; j <= chars.Count; j++) {
+            const char = chars.Item(j);
+            const font = char.Font;
+            const charText = char.Text || '';
 
-            if (wordText.match(/^[\r\n\f\u0007]+$/)) {
+            // 跳过段落结束符等，但保留Tab
+            if (charText.match(/^[\r\n\f\u0007]+$/)) {
               continue;
+            }
+
+            // 获取高亮颜色（使用 Range 的 HighlightColorIndex）
+            let highlightIndex = 0;
+            try {
+              const charRange = char;
+              highlightIndex = charRange.HighlightColorIndex || 0;
+            } catch (e) {
+              // 如果失败，尝试从 Font 获取
+              try {
+                highlightIndex = font.HighlightColorIndex || 0;
+              } catch (e2) {}
             }
 
             const formatKey = [
@@ -828,28 +776,29 @@ function parseDocxToJSON(range) {
               font.Italic,
               font.Underline,
               font.Color,
-              font.HighlightColorIndex,
+              highlightIndex,
               font.StrikeThrough,
               font.Superscript,
               font.Subscript
             ].join('|');
 
             if (formatKey === lastFormat && currentRun) {
-              currentRun.text += cleanText(wordText);
+              currentRun.text += charText;
             } else {
               if (currentRun && currentRun.text) {
                 paragraphData.runs.push(currentRun);
               }
               currentRun = {
-                text: cleanText(wordText),
+                text: charText,
                 rStyle: makeRStyle(
                   font.Name || '',
                   font.Size || 12,
                   font.Bold === -1 || font.Bold === true,
                   font.Italic === -1 || font.Italic === true,
-                  getUnderlineName(font.Underline),
+                  font.Underline || 0,
+                  getRGBColor(font.UnderlineColor),
                   getRGBColor(font.Color),
-                  getHighlightName(font.HighlightColorIndex),
+                  highlightIndex,
                   font.StrikeThrough === -1 || font.StrikeThrough === true,
                   font.Superscript === -1 || font.Superscript === true,
                   font.Subscript === -1 || font.Subscript === true
@@ -1045,11 +994,23 @@ function generateTable(doc, tableData, currentPos) {
                 }
                 font.Bold = rStyle[RSTYLE.BOLD] ? -1 : 0;
                 font.Italic = rStyle[RSTYLE.ITALIC] ? -1 : 0;
-                if (rStyle[RSTYLE.UNDERLINE] && rStyle[RSTYLE.UNDERLINE] !== 'none') {
-                  font.Underline = getUnderlineValue(rStyle[RSTYLE.UNDERLINE]);
+                if (rStyle[RSTYLE.UNDERLINE]) {
+                  font.Underline = rStyle[RSTYLE.UNDERLINE];
+                  if (rStyle[RSTYLE.UNDERLINE_COLOR] && rStyle[RSTYLE.UNDERLINE_COLOR] !== '#000000') {
+                    font.UnderlineColor = parseRGBColor(rStyle[RSTYLE.UNDERLINE_COLOR]);
+                  }
                 }
                 if (rStyle[RSTYLE.COLOR] && rStyle[RSTYLE.COLOR] !== '#000000') {
                   font.Color = parseRGBColor(rStyle[RSTYLE.COLOR]);
+                }
+                if (rStyle[RSTYLE.HIGHLIGHT]) {
+                  try {
+                    formatRange.HighlightColorIndex = rStyle[RSTYLE.HIGHLIGHT];
+                  } catch (e) {
+                    try {
+                      font.HighlightColorIndex = rStyle[RSTYLE.HIGHLIGHT];
+                    } catch (e2) {}
+                  }
                 }
               } catch (e) {}
             }
@@ -1228,6 +1189,7 @@ function generateDocxFromJSON(jsonData, doc, startPosition = null) {
         const pStyle = para.pStyle || DEFAULT_PSTYLE;
         const alignment = pStyle[PSTYLE.ALIGNMENT] || 'left';
         const lineSpacing = pStyle[PSTYLE.LINE_SPACING] || 0;
+        const lineSpacingRule = pStyle[PSTYLE.LINE_SPACING_RULE] || 0;
         const indentLeft = pStyle[PSTYLE.INDENT_LEFT] || 0;
         const indentRight = pStyle[PSTYLE.INDENT_RIGHT] || 0;
         const indentFirstLine = pStyle[PSTYLE.INDENT_FIRST_LINE] || 0;
@@ -1290,6 +1252,8 @@ function generateDocxFromJSON(jsonData, doc, startPosition = null) {
         }
 
         // 处理普通段落
+        const paraStartPos = currentPos;  // 记录段落开始位置（移到外面避免未定义）
+        
         if (para.runs && para.runs.length > 0) {
           for (const run of para.runs) {
             const runText = run.text || '';
@@ -1303,36 +1267,107 @@ function generateDocxFromJSON(jsonData, doc, startPosition = null) {
             const insertedRange = doc.Range(currentPos, currentPos + runText.length);
             const font = insertedRange.Font;
 
-            // 重置字体格式，避免继承上下文格式
-            font.Reset();
-
-            // 应用字符样式
+            // 应用字符样式（直接使用JSON中的值）
             const rStyle = run.rStyle || DEFAULT_RSTYLE;
+            
+            // 字体和字号
             if (rStyle[RSTYLE.FONT_NAME]) {
               font.Name = rStyle[RSTYLE.FONT_NAME];
             }
             if (rStyle[RSTYLE.FONT_SIZE]) {
               font.Size = rStyle[RSTYLE.FONT_SIZE];
             }
+            
+            // 字体样式 - 直接设置，不做条件判断
             font.Bold = rStyle[RSTYLE.BOLD] ? -1 : 0;
             font.Italic = rStyle[RSTYLE.ITALIC] ? -1 : 0;
             font.StrikeThrough = rStyle[RSTYLE.STRIKETHROUGH] ? -1 : 0;
             font.Superscript = rStyle[RSTYLE.SUPERSCRIPT] ? -1 : 0;
             font.Subscript = rStyle[RSTYLE.SUBSCRIPT] ? -1 : 0;
-            font.Underline = getUnderlineValue(rStyle[RSTYLE.UNDERLINE] || 'none');
-
+            
+            // 下划线
+            if (rStyle[RSTYLE.UNDERLINE]) {
+              font.Underline = rStyle[RSTYLE.UNDERLINE];
+              if (rStyle[RSTYLE.UNDERLINE_COLOR] && rStyle[RSTYLE.UNDERLINE_COLOR] !== '#000000') {
+                font.UnderlineColor = parseRGBColor(rStyle[RSTYLE.UNDERLINE_COLOR]);
+              }
+            } else {
+              font.Underline = 0;
+            }
+            
+            // 颜色
             if (rStyle[RSTYLE.COLOR] && rStyle[RSTYLE.COLOR] !== '#000000') {
               font.Color = parseRGBColor(rStyle[RSTYLE.COLOR]);
+            } else {
+              font.Color = 0;
             }
-            if (rStyle[RSTYLE.HIGHLIGHT] && rStyle[RSTYLE.HIGHLIGHT] !== 'none') {
-              font.HighlightColorIndex = getHighlightValue(rStyle[RSTYLE.HIGHLIGHT]);
+            
+            // 高亮（使用 Range 的 HighlightColorIndex）
+            if (rStyle[RSTYLE.HIGHLIGHT]) {
+              try {
+                insertedRange.HighlightColorIndex = rStyle[RSTYLE.HIGHLIGHT];
+              } catch (e) {
+                // 如果 Range.HighlightColorIndex 不可用，尝试 Font
+                try {
+                  font.HighlightColorIndex = rStyle[RSTYLE.HIGHLIGHT];
+                } catch (e2) {}
+              }
+            } else {
+              try {
+                insertedRange.HighlightColorIndex = 0;
+              } catch (e) {
+                try {
+                  font.HighlightColorIndex = 0;
+                } catch (e2) {}
+              }
             }
 
             currentPos += runText.length;
           }
         }
 
-        // 段落末尾换行
+        // 先设置段落格式 - 使用 Range 来精确定位刚插入的段落
+        // 必须在添加段落结束符（\r）之前设置格式
+        try {
+          const insertedParaRange = doc.Range(paraStartPos, currentPos);
+          const insertedPara = insertedParaRange.Paragraphs.Item(1);
+          if (insertedPara) {
+            const paraFormat = insertedPara.Format;
+
+            // 如果有样式名称，先应用样式
+            if (styleName) {
+              try {
+                insertedPara.Style = styleName;
+              } catch (e) {
+                console.warn('应用样式失败:', e);
+              }
+            }
+
+            // 强制应用 JSON 中的所有段落格式（覆盖继承的格式和样式）
+            // 不使用条件判断，直接设置所有属性
+            paraFormat.Alignment = getAlignmentValue(alignment);
+            paraFormat.LeftIndent = indentLeft;
+            paraFormat.RightIndent = indentRight;
+            paraFormat.FirstLineIndent = indentFirstLine;
+            paraFormat.SpaceBefore = spaceBefore;
+            paraFormat.SpaceAfter = spaceAfter;
+            
+            // 设置行距（同时设置行距值和行距规则）
+            if (lineSpacing && lineSpacing > 0) {
+              try {
+                paraFormat.LineSpacingRule = lineSpacingRule;
+                paraFormat.LineSpacing = lineSpacing;
+              } catch (e) {
+                console.warn('设置行距失败:', e);
+              }
+            }
+          }
+          paraIndex++;
+        } catch (e) {
+          console.warn('设置段落格式失败:', e);
+        }
+
+        // 段落格式设置完成后，再添加段落结束符
         if (i < processedElements.length - 1) {
           const nextElement = processedElements[i + 1];
           if (nextElement && nextElement.type !== 'table') {
@@ -1341,42 +1376,6 @@ function generateDocxFromJSON(jsonData, doc, startPosition = null) {
             currentPos += 1;
           }
         }
-
-        // 设置段落格式
-        try {
-          paraIndex++;
-          const paraCount = doc.Paragraphs.Count;
-          if (paraCount > 0 && paraIndex <= paraCount) {
-            const currentPara = doc.Paragraphs.Item(paraIndex);
-            const paraFormat = currentPara.Format;
-
-            if (styleName) {
-              try {
-                currentPara.Style = styleName;
-              } catch (e) {}
-            }
-
-            paraFormat.Alignment = getAlignmentValue(alignment);
-            if (lineSpacing && lineSpacing > 0) {
-              paraFormat.LineSpacing = lineSpacing;
-            }
-            if (indentLeft !== undefined) {
-              paraFormat.LeftIndent = indentLeft;
-            }
-            if (indentRight !== undefined) {
-              paraFormat.RightIndent = indentRight;
-            }
-            if (indentFirstLine !== undefined) {
-              paraFormat.FirstLineIndent = indentFirstLine;
-            }
-            if (spaceBefore !== undefined) {
-              paraFormat.SpaceBefore = spaceBefore;
-            }
-            if (spaceAfter !== undefined) {
-              paraFormat.SpaceAfter = spaceAfter;
-            }
-          }
-        } catch (e) {}
       } else if (element.type === 'table') {
         currentPos = generateTable(doc, element.data, currentPos);
         paraIndex = doc.Paragraphs.Count;
@@ -1453,12 +1452,8 @@ export default {
   getTabAlignmentValue,
   getTabLeaderName,
   getTabLeaderValue,
-  getUnderlineName,
-  getUnderlineValue,
   getRGBColor,
-  parseRGBColor,
-  getHighlightName,
-  getHighlightValue
+  parseRGBColor
 };
 
 // 也支持命名导出
@@ -1486,10 +1481,6 @@ export {
   getTabAlignmentValue,
   getTabLeaderName,
   getTabLeaderValue,
-  getUnderlineName,
-  getUnderlineValue,
   getRGBColor,
-  parseRGBColor,
-  getHighlightName,
-  getHighlightValue
+  parseRGBColor
 };

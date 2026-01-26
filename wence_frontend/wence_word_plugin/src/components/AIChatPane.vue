@@ -707,38 +707,45 @@ export default {
           return;
         }
         
-        // 检查是否有记录的插入前文档长度
-        const targetLength = msg.docLengthBefore;
-        if (!targetLength) {
-          // alert('该消息没有可撤销的文档内容（可能还未输出到文档）');
+        // 检查是否有记录的插入范围
+        if (!msg.insertStartPos && msg.insertStartPos !== 0) {
+          console.log('该消息没有可撤销的文档内容（可能还未输出到文档）');
           return;
         }
         
-        console.log(`目标文档长度: ${targetLength}, 当前长度: ${doc.Content.End}`);
+        const startPos = msg.insertStartPos;
+        const endPos = msg.insertEndPos;
+        console.log(`准备删除插入范围: ${startPos} - ${endPos}`);
         
-        // 一直撤销，直到文档长度恢复到插入前的长度
-        let actualUndoCount = 0;
-        const maxUndo = 500; // 安全限制
-        
-        while (doc.Content.End > targetLength && actualUndoCount < maxUndo) {
+        try {
+          // 先删除该范围内的批注
           try {
-            const canUndo = doc.Undo();
-            if (canUndo === false || canUndo === 0) {
-              console.log('无法继续撤销');
-              break;
+            const insertedRange = doc.Range(startPos, endPos);
+            // 直接删除范围内的所有批注
+            while (insertedRange.Comments.Count > 0) {
+              insertedRange.Comments.Item(1).Delete();
             }
-            actualUndoCount++;
-          } catch (e) {
-            console.log('撤销出错:', e.message);
-            break;
+            console.log('删除批注完成');
+          } catch (commentErr) {
+            console.log('删除批注:', commentErr.message);
           }
+          
+          // 再删除内容
+          const range = doc.Range(startPos, endPos);
+          range.Delete();
+          
+          console.log('✅ 成功删除插入内容');
+          
+          // 标记该消息的文档内容已被撤销，清除记录
+          msg.documentReverted = true;
+          delete msg.insertStartPos;
+          delete msg.insertEndPos;
+          delete msg.docLengthBefore;
+          delete msg.commentIndex;
+        } catch (e) {
+          console.error('删除失败:', e.message);
+          alert('撤销失败: ' + e.message);
         }
-        
-        console.log(`✅ 成功撤销了 ${actualUndoCount} 次操作，当前文档长度: ${doc.Content.End}`);
-        
-        // 标记该消息的文档内容已被撤销，清除记录
-        msg.documentReverted = true;
-        delete msg.docLengthBefore;
 
       } catch (error) {
         console.error('撤销失败:', error);
@@ -764,12 +771,12 @@ export default {
       }
       e.stopPropagation();
       this.modeDropdownOpen = false;
-      
+
       // 如果是打开下拉框，刷新模型列表
       if (!this.modelDropdownOpen) {
         this.loadModels();
       }
-      
+
       this.modelDropdownOpen = !this.modelDropdownOpen;
     },
 
@@ -812,16 +819,21 @@ export default {
      */
     async initDocumentAndLoadHistory() {
       try {
+        console.log('[初始化] 开始获取文档信息');
         // 获取当前文档信息
         const docInfo = this.getDocumentInfo();
+        console.log('[初始化] 文档信息:', docInfo);
         if (docInfo) {
           this.currentDocId = docInfo.docId;
           this.currentDocName = docInfo.docName;
+          console.log('[初始化] 已设置 currentDocId:', this.currentDocId);
           // 检查是否有历史记录（只获取1条来判断）
           await this.checkHasHistory();
+        } else {
+          console.warn('[初始化] 未获取到文档信息');
         }
       } catch (e) {
-        console.warn('初始化文档信息失败:', e);
+        console.error('[初始化] 失败:', e);
       }
     },
 
@@ -834,9 +846,13 @@ export default {
         return;
       }
 
+      console.log('[检查历史] docId:', this.currentDocId);
+
       try {
         const result = await api.getChatHistory(this.currentDocId, { limit: 1 });
+        console.log('[检查历史] 返回:', result);
         this.hasHistory = result.success && result.data?.messages && result.data.messages.length > 0;
+        console.log('[检查历史] hasHistory:', this.hasHistory);
       } catch (e) {
         console.warn('检查历史记录失败:', e);
         this.hasHistory = false;
@@ -847,6 +863,14 @@ export default {
      * 点击显示历史记录
      */
     async loadAndShowHistory() {
+      console.log('[显示历史] 点击按钮，当前 docId:', this.currentDocId);
+      // 重新获取文档信息，确保 docId 是最新的
+      const docInfo = this.getDocumentInfo();
+      if (docInfo) {
+        this.currentDocId = docInfo.docId;
+        this.currentDocName = docInfo.docName;
+        console.log('[显示历史] 更新后的 docId:', this.currentDocId);
+      }
       await this.loadChatHistory();
       this.historyLoaded = true;
     },
@@ -906,13 +930,19 @@ export default {
      */
     async loadChatHistory() {
       if (!this.currentDocId) {
+        console.warn('[加载历史] 缺少 docId');
         return;
       }
 
+      console.log('[加载历史] 开始加载', { docId: this.currentDocId, docName: this.currentDocName });
+
       this.historyLoading = true;
       try {
-        const result = await api.getChatHistory(this.currentDocId, { limit: 50 });
+        const result = await api.getChatHistory(this.currentDocId, { limit: 200 });
+        console.log('[加载历史] API 返回:', result);
+
         if (result.success && result.data?.messages) {
+          console.log('[加载历史] 消息数量:', result.data.messages.length);
           // 转换后端格式为前端格式
           this.messages = result.data.messages.map((msg) => ({
             role: msg.role,
@@ -932,9 +962,11 @@ export default {
 
           this.historyLoaded = true;
           this.scrollToBottom();
+        } else {
+          console.warn('[加载历史] 返回数据格式不正确:', result);
         }
       } catch (e) {
-        console.warn('加载历史记录失败:', e);
+        console.error('[加载历史] 失败:', e);
       }
       this.historyLoading = false;
     },
@@ -944,8 +976,16 @@ export default {
      */
     async saveMessageToHistory(role, content, documentJson = null, selectionContext = null, contentParts = null) {
       if (!this.currentDocId) {
+        console.warn('[保存消息] 缺少 docId，无法保存');
         return;
       }
+
+      console.log('[保存消息]', {
+        docId: this.currentDocId,
+        docName: this.currentDocName,
+        role,
+        contentLength: content.length
+      });
 
       try {
         await api.saveMessage({
@@ -959,6 +999,7 @@ export default {
           model: this.selectedModel || 'auto',
           mode: this.mode
         });
+        console.log('[保存消息] 成功');
       } catch (e) {
         console.warn('保存消息失败:', e);
       }
@@ -1159,8 +1200,18 @@ export default {
 
       if (this.currentSelection && this.currentSelectionJSON) {
         selectionContext = { ...this.currentSelection };
-        documentJson = this.currentSelectionJSON;
+        documentJson = {
+          ...this.currentSelectionJSON,
+          docId: this.currentDocId,
+          docName: this.currentDocName
+        };
         userMsgObj.selectionContext = selectionContext;
+      } else {
+        // 即使没有选中内容，也要传递 docId 和 docName
+        documentJson = {
+          docId: this.currentDocId,
+          docName: this.currentDocName
+        };
       }
 
       this.messages.push(userMsgObj);
@@ -1411,13 +1462,22 @@ export default {
             console.log('插入到选区末尾:', insertPos, 'Start:', selection.Range.Start);
           }
 
+          // 记录插入前的文档长度（用于撤销功能）
+          msg.docLengthBefore = doc.Content.End;
+          console.log('记录插入前文档长度:', msg.docLengthBefore);
+
           // 使用导入的 generateDocxFromJSON 生成文档，传入插入位置
           const result = generateDocxFromJSON(jsonData, doc, insertPos);
 
           if (result.success) {
             console.log('带格式的文档内容已成功插入');
             console.log(`实际插入范围: ${result.startPos} - ${result.endPos}`);
-            
+
+            // 记录实际插入范围（用于撤销功能）
+            msg.insertStartPos = result.startPos;
+            msg.insertEndPos = result.endPos;
+            console.log('记录插入范围用于撤销:', msg.insertStartPos, '-', msg.insertEndPos);
+
             // 为插入的内容添加批注
             try {
               // 使用返回的实际插入范围
@@ -1439,7 +1499,7 @@ export default {
           }
         } else {
           // 纯文本插入
-          this.insertPlainText(content);
+          this.insertPlainText(content, msg);
         }
       } catch (error) {
         console.error('插入文本失败:', error);
@@ -1450,9 +1510,16 @@ export default {
     /**
      * 插入纯文本（作为后备方案）
      */
-    insertPlainText(content) {
+    insertPlainText(content, msg = null) {
       try {
+        const doc = window.Application.ActiveDocument;
         const selection = window.Application.Selection;
+
+        // 记录插入前的文档长度（用于撤销功能）
+        if (msg) {
+          msg.docLengthBefore = doc.Content.End;
+          console.log('记录插入前文档长度:', msg.docLengthBefore);
+        }
 
         // 清理可能的 JSON 代码块标记
         let cleanContent = content;

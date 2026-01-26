@@ -19,10 +19,6 @@ ruff check   # Lint all files in the current directory.
 ruff format  # Format all files in the current directory.
 ```
 
-## 文档
-
-
-
 ## 打包发布
 
 ```bash

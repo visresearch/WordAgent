@@ -110,6 +110,8 @@ def get_enabled_models_from_settings() -> list[ModelInfo]:
 
                 enabled_models.append(ModelInfo(id=model_id, name=model_name, provider=provider_name))
 
+    # 按模型 ID 字母顺序排序
+    enabled_models.sort(key=lambda m: m.id.lower())
     return enabled_models
 
 
@@ -198,6 +200,8 @@ async def get_provider_models(request: ProviderModelsRequest):
                 {"id": model.id, "name": format_model_name(model.id), "owned_by": getattr(model, "owned_by", "unknown")}
             )
 
+        # 按模型 ID 字母顺序排序
+        models.sort(key=lambda m: m["id"].lower())
         return {"success": True, "models": models}
 
     except Exception as e:

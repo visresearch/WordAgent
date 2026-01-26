@@ -19,6 +19,11 @@
           "id": "deepseek-r1",
           "name": "Deepseek R1",
           "enabled": false
+        },
+        {
+          "id": "deepseek-v3.2",
+          "name": "Deepseek V3.2",
+          "enabled": true
         }
       ],
       "enabled": true

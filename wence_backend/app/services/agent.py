@@ -18,8 +18,8 @@ from app.services.llm_client import LLMClientManager, resolve_model
 # ============== Pydantic 模型定义（用于 Tool Schema）==============
 
 # 样式数组索引常量（与前端 docxJsonConverter.js 保持一致）
-# pStyle: [alignment, lineSpacing, indentLeft, indentRight, indentFirstLine, spaceBefore, spaceAfter, styleName]
-# rStyle: [fontName, fontSize, bold, italic, underline, color, highlight, strikethrough, superscript, subscript]
+# pStyle: [alignment, lineSpacing, indentLeft, indentRight, indentFirstLine, spaceBefore, spaceAfter, styleName, lineSpacingRule]
+# rStyle: [fontName, fontSize, bold, italic, underline, underlineColor, color, highlight, strikethrough, superscript, subscript]
 # cStyle: [rowSpan, colSpan, alignment, verticalAlignment]
 # tStyle: [tableAlignment]
 
@@ -29,8 +29,9 @@ class Run(BaseModel):
 
     text: str = Field(description="文字内容")
     rStyle: list = Field(
-        default_factory=lambda: ["宋体", 12, False, False, "none", "#000000", "none", False, False, False],
-        description="字符样式数组: [字体, 字号, 粗体, 斜体, 下划线, 颜色, 高亮, 删除线, 上标, 下标]",
+        default_factory=lambda: ["宋体", 12, False, False, 0, "#000000", "#000000", 0, False, False, False],
+        #                       [字体,  字号, 粗体,  斜体,  下划线, 下划线颜色, 颜色,    高亮, 删除线,  上标, 下标]
+        description="字符样式数组: [字体, 字号, 粗体, 斜体, 下划线, 下划线颜色, 颜色, 高亮, 删除线, 上标, 下标]",
     )
 
 
@@ -39,8 +40,8 @@ class Paragraph(BaseModel):
 
     text: str | None = Field(None, description="段落完整文本（可选，可从 runs 拼接）")
     pStyle: list = Field(
-        default_factory=lambda: ["left", 12, 0, 0, 0, 0, 6, "正文"],
-        description="段落样式数组: [对齐, 行距, 左缩进, 右缩进, 首行缩进, 段前, 段后, 样式名]",
+        default_factory=lambda: ["left", 12, 0, 0, 0, 0, 6, "正文", 0],
+        description="段落样式数组: [对齐, 行距, 左缩进, 右缩进, 首行缩进, 段前, 段后, 样式名, 行距规则]",
     )
     runs: list[Run] = Field(description="格式块数组")
 
@@ -145,8 +146,14 @@ AGENT_PROMPT = """你是专业的文档处理和写作助手。你可以：
 
 【JSON 格式说明 - 数组格式节省 token】
 使用数组表示样式，按固定顺序：
-- pStyle: [对齐, 行距, 左缩进, 右缩进, 首行缩进, 段前, 段后, 样式名]
-- rStyle: [字体, 字号, 粗体, 斜体, 下划线, 颜色, 高亮, 删除线, 上标, 下标]
+- pStyle: [对齐, 行距, 左缩进, 右缩进, 首行缩进, 段前, 段后, 样式名, 行距规则]
+  * 对齐: left/center/right/justify
+  * 行距规则: 0=多倍行距, 1=至少, 2=固定值
+- rStyle: [字体, 字号, 粗体, 斜体, 下划线, 下划线颜色, 颜色, 高亮, 删除线, 上标, 下标]
+  * 下划线: 0=无, 1=单线, 3=双线, 4=虚线, 6=粗线, 7=粗虚线, 11=波浪线, 27=粗波浪线 (支持0-15的值)
+  * 下划线颜色: #RRGGBB 格式
+  * 颜色: #RRGGBB 格式
+  * 高亮: 0=无, 1-16=颜色索引 (1=黑、2=蓝、3=青绿、4=鲜绿、5=粉红、6=红、7=黄、9=深蓝、10=青、11=绿、12=紫罗兰、13=深红、14=深黄、15=深灰、16=浅灰)
 - cStyle: [跨行, 跨列, 水平对齐, 垂直对齐]
 - tStyle: [表格对齐]
 
@@ -170,21 +177,100 @@ def create_llm(model_name: str) -> ChatOpenAI:
     )
 
 
+# ============== Summary Agent Prompt ==============
+
+SUMMARY_PROMPT = """你是文档内容分析助手。请分析生成的文档内容，提炼出主要的内容要点。
+
+要求：
+1. 列出生成的主要内容（如：生成了第一点...、第二点...）
+2. 如果是单段内容，总结核心主题
+3. 简洁明了，不要重复原文
+4. 使用分点格式（用数字或序号）
+5. 使用友好的语气
+
+示例：
+- 如果是多点内容：已生成3点内容：1. XXX 2. YYY 3. ZZZ
+- 如果是单段内容：已生成一段关于XXX的内容
+- 如果是文章：已生成一篇关于XXX的文章，包含...几个部分"""
+
+
 # ============== LangGraph 节点工厂 ==============
 
 
-def create_call_model_node(llm_with_tools):
-    """创建 call_model 节点（使用闭包传递 llm_with_tools）"""
+def create_writer_agent_node(llm_with_tools):
+    """创建 writer_agent 节点（使用闭包传递 llm_with_tools）"""
 
-    def call_model(state: MessagesState) -> dict:
-        """调用 LLM - 支持流式输出"""
-        # writer = get_stream_writer()
-        # writer("💭 AI正在思考...")
-
+    def writer_agent(state: MessagesState) -> dict:
+        """Writer Agent - 处理文档生成和修改请求"""
+        print("[Writer Agent] 开始处理")
         response = llm_with_tools.invoke(state["messages"])
         return {"messages": [response]}
 
-    return call_model
+    return writer_agent
+
+
+def create_summary_agent_node(llm):
+    """创建 summary_agent 节点（使用闭包传递 llm）"""
+
+    def summary_agent(state: MessagesState) -> dict:
+        """Summary Agent - 总结文档修改内容"""
+        print("[Summary Agent] 开始总结")
+        writer = get_stream_writer()
+
+        # 从消息历史中提取用户请求和工具结果
+        user_request = ""
+        document_content = ""
+
+        for msg in state["messages"]:
+            if isinstance(msg, HumanMessage):
+                # 提取用户的原始请求（去掉 JSON 部分）
+                content = msg.content
+                if "要求：" in content:
+                    user_request = content.split("要求：")[-1].split("\n")[0].strip()
+                else:
+                    user_request = content[:200]  # 取前200字符
+            elif isinstance(msg, ToolMessage):
+                # 提取工具生成的实际内容
+                try:
+                    doc = json.loads(msg.content)
+                    paragraphs = doc.get("paragraphs", [])
+
+                    # 提取所有段落的文本内容
+                    text_parts = []
+                    for para in paragraphs:
+                        para_text = para.get("text", "")
+                        if not para_text and para.get("runs"):
+                            # 从 runs 中拼接文本
+                            para_text = "".join([run.get("text", "") for run in para.get("runs", [])])
+                        if para_text:
+                            text_parts.append(para_text)
+
+                    document_content = "\n".join(text_parts)
+
+                    # 如果有表格，也提取表格内容
+                    tables = doc.get("tables", [])
+                    if tables:
+                        document_content += f"\n\n[包含 {len(tables)} 个表格]"
+
+                except Exception as e:
+                    print(f"[Summary Agent] 提取内容失败: {e}")
+                    document_content = "文档已生成"
+
+        # 构建总结请求
+        summary_messages = [
+            SystemMessage(content=SUMMARY_PROMPT),
+            HumanMessage(
+                content=f"用户请求：{user_request}\n\n生成的内容：\n{document_content}\n\n请分析并总结：生成了哪几点内容？"
+            ),
+        ]
+
+        writer("📝 正在总结修改...")
+        response = llm.invoke(summary_messages)
+        print(f"[Summary Agent] 总结完成: {response.content[:100]}...")
+
+        return {"messages": [response]}
+
+    return summary_agent
 
 
 def call_tools(state: MessagesState) -> dict:
@@ -208,29 +294,36 @@ def should_call_tools(state: MessagesState) -> str:
     """判断是否需要调用工具"""
     last_message = state["messages"][-1]
     if hasattr(last_message, "tool_calls") and last_message.tool_calls:
-        print("应该调用工具")
+        print("[Router] -> call_tools")
         return "call_tools"
+    print("[Router] -> END (闲聊模式)")
     return END
 
 
 # ============== 构建 LangGraph ==============
 
 
-def build_graph(llm_with_tools):
-    """构建 LangGraph 工作流"""
+def build_graph(llm_with_tools, llm):
+    """
+    构建 LangGraph 工作流
+
+    流程：
+    START -> writer_agent
+             ├─ (有tool_calls) -> call_tools -> summary_agent -> END
+             └─ (无tool_calls，闲聊) -> END
+    """
     graph = StateGraph(MessagesState)
 
-    # 添加节点（使用闭包传递 llm_with_tools）
-    graph.add_node("call_model", create_call_model_node(llm_with_tools))
+    # 添加节点
+    graph.add_node("writer_agent", create_writer_agent_node(llm_with_tools))
     graph.add_node("call_tools", call_tools)
+    graph.add_node("summary_agent", create_summary_agent_node(llm))
 
     # 添加边
-    graph.add_edge(START, "call_model")
-    graph.add_conditional_edges("call_model", should_call_tools, {"call_tools": "call_tools", END: END})
-
-    # graph.add_edge("call_tools", END)  # 工具执行后直接结束，不再调用模型
-    graph.add_conditional_edges("call_model", should_call_tools, {"call_tools": "call_tools", END: END})
-    graph.add_edge("call_tools", "call_model")  # 工具执行后回到模型
+    graph.add_edge(START, "writer_agent")
+    graph.add_conditional_edges("writer_agent", should_call_tools, {"call_tools": "call_tools", END: END})
+    graph.add_edge("call_tools", "summary_agent")  # 工具执行后进入总结
+    graph.add_edge("summary_agent", END)  # 总结后结束
 
     return graph.compile()
 
@@ -264,11 +357,11 @@ async def process_writing_request_stream(
     model_name = resolve_model(model or "auto")
     llm = create_llm(model_name)
 
-    # 绑定工具到模型
+    # 绑定工具到模型（用于 writer_agent）
     llm_with_tools = llm.bind_tools([generate_document])
 
-    # 构建图（传入 llm_with_tools）
-    app = build_graph(llm_with_tools)
+    # 构建图（传入 llm_with_tools 和 llm）
+    app = build_graph(llm_with_tools, llm)
 
     try:
         # 构建消息
@@ -292,7 +385,7 @@ async def process_writing_request_stream(
                 simplified["paragraphs"].append(
                     {
                         "text": para.get("text", ""),
-                        "pStyle": para.get("pStyle", ["left", 12, 0, 0, 0, 0, 6, ""]),
+                        "pStyle": para.get("pStyle", ["left", 12, 0, 0, 0, 0, 6, "", 0]),
                         "runs": para.get("runs", []),
                     }
                 )
@@ -430,6 +523,7 @@ async def process_writing_request_stream(
 
         if not has_tool_result:
             print(f"[LangGraph] ⚠️ 未检测到工具调用结果")
+            yield f"data: {json.dumps({'type': 'status', 'content': '⚠️ 没有检测到生成文档，模型可能不支持'}, ensure_ascii=False)}\n\n"
 
         yield "data: [DONE]\n\n"
 
