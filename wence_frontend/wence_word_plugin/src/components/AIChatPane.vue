@@ -528,158 +528,6 @@ export default {
     },
 
     /**
-     * 重试生成 - 重新发送上一条用户消息
-     */
-    async retryMessage(aiMessageIndex) {
-      if (this.isLoading) {
-        return;
-      }
-
-      // 找到这条 AI 消息对应的用户消息（上一条）
-      let userMessageIndex = aiMessageIndex - 1;
-      while (userMessageIndex >= 0 && this.messages[userMessageIndex].role !== 'user') {
-        userMessageIndex--;
-      }
-
-      if (userMessageIndex < 0) {
-        console.warn('找不到对应的用户消息');
-        return;
-      }
-
-      const userMsg = this.messages[userMessageIndex];
-      const userMessage = userMsg.content;
-      const selectionContext = userMsg.selectionContext || null;
-
-      // 删除当前 AI 消息
-      this.messages.splice(aiMessageIndex, 1);
-
-      // 重新发送请求
-      this.isLoading = true;
-      this.scrollToBottom();
-
-      // 创建新的 AI 消息占位
-      const newAiMessageIndex = this.messages.length;
-      this.messages.push({
-        role: 'assistant',
-        content: '',
-        contentParts: [],
-        thinking: '',
-        thinkingExpanded: true,
-        thinkingStartTime: null,
-        thinkingDuration: '',
-        documentJson: null,
-        statusText: '' // 状态提示文本
-      });
-
-      // 用于检测并过滤 JSON 输出
-      let jsonDetected = false;
-
-      // 使用 api.js 封装的流式接口
-      const streamCtrl = api.chatStream(userMessage, {
-        mode: this.mode,
-        model: this.selectedModel || 'auto',
-        documentJson: this.currentSelectionJSON,
-        history: this.messages.slice(0, -1).slice(-10),
-
-        onMessage: (data) => {
-          // 处理 thinking 内容（深度思考）
-          if (data.type === 'thinking' && data.content) {
-            // 记录思考开始时间
-            if (!this.messages[newAiMessageIndex].thinkingStartTime) {
-              this.messages[newAiMessageIndex].thinkingStartTime = Date.now();
-            }
-            this.messages[newAiMessageIndex].thinking += data.content;
-            this.scrollToBottom();
-            return;
-          }
-
-          if (data.type === 'status' && data.content) {
-            // 更新状态文本
-            this.messages[newAiMessageIndex].statusText = data.content;
-            this.scrollToBottom();
-            return;
-          }
-
-          if (data.type === 'text' && data.content) {
-            // 收到正式内容时，计算思考耗时并收起思考块
-            if (this.messages[newAiMessageIndex].thinkingStartTime && !this.messages[newAiMessageIndex].thinkingDuration) {
-              const duration = Math.round((Date.now() - this.messages[newAiMessageIndex].thinkingStartTime) / 1000);
-              this.messages[newAiMessageIndex].thinkingDuration = `${duration}秒`;
-              this.messages[newAiMessageIndex].thinkingExpanded = false;
-            }
-            
-            if (jsonDetected) {
-              return;
-            }
-
-            const content = data.content;
-            const currentContent = this.messages[newAiMessageIndex].content;
-            const combined = currentContent + content;
-
-            // 检测 JSON 开始的多种模式
-            if (
-              content.includes('{"') ||
-              content.includes('{\n') ||
-              content.includes('"paragraphs"') ||
-              content.includes('"text":')
-            ) {
-              jsonDetected = true;
-              console.log('[Filter] 检测到 JSON 输出，停止显示');
-              return;
-            }
-
-            if (
-              combined.trim().startsWith('{') &&
-              (combined.includes('"paragraphs"') || combined.includes('"text"'))
-            ) {
-              jsonDetected = true;
-              console.log('[Filter] 检测到累积内容为 JSON，停止显示');
-              return;
-            }
-
-            this.messages[newAiMessageIndex].content += content;
-            this.scrollToBottom();
-          } else if (data.type === 'json' && data.content) {
-            this.messages[newAiMessageIndex].documentJson = data.content;
-            // 移除"正在生成文档"的临时提示
-            const currentContent = this.messages[newAiMessageIndex].content;
-            if (currentContent.includes('⏳ 正在生成文档...')) {
-              this.messages[newAiMessageIndex].content = currentContent.replace(
-                /\n*⏳ 正在生成文档\.\.\./,
-                ''
-              );
-            }
-            this.scrollToBottom();
-          }
-        },
-
-        onError: (error) => {
-          console.error('重试请求失败:', error);
-          this.messages[newAiMessageIndex].content = `网络错误：${error.message}`;
-        },
-
-        onComplete: () => {
-          this.isLoading = false;
-
-          // 确保 thinking 块已折叠
-          const msg = this.messages[newAiMessageIndex];
-          if (msg.thinking && msg.thinkingExpanded) {
-            msg.thinkingExpanded = false;
-          }
-
-          this.scrollToBottom();
-
-          // 保存新的 AI 回复到历史
-          if (msg.content) {
-            this.saveMessageToHistory('assistant', msg.content, msg.documentJson, null, msg.contentParts);
-          }
-        }
-      });
-
-      this.currentStreamCtrl = streamCtrl;
-    },
-
-    /**
      * 还原到某条消息 - 删除该消息之后的所有消息
      */
     async revertToMessage(messageIndex) {
@@ -706,7 +554,7 @@ export default {
           alert('消息不存在');
           return;
         }
-        
+
         // 检查是否有记录的插入范围
         if (!msg.insertStartPos && msg.insertStartPos !== 0) {
           console.log('该消息没有可撤销的文档内容（可能还未输出到文档）');
@@ -1181,6 +1029,39 @@ export default {
         textarea.style.height = textarea.scrollHeight + 'px';
       }
     },
+
+    /**
+     * 重试生成 - 重新发送上一条用户消息
+     */
+    async retryMessage(aiMessageIndex) {
+      if (this.isLoading) {
+        return;
+      }
+
+      // 找到这条 AI 消息对应的用户消息（上一条）
+      let userMessageIndex = aiMessageIndex - 1;
+      while (userMessageIndex >= 0 && this.messages[userMessageIndex].role !== 'user') {
+        userMessageIndex--;
+      }
+
+      if (userMessageIndex < 0) {
+        console.warn('找不到对应的用户消息');
+        return;
+      }
+
+      const userMsg = this.messages[userMessageIndex];
+      const userMessage = userMsg.content;
+
+      // 删除当前 AI 消息
+      this.messages.splice(aiMessageIndex, 1);
+
+      // 使用公共方法发送请求
+      this._sendStreamRequest(userMessage, this.currentSelectionJSON);
+    },
+
+    /**
+     * 发送用户消息
+     */
     async sendMessage() {
       if (!this.inputText.trim() || this.isLoading) {
         return;
@@ -1228,157 +1109,53 @@ export default {
       // 保存用户消息到历史
       this.saveMessageToHistory('user', userMessage, null, selectionContext);
 
+      // 使用公共方法发送请求
+      this._sendStreamRequest(userMessage, documentJson);
+    },
+
+    /**
+     * 发送流式请求的公共方法
+     * @param {string} userMessage - 用户消息
+     * @param {Object} documentJson - 文档 JSON 数据
+     * @private
+     */
+    _sendStreamRequest(userMessage, documentJson) {
       this.isLoading = true;
       this.scrollToBottom();
 
-      // 创建 AI 消息占位，记录其索引
+      // 创建 AI 消息占位
       const aiMessageIndex = this.messages.length;
       this.messages.push({
         role: 'assistant',
         content: '',
-        contentParts: [], // 存储消息各部分（status和text）
-        documentJson: null, // 保存文档 JSON 数据
+        contentParts: [],
+        documentJson: null,
         thinking: '',
         thinkingExpanded: true,
         thinkingStartTime: null,
         thinkingDuration: '',
-        statusText: '' // 状态提示文本
+        statusText: ''
       });
-
-      // 用于检测并过滤 JSON 输出
-      let jsonDetected = false;
 
       // 使用 api.js 封装的流式接口
       const streamCtrl = api.chatStream(userMessage, {
         mode: this.mode,
         model: this.selectedModel || 'auto',
         documentJson: documentJson,
-        history: this.messages.slice(0, -1).slice(-10), // 排除刚添加的空消息
+        history: this.messages.slice(0, -1).slice(-10),
 
         onMessage: (data) => {
-          // 处理状态消息 - 添加到contentParts
-          if (data.type === 'status' && data.content) {
-            this.messages[aiMessageIndex].contentParts.push({
-              type: 'status',
-              content: data.content
-            });
-            this.scrollToBottom();
-            return;
-          }
-
-          // 处理 thinking 内容
-          if (data.type === 'thinking' && data.content) {
-            const msg = this.messages[aiMessageIndex];
-            if (!msg.thinkingStartTime) {
-              msg.thinkingStartTime = Date.now();
-            }
-            msg.thinking += data.content;
-            // 实时更新思考时长
-            const elapsed = ((Date.now() - msg.thinkingStartTime) / 1000).toFixed(0);
-            msg.thinkingDuration = `${elapsed}秒`;
-            this.scrollToBottom();
-            return;
-          }
-
-          if (data.type === 'text' && data.content) {
-            // 收到正式内容时，计算最终思考耗时并自动折叠
-            const msg = this.messages[aiMessageIndex];
-            if (msg.thinkingStartTime && msg.thinkingExpanded) {
-              const duration = Math.round((Date.now() - msg.thinkingStartTime) / 1000);
-              msg.thinkingDuration = `${duration}秒`;
-              msg.thinkingExpanded = false;
-            }
-
-            // 一旦检测到 JSON，后续所有文本都跳过
-            if (jsonDetected) {
-              return;
-            }
-
-            const content = data.content;
-            // 检测当前内容或累积内容是否包含 JSON 结构
-            const currentContent = this.messages[aiMessageIndex].content;
-            const combined = currentContent + content;
-
-            // 检测 JSON 开始的多种模式
-            if (
-              content.includes('{"') ||
-              content.includes('{\n') ||
-              content.includes('{ \n') ||
-              content.includes('"paragraphs"') ||
-              content.includes('"text":')
-            ) {
-              // 检测到 JSON 内容，停止显示
-              jsonDetected = true;
-              console.log('[Filter] 检测到 JSON 输出，停止显示后续内容');
-              return;
-            }
-
-            // 检测是否是 JSON 的开头
-            if (
-              combined.trim().startsWith('{') &&
-              (combined.includes('"paragraphs"') || combined.includes('"text"'))
-            ) {
-              jsonDetected = true;
-              console.log('[Filter] 检测到累积内容为 JSON，停止显示');
-              return;
-            }
-
-            // 添加到content和contentParts
-            this.messages[aiMessageIndex].content += content;
-            
-            // 添加到contentParts（累加到最后一个text部分）
-            const parts = this.messages[aiMessageIndex].contentParts;
-            if (parts.length > 0 && parts[parts.length - 1].type === 'text') {
-              parts[parts.length - 1].content += content;
-            } else {
-              parts.push({ type: 'text', content });
-            }
-            
-            this.scrollToBottom();
-          } else if (data.type === 'json' && data.content) {
-            // JSON 数据：保存用于文档转换
-            this.messages[aiMessageIndex].documentJson = data.content;
-            // 移除"正在生成文档"的临时提示
-            const currentContent = this.messages[aiMessageIndex].content;
-            if (currentContent.includes('⏳ 正在生成文档...')) {
-              this.messages[aiMessageIndex].content = currentContent.replace(
-                /\n*⏳ 正在生成文档\.\.\./,
-                ''
-              );
-            }
-
-            // 自动输出到文档（插入到选区末尾）
-            console.log('收到完整JSON，自动输出到文档');
-            this.$nextTick(() => {
-              this.insertToWord(this.messages[aiMessageIndex], false);
-            });
-
-            this.scrollToBottom();
-          } else if (data.content && typeof data.content === 'string') {
-            // 兼容旧格式（没有 type 字段），但只接受字符串
-            if (!jsonDetected) {
-              this.messages[aiMessageIndex].content += data.content;
-              this.scrollToBottom();
-            }
-          } else if (data.error) {
-            this.messages[aiMessageIndex].content += `\n\n错误: ${data.error}`;
-          }
+          this._handleStreamMessage(data, aiMessageIndex);
         },
 
         onError: (error) => {
-          console.error('发送请求失败:', error);
-          this.messages[aiMessageIndex].content =
-            `网络错误：${error.message}。请确保后端服务运行在 localhost:3880`;
+          console.error('请求失败:', error);
+          this.messages[aiMessageIndex].content = `网络错误：${error.message}。请确保后端服务运行在 localhost:3880`;
         },
 
         onComplete: () => {
-          // 清除已使用的选区
-          if (documentJson) {
-            this.clearSelection();
-          }
           this.isLoading = false;
 
-          // 确保 thinking 块已折叠（如果有的话）
           const msg = this.messages[aiMessageIndex];
           if (msg.thinking && msg.thinkingExpanded) {
             msg.thinkingExpanded = false;
@@ -1393,9 +1170,95 @@ export default {
         }
       });
 
-      // 保存控制器以便需要时中断请求
       this.currentStreamCtrl = streamCtrl;
     },
+
+    /**
+     * 处理流式消息的公共方法
+     * @param {Object} data - 收到的数据
+     * @param {number} aiMessageIndex - AI 消息在数组中的索引
+     * @private
+     */
+    _handleStreamMessage(data, aiMessageIndex) {
+      const msg = this.messages[aiMessageIndex];
+
+      // 处理后端请求全文
+      if (data.type === 'request_document') {
+        console.log('[Stream] 收到请求全文消息:', data.content);
+        msg.contentParts.push({
+          type: 'status',
+          content: data.content || '正在解析全文...'
+        });
+        this.scrollToBottom();
+        
+        // 异步发送全文（带进度提示）
+        const statusIndex = msg.contentParts.length - 1;
+        api.sendDocument({
+          onProgress: (current, total) => {
+            // 更新进度提示
+            if (total > 0) {
+              msg.contentParts[statusIndex].content = `正在解析文档... (${current}/${total})`;
+            }
+          }
+        }).then(result => {
+          console.log('[Stream] 已发送全文:', result);
+          msg.contentParts[statusIndex].content = '✅ 文档已发送';
+          this.scrollToBottom();
+        }).catch(err => {
+          console.error('[Stream] 发送全文失败:', err);
+          msg.contentParts[statusIndex].content = '❌ 发送失败: ' + err.message;
+          this.scrollToBottom();
+        });
+        return;
+      }
+
+      // 处理状态消息
+      if (data.type === 'status' && data.content) {
+        msg.contentParts.push({
+          type: 'status',
+          content: data.content
+        });
+        this.scrollToBottom();
+        return;
+      }
+
+      // 处理文本内容
+      if (data.type === 'text' && data.content) {
+        // 收到正式内容时，计算思考耗时并自动折叠
+        if (msg.thinkingStartTime && msg.thinkingExpanded) {
+          const duration = Math.round((Date.now() - msg.thinkingStartTime) / 1000);
+          msg.thinkingDuration = `${duration}秒`;
+          msg.thinkingExpanded = false;
+        }
+
+        const content = data.content;
+        msg.content += content;
+
+        // 添加到 contentParts（累加到最后一个 text 部分）
+        const parts = msg.contentParts;
+        if (parts.length > 0 && parts[parts.length - 1].type === 'text') {
+          parts[parts.length - 1].content += content;
+        } else {
+          parts.push({ type: 'text', content });
+        }
+
+        this.scrollToBottom();
+      } else if (data.type === 'json' && data.content) {
+        // JSON 数据：保存用于文档转换
+        msg.documentJson = data.content;
+
+        // 自动输出到文档
+        console.log('收到完整JSON，自动输出到文档');
+        this.$nextTick(() => {
+          this.insertToWord(msg, false);
+        });
+
+        this.scrollToBottom();
+      } else if (data.error) {
+        msg.content += `\n\n错误: ${data.error}`;
+      }
+    },
+
     scrollToBottom() {
       this.$nextTick(() => {
         const container = this.$refs.messagesContainer;
@@ -2116,6 +1979,7 @@ export default {
   cursor: pointer;
   border-radius: 3px;
   transition: color 0.2s;
+  user-select: none;
 }
 
 .select-trigger:hover {

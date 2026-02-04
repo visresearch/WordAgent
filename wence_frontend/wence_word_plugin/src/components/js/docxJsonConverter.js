@@ -699,7 +699,7 @@ function parseDocxToJSON(range) {
         // 空段落
         if (paraText.match(/^[\r\n\f\u0007]*$/)) {
           result.paragraphs.push({
-            text: '',
+            // text: '',
             pStyle: [
               getAlignmentName(para.Format.Alignment),
               para.Format.LineSpacing || 0,
@@ -725,7 +725,7 @@ function parseDocxToJSON(range) {
         } catch (e) {}
 
         const paragraphData = {
-          text: cleanText(paraText),
+          // text: cleanText(paraText),
           pStyle: [
             getAlignmentName(paraFormat.Alignment),
             paraFormat.LineSpacing || 0,

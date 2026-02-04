@@ -13,6 +13,8 @@
  * const result = await api.chat(message)
  */
 
+import { parseDocxToJSON } from './docxJsonConverter.js';
+
 // ============== 配置 ==============
 
 const CONFIG = {
@@ -24,6 +26,21 @@ const CONFIG = {
 };
 
 // ============== 工具函数 ==============
+
+/**
+ * 防抖函数 - 防止频繁调用
+ */
+function debounce(func, wait) {
+  let timeout;
+  return function executedFunction(...args) {
+    const later = () => {
+      clearTimeout(timeout);
+      func(...args);
+    };
+    clearTimeout(timeout);
+    timeout = setTimeout(later, wait);
+  };
+}
 
 /**
  * 发送 HTTP 请求的基础函数
@@ -126,6 +143,7 @@ function chatStream(message, options = {}) {
 
   const execute = async () => {
     try {
+      // fetch 请求 流式响应
       const response = await fetch(`${CONFIG.baseURL}/api/chat/stream`, {
         method: 'POST',
         headers: CONFIG.headers,
@@ -202,6 +220,351 @@ function chatStream(message, options = {}) {
     abort: () => controller.abort()
   };
 }
+
+// ============== 文档处理 API ==============
+
+// 文档解析缓存（避免重复解析）
+const documentCache = new Map();
+const CACHE_EXPIRE_TIME = 5000; // 5秒缓存有效期
+
+/**
+ * 生成文档缓存键
+ */
+function getDocumentCacheKey(doc) {
+  if (!doc) return null;
+  // 使用文档路径 + 修改时间作为缓存键
+  const path = doc.FullName || doc.Name || '';
+  const modified = doc.Saved ? '1' : '0'; // 检测是否有未保存的修改
+  return `${path}_${modified}`;
+}
+
+/**
+ * 异步解析文档（分片处理，避免阻塞 UI）
+ * @param {Object} doc - WPS Document 对象
+ * @param {Function} onProgress - 进度回调 (current, total)
+ * @returns {Promise<Object>} - 解析结果
+ */
+async function parseDocumentAsync(doc, onProgress = null) {
+  return new Promise((resolve) => {
+    // 使用 setTimeout 将任务推迟到下一个事件循环
+    // 这样可以让 UI 有时间响应
+    setTimeout(() => {
+      try {
+        const fullRange = doc.Content;
+        if (!fullRange) {
+          resolve({ error: '无法获取文档内容' });
+          return;
+        }
+
+        // 调用同步解析（WPS API 必须同步调用）
+        // 但我们通过 setTimeout 将其推迟，避免立即阻塞
+        const result = parseDocxToJSON(fullRange);
+
+        if (!result.error) {
+          result._meta = {
+            isFullDocument: true,
+            documentName: doc.Name || '',
+            parsedAt: new Date().toISOString()
+          };
+        }
+
+        resolve(result);
+      } catch (error) {
+        resolve({ error: '解析全文失败: ' + error.message });
+      }
+    }, 0);
+  });
+}
+
+/**
+ * 解析当前文档全文为 JSON（带缓存优化）
+ * @param {Object} doc - WPS Document 对象（可选，默认使用当前活动文档）
+ * @param {Object} options - 配置选项
+ * @param {boolean} options.useCache - 是否使用缓存（默认 true）
+ * @param {Function} options.onProgress - 进度回调
+ * @returns {Promise<Object>} - JSON 数据或错误对象
+ */
+async function parseFullDocument(doc, options = {}) {
+  const { useCache = true, onProgress = null } = options;
+
+  try {
+    if (!doc) {
+      doc = window.Application.ActiveDocument;
+      if (!doc) {
+        return { error: '没有打开的文档' };
+      }
+    }
+
+    // 检查缓存
+    if (useCache) {
+      const cacheKey = getDocumentCacheKey(doc);
+      if (cacheKey) {
+        const cached = documentCache.get(cacheKey);
+        if (cached && Date.now() - cached.timestamp < CACHE_EXPIRE_TIME) {
+          console.log('[parseFullDocument] 使用缓存');
+          return cached.data;
+        }
+      }
+    }
+
+    // 异步解析
+    const result = await parseDocumentAsync(doc, onProgress);
+
+    // 保存到缓存
+    if (useCache && !result.error) {
+      const cacheKey = getDocumentCacheKey(doc);
+      if (cacheKey) {
+        documentCache.set(cacheKey, {
+          data: result,
+          timestamp: Date.now()
+        });
+
+        // 清理过期缓存
+        setTimeout(() => {
+          for (const [key, value] of documentCache.entries()) {
+            if (Date.now() - value.timestamp > CACHE_EXPIRE_TIME) {
+              documentCache.delete(key);
+            }
+          }
+        }, CACHE_EXPIRE_TIME);
+      }
+    }
+
+    return result;
+  } catch (error) {
+    return { error: '解析全文失败: ' + error.message };
+  }
+}
+
+/**
+ * 发送文档 JSON 到后端 /api/chat/doc 接口
+ * @param {Object} options - 配置选项
+ * @param {Object} options.doc - WPS Document 对象（可选）
+ * @param {Object} options.documentJson - 已解析的文档 JSON（可选，不传则自动解析）
+ * @param {Function} options.onProgress - 解析进度回调
+ * @returns {Promise<Object>} - 后端返回结果
+ */
+async function sendDocument(options = {}) {
+  const { doc = null, documentJson = null, onProgress = null } = options;
+
+  // 如果没有传入 documentJson，则自动解析
+  let docData = documentJson;
+  let docName = '';
+
+  if (!docData) {
+    const currentDoc = doc || window.Application?.ActiveDocument;
+    // 使用异步解析（带缓存）
+    docData = await parseFullDocument(currentDoc, { onProgress });
+    if (docData.error) {
+      return { success: false, error: docData.error };
+    }
+    docName = currentDoc?.Name || '';
+  } else {
+    // 从 documentJson 的 _meta 中获取文档名
+    docName = docData._meta?.documentName || '';
+  }
+
+  console.log('[sendDocument] 发送文档:', docName);
+
+  return await request('/api/chat/doc', {
+    method: 'POST',
+    body: {
+      documentJson: docData,
+      documentName: docName,
+      timestamp: Date.now()
+    }
+  });
+}
+
+// /**
+//  * 阶段1：定位 - 发送文档摘要，获取 Query DSL
+//  * 
+//  * @param {string} message - 用户消息
+//  * @param {Object} options - 配置选项
+//  * @param {Object} options.documentSummary - 文档摘要（由 generateSummary 生成）
+//  * @param {Function} options.onQuery - 收到 Query DSL 时的回调
+//  * @param {Function} options.onText - 收到纯文本回复时的回调
+//  * @param {Function} options.onError - 发生错误时的回调
+//  * @param {Function} options.onComplete - 完成时的回调
+//  * @returns {Object} - 包含 abort 方法的控制对象
+//  */
+// function locateContent(message, options = {}) {
+//   const {
+//     documentSummary = null,
+//     model = 'auto',
+//     onQuery,
+//     onText,
+//     onStatus,
+//     onError,
+//     onComplete
+//   } = options;
+
+//   const controller = new AbortController();
+
+//   const execute = async () => {
+//     try {
+//       const response = await fetch(`${CONFIG.baseURL}/api/chat/locate`, {
+//         method: 'POST',
+//         headers: CONFIG.headers,
+//         body: JSON.stringify({
+//           message: message.trim(),
+//           documentSummary,
+//           model
+//         }),
+//         signal: controller.signal
+//       });
+
+//       if (!response.ok) {
+//         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+//       }
+
+//       const reader = response.body.getReader();
+//       const decoder = new TextDecoder();
+//       let buffer = '';
+
+//       while (true) {
+//         const { done, value } = await reader.read();
+
+//         if (done) {
+//           if (onComplete) {
+//             onComplete();
+//           }
+//           break;
+//         }
+
+//         buffer += decoder.decode(value, { stream: true });
+//         const lines = buffer.split('\n');
+//         buffer = lines.pop() || '';
+
+//         for (const line of lines) {
+//           if (line.startsWith('data: ')) {
+//             const data = line.slice(6);
+//             if (data === '[DONE]') {
+//               if (onComplete) {
+//                 onComplete();
+//               }
+//               return;
+//             }
+//             try {
+//               const parsed = JSON.parse(data);
+//               if (parsed.type === 'query' && onQuery) {
+//                 onQuery(parsed.queryDSL, parsed.message);
+//               } else if (parsed.type === 'text' && onText) {
+//                 onText(parsed.content);
+//               } else if (parsed.type === 'status' && onStatus) {
+//                 onStatus(parsed.content);
+//               } else if (parsed.type === 'error' && onError) {
+//                 onError(new Error(parsed.content));
+//               }
+//             } catch (e) {
+//               console.error('解析响应失败:', e);
+//             }
+//           }
+//         }
+//       }
+//     } catch (error) {
+//       if (error.name !== 'AbortError' && onError) {
+//         onError(error);
+//       }
+//     }
+//   };
+
+//   execute();
+//   return { abort: () => controller.abort() };
+// }
+
+// /**
+//  * 阶段2：修改 - 发送匹配的段落，获取修改结果
+//  * 
+//  * @param {string} message - 用户消息
+//  * @param {Object} options - 配置选项
+//  * @param {Array} options.matchedParagraphs - 匹配的段落数组
+//  * @param {Array} options.originalIndices - 原始段落索引
+//  * @param {Function} options.onMessage - 收到消息时的回调
+//  * @param {Function} options.onError - 发生错误时的回调
+//  * @param {Function} options.onComplete - 完成时的回调
+//  * @returns {Object} - 包含 abort 方法的控制对象
+//  */
+// function modifyContent(message, options = {}) {
+//   const {
+//     matchedParagraphs = [],
+//     originalIndices = [],
+//     model = 'auto',
+//     onMessage,
+//     onError,
+//     onComplete
+//   } = options;
+
+//   const controller = new AbortController();
+
+//   const execute = async () => {
+//     try {
+//       const response = await fetch(`${CONFIG.baseURL}/api/chat/modify`, {
+//         method: 'POST',
+//         headers: CONFIG.headers,
+//         body: JSON.stringify({
+//           message: message.trim(),
+//           matchedParagraphs,
+//           originalIndices,
+//           model
+//         }),
+//         signal: controller.signal
+//       });
+
+//       if (!response.ok) {
+//         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+//       }
+
+//       const reader = response.body.getReader();
+//       const decoder = new TextDecoder();
+//       let buffer = '';
+
+//       while (true) {
+//         const { done, value } = await reader.read();
+
+//         if (done) {
+//           if (onComplete) {
+//             onComplete();
+//           }
+//           break;
+//         }
+
+//         buffer += decoder.decode(value, { stream: true });
+//         const lines = buffer.split('\n');
+//         buffer = lines.pop() || '';
+
+//         for (const line of lines) {
+//           if (line.startsWith('data: ')) {
+//             const data = line.slice(6);
+//             if (data === '[DONE]') {
+//               if (onComplete) {
+//                 onComplete();
+//               }
+//               return;
+//             }
+//             try {
+//               const parsed = JSON.parse(data);
+//               if (onMessage) {
+//                 onMessage(parsed);
+//               }
+//             } catch (e) {
+//               if (onMessage) {
+//                 onMessage({ content: data });
+//               }
+//             }
+//           }
+//         }
+//       }
+//     } catch (error) {
+//       if (error.name !== 'AbortError' && onError) {
+//         onError(error);
+//       }
+//     }
+//   };
+
+//   execute();
+//   return { abort: () => controller.abort() };
+// }
 
 /**
  * 获取可用模型列表
@@ -392,6 +755,10 @@ export default {
   getModels,
   fetchAvailableModels,
 
+  // 文档处理
+  parseFullDocument,
+  sendDocument,
+
   // 聊天历史 API
   getChatHistory,
   saveMessage,
@@ -415,6 +782,8 @@ export {
   chatStream,
   getModels,
   fetchAvailableModels,
+  parseFullDocument,
+  sendDocument,
   getChatHistory,
   saveMessage,
   clearChatHistory,
