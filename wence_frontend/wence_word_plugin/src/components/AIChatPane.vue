@@ -128,6 +128,7 @@
               <div v-for="(part, partIndex) in msg.contentParts" :key="partIndex">
                 <div v-if="part.type === 'status'" class="status-line">
                   <span class="typing">{{ part.content }}</span>
+                  <span v-if="part.loading" class="loading-spinner"></span>
                 </div>
                 <div v-else-if="part.type === 'text'" class="markdown-body" v-html="renderMarkdown(part.content)"></div>
               </div>
@@ -1187,27 +1188,25 @@ export default {
         console.log('[Stream] 收到请求全文消息:', data.content);
         msg.contentParts.push({
           type: 'status',
-          content: data.content || '正在解析全文...'
+          content: '📑 正在解析全文',
+          loading: true  // 显示加载动画
         });
         this.scrollToBottom();
-        
-        // 异步发送全文（带进度提示）
+
+        // 等待 Vue 渲染完成后再发送，确保用户能看到 loading 状态
         const statusIndex = msg.contentParts.length - 1;
-        api.sendDocument({
-          onProgress: (current, total) => {
-            // 更新进度提示
-            if (total > 0) {
-              msg.contentParts[statusIndex].content = `正在解析文档... (${current}/${total})`;
-            }
-          }
-        }).then(result => {
-          console.log('[Stream] 已发送全文:', result);
-          msg.contentParts[statusIndex].content = '✅ 文档已发送';
-          this.scrollToBottom();
-        }).catch(err => {
-          console.error('[Stream] 发送全文失败:', err);
-          msg.contentParts[statusIndex].content = '❌ 发送失败: ' + err.message;
-          this.scrollToBottom();
+        this.$nextTick(() => {
+          api.sendDocument().then(result => {
+            console.log('[Stream] 已发送全文:', result);
+            msg.contentParts[statusIndex].content = '✅ 全文解析完成';
+            msg.contentParts[statusIndex].loading = false;  // 停止加载动画
+            this.scrollToBottom();
+          }).catch(err => {
+            console.error('[Stream] 发送全文失败:', err);
+            msg.contentParts[statusIndex].content = '❌ 解析失败: ' + err.message;
+            msg.contentParts[statusIndex].loading = false;  // 停止加载动画
+            this.scrollToBottom();
+          });
         });
         return;
       }
@@ -1635,10 +1634,30 @@ export default {
 .status-line {
   margin: 4px 0;
   padding: 2px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .status-line .typing {
-  display: block;
+  display: inline;
+}
+
+/* 旋转加载圈圈 */
+.loading-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid #e0e0e0;
+  border-top-color: #667eea;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .message {

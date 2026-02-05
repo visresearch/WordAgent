@@ -16,7 +16,7 @@ const router = createRouter({
     {
       path: '/setting',
       name: '设置',
-      component: () => import('../components/SettingPane.vue')
+      component: () => import('../components/setting/SettingPane.vue')
     },
     {
       path: '/about',

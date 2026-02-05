@@ -223,33 +223,25 @@ function chatStream(message, options = {}) {
 
 // ============== 文档处理 API ==============
 
-// 文档解析缓存（避免重复解析）
-const documentCache = new Map();
-const CACHE_EXPIRE_TIME = 5000; // 5秒缓存有效期
-
 /**
- * 生成文档缓存键
- */
-function getDocumentCacheKey(doc) {
-  if (!doc) return null;
-  // 使用文档路径 + 修改时间作为缓存键
-  const path = doc.FullName || doc.Name || '';
-  const modified = doc.Saved ? '1' : '0'; // 检测是否有未保存的修改
-  return `${path}_${modified}`;
-}
-
-/**
- * 异步解析文档（分片处理，避免阻塞 UI）
+ * 异步解析文档（推迟到下一个事件循环，避免阻塞 UI）
  * @param {Object} doc - WPS Document 对象
- * @param {Function} onProgress - 进度回调 (current, total)
  * @returns {Promise<Object>} - 解析结果
  */
-async function parseDocumentAsync(doc, onProgress = null) {
+async function parseFullDocument(doc) {
   return new Promise((resolve) => {
     // 使用 setTimeout 将任务推迟到下一个事件循环
-    // 这样可以让 UI 有时间响应
+    // 这样可以让 UI 有时间响应，避免卡顿
     setTimeout(() => {
       try {
+        if (!doc) {
+          doc = window.Application.ActiveDocument;
+          if (!doc) {
+            resolve({ error: '没有打开的文档' });
+            return;
+          }
+        }
+
         const fullRange = doc.Content;
         if (!fullRange) {
           resolve({ error: '无法获取文档内容' });
@@ -257,7 +249,6 @@ async function parseDocumentAsync(doc, onProgress = null) {
         }
 
         // 调用同步解析（WPS API 必须同步调用）
-        // 但我们通过 setTimeout 将其推迟，避免立即阻塞
         const result = parseDocxToJSON(fullRange);
 
         if (!result.error) {
@@ -277,75 +268,14 @@ async function parseDocumentAsync(doc, onProgress = null) {
 }
 
 /**
- * 解析当前文档全文为 JSON（带缓存优化）
- * @param {Object} doc - WPS Document 对象（可选，默认使用当前活动文档）
- * @param {Object} options - 配置选项
- * @param {boolean} options.useCache - 是否使用缓存（默认 true）
- * @param {Function} options.onProgress - 进度回调
- * @returns {Promise<Object>} - JSON 数据或错误对象
- */
-async function parseFullDocument(doc, options = {}) {
-  const { useCache = true, onProgress = null } = options;
-
-  try {
-    if (!doc) {
-      doc = window.Application.ActiveDocument;
-      if (!doc) {
-        return { error: '没有打开的文档' };
-      }
-    }
-
-    // 检查缓存
-    if (useCache) {
-      const cacheKey = getDocumentCacheKey(doc);
-      if (cacheKey) {
-        const cached = documentCache.get(cacheKey);
-        if (cached && Date.now() - cached.timestamp < CACHE_EXPIRE_TIME) {
-          console.log('[parseFullDocument] 使用缓存');
-          return cached.data;
-        }
-      }
-    }
-
-    // 异步解析
-    const result = await parseDocumentAsync(doc, onProgress);
-
-    // 保存到缓存
-    if (useCache && !result.error) {
-      const cacheKey = getDocumentCacheKey(doc);
-      if (cacheKey) {
-        documentCache.set(cacheKey, {
-          data: result,
-          timestamp: Date.now()
-        });
-
-        // 清理过期缓存
-        setTimeout(() => {
-          for (const [key, value] of documentCache.entries()) {
-            if (Date.now() - value.timestamp > CACHE_EXPIRE_TIME) {
-              documentCache.delete(key);
-            }
-          }
-        }, CACHE_EXPIRE_TIME);
-      }
-    }
-
-    return result;
-  } catch (error) {
-    return { error: '解析全文失败: ' + error.message };
-  }
-}
-
-/**
  * 发送文档 JSON 到后端 /api/chat/doc 接口
  * @param {Object} options - 配置选项
  * @param {Object} options.doc - WPS Document 对象（可选）
  * @param {Object} options.documentJson - 已解析的文档 JSON（可选，不传则自动解析）
- * @param {Function} options.onProgress - 解析进度回调
  * @returns {Promise<Object>} - 后端返回结果
  */
 async function sendDocument(options = {}) {
-  const { doc = null, documentJson = null, onProgress = null } = options;
+  const { doc = null, documentJson = null } = options;
 
   // 如果没有传入 documentJson，则自动解析
   let docData = documentJson;
@@ -353,8 +283,8 @@ async function sendDocument(options = {}) {
 
   if (!docData) {
     const currentDoc = doc || window.Application?.ActiveDocument;
-    // 使用异步解析（带缓存）
-    docData = await parseFullDocument(currentDoc, { onProgress });
+    // 使用异步解析
+    docData = await parseFullDocument(currentDoc);
     if (docData.error) {
       return { success: false, error: docData.error };
     }
