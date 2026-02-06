@@ -199,7 +199,7 @@ export default {
 }
 
 .switch input:checked + .slider {
-  background-color: #2563eb;
+  background-color: #667eea;
 }
 
 .switch input:checked + .slider:before {
@@ -242,7 +242,7 @@ export default {
 }
 
 .radio-item.active {
-  border-color: #2563eb;
+  border-color: #667eea;
   background: #f8faff;
 }
 
@@ -262,7 +262,7 @@ export default {
 }
 
 .radio-item.active .radio-circle {
-  border-color: #2563eb;
+  border-color: #667eea;
 }
 
 .radio-item.active .radio-circle::after {
@@ -273,7 +273,7 @@ export default {
   transform: translate(-50%, -50%);
   width: 8px;
   height: 8px;
-  background: #2563eb;
+  background: #667eea;
   border-radius: 50%;
 }
 

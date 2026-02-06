@@ -37,6 +37,25 @@ function OnAction(control) {
         }
       }
       break;
+    case 'btnShowSession':
+      {
+        let tsId = window.Application.PluginStorage.getItem('session_taskpane_id');
+        if (!tsId) {
+          let tskpane = window.Application.CreateTaskPane(
+            Util.GetUrlPath() + Util.GetRouterHash() + '/session',
+            '历史会话'
+          );
+          let id = tskpane.ID;
+          window.Application.PluginStorage.setItem('session_taskpane_id', id);
+          tskpane.DockPosition = window.Application.Enum.msoCTPDockPositionRight;
+          tskpane.Width = window.devicePixelRatio * 400;
+          tskpane.Visible = true;
+        } else {
+          let tskpane = window.Application.GetTaskPane(tsId);
+          tskpane.Visible = !tskpane.Visible;
+        }
+      }
+      break;
     case 'btnShowSetting':
       {
         // 使用 WPS 原生对话框显示设置界面
@@ -91,6 +110,8 @@ function GetImage(control) {
   switch (eleId) {
     case 'btnShowAIChat':
       return 'images/robot.svg';
+    case 'btnShowSession':
+      return 'images/session.svg';
     case 'btnShowSetting':
       return 'images/setting.svg';
     case 'btnShowAbout':

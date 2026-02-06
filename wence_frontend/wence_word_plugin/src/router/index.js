@@ -11,7 +11,12 @@ const router = createRouter({
     {
       path: '/aichat',
       name: 'AI对话',
-      component: () => import('../components/AIChatPane.vue')
+      component: () => import('../components/chat/AIChatPane.vue')
+    },
+    {
+      path: '/session',
+      name: '历史会话',
+      component: () => import('../components/session/SessionPane.vue')
     },
     {
       path: '/setting',
@@ -21,7 +26,7 @@ const router = createRouter({
     {
       path: '/about',
       name: '关于',
-      component: () => import('../components/AboutPane.vue')
+      component: () => import('../components/about/AboutPane.vue')
     },
     {
       path: '/debug',

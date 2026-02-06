@@ -422,8 +422,8 @@
 </template>
 
 <script>
-import { parseDocxToJSON, generateDocxFromJSON } from './js/docxJsonConverter.js';
-import api from './js/api.js';
+import { parseDocxToJSON, generateDocxFromJSON } from '../js/docxJsonConverter.js';
+import api from '../js/api.js';
 import MarkdownIt from 'markdown-it';
 
 // 初始化 markdown-it 实例

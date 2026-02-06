@@ -539,7 +539,7 @@ export default {
 
 .models-count {
   font-size: 12px;
-  color: #2563eb;
+  color: #667eea;
   background: #eff6ff;
   padding: 2px 8px;
   border-radius: 10px;
@@ -556,7 +556,7 @@ export default {
   align-items: center;
   gap: 6px;
   padding: 8px 16px;
-  background: #2563eb;
+  background: #667eea;
   color: white;
   border: none;
   border-radius: 6px;
@@ -687,7 +687,7 @@ export default {
 
 .form-row .field-input:focus {
   outline: none;
-  border-color: #2563eb;
+  border-color: #667eea;
   box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1);
 }
 
@@ -737,14 +737,14 @@ export default {
   border-radius: 6px;
   font-size: 13px;
   cursor: pointer;
-  color: #2563eb;
+  color: #667eea;
   transition: all 0.2s;
 }
 
 .btn-fetch:hover:not(:disabled),
 .btn-custom:hover {
   background: #f8faff;
-  border-color: #2563eb;
+  border-color: #667eea;
 }
 
 .btn-fetch:disabled {
@@ -853,7 +853,7 @@ export default {
   background: transparent;
   border: none;
   cursor: pointer;
-  color: #2563eb;
+  color: #667eea;
   transition: all 0.2s;
 }
 
@@ -928,7 +928,7 @@ export default {
 }
 
 .switch input:checked + .slider {
-  background-color: #2563eb;
+  background-color: #667eea;
 }
 
 .switch input:checked + .slider:before {

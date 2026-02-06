@@ -278,8 +278,8 @@ export default {
 }
 
 .nav-item.active {
-  color: #3498db;
-  background: #e8f4fc;
+  color: #333333;
+  background: #f5f5f5;
   font-weight: 500;
 }
 
@@ -365,7 +365,7 @@ export default {
 
 .btn-save {
   padding: 10px 32px;
-  background: #2563eb;
+  background: #667eea;
   color: white;
 }
 
