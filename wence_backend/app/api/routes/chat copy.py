@@ -7,6 +7,9 @@ import json
 import uuid
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+from typing import Any
 
 from app.services.agent import (
     process_writing_request_stream,
@@ -14,8 +17,85 @@ from app.services.agent import (
     cleanup_tool_request,
     submit_tool_response,
 )
+from app.models.chat import ChatRequest
 
 router = APIRouter()
+
+
+class DocumentRequest(BaseModel):
+    """文档请求模型"""
+
+    documentJson: Any  # 文档 JSON 数据
+    documentName: str = ""  # 文档名称
+    timestamp: int | None = None
+
+
+async def generate_stream(request: ChatRequest):
+    """生成流式响应 - 使用 Agent + Tool Calling"""
+    async for chunk in process_writing_request_stream(
+        message=request.message,
+        document_json=request.documentJson,
+        history=request.history,
+        model=request.model,
+        mode=request.mode,
+    ):
+        yield chunk
+
+
+@router.post("/doc")
+async def receive_document(request: DocumentRequest):
+    """
+    接收文档 JSON 接口
+    用于接收前端解析的全文文档
+    """
+    doc_json = request.documentJson
+    doc_name = request.documentName
+
+    # 统计文档信息
+    para_count = len(doc_json.get("paragraphs", [])) if doc_json else 0
+    table_count = len(doc_json.get("tables", [])) if doc_json else 0
+    meta = doc_json.get("_meta", {}) if doc_json else {}
+
+    print("=" * 50)
+    print("收到文档:")
+    print(f"文档名: {doc_name or meta.get('documentName', '未知')}")
+    print(f"段落数: {para_count}")
+    print(f"表格数: {table_count}")
+    print("=" * 50)
+
+    return {
+        "success": True,
+        "message": "文档接收成功",
+        "stats": {
+            "paragraphCount": para_count,
+            "tableCount": table_count,
+            "documentName": doc_name or meta.get("documentName", ""),
+            "isFullDocument": meta.get("isFullDocument", False),
+        },
+    }
+
+
+@router.post("/stream")
+async def chat_stream(request: ChatRequest):
+    """
+    流式聊天接口
+    使用 SSE 返回流式响应
+    """
+    print("=" * 50)
+    print("收到流式聊天请求:")
+    print(f"用户消息: {request.message}")
+    print(f"模式: {request.mode}")
+    print(f"模型: {request.model}")
+    if request.documentJson:
+        para_count = len(request.documentJson.get("paragraphs", []))
+        print(f"文档段落数: {para_count}")
+    print("=" * 50)
+
+    return StreamingResponse(
+        generate_stream(request),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+    )
 
 
 # ============== WebSocket 聊天接口 ==============
@@ -82,7 +162,7 @@ async def chat_websocket(websocket: WebSocket):
                 message = data.get("message", "")
                 mode = data.get("mode", "agent")
                 model = data.get("model", "auto")
-                document_range = data.get("documentRange")
+                document_json = data.get("documentJson")
                 history = data.get("history", [])
 
                 print("=" * 50)
@@ -90,13 +170,14 @@ async def chat_websocket(websocket: WebSocket):
                 print(f"用户消息: {message}")
                 print(f"模式: {mode}")
                 print(f"模型: {model}")
-                if document_range:
-                    print(f"文档范围: {document_range}")
+                if document_json and document_json.get("paragraphs"):
+                    para_count = len(document_json.get("paragraphs", []))
+                    print(f"文档段落数: {para_count}")
                 print("=" * 50)
 
                 # 启动流式处理
                 stream_task = asyncio.create_task(
-                    _run_ws_stream(websocket, session_id, message, mode, model, document_range, history)
+                    _run_ws_stream(websocket, session_id, message, mode, model, document_json, history)
                 )
 
                 # 在流式生成期间，继续从队列读取消息（document_response / stop）
@@ -164,14 +245,14 @@ async def _run_ws_stream(
     message: str,
     mode: str,
     model: str,
-    document_range: list | None,
+    document_json: dict | None,
     history: list,
 ):
     """在 WebSocket 上运行流式处理"""
     try:
         async for chunk in process_writing_request_stream(
             message=message,
-            document_range=document_range,
+            document_json=document_json,
             history=history,
             model=model,
             mode=mode,

@@ -563,13 +563,31 @@ function parseTable(table) {
 }
 
 /**
- * 解析 Word 文档选中内容为 JSON
- * @param {Object} range - WPS Range 对象（可选，默认使用当前选中）
+ * 解析 Word 文档内容为 JSON
+ * @param {Object|number} rangeOrStart - WPS Range 对象，或起始位置（数字）
+ * @param {number} [end] - 结束位置（仅当第一个参数为数字时使用）
  * @returns {Object} - JSON 数据或错误对象
  */
-function parseDocxToJSON(range) {
+function parseDocxToJSON(rangeOrStart, end) {
   try {
-    if (!range) {
+    let range;
+
+    if (typeof rangeOrStart === 'number') {
+      // 传入的是起始和结束位置
+      const doc = window.Application?.ActiveDocument;
+      if (!doc) {
+        return { error: '没有打开的文档' };
+      }
+      const endPos = (typeof end === 'number') ? end : doc.Content.End;
+      range = doc.Range(rangeOrStart, endPos);
+      if (!range) {
+        return { error: '无法创建指定范围' };
+      }
+    } else if (rangeOrStart) {
+      // 传入的是 Range 对象
+      range = rangeOrStart;
+    } else {
+      // 无参数，使用当前选区
       const selection = window.Application.Selection;
       if (!selection) {
         return { error: '没有选中内容' };

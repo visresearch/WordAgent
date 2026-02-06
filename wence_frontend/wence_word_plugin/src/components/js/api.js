@@ -28,21 +28,6 @@ const CONFIG = {
 // ============== 工具函数 ==============
 
 /**
- * 防抖函数 - 防止频繁调用
- */
-function debounce(func, wait) {
-  let timeout;
-  return function executedFunction(...args) {
-    const later = () => {
-      clearTimeout(timeout);
-      func(...args);
-    };
-    clearTimeout(timeout);
-    timeout = setTimeout(later, wait);
-  };
-}
-
-/**
  * 发送 HTTP 请求的基础函数
  * @param {string} url - 请求地址（相对路径）
  * @param {Object} options - 请求选项
@@ -117,9 +102,213 @@ async function request(url, options = {}) {
 
 // ============== API 方法 ==============
 
+// ============== WebSocket 管理 ==============
+
 /**
- * 流式聊天 API（支持 SSE）
- * 用于实时接收 AI 回复
+ * WebSocket 连接管理器
+ * 维护一个持久的 WebSocket 连接，支持自动重连
+ */
+const wsManager = {
+  /** @type {WebSocket|null} */
+  ws: null,
+  /** 连接状态 */
+  connected: false,
+  /** 当前消息回调（每次 chatStream 设置） */
+  onMessage: null,
+  onError: null,
+  onComplete: null,
+  /** 重连计时器 */
+  _reconnectTimer: null,
+  /** 重连次数 */
+  _reconnectAttempts: 0,
+  /** 最大重连次数 */
+  _maxReconnectAttempts: 5,
+  /** 连接 Promise（确保 connect 不会并发） */
+  _connectPromise: null,
+
+  /**
+   * 获取 WebSocket URL
+   */
+  getWsURL() {
+    // 将 http:// 替换为 ws://
+    const wsBase = CONFIG.baseURL.replace(/^http/, 'ws');
+    return `${wsBase}/api/chat/ws`;
+  },
+
+  /**
+   * 建立连接
+   * @returns {Promise<WebSocket>}
+   */
+  connect() {
+    // 如果已连接，直接返回
+    if (this.ws && this.connected) {
+      return Promise.resolve(this.ws);
+    }
+
+    // 如果正在连接，返回现有 Promise
+    if (this._connectPromise) {
+      return this._connectPromise;
+    }
+
+    this._connectPromise = new Promise((resolve, reject) => {
+      const url = this.getWsURL();
+      console.log('[WebSocket] 正在连接:', url);
+
+      const ws = new WebSocket(url);
+
+      ws.onopen = () => {
+        console.log('[WebSocket] 连接成功');
+        this.ws = ws;
+        this.connected = true;
+        this._reconnectAttempts = 0;
+        this._connectPromise = null;
+        resolve(ws);
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+
+          if (data.type === 'done') {
+            if (this.onComplete) {
+              this.onComplete();
+            }
+            return;
+          }
+
+          if (data.type === 'error') {
+            if (this.onError) {
+              this.onError(new Error(data.content || '未知错误'));
+            }
+            return;
+          }
+
+          // 后端请求读取文档：自动解析并回传，对上层透明
+          if (data.type === 'read_document') {
+            console.log('[WebSocket] 后端请求读取文档, startPos:', data.startPos, 'endPos:', data.endPos);
+            this._handleDocumentRequest(data.startPos, data.endPos);
+            return;
+          }
+
+          // 其他消息类型：text, json, status 等
+          if (this.onMessage) {
+            this.onMessage(data);
+          }
+        } catch (e) {
+          console.error('[WebSocket] 解析消息失败:', e, event.data);
+        }
+      };
+
+      ws.onerror = (event) => {
+        console.error('[WebSocket] 连接错误:', event);
+        this._connectPromise = null;
+        if (!this.connected) {
+          reject(new Error('WebSocket 连接失败'));
+        }
+      };
+
+      ws.onclose = (event) => {
+        console.log('[WebSocket] 连接关闭:', event.code, event.reason);
+        this.connected = false;
+        this.ws = null;
+        this._connectPromise = null;
+
+        // 如果不是主动关闭，尝试重连
+        if (event.code !== 1000 && this._reconnectAttempts < this._maxReconnectAttempts) {
+          this._scheduleReconnect();
+        }
+      };
+    });
+
+    return this._connectPromise;
+  },
+
+  /**
+   * 发送消息
+   * @param {Object} data - 要发送的数据
+   */
+  async send(data) {
+    if (!this.ws || !this.connected) {
+      await this.connect();
+    }
+    this.ws.send(JSON.stringify(data));
+  },
+
+  /**
+   * 关闭连接
+   */
+  close() {
+    if (this._reconnectTimer) {
+      clearTimeout(this._reconnectTimer);
+      this._reconnectTimer = null;
+    }
+    if (this.ws) {
+      this.ws.close(1000, '主动关闭');
+      this.ws = null;
+      this.connected = false;
+    }
+  },
+
+  /**
+   * 处理后端的文档读取请求：根据 startPos/endPos 解析文档并通过 WebSocket 回传
+   * @param {number} startPos - 起始位置，-1 表示文档开头
+   * @param {number} endPos - 结束位置，-1 表示文档结尾
+   */
+  async _handleDocumentRequest(startPos = -1, endPos = -1) {
+    // 通知上层显示状态
+    if (this.onMessage) {
+      this.onMessage({ type: 'status', content: `📑 正在读取文档(${startPos} - ${endPos})`, loading: true });
+    }
+
+    try {
+      const docData = await parseDocumentRange(startPos, endPos);
+
+      if (docData.error) {
+        throw new Error(docData.error);
+      }
+
+      // 通过 WebSocket 回传文档给后端
+      await this.send({
+        type: 'document_response',
+        documentJson: docData
+      });
+
+      console.log('[WebSocket] 已回传文档，段落数:', docData.paragraphs?.length || 0);
+      // if (this.onMessage) {
+      //   this.onMessage({ type: 'status', content: '✅ 文档读取完成' });
+      // }
+    } catch (err) {
+      console.error('[WebSocket] 解析/回传文档失败:', err);
+      // if (this.onMessage) {
+      //   this.onMessage({ type: 'status', content: '❌ 解析失败: ' + err.message });
+      // }
+    }
+  },
+
+  /**
+   * 安排重连
+   */
+  _scheduleReconnect() {
+    if (this._reconnectTimer) {
+      return;
+    }
+
+    this._reconnectAttempts++;
+    const delay = Math.min(1000 * Math.pow(2, this._reconnectAttempts - 1), 10000);
+    console.log(`[WebSocket] ${delay}ms 后重连 (${this._reconnectAttempts}/${this._maxReconnectAttempts})`);
+
+    this._reconnectTimer = setTimeout(() => {
+      this._reconnectTimer = null;
+      this.connect().catch(() => {
+        console.log('[WebSocket] 重连失败');
+      });
+    }, delay);
+  }
+};
+
+/**
+ * 流式聊天 API（WebSocket）
+ * 通过 WebSocket 双向通信，支持后端请求前端操作
  *
  * @param {string} message - 用户消息
  * @param {Object} options - 配置选项
@@ -135,81 +324,33 @@ function chatStream(message, options = {}) {
     onComplete,
     mode = 'agent',
     model = 'auto',
-    documentJson = null,
+    documentRange = null,
     history = []
   } = options;
 
-  const controller = new AbortController();
+  // 设置当前会话的回调
+  wsManager.onMessage = onMessage;
+  wsManager.onError = onError;
+  wsManager.onComplete = onComplete;
 
   const execute = async () => {
     try {
-      // fetch 请求 流式响应
-      const response = await fetch(`${CONFIG.baseURL}/api/chat/stream`, {
-        method: 'POST',
-        headers: CONFIG.headers,
-        body: JSON.stringify({
-          message: message.trim(),
-          mode,
-          model,
-          documentJson,
-          history,
-          timestamp: Date.now()
-        }),
-        signal: controller.signal
+      // 确保 WebSocket 已连接
+      await wsManager.connect();
+
+      // 发送聊天请求
+      await wsManager.send({
+        type: 'chat',
+        message: message.trim(),
+        mode,
+        model,
+        documentRange,
+        history,
+        timestamp: Date.now()
       });
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-
-        if (done) {
-          if (onComplete) {
-            onComplete();
-          }
-          break;
-        }
-
-        buffer += decoder.decode(value, { stream: true });
-
-        // 处理 SSE 格式
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6);
-            if (data === '[DONE]') {
-              if (onComplete) {
-                onComplete();
-              }
-              return;
-            }
-            try {
-              const parsed = JSON.parse(data);
-              if (onMessage) {
-                onMessage(parsed);
-              }
-            } catch (e) {
-              // 如果不是 JSON，直接传递文本
-              if (onMessage) {
-                onMessage({ content: data });
-              }
-            }
-          }
-        }
-      }
     } catch (error) {
-      if (error.name !== 'AbortError') {
-        if (onError) {
-          onError(error);
-        }
+      if (onError) {
+        onError(error);
       }
     }
   };
@@ -217,43 +358,56 @@ function chatStream(message, options = {}) {
   execute();
 
   return {
-    abort: () => controller.abort()
+    abort: () => {
+      // 发送停止请求
+      wsManager.send({ type: 'stop' }).catch(() => {});
+    }
   };
 }
 
 // ============== 文档处理 API ==============
 
 /**
- * 异步解析文档（推迟到下一个事件循环，避免阻塞 UI）
- * @param {Object} doc - WPS Document 对象
+ * 异步解析文档范围（推迟到下一个事件循环，避免阻塞 UI）
+ * 不传参数或传 (-1, -1) 时解析全文，传入具体位置则解析指定范围
+ *
+ * @param {number} [startPos=-1] - 起始位置，-1 表示文档开头
+ * @param {number} [endPos=-1] - 结束位置，-1 表示文档结尾
  * @returns {Promise<Object>} - 解析结果
  */
-async function parseFullDocument(doc) {
+async function parseDocumentRange(startPos = -1, endPos = -1) {
   return new Promise((resolve) => {
     // 使用 setTimeout 将任务推迟到下一个事件循环
     // 这样可以让 UI 有时间响应，避免卡顿
     setTimeout(() => {
       try {
+        const doc = window.Application?.ActiveDocument;
         if (!doc) {
-          doc = window.Application.ActiveDocument;
-          if (!doc) {
-            resolve({ error: '没有打开的文档' });
-            return;
-          }
-        }
-
-        const fullRange = doc.Content;
-        if (!fullRange) {
-          resolve({ error: '无法获取文档内容' });
+          resolve({ error: '没有打开的文档' });
           return;
         }
 
-        // 调用同步解析（WPS API 必须同步调用）
-        const result = parseDocxToJSON(fullRange);
+        const isFullDocument = (startPos === -1 && endPos === -1);
+        let result;
+
+        if (isFullDocument) {
+          // 解析全文
+          const fullRange = doc.Content;
+          if (!fullRange) {
+            resolve({ error: '无法获取文档内容' });
+            return;
+          }
+          result = parseDocxToJSON(fullRange);
+        } else {
+          // 解析指定范围
+          result = parseDocxToJSON(startPos, endPos);
+        }
 
         if (!result.error) {
           result._meta = {
-            isFullDocument: true,
+            isFullDocument,
+            startPos: isFullDocument ? 0 : startPos,
+            endPos: isFullDocument ? doc.Content.End : endPos,
             documentName: doc.Name || '',
             parsedAt: new Date().toISOString()
           };
@@ -261,7 +415,7 @@ async function parseFullDocument(doc) {
 
         resolve(result);
       } catch (error) {
-        resolve({ error: '解析全文失败: ' + error.message });
+        resolve({ error: '解析文档失败: ' + error.message });
       }
     }, 0);
   });
@@ -284,7 +438,7 @@ async function sendDocument(options = {}) {
   if (!docData) {
     const currentDoc = doc || window.Application?.ActiveDocument;
     // 使用异步解析
-    docData = await parseFullDocument(currentDoc);
+    docData = await parseDocumentRange();
     if (docData.error) {
       return { success: false, error: docData.error };
     }
@@ -686,8 +840,11 @@ export default {
   fetchAvailableModels,
 
   // 文档处理
-  parseFullDocument,
+  parseDocumentRange,
   sendDocument,
+
+  // WebSocket 管理
+  wsManager,
 
   // 聊天历史 API
   getChatHistory,
@@ -712,8 +869,9 @@ export {
   chatStream,
   getModels,
   fetchAvailableModels,
-  parseFullDocument,
+  parseDocumentRange,
   sendDocument,
+  wsManager,
   getChatHistory,
   saveMessage,
   clearChatHistory,

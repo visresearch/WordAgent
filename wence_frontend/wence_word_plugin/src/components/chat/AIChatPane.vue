@@ -32,7 +32,7 @@
 </template>
 
 <script>
-import { parseDocxToJSON, generateDocxFromJSON } from '../js/docxJsonConverter.js';
+import { generateDocxFromJSON } from '../js/docxJsonConverter.js';
 import api from '../js/api.js';
 import ChatMessages from './ChatMessages.vue';
 import ChatInput from './ChatInput.vue';
@@ -53,7 +53,7 @@ export default {
       isLoading: false,
       lastReadJSON: null,
       currentSelection: null,
-      currentSelectionJSON: null,
+      currentSelectionRange: null,
       currentStreamCtrl: null,
       currentDocId: null,
       currentDocName: null,
@@ -450,13 +450,6 @@ export default {
 
         console.log('[Selection] 选中内容长度:', cleanedText.length);
 
-        const jsonData = parseDocxToJSON(range);
-        if (jsonData.error) {
-          console.error('[Selection] 解析选区失败:', jsonData.error);
-          alert('解析选中内容失败: ' + jsonData.error);
-          return;
-        }
-
         const maxPreviewLen = 50;
         let preview = cleanedText;
         let hasMore = false;
@@ -476,7 +469,7 @@ export default {
           endText: (cleanedText.length > 20 ? '...' : '') + endText,
           charCount: cleanedText.length,
           hasMore,
-          jsonData: jsonData
+          range: { startPos: range.Start, endPos: range.End }
         };
 
         console.log('[Selection] 选区信息已生成:', {
@@ -505,9 +498,9 @@ export default {
         hasMore: selectionInfo.hasMore
       };
 
-      this.currentSelectionJSON = selectionInfo.jsonData;
+      this.currentSelectionRange = selectionInfo.range;
 
-      console.log('[AIChatPane] 选区已设置，字符数:', selectionInfo.charCount);
+      console.log('[AIChatPane] 选区已设置，字符数:', selectionInfo.charCount, '范围:', selectionInfo.range);
     },
 
     /**
@@ -515,7 +508,7 @@ export default {
      */
     clearSelection() {
       this.currentSelection = null;
-      this.currentSelectionJSON = null;
+      this.currentSelectionRange = null;
       try {
         const selection = window.Application?.Selection;
         if (selection) {
@@ -549,7 +542,8 @@ export default {
 
       this.messages.splice(aiMessageIndex, 1);
 
-      this._sendStreamRequest(userMessage, this.currentSelectionJSON);
+      const retryRanges = this.currentSelectionRange ? [this.currentSelectionRange] : null;
+      this._sendStreamRequest(userMessage, retryRanges);
     },
 
     /**
@@ -562,21 +556,12 @@ export default {
       };
 
       let selectionContext = null;
-      let documentJson = null;
+      let documentRange = null;
 
-      if (this.currentSelection && this.currentSelectionJSON) {
+      if (this.currentSelection && this.currentSelectionRange) {
         selectionContext = { ...this.currentSelection };
-        documentJson = {
-          ...this.currentSelectionJSON,
-          docId: this.currentDocId,
-          docName: this.currentDocName
-        };
+        documentRange = [this.currentSelectionRange];
         userMsgObj.selectionContext = selectionContext;
-      } else {
-        documentJson = {
-          docId: this.currentDocId,
-          docName: this.currentDocName
-        };
       }
 
       this.messages.push(userMsgObj);
@@ -586,13 +571,13 @@ export default {
 
       this.saveMessageToHistory('user', userMessage, null, selectionContext);
 
-      this._sendStreamRequest(userMessage, documentJson);
+      this._sendStreamRequest(userMessage, documentRange);
     },
 
     /**
      * 发送流式请求的公共方法
      */
-    _sendStreamRequest(userMessage, documentJson) {
+    _sendStreamRequest(userMessage, documentRange) {
       this.isLoading = true;
       this.scrollToBottom();
 
@@ -612,7 +597,7 @@ export default {
       const streamCtrl = api.chatStream(userMessage, {
         mode: this.mode,
         model: this.selectedModel || 'auto',
-        documentJson: documentJson,
+        documentRange: documentRange,
         history: this.messages.slice(0, -1).slice(-10),
 
         onMessage: (data) => {
@@ -649,36 +634,11 @@ export default {
     _handleStreamMessage(data, aiMessageIndex) {
       const msg = this.messages[aiMessageIndex];
 
-      if (data.type === 'request_document') {
-        console.log('[Stream] 收到请求全文消息:', data.content);
-        msg.contentParts.push({
-          type: 'status',
-          content: '📑 正在解析全文',
-          loading: true
-        });
-        this.scrollToBottom();
-
-        const statusIndex = msg.contentParts.length - 1;
-        this.$nextTick(() => {
-          api.sendDocument().then(result => {
-            console.log('[Stream] 已发送全文:', result);
-            msg.contentParts[statusIndex].content = '✅ 全文解析完成';
-            msg.contentParts[statusIndex].loading = false;
-            this.scrollToBottom();
-          }).catch(err => {
-            console.error('[Stream] 发送全文失败:', err);
-            msg.contentParts[statusIndex].content = '❌ 解析失败: ' + err.message;
-            msg.contentParts[statusIndex].loading = false;
-            this.scrollToBottom();
-          });
-        });
-        return;
-      }
-
       if (data.type === 'status' && data.content) {
         msg.contentParts.push({
           type: 'status',
-          content: data.content
+          content: data.content,
+          loading: !!data.loading
         });
         this.scrollToBottom();
         return;
