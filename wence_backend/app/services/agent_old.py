@@ -206,40 +206,29 @@ def generate_document(document: DocumentOutput) -> dict:
     # 生成完整的 JSON，所有属性都有值
     doc_dict = document.model_dump()
 
-    # # 保存到 example 文件夹
-    # try:
-    #     from pathlib import Path
-    #     from datetime import datetime
+    # 保存到 example 文件夹
+    try:
+        from pathlib import Path
+        from datetime import datetime
 
-    #     example_dir = Path(__file__).parent.parent.parent / "example"
-    #     example_dir.mkdir(exist_ok=True)
+        example_dir = Path(__file__).parent.parent.parent / "example"
+        example_dir.mkdir(exist_ok=True)
 
-    #     # 生成带时间戳的文件名
-    #     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    #     output_file = example_dir / f"generated_{timestamp}.json"
+        # 生成带时间戳的文件名
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_file = example_dir / f"generated_{timestamp}.json"
 
-    #     # 保存 JSON 文件（带缩进方便调试查看）
-    #     with open(output_file, "w", encoding="utf-8") as f:
-    #         json.dump(doc_dict, f, ensure_ascii=False, indent=2)
+        # 保存 JSON 文件（带缩进方便调试查看）
+        with open(output_file, "w", encoding="utf-8") as f:
+            json.dump(doc_dict, f, ensure_ascii=False, indent=2)
 
-    #     print(f"[生成文档] JSON 已保存到: {output_file}")
-    # except Exception as e:
-    #     print(f"[生成文档] 保存文件失败: {e}")
+        print(f"[生成文档] JSON 已保存到: {output_file}")
+    except Exception as e:
+        print(f"[生成文档] 保存文件失败: {e}")
 
     writer({"type": "status", "content": "✅ 文档已生成"})
     return doc_dict
 
-@tool
-def read_document() -> dict:
-    """
-    读取文档内容（模拟工具调用，实际不需要前端实现）
-
-    process_writing_request_stream 中将 document_json
-
-    Returns:
-        模拟的文档内容（实际不使用）
-    """
-    return {"paragraphs": []}  # 返回空文档，实际内容通过用户消息传递
 
 # @tool
 # def locate_in_document(query: DocumentQuery) -> dict:

@@ -191,6 +191,62 @@ export default {
         messageCount: 15,
         createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7), // 7天前
         updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7)
+      },
+      {
+        id: '5',
+        title: '产品需求文档',
+        preview: '1. 需求背景 2. 功能描述 3. 交互设计...',
+        messageCount: 15,
+        createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7), // 7天前
+        updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7)
+      },
+      {
+        id: '5',
+        title: '产品需求文档',
+        preview: '1. 需求背景 2. 功能描述 3. 交互设计...',
+        messageCount: 15,
+        createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7), // 7天前
+        updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7)
+      },
+      {
+        id: '5',
+        title: '产品需求文档',
+        preview: '1. 需求背景 2. 功能描述 3. 交互设计...',
+        messageCount: 15,
+        createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7), // 7天前
+        updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7)
+      },
+      {
+        id: '5',
+        title: '产品需求文档',
+        preview: '1. 需求背景 2. 功能描述 3. 交互设计...',
+        messageCount: 15,
+        createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7), // 7天前
+        updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7)
+      },
+      {
+        id: '5',
+        title: '产品需求文档',
+        preview: '1. 需求背景 2. 功能描述 3. 交互设计...',
+        messageCount: 15,
+        createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7), // 7天前
+        updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7)
+      },
+      {
+        id: '5',
+        title: '产品需求文档',
+        preview: '1. 需求背景 2. 功能描述 3. 交互设计...',
+        messageCount: 15,
+        createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7), // 7天前
+        updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7)
+      },
+      {
+        id: '5',
+        title: '产品需求文档',
+        preview: '1. 需求背景 2. 功能描述 3. 交互设计...',
+        messageCount: 15,
+        createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7), // 7天前
+        updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7)
       }
     ];
 
@@ -413,6 +469,19 @@ export default {
   flex: 1;
   overflow-y: auto;
   padding: 0 16px 16px;
+}
+
+.session-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.session-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.session-list::-webkit-scrollbar-thumb {
+  background: #c5cdd8;
+  border-radius: 2px;
 }
 
 .sessions-wrapper {

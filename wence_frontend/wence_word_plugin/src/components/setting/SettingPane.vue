@@ -91,8 +91,8 @@ import { ref, reactive, computed, onMounted } from 'vue';
 import api from '../js/api.js';
 import GeneralSetting from './GeneralSetting.vue';
 import ModelSetting from './ModelSetting.vue';
-import PersonalizationPane from './PersonalizationPane.vue';
-import DataManagementPane from './DataManagementPane.vue';
+import PersonalizationPane from './PersonalizationSetting.vue';
+import DataManagementPane from './DataManagementSetting.vue';
 
 export default {
   name: 'SettingPane',

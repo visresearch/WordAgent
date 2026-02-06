@@ -1,496 +1,97 @@
 <template>
   <div class="ai-chat-container">
-    <div ref="messagesContainer" class="chat-messages">
-      <!-- 显示历史记录按钮 -->
-      <div v-if="hasHistory && !historyLoaded" class="history-hint" @click="loadAndShowHistory">
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-        >
-          <circle cx="12" cy="12" r="10" />
-          <polyline points="12 6 12 12 16 14" />
-        </svg>
-        <span>显示历史聊天记录</span>
-      </div>
-      <!-- 空状态显示 -->
-      <div v-if="messages.length === 0 && !isLoading" class="empty-state">
-        <svg class="empty-icon" viewBox="0 0 1144 1024" xmlns="http://www.w3.org/2000/svg">
-          <path
-            d="M1080.018824 582.354824c-23.009882 129.505882-139.023059 227.930353-278.648471 227.930352H329.968941c-140.167529 0-256.602353-99.267765-278.889412-229.616941A47.164235 47.164235 0 0 1 0 533.684706l-0.060235-181.067294c0-26.021647 21.082353-47.164235 47.164235-47.164236C47.164235 153.419294 173.778824 30.117647 329.968941 30.117647h471.401412C957.620706 30.117647 1084.235294 153.419294 1084.235294 305.453176v6.625883a47.164235 47.164235 0 0 1 60.235294 45.296941v181.067294a47.164235 47.164235 0 0 1-64.451764 43.91153zM330.029176 144.865882c-91.136 0-164.984471 71.920941-164.98447 160.587294v229.496471c0 88.726588 73.848471 160.647529 165.044706 160.647529h471.341176c91.136 0 165.044706-71.920941 165.044706-160.647529v-229.496471c0-88.666353-73.908706-160.587294-165.044706-160.587294H329.968941zM400.685176 259.614118c39.092706 0 70.716235 31.623529 70.716236 70.656v122.819764a70.716235 70.716235 0 0 1-141.432471 0V330.270118c0-39.032471 31.683765-70.656 70.716235-70.656z m329.968942 0c39.092706 0 70.716235 31.623529 70.716235 70.656v122.819764a70.716235 70.716235 0 1 1-141.372235 0V330.270118c0-39.032471 31.623529-70.656 70.656-70.656zM420.502588 993.882353a137.697882 137.697882 0 0 1-137.637647-137.697882h565.669647a137.697882 137.697882 0 0 1-137.697882 137.697882h-290.334118z"
-            fill="currentColor"
-          />
-        </svg>
-        <div class="empty-text-container">
-          <span class="empty-text">我能做什么</span>
-          <a href="https://cmcblog.netlify.app/" target="_blank" class="help-icon">
-            <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
-              <circle
-                cx="8"
-                cy="8"
-                r="7"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.5"
-              />
-              <path
-                d="M8 12v-1M8 9V8a1.5 1.5 0 0 1 1-1.415A1.5 1.5 0 1 0 6.5 5"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.5"
-                stroke-linecap="round"
-              />
-            </svg>
-          </a>
-        </div>
-      </div>
-      <!-- 消息容器：包含消息框和操作图标 -->
-      <div
-        v-for="(msg, index) in messages"
-        :key="index"
-        :class="['message-wrapper', msg.role === 'user' ? 'user-wrapper' : 'ai-wrapper']"
-      >
-        <div :class="['message', msg.role === 'user' ? 'user-message' : 'ai-message']">
-          <!-- 显示选中内容上下文 -->
-          <div v-if="msg.selectionContext" class="selection-context">
-            <div class="context-header">
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 16 16"
-                fill="currentColor"
-              >
-                <path
-                  d="M14 1H2a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1zM2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2H2z"
-                />
-                <path d="M3 4h10v1H3V4zm0 3h10v1H3V7zm0 3h6v1H3v-1z" />
-              </svg>
-              <span>选中的内容</span>
-            </div>
-            <div class="context-preview">
-              <span class="context-text">{{ msg.selectionContext.preview }}</span>
-              <span v-if="msg.selectionContext.hasMore" class="context-more">...</span>
-            </div>
-            <div class="context-range">
-              {{ msg.selectionContext.startText }} → {{ msg.selectionContext.endText }}
-              <span class="context-stats">({{ msg.selectionContext.charCount }} 字符)</span>
-            </div>
-          </div>
-          <div class="message-content">
-            <span
-              v-if="msg.role === 'assistant' && !msg.content && !msg.thinking && !msg.statusText && isLoading"
-              class="typing"
-            >💭 AI正在思考中...</span>
-            <!-- 状态提示文本 -->
-            <span
-              v-if="msg.statusText"
-              class="typing"
-            >{{ msg.statusText }}</span>
-            <!-- Thinking 内容（深度思考过程） -->
-            <div v-if="msg.thinking" class="thinking-block" :class="{ expanded: msg.thinkingExpanded }">
-              <div class="thinking-header" @click="toggleThinking(index)">
-                <svg
-                  class="thinking-icon"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                >
-                  <circle cx="12" cy="12" r="10" />
-                  <path d="M12 6v6l4 2" />
-                </svg>
-                <span class="thinking-label">深度思考</span>
-                <span v-if="msg.thinkingDuration" class="thinking-duration">{{ msg.thinkingDuration }}</span>
-                <svg
-                  class="thinking-arrow"
-                  :class="{ rotated: msg.thinkingExpanded }"
-                  width="12"
-                  height="12"
-                  viewBox="0 0 16 16"
-                  fill="currentColor"
-                >
-                  <path d="M8 10.293L3.854 6.146a.5.5 0 1 1 .708-.707L8 8.879l3.438-3.44a.5.5 0 0 1 .708.708L8 10.293z" />
-                </svg>
-              </div>
-              <div v-show="msg.thinkingExpanded" class="thinking-content">
-                {{ msg.thinking }}
-              </div>
-            </div>
-            <!-- 用户消息直接显示文本 -->
-            <span v-else-if="msg.role === 'user'">{{ msg.content }}</span>
-            <!-- AI 消息使用 contentParts 渲染，区分 status 和 text -->
-            <template v-else-if="msg.contentParts && msg.contentParts.length > 0">
-              <div v-for="(part, partIndex) in msg.contentParts" :key="partIndex">
-                <div v-if="part.type === 'status'" class="status-line">
-                  <span class="typing">{{ part.content }}</span>
-                  <span v-if="part.loading" class="loading-spinner"></span>
-                </div>
-                <div v-else-if="part.type === 'text'" class="markdown-body" v-html="renderMarkdown(part.content)"></div>
-              </div>
-            </template>
-            <!-- 兼容旧的 content 字段 -->
-            <!-- eslint-disable-next-line vue/no-v-html -->
-            <div v-else-if="msg.content" class="markdown-body" v-html="renderMarkdown(msg.content)"></div>
-          </div>
-        </div>
-        <!-- AI 消息的操作图标按钮（在消息框外下方） -->
-        <div
-          v-if="msg.role === 'assistant' && msg.content && !isLoading"
-          class="message-icon-actions"
-        >
-          <div v-if="msg.documentJson" class="icon-btn-wrapper">
-            <button class="icon-btn" @click="insertToWord(msg, true)">
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 16 16"
-                fill="currentColor"
-              >
-                <path
-                  fill-rule="evenodd"
-                  d="M6 12.5a.5.5 0 0 0 .5.5h8a.5.5 0 0 0 .5-.5v-9a.5.5 0 0 0-.5-.5h-8a.5.5 0 0 0-.5.5v2a.5.5 0 0 1-1 0v-2A1.5 1.5 0 0 1 6.5 2h8A1.5 1.5 0 0 1 16 3.5v9a1.5 1.5 0 0 1-1.5 1.5h-8A1.5 1.5 0 0 1 5 12.5v-2a.5.5 0 0 1 1 0v2z"
-                />
-                <path
-                  fill-rule="evenodd"
-                  d="M.146 8.354a.5.5 0 0 1 0-.708l3-3a.5.5 0 1 1 .708.708L1.707 7.5H10.5a.5.5 0 0 1 0 1H1.707l2.147 2.146a.5.5 0 0 1-.708.708l-3-3z"
-                />
-              </svg>
-            </button>
-            <span class="icon-tooltip">输出</span>
-          </div>
-          <div class="icon-btn-wrapper">
-            <button class="icon-btn" @click="copyToClipboard(msg.content)">
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 16 16"
-                fill="currentColor"
-              >
-                <path
-                  d="M14 4.5V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2h5.5L14 4.5zM10 4a1 1 0 0 0 1 1h2.5L10 1.5V4z"
-                />
-              </svg>
-            </button>
-            <span class="icon-tooltip">复制</span>
-          </div>
-          <div class="icon-btn-wrapper">
-            <button class="icon-btn" @click="retryMessage(index)">
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 16 16"
-                fill="currentColor"
-              >
-                <path
-                  d="M11.534 7h3.932a.25.25 0 0 1 .192.41l-1.966 2.36a.25.25 0 0 1-.384 0l-1.966-2.36a.25.25 0 0 1 .192-.41zm-11 2h3.932a.25.25 0 0 0 .192-.41L2.692 6.23a.25.25 0 0 0-.384 0L.342 8.59A.25.25 0 0 0 .534 9z"
-                />
-                <path
-                  fill-rule="evenodd"
-                  d="M8 3c-1.552 0-2.94.707-3.857 1.818a.5.5 0 1 1-.771-.636A6.002 6.002 0 0 1 13.917 7H12.9A5.002 5.002 0 0 0 8 3zM3.1 9a5.002 5.002 0 0 0 8.757 2.182.5.5 0 1 1 .771.636A6.002 6.002 0 0 1 2.083 9H3.1z"
-                />
-              </svg>
-            </button>
-            <span class="icon-tooltip">重试</span>
-          </div>
-          <div v-if="index > 0" class="icon-btn-wrapper">
-            <button class="icon-btn" @click="revertToMessage(index)">
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 16 16"
-                fill="currentColor"
-              >
-                <path
-                  fill-rule="evenodd"
-                  d="M8 3a5 5 0 1 1-4.546 2.914.5.5 0 0 0-.908-.417A6 6 0 1 0 8 2v1z"
-                />
-                <path
-                  d="M8 4.466V.534a.25.25 0 0 0-.41-.192L5.23 2.308a.25.25 0 0 0 0 .384l2.36 1.966A.25.25 0 0 0 8 4.466z"
-                />
-              </svg>
-            </button>
-            <span class="icon-tooltip">撤消</span>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 当前选中内容预览 -->
-    <div v-if="currentSelection" class="current-selection-bar">
-      <div class="selection-bar-content">
-        <div class="selection-bar-icon">
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 16 16"
-            fill="currentColor"
-          >
-            <path
-              d="M14 1H2a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1zM2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2H2z"
-            />
-            <path d="M3 4h10v1H3V4zm0 3h10v1H3V7zm0 3h6v1H3v-1z" />
-          </svg>
-        </div>
-        <div class="selection-bar-info">
-          <span class="selection-bar-preview">{{ currentSelection.preview }}</span>
-          <span class="selection-bar-range">{{ currentSelection.startText }} → {{ currentSelection.endText }}</span>
-        </div>
-        <button class="selection-bar-clear" title="清除选区" @click="clearSelection">
-          <svg
-            width="10"
-            height="10"
-            viewBox="0 0 16 16"
-            fill="currentColor"
-          >
-            <path
-              d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"
-            />
-          </svg>
-        </button>
-      </div>
-    </div>
-
-    <div class="chat-input-area">
-      <div class="input-container">
-        <textarea
-          ref="chatInput"
-          v-model="inputText"
-          placeholder="描述下一步要构建的内容"
-          class="chat-input"
-          rows="1"
-          @keydown.enter.exact.prevent="sendMessage"
-          @input="autoResize"
-        ></textarea>
-        <div class="input-toolbar">
-          <div class="toolbar-left">
-            <!-- 模式选择 -->
-            <div class="custom-select" :class="{ open: modeDropdownOpen }">
-              <div class="select-trigger" @click="toggleModeDropdown">
-                <span>{{ mode === 'agent' ? 'Agent' : 'Ask' }}</span>
-                <svg
-                  class="select-arrow"
-                  width="8"
-                  height="8"
-                  viewBox="0 0 12 12"
-                >
-                  <path
-                    d="M3 4.5L6 7.5L9 4.5"
-                    stroke="currentColor"
-                    stroke-width="1.5"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    fill="none"
-                  />
-                </svg>
-              </div>
-              <div class="select-dropdown">
-                <div
-                  class="select-option"
-                  :class="{ active: mode === 'agent' }"
-                  @click="selectMode('agent')"
-                >
-                  Agent
-                </div>
-                <div
-                  class="select-option"
-                  :class="{ active: mode === 'ask' }"
-                  @click="selectMode('ask')"
-                >
-                  Ask
-                </div>
-              </div>
-            </div>
-
-            <!-- 模型选择 -->
-            <div
-              class="custom-select"
-              :class="{ open: modelDropdownOpen, disabled: modelsLoading }"
-            >
-              <div class="select-trigger" @click="toggleModelDropdown">
-                <span v-if="modelsLoading">加载中...</span>
-                <span v-else>{{ selectedModelName }}</span>
-                <svg
-                  class="select-arrow"
-                  width="8"
-                  height="8"
-                  viewBox="0 0 12 12"
-                >
-                  <path
-                    d="M3 4.5L6 7.5L9 4.5"
-                    stroke="currentColor"
-                    stroke-width="1.5"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    fill="none"
-                  />
-                </svg>
-              </div>
-              <div class="select-dropdown model-dropdown">
-                <div
-                  v-for="model in availableModels"
-                  :key="model.id"
-                  class="select-option"
-                  :class="{ active: selectedModel === model.id }"
-                  @click="selectModel(model.id)"
-                >
-                  {{ model.name }}
-                </div>
-              </div>
-            </div>
-          </div>
-          <div class="toolbar-right">
-            <div class="btn-wrapper">
-              <button class="add-selection-btn" title="添加选区" @click="addSelectionManually">
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                  stroke="currentColor"
-                >
-                  <rect
-                    x="2"
-                    y="2"
-                    width="12"
-                    height="12"
-                    rx="2"
-                    stroke-width="1.5"
-                  />
-                  <path d="M8 5v6M5 8h6" stroke-width="1.5" stroke-linecap="round" />
-                </svg>
-              </button>
-              <span class="tooltip">添加选区</span>
-            </div>
-            <div class="btn-wrapper">
-              <button
-                v-if="!isLoading"
-                class="send-btn"
-                :disabled="!inputText.trim()"
-                @click="sendMessage"
-              >
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                >
-                  <path
-                    d="M1 8L15 1L8 15L7 9L1 8Z"
-                    stroke="currentColor"
-                    stroke-width="1.5"
-                    stroke-linejoin="round"
-                  />
-                </svg>
-              </button>
-              <button v-else class="stop-btn" @click="stopGeneration">
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                >
-                  <circle
-                    cx="8"
-                    cy="8"
-                    r="7"
-                    stroke="currentColor"
-                    stroke-width="1.5"
-                    fill="none"
-                  />
-                  <rect
-                    x="5"
-                    y="5"
-                    width="6"
-                    height="6"
-                    rx="0.5"
-                    fill="currentColor"
-                  />
-                </svg>
-              </button>
-              <span class="tooltip">{{ isLoading ? '终止' : '发送' }}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+    <ChatMessages
+      ref="chatMessages"
+      :messages="messages"
+      :is-loading="isLoading"
+      :has-history="hasHistory"
+      :history-loaded="historyLoaded"
+      @load-history="loadAndShowHistory"
+      @insert-to-word="insertToWord"
+      @copy="copyToClipboard"
+      @retry="retryMessage"
+      @revert="revertToMessage"
+      @toggle-thinking="toggleThinking"
+    />
+    <ChatInput
+      :mode="mode"
+      :selected-model="selectedModel"
+      :available-models="availableModels"
+      :models-loading="modelsLoading"
+      :is-loading="isLoading"
+      :current-selection="currentSelection"
+      @update:mode="mode = $event"
+      @update:selected-model="selectedModel = $event"
+      @send="handleSend"
+      @stop="stopGeneration"
+      @add-selection="addSelectionManually"
+      @clear-selection="clearSelection"
+      @refresh-models="loadModels"
+    />
   </div>
 </template>
 
 <script>
 import { parseDocxToJSON, generateDocxFromJSON } from '../js/docxJsonConverter.js';
 import api from '../js/api.js';
-import MarkdownIt from 'markdown-it';
-
-// 初始化 markdown-it 实例
-const md = new MarkdownIt({
-  html: false, // 禁用 HTML 标签（安全考虑）
-  breaks: true, // 把\n转换为<br>
-  linkify: true, // 自动识别链接
-  typographer: true // 启用排版优化
-});
+import ChatMessages from './ChatMessages.vue';
+import ChatInput from './ChatInput.vue';
 
 export default {
   name: 'AIChatPane',
+  components: {
+    ChatMessages,
+    ChatInput
+  },
   data() {
     return {
-      inputText: '',
       mode: 'agent',
       selectedModel: '',
-      availableModels: [], // 可用模型列表
-      modelsLoading: false, // 模型加载状态
+      availableModels: [],
+      modelsLoading: false,
       messages: [],
       isLoading: false,
-      lastReadJSON: null, // 存储上次读取的文档JSON
-      currentSelection: null, // 当前选中的内容信息
-      currentSelectionJSON: null, // 当前选中内容的完整JSON
-      currentStreamCtrl: null, // 当前流式请求控制器
-      currentDocId: null, // 当前文档的唯一标识符
-      currentDocName: null, // 当前文档名称
-      historyLoading: false, // 历史记录加载状态
-      hasHistory: false, // 是否有历史记录可加载
-      historyLoaded: false, // 是否已加载历史记录
-      modeDropdownOpen: false, // 模式下拉框状态
-      modelDropdownOpen: false // 模型下拉框状态
+      lastReadJSON: null,
+      currentSelection: null,
+      currentSelectionJSON: null,
+      currentStreamCtrl: null,
+      currentDocId: null,
+      currentDocName: null,
+      historyLoading: false,
+      hasHistory: false,
+      historyLoaded: false
     };
   },
-  computed: {
-    selectedModelName() {
-      const model = this.availableModels.find((m) => m.id === this.selectedModel);
-      return model ? model.name : '选择模型';
-    }
-  },
   mounted() {
-    this.$nextTick(() => {
-      this.autoResize();
-    });
-    // 页面加载时获取模型列表
     this.loadModels();
-    // 初始化文档标识并加载历史
     this.initDocumentAndLoadHistory();
-    // 点击其他地方关闭下拉框
-    document.addEventListener('click', this.closeDropdowns);
-  },
-  beforeUnmount() {
-    // 移除点击监听
-    document.removeEventListener('click', this.closeDropdowns);
   },
   methods: {
+    /**
+     * 切换 thinking 展开/收起
+     */
+    toggleThinking(index) {
+      if (this.messages[index]) {
+        this.messages[index].thinkingExpanded = !this.messages[index].thinkingExpanded;
+      }
+    },
+
+    /**
+     * 滚动到底部（委托给 ChatMessages）
+     */
+    scrollToBottom() {
+      this.$refs.chatMessages?.scrollToBottom();
+    },
+
     /**
      * 复制到剪切板
      */
     async copyToClipboard(content) {
       try {
         await navigator.clipboard.writeText(content);
-        // 可以添加一个临时提示
         console.log('已复制到剪切板');
       } catch (error) {
         console.error('复制失败:', error);
-        // 降级方案：使用传统方法
         const textarea = document.createElement('textarea');
         textarea.value = content;
         textarea.style.position = 'fixed';
@@ -504,27 +105,6 @@ export default {
           console.error('降级复制也失败:', e);
         }
         document.body.removeChild(textarea);
-      }
-    },
-
-    /**
-     * 渲染 Markdown 内容
-     */
-    renderMarkdown(content) {
-      if (!content) {
-        return '';
-      }
-      // 去除空的 ```json 代码块（防止出现空黑框）
-      let cleaned = content.replace(/```json\s*```/g, '');
-      return md.render(cleaned);
-    },
-
-    /**
-     * 切换 thinking 内容的展开/收起状态
-     */
-    toggleThinking(index) {
-      if (this.messages[index]) {
-        this.messages[index].thinkingExpanded = !this.messages[index].thinkingExpanded;
       }
     },
 
@@ -556,21 +136,18 @@ export default {
           return;
         }
 
-        // 检查是否有记录的插入范围
         if (!msg.insertStartPos && msg.insertStartPos !== 0) {
           console.log('该消息没有可撤销的文档内容（可能还未输出到文档）');
           return;
         }
-        
+
         const startPos = msg.insertStartPos;
         const endPos = msg.insertEndPos;
         console.log(`准备删除插入范围: ${startPos} - ${endPos}`);
-        
+
         try {
-          // 先删除该范围内的批注
           try {
             const insertedRange = doc.Range(startPos, endPos);
-            // 直接删除范围内的所有批注
             while (insertedRange.Comments.Count > 0) {
               insertedRange.Comments.Item(1).Delete();
             }
@@ -578,14 +155,12 @@ export default {
           } catch (commentErr) {
             console.log('删除批注:', commentErr.message);
           }
-          
-          // 再删除内容
+
           const range = doc.Range(startPos, endPos);
           range.Delete();
-          
+
           console.log('✅ 成功删除插入内容');
-          
-          // 标记该消息的文档内容已被撤销，清除记录
+
           msg.documentReverted = true;
           delete msg.insertStartPos;
           delete msg.insertEndPos;
@@ -595,63 +170,12 @@ export default {
           console.error('删除失败:', e.message);
           alert('撤销失败: ' + e.message);
         }
-
       } catch (error) {
         console.error('撤销失败:', error);
         alert('撤销失败: ' + error.message);
       }
     },
 
-    /**
-     * 切换模式下拉框
-     */
-    toggleModeDropdown(e) {
-      e.stopPropagation();
-      this.modelDropdownOpen = false;
-      this.modeDropdownOpen = !this.modeDropdownOpen;
-    },
-
-    /**
-     * 切换模型下拉框
-     */
-    toggleModelDropdown(e) {
-      if (this.modelsLoading) {
-        return;
-      }
-      e.stopPropagation();
-      this.modeDropdownOpen = false;
-
-      // 如果是打开下拉框，刷新模型列表
-      if (!this.modelDropdownOpen) {
-        this.loadModels();
-      }
-
-      this.modelDropdownOpen = !this.modelDropdownOpen;
-    },
-
-    /**
-     * 选择模式
-     */
-    selectMode(value) {
-      this.mode = value;
-      this.modeDropdownOpen = false;
-    },
-
-    /**
-     * 选择模型
-     */
-    selectModel(id) {
-      this.selectedModel = id;
-      this.modelDropdownOpen = false;
-    },
-
-    /**
-     * 关闭所有下拉框
-     */
-    closeDropdowns() {
-      this.modeDropdownOpen = false;
-      this.modelDropdownOpen = false;
-    },
     /**
      * 终止生成
      */
@@ -669,14 +193,12 @@ export default {
     async initDocumentAndLoadHistory() {
       try {
         console.log('[初始化] 开始获取文档信息');
-        // 获取当前文档信息
         const docInfo = this.getDocumentInfo();
         console.log('[初始化] 文档信息:', docInfo);
         if (docInfo) {
           this.currentDocId = docInfo.docId;
           this.currentDocName = docInfo.docName;
           console.log('[初始化] 已设置 currentDocId:', this.currentDocId);
-          // 检查是否有历史记录（只获取1条来判断）
           await this.checkHasHistory();
         } else {
           console.warn('[初始化] 未获取到文档信息');
@@ -713,7 +235,6 @@ export default {
      */
     async loadAndShowHistory() {
       console.log('[显示历史] 点击按钮，当前 docId:', this.currentDocId);
-      // 重新获取文档信息，确保 docId 是最新的
       const docInfo = this.getDocumentInfo();
       if (docInfo) {
         this.currentDocId = docInfo.docId;
@@ -734,17 +255,13 @@ export default {
           return null;
         }
 
-        // 使用文档的完整路径作为唯一标识
-        // 如果是未保存的文档，使用文档名称 + 创建时间
         const fullPath = doc.FullName || '';
         const docName = doc.Name || 'Untitled';
 
         let docId;
         if (fullPath && fullPath !== docName) {
-          // 已保存的文档，使用完整路径的 hash
           docId = this.hashString(fullPath);
         } else {
-          // 未保存的文档，使用名称 + 时间戳（存储在本地）
           const storedId = window.Application.PluginStorage.getItem(`unsaved_doc_${docName}`);
           if (storedId) {
             docId = storedId;
@@ -792,16 +309,14 @@ export default {
 
         if (result.success && result.data?.messages) {
           console.log('[加载历史] 消息数量:', result.data.messages.length);
-          // 转换后端格式为前端格式
           this.messages = result.data.messages.map((msg) => ({
             role: msg.role,
             content: msg.content,
-            contentParts: msg.contentParts || [], // 恢复 contentParts
+            contentParts: msg.contentParts || [],
             documentJson: msg.documentJson || null,
             selectionContext: msg.selectionContext || null
           }));
 
-          // 恢复上一次使用的 model 和 mode
           if (result.data.lastUsedModel) {
             this.selectedModel = result.data.lastUsedModel;
           }
@@ -886,20 +401,17 @@ export default {
         console.log('模型列表响应:', result);
         if (result.success && result.data?.models && result.data.models.length > 0) {
           this.availableModels = result.data.models;
-          // 只在当前选中的模型在新列表中不存在时才重置为 auto
           const modelExists = this.availableModels.some(m => m.id === this.selectedModel);
           if (!modelExists) {
             this.selectedModel = 'auto';
           }
         } else {
           console.warn('获取模型列表失败:', result.error);
-          // 请求失败显示 Auto
           this.availableModels = [{ id: 'auto', name: 'Auto' }];
           this.selectedModel = 'auto';
         }
       } catch (error) {
         console.error('加载模型列表失败:', error);
-        // 请求失败显示 Auto
         this.availableModels = [{ id: 'auto', name: 'Auto' }];
         this.selectedModel = 'auto';
       }
@@ -930,7 +442,6 @@ export default {
         const text = range.Text || '';
         const cleanedText = text.replace(/[\r\n\u0007\f]/g, ' ').trim();
 
-        // 检查是否有有效的选中内容
         if (!cleanedText || cleanedText.length < 2) {
           console.warn('[Selection] 没有选中有效内容');
           alert('请先在文档中选中文本内容');
@@ -939,7 +450,6 @@ export default {
 
         console.log('[Selection] 选中内容长度:', cleanedText.length);
 
-        // 解析选中内容为JSON
         const jsonData = parseDocxToJSON(range);
         if (jsonData.error) {
           console.error('[Selection] 解析选区失败:', jsonData.error);
@@ -947,7 +457,6 @@ export default {
           return;
         }
 
-        // 生成预览信息
         const maxPreviewLen = 50;
         let preview = cleanedText;
         let hasMore = false;
@@ -957,7 +466,6 @@ export default {
           hasMore = true;
         }
 
-        // 获取开始和结束文字
         const startText = cleanedText.substring(0, Math.min(10, cleanedText.length));
         const endText =
           cleanedText.length > 10 ? cleanedText.substring(cleanedText.length - 10) : cleanedText;
@@ -976,7 +484,6 @@ export default {
           charCount: selectionInfo.charCount
         });
 
-        // 直接调用处理方法
         this.handleSelectionAdd(selectionInfo);
       } catch (error) {
         console.error('[Selection] 处理选区失败:', error);
@@ -986,12 +493,10 @@ export default {
 
     /**
      * 处理添加的选区
-     * @param {Object} selectionInfo - 选区信息对象
      */
     handleSelectionAdd(selectionInfo) {
       console.log('[AIChatPane] 收到选区信息:', selectionInfo);
 
-      // 更新当前选区信息
       this.currentSelection = {
         preview: selectionInfo.preview,
         startText: selectionInfo.startText,
@@ -1000,7 +505,6 @@ export default {
         hasMore: selectionInfo.hasMore
       };
 
-      // 更新选区JSON数据
       this.currentSelectionJSON = selectionInfo.jsonData;
 
       console.log('[AIChatPane] 选区已设置，字符数:', selectionInfo.charCount);
@@ -1012,22 +516,13 @@ export default {
     clearSelection() {
       this.currentSelection = null;
       this.currentSelectionJSON = null;
-      // 尝试取消Word中的选区
       try {
         const selection = window.Application?.Selection;
         if (selection) {
-          selection.Collapse(1); // wdCollapseStart
+          selection.Collapse(1);
         }
       } catch (e) {
         console.warn('取消选区失败:', e);
-      }
-    },
-
-    autoResize() {
-      const textarea = this.$refs.chatInput;
-      if (textarea) {
-        textarea.style.height = 'auto';
-        textarea.style.height = textarea.scrollHeight + 'px';
       }
     },
 
@@ -1039,7 +534,6 @@ export default {
         return;
       }
 
-      // 找到这条 AI 消息对应的用户消息（上一条）
       let userMessageIndex = aiMessageIndex - 1;
       while (userMessageIndex >= 0 && this.messages[userMessageIndex].role !== 'user') {
         userMessageIndex--;
@@ -1053,30 +547,20 @@ export default {
       const userMsg = this.messages[userMessageIndex];
       const userMessage = userMsg.content;
 
-      // 删除当前 AI 消息
       this.messages.splice(aiMessageIndex, 1);
 
-      // 使用公共方法发送请求
       this._sendStreamRequest(userMessage, this.currentSelectionJSON);
     },
 
     /**
-     * 发送用户消息
+     * 处理用户发送消息（由 ChatInput 触发）
      */
-    async sendMessage() {
-      if (!this.inputText.trim() || this.isLoading) {
-        return;
-      }
-
-      const userMessage = this.inputText.trim();
-
-      // 创建用户消息对象
+    handleSend(userMessage) {
       const userMsgObj = {
         role: 'user',
         content: userMessage
       };
 
-      // 如果有选中的内容，添加选区上下文
       let selectionContext = null;
       let documentJson = null;
 
@@ -1089,7 +573,6 @@ export default {
         };
         userMsgObj.selectionContext = selectionContext;
       } else {
-        // 即使没有选中内容，也要传递 docId 和 docName
         documentJson = {
           docId: this.currentDocId,
           docName: this.currentDocName
@@ -1097,34 +580,22 @@ export default {
       }
 
       this.messages.push(userMsgObj);
-      this.inputText = '';
-      this.historyLoaded = true; // 用户开始发消息，隐藏历史提示
-      
-      // 立即清除选区
-      this.clearSelection();
-      
-      this.$nextTick(() => {
-        this.autoResize();
-      });
+      this.historyLoaded = true;
 
-      // 保存用户消息到历史
+      this.clearSelection();
+
       this.saveMessageToHistory('user', userMessage, null, selectionContext);
 
-      // 使用公共方法发送请求
       this._sendStreamRequest(userMessage, documentJson);
     },
 
     /**
      * 发送流式请求的公共方法
-     * @param {string} userMessage - 用户消息
-     * @param {Object} documentJson - 文档 JSON 数据
-     * @private
      */
     _sendStreamRequest(userMessage, documentJson) {
       this.isLoading = true;
       this.scrollToBottom();
 
-      // 创建 AI 消息占位
       const aiMessageIndex = this.messages.length;
       this.messages.push({
         role: 'assistant',
@@ -1138,7 +609,6 @@ export default {
         statusText: ''
       });
 
-      // 使用 api.js 封装的流式接口
       const streamCtrl = api.chatStream(userMessage, {
         mode: this.mode,
         model: this.selectedModel || 'auto',
@@ -1164,7 +634,6 @@ export default {
 
           this.scrollToBottom();
 
-          // 保存 AI 回复到历史
           if (msg.content) {
             this.saveMessageToHistory('assistant', msg.content, msg.documentJson, null, msg.contentParts);
           }
@@ -1175,43 +644,37 @@ export default {
     },
 
     /**
-     * 处理流式消息的公共方法
-     * @param {Object} data - 收到的数据
-     * @param {number} aiMessageIndex - AI 消息在数组中的索引
-     * @private
+     * 处理流式消息
      */
     _handleStreamMessage(data, aiMessageIndex) {
       const msg = this.messages[aiMessageIndex];
 
-      // 处理后端请求全文
       if (data.type === 'request_document') {
         console.log('[Stream] 收到请求全文消息:', data.content);
         msg.contentParts.push({
           type: 'status',
           content: '📑 正在解析全文',
-          loading: true  // 显示加载动画
+          loading: true
         });
         this.scrollToBottom();
 
-        // 等待 Vue 渲染完成后再发送，确保用户能看到 loading 状态
         const statusIndex = msg.contentParts.length - 1;
         this.$nextTick(() => {
           api.sendDocument().then(result => {
             console.log('[Stream] 已发送全文:', result);
             msg.contentParts[statusIndex].content = '✅ 全文解析完成';
-            msg.contentParts[statusIndex].loading = false;  // 停止加载动画
+            msg.contentParts[statusIndex].loading = false;
             this.scrollToBottom();
           }).catch(err => {
             console.error('[Stream] 发送全文失败:', err);
             msg.contentParts[statusIndex].content = '❌ 解析失败: ' + err.message;
-            msg.contentParts[statusIndex].loading = false;  // 停止加载动画
+            msg.contentParts[statusIndex].loading = false;
             this.scrollToBottom();
           });
         });
         return;
       }
 
-      // 处理状态消息
       if (data.type === 'status' && data.content) {
         msg.contentParts.push({
           type: 'status',
@@ -1221,9 +684,7 @@ export default {
         return;
       }
 
-      // 处理文本内容
       if (data.type === 'text' && data.content) {
-        // 收到正式内容时，计算思考耗时并自动折叠
         if (msg.thinkingStartTime && msg.thinkingExpanded) {
           const duration = Math.round((Date.now() - msg.thinkingStartTime) / 1000);
           msg.thinkingDuration = `${duration}秒`;
@@ -1233,7 +694,6 @@ export default {
         const content = data.content;
         msg.content += content;
 
-        // 添加到 contentParts（累加到最后一个 text 部分）
         const parts = msg.contentParts;
         if (parts.length > 0 && parts[parts.length - 1].type === 'text') {
           parts[parts.length - 1].content += content;
@@ -1243,10 +703,8 @@ export default {
 
         this.scrollToBottom();
       } else if (data.type === 'json' && data.content) {
-        // JSON 数据：保存用于文档转换
         msg.documentJson = data.content;
 
-        // 自动输出到文档
         console.log('收到完整JSON，自动输出到文档');
         this.$nextTick(() => {
           this.insertToWord(msg, false);
@@ -1258,37 +716,22 @@ export default {
       }
     },
 
-    scrollToBottom() {
-      this.$nextTick(() => {
-        const container = this.$refs.messagesContainer;
-        if (container) {
-          container.scrollTop = container.scrollHeight;
-        }
-      });
-    },
     /**
      * 插入内容到 Word 文档
-     * @param {Object} msg - 消息对象
-     * @param {boolean} insertAtCursor - true: 插入到光标位置, false: 插入到选区末尾
      */
     insertToWord(msg, insertAtCursor = true) {
       try {
-        // 获取当前活动文档
         const doc = window.Application.ActiveDocument;
         if (!doc) {
           alert('请先打开一个Word文档');
           return;
         }
 
-        // 优先使用已保存的 documentJson
         let jsonData = msg.documentJson || null;
         const content = msg.content || '';
 
-        // 如果没有预存的 JSON，尝试从内容解析
         if (!jsonData) {
-          // 检查是否是 JSON 或包含 JSON 代码块
           if (content.includes('```json')) {
-            // 提取 JSON 代码块
             const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
             if (jsonMatch) {
               try {
@@ -1298,7 +741,6 @@ export default {
               }
             }
           } else if (content.trim().startsWith('{') && content.trim().endsWith('}')) {
-            // 尝试直接解析 JSON
             try {
               jsonData = JSON.parse(content);
             } catch (e) {
@@ -1307,7 +749,6 @@ export default {
           }
         }
 
-        // 如果是有效的文档 JSON，使用 generateDocxFromJSON 生成
         if (jsonData && (jsonData.paragraphs || jsonData.tables)) {
           console.log('检测到文档 JSON，使用格式化输出');
 
@@ -1315,52 +756,39 @@ export default {
           let insertPos;
 
           if (insertAtCursor) {
-            // 按钮点击：插入到当前光标位置
             insertPos = selection.Range.Start;
             console.log('插入到光标位置:', insertPos);
           } else {
-            // 默认自动输出：插入到选区末尾
             insertPos = selection.Range.End;
             console.log('插入到选区末尾:', insertPos, 'Start:', selection.Range.Start);
           }
 
-          // 记录插入前的文档长度（用于撤销功能）
           msg.docLengthBefore = doc.Content.End;
           console.log('记录插入前文档长度:', msg.docLengthBefore);
 
-          // 使用导入的 generateDocxFromJSON 生成文档，传入插入位置
           const result = generateDocxFromJSON(jsonData, doc, insertPos);
 
           if (result.success) {
             console.log('带格式的文档内容已成功插入');
             console.log(`实际插入范围: ${result.startPos} - ${result.endPos}`);
 
-            // 记录实际插入范围（用于撤销功能）
             msg.insertStartPos = result.startPos;
             msg.insertEndPos = result.endPos;
             console.log('记录插入范围用于撤销:', msg.insertStartPos, '-', msg.insertEndPos);
 
-            // 为插入的内容添加批注
             try {
-              // 使用返回的实际插入范围
               const insertedRange = doc.Range(result.startPos, result.endPos);
-
-              // 添加批注
               const comment = doc.Comments.Add(insertedRange, '');
-              // 设置批注作者为"文策AI"
               comment.Author = '文策AI';
               console.log('批注添加成功');
-
             } catch (e) {
               console.error('添加批注失败:', e);
             }
           } else {
             console.error('生成文档失败:', result.error);
-            // 回退到纯文本插入
             this.insertPlainText(content);
           }
         } else {
-          // 纯文本插入
           this.insertPlainText(content, msg);
         }
       } catch (error) {
@@ -1377,20 +805,16 @@ export default {
         const doc = window.Application.ActiveDocument;
         const selection = window.Application.Selection;
 
-        // 记录插入前的文档长度（用于撤销功能）
         if (msg) {
           msg.docLengthBefore = doc.Content.End;
           console.log('记录插入前文档长度:', msg.docLengthBefore);
         }
 
-        // 清理可能的 JSON 代码块标记
         let cleanContent = content;
         if (content.includes('```json')) {
-          // 如果包含 JSON 代码块但解析失败，提取其中的文本
           cleanContent = content.replace(/```json\s*/g, '').replace(/```/g, '');
         }
 
-        // 在当前光标位置插入文本
         selection.TypeText(cleanContent);
         selection.TypeParagraph();
 
@@ -1399,6 +823,7 @@ export default {
         console.error('插入纯文本失败:', error);
       }
     },
+
     hidePane() {
       let tsId = window.Application.PluginStorage.getItem('ai_taskpane_id');
       if (tsId) {
@@ -1422,845 +847,5 @@ export default {
   background: #f7f8fa;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   box-sizing: border-box;
-}
-
-.chat-messages {
-  flex: 1;
-  overflow-y: auto;
-  padding: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-/* 历史记录提示样式 */
-.history-hint {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 8px 12px;
-  margin-bottom: 4px;
-  color: #666;
-  font-size: 13px;
-  cursor: pointer;
-  transition: color 0.2s ease;
-  user-select: none;
-}
-
-.history-hint:hover {
-  color: #1a73e8;
-}
-
-.history-hint svg {
-  flex-shrink: 0;
-}
-
-/* 空状态样式 */
-.empty-state {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  opacity: 0.5;
-}
-
-.empty-icon {
-  width: 64px;
-  height: 64px;
-  color: #999;
-}
-
-.empty-text-container {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.empty-text {
-  font-size: 14px;
-  color: #999;
-  font-weight: 500;
-}
-
-.help-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  color: #667eea;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  text-decoration: none;
-}
-
-.help-icon:hover {
-  color: #5568d3;
-  transform: scale(1.15);
-}
-
-.help-icon svg {
-  width: 100%;
-  height: 100%;
-}
-
-/* Thinking 思考块样式 */
-.thinking-block {
-  margin-bottom: 8px;
-  border-radius: 8px;
-  background: linear-gradient(135deg, #f8f9fc 0%, #f0f4ff 100%);
-  border: 1px solid #e0e6f6;
-  overflow: hidden;
-  transition: all 0.3s ease;
-}
-
-.thinking-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  cursor: pointer;
-  user-select: none;
-  transition: background 0.2s;
-}
-
-.thinking-header:hover {
-  background: rgba(102, 126, 234, 0.08);
-}
-
-.thinking-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  color: #667eea;
-  animation: pulse 2s ease-in-out infinite;
-}
-
-.thinking-block:not(.expanded) .thinking-icon {
-  animation: none;
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
-}
-
-.thinking-label {
-  font-size: 12px;
-  font-weight: 500;
-  color: #5a6378;
-  flex: 1;
-}
-
-.thinking-duration {
-  font-size: 11px;
-  color: #8893a7;
-  margin-right: 4px;
-}
-
-.thinking-arrow {
-  color: #8893a7;
-  transition: transform 0.3s ease;
-}
-
-.thinking-arrow.rotated {
-  transform: rotate(180deg);
-}
-
-.thinking-content {
-  padding: 0 12px 12px 40px;
-  font-size: 12px;
-  line-height: 1.6;
-  color: #5a6378;
-  white-space: pre-wrap;
-  word-wrap: break-word;
-  max-height: 300px;
-  overflow-y: auto;
-  border-top: 1px solid #e8ecf4;
-  margin-top: 0;
-  padding-top: 10px;
-}
-
-.thinking-content::-webkit-scrollbar {
-  width: 4px;
-}
-
-.thinking-content::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.thinking-content::-webkit-scrollbar-thumb {
-  background: #c5cdd8;
-  border-radius: 2px;
-}
-
-/* 消息容器 */
-.message-wrapper {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  width: 100%;
-}
-
-.user-wrapper {
-  align-items: flex-end;
-}
-
-.ai-wrapper {
-  align-items: flex-start;
-}
-
-/* 状态消息样式 */
-.status-wrapper {
-  align-items: center;
-}
-
-.status-message {
-  width: 100%;
-  text-align: center;
-  padding: 4px 0;
-}
-
-.status-message .typing {
-  display: inline-block;
-}
-
-/* Status 行样式 */
-.status-line {
-  margin: 4px 0;
-  padding: 2px 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.status-line .typing {
-  display: inline;
-}
-
-/* 旋转加载圈圈 */
-.loading-spinner {
-  display: inline-block;
-  width: 12px;
-  height: 12px;
-  border: 2px solid #e0e0e0;
-  border-top-color: #667eea;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.message {
-  max-width: 90%;
-  padding: 6px 8px;
-  border-radius: 8px;
-  line-height: 1.4;
-  font-size: 12px;
-}
-
-.user-message {
-  align-self: flex-end;
-  background: #c7d1ff;
-  color: #333;
-  border-bottom-right-radius: 4px;
-}
-
-.ai-message {
-  align-self: flex-start;
-  background: transparent;
-  color: #333;
-  box-shadow: none;
-  padding: 0;
-  max-width: 100%;
-}
-
-.message-content {
-  word-wrap: break-word;
-}
-
-/* Markdown 渲染样式 - 使用 :deep() 穿透 scoped 限制 */
-.message-content :deep(.markdown-body) {
-  font-size: 12px;
-  line-height: 1.6;
-}
-
-.message-content :deep(.markdown-body) p {
-  margin: 0 0 8px 0;
-}
-
-.message-content :deep(.markdown-body) p:last-child {
-  margin-bottom: 0;
-}
-
-.message-content :deep(.markdown-body) h1,
-.message-content :deep(.markdown-body) h2,
-.message-content :deep(.markdown-body) h3,
-.message-content :deep(.markdown-body) h4,
-.message-content :deep(.markdown-body) h5,
-.message-content :deep(.markdown-body) h6 {
-  margin: 12px 0 8px 0;
-  font-weight: 600;
-  line-height: 1.3;
-}
-
-.message-content :deep(.markdown-body) h1 {
-  font-size: 1.4em;
-}
-.message-content :deep(.markdown-body) h2 {
-  font-size: 1.25em;
-}
-.message-content :deep(.markdown-body) h3 {
-  font-size: 1.1em;
-}
-.message-content :deep(.markdown-body) h4,
-.message-content :deep(.markdown-body) h5,
-.message-content :deep(.markdown-body) h6 {
-  font-size: 1em;
-}
-
-.message-content :deep(.markdown-body) ul,
-.message-content :deep(.markdown-body) ol {
-  margin: 6px 0;
-  padding-left: 24px;
-  list-style-position: outside;
-}
-
-.message-content :deep(.markdown-body) ul {
-  list-style-type: disc;
-}
-
-.message-content :deep(.markdown-body) ol {
-  list-style-type: decimal;
-}
-
-.message-content :deep(.markdown-body) li {
-  margin: 4px 0;
-  padding-left: 4px;
-}
-
-.message-content :deep(.markdown-body) code {
-  background: rgba(0, 0, 0, 0.06);
-  padding: 2px 4px;
-  border-radius: 3px;
-  font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
-  font-size: 0.9em;
-}
-
-.message-content :deep(.markdown-body) pre {
-  background: #1e1e1e;
-  color: #d4d4d4;
-  padding: 10px;
-  border-radius: 6px;
-  overflow-x: auto;
-  margin: 8px 0;
-}
-
-.message-content :deep(.markdown-body) pre code {
-  background: none;
-  padding: 0;
-  color: inherit;
-  font-size: 11px;
-  line-height: 1.4;
-}
-
-.message-content :deep(.markdown-body) blockquote {
-  margin: 8px 0;
-  padding: 4px 12px;
-  border-left: 3px solid #667eea;
-  background: rgba(102, 126, 234, 0.08);
-  color: #555;
-}
-
-.message-content :deep(.markdown-body) a {
-  color: #667eea;
-  text-decoration: none;
-}
-
-.message-content :deep(.markdown-body) a:hover {
-  text-decoration: underline;
-}
-
-.message-content :deep(.markdown-body) table {
-  border-collapse: collapse;
-  margin: 8px 0;
-  width: 100%;
-}
-
-.message-content :deep(.markdown-body) th,
-.message-content :deep(.markdown-body) td {
-  border: 1px solid #ddd;
-  padding: 6px 8px;
-  text-align: left;
-}
-
-.message-content :deep(.markdown-body) th {
-  background: #f5f5f5;
-  font-weight: 600;
-}
-
-.message-content :deep(.markdown-body) hr {
-  border: none;
-  border-top: 1px solid #ddd;
-  margin: 12px 0;
-}
-
-.message-content :deep(.markdown-body) strong {
-  font-weight: 700;
-  color: #222;
-}
-
-.message-content :deep(.markdown-body) em {
-  font-style: italic;
-}
-
-/* AI 消息外部图标按钮 */
-.message-icon-actions {
-  display: flex;
-  flex-direction: row;
-  gap: 2px;
-  margin-left: 0;
-}
-
-.icon-btn-wrapper {
-  position: relative;
-}
-
-.icon-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  background: transparent;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  color: #999;
-  transition: all 0.15s ease;
-}
-
-.icon-btn:hover {
-  background: #f0f0f0;
-  color: #333;
-}
-
-.icon-btn svg {
-  width: 14px;
-  height: 14px;
-}
-
-/* 图标按钮的 tooltip */
-.icon-tooltip {
-  position: absolute;
-  left: 50%;
-  bottom: 100%;
-  transform: translateX(-50%);
-  padding: 3px 6px;
-  background: white;
-  color: #333;
-  font-size: 10px;
-  border-radius: 4px;
-  white-space: nowrap;
-  opacity: 0;
-  visibility: hidden;
-  transition:
-    opacity 0.2s,
-    visibility 0.2s;
-  pointer-events: none;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-  border: 1px solid #e0e0e0;
-  margin-bottom: 4px;
-}
-
-.icon-btn-wrapper:hover .icon-tooltip {
-  opacity: 1;
-  visibility: visible;
-}
-
-.typing {
-  color: #888;
-}
-
-.chat-input-area {
-  padding: 12px 12px;
-  background: #f7f8fa;
-  flex-shrink: 0;
-}
-
-.input-container {
-  background: white;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
-}
-
-.chat-input {
-  width: 100%;
-  padding: 6px 10px;
-  padding-bottom: 0;
-  border: none;
-  resize: none;
-  font-size: 12px;
-  font-family: inherit;
-  outline: none;
-  background: transparent;
-  color: #333;
-  box-sizing: border-box;
-  overflow: hidden;
-  min-height: 20px;
-  max-height: 150px;
-  line-height: 1.4;
-}
-
-.chat-input::placeholder {
-  color: #999;
-}
-
-.input-toolbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 3px 6px;
-}
-
-.toolbar-left {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.toolbar-right {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.btn-wrapper {
-  position: relative;
-  display: inline-flex;
-}
-
-.btn-wrapper .tooltip {
-  position: absolute;
-  bottom: 100%;
-  left: 50%;
-  transform: translateX(-50%);
-  padding: 3px 6px;
-  background: white;
-  color: #333;
-  font-size: 10px;
-  border-radius: 4px;
-  white-space: nowrap;
-  opacity: 0;
-  visibility: hidden;
-  transition:
-    opacity 0.2s,
-    visibility 0.2s;
-  pointer-events: none;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-  border: 1px solid #e0e0e0;
-  margin-bottom: 4px;
-}
-
-.btn-wrapper:hover .tooltip {
-  opacity: 1;
-  visibility: visible;
-}
-
-/* 自定义下拉组件 */
-.custom-select {
-  position: relative;
-  display: inline-flex;
-  font-size: 8px;
-}
-
-.custom-select.disabled {
-  opacity: 0.5;
-  pointer-events: none;
-}
-
-.select-trigger {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 2px 4px;
-  color: #666;
-  cursor: pointer;
-  border-radius: 3px;
-  transition: color 0.2s;
-  user-select: none;
-}
-
-.select-trigger:hover {
-  color: #667eea;
-}
-
-.custom-select.open .select-trigger {
-  color: #667eea;
-}
-
-.select-arrow {
-  transition: transform 0.2s;
-}
-
-.custom-select.open .select-arrow {
-  transform: rotate(180deg);
-}
-
-.select-dropdown {
-  position: absolute;
-  bottom: 100%;
-  left: 0;
-  min-width: 100%;
-  background: white;
-  border: 1px solid #e0e0e0;
-  border-radius: 6px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  padding: 2px 0;
-  margin-bottom: 4px;
-  opacity: 0;
-  visibility: hidden;
-  transform: translateY(4px);
-  transition:
-    opacity 0.15s,
-    visibility 0.15s,
-    transform 0.15s;
-  z-index: 100;
-}
-
-.custom-select.open .select-dropdown {
-  opacity: 1;
-  visibility: visible;
-  transform: translateY(0);
-}
-
-.model-dropdown {
-  min-width: 100px;
-}
-
-.select-option {
-  padding: 2px 10px;
-  color: #333;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background 0.15s;
-}
-
-.select-option:hover {
-  background: #f5f5f5;
-}
-
-.select-option.active {
-  color: #667eea;
-  background: #f0f4ff;
-}
-
-/* 保留旧样式兼容 */
-.toolbar-select option {
-  background: white;
-  color: #333;
-  padding: 4px 8px;
-}
-
-.toolbar-select:hover {
-  color: #667eea;
-}
-
-.toolbar-select:focus {
-  outline: none;
-  color: #667eea;
-}
-
-.add-selection-btn {
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  color: #888;
-  border: none;
-  border-radius: 3px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.add-selection-btn:hover {
-  background: #f0f0f0;
-  color: #667eea;
-}
-
-.send-btn {
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  color: #888;
-  border: none;
-  border-radius: 3px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.send-btn:hover:not(:disabled) {
-  background: #f0f0f0;
-  color: #667eea;
-}
-
-.send-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.stop-btn {
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  color: #e74c3c;
-  border: none;
-  border-radius: 3px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.stop-btn:hover {
-  background: #fef0ef;
-  color: #c0392b;
-}
-
-/* 选中内容上下文样式 */
-.selection-context {
-  background: #dce4ff;
-  border: 1px solid #c5d3ff;
-  border-radius: 6px;
-  padding: 8px;
-  margin-bottom: 8px;
-  font-size: 11px;
-}
-
-.context-header {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  color: #5566cc;
-  font-weight: 500;
-  margin-bottom: 4px;
-}
-
-.context-preview {
-  background: white;
-  border-radius: 4px;
-  padding: 6px 8px;
-  margin-bottom: 4px;
-  color: #333;
-  line-height: 1.4;
-  max-height: 60px;
-  overflow: hidden;
-}
-
-.context-text {
-  word-break: break-all;
-}
-
-.context-more {
-  color: #999;
-}
-
-.context-range {
-  color: #888;
-  font-size: 10px;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.context-stats {
-  color: #999;
-  margin-left: auto;
-}
-
-/* 当前选区预览条 */
-.current-selection-bar {
-  background: #f0f0f0;
-  border-top: 1px solid #d8d8d8;
-  border-bottom: 1px solid #d8d8d8;
-  padding: 6px 10px;
-}
-
-.selection-bar-content {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.selection-bar-icon {
-  flex-shrink: 0;
-  color: #667eea;
-  display: flex;
-  align-items: center;
-}
-
-.selection-bar-info {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.selection-bar-preview {
-  font-size: 11px;
-  color: #333;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.selection-bar-range {
-  font-size: 9px;
-  color: #888;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.selection-bar-clear {
-  flex-shrink: 0;
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: white;
-  color: #333;
-  border: 1px solid #e0e0e0;
-  border-radius: 50%;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.selection-bar-clear:hover {
-  background: #f5f5f5;
-  color: #000;
-  border-color: #ccc;
 }
 </style>

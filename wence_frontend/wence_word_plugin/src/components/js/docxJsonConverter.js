@@ -699,20 +699,7 @@ function parseDocxToJSON(range) {
         // 空段落
         if (paraText.match(/^[\r\n\f\u0007]*$/)) {
           result.paragraphs.push({
-            // text: '',
-            pStyle: [
-              getAlignmentName(para.Format.Alignment),
-              para.Format.LineSpacing || 0,
-              para.Format.LeftIndent || 0,
-              para.Format.RightIndent || 0,
-              para.Format.FirstLineIndent || 0,
-              para.Format.SpaceBefore || 0,
-              para.Format.SpaceAfter || 0,
-              '',
-              para.Format.LineSpacingRule || 0
-            ],
-            runs: [],
-            isEmpty: true,
+            isParaEmpty: true,
             position: paraStart
           });
           continue;
