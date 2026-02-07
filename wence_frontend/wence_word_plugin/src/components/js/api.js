@@ -183,14 +183,7 @@ const wsManager = {
             return;
           }
 
-          // 后端请求读取文档：自动解析并回传，对上层透明
-          if (data.type === 'read_document') {
-            console.log('[WebSocket] 后端请求读取文档, startPos:', data.startPos, 'endPos:', data.endPos);
-            this._handleDocumentRequest(data.startPos, data.endPos);
-            return;
-          }
-
-          // 其他消息类型：text, json, status 等
+          // 所有消息类型（text, json, status, read_document 等）都透传给上层
           if (this.onMessage) {
             this.onMessage(data);
           }
@@ -255,11 +248,7 @@ const wsManager = {
    * @param {number} endPos - 结束位置，-1 表示文档结尾
    */
   async _handleDocumentRequest(startPos = -1, endPos = -1) {
-    // 通知上层显示状态
-    if (this.onMessage) {
-      this.onMessage({ type: 'status', content: `📑 正在读取文档(${startPos} - ${endPos})`, loading: true });
-    }
-
+    // 注意：不在这里发送 loading 状态，AIChatPane 在收到 read_document 时已经推入了 loading 状态
     try {
       const docData = await parseDocumentRange(startPos, endPos);
 

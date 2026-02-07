@@ -8,8 +8,10 @@ import uuid
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from app.services.agent import (
+from app.services.agent.agent import (
     process_writing_request_stream,
+)
+from app.services.agent.tools import (
     create_tool_request,
     cleanup_tool_request,
     submit_tool_response,

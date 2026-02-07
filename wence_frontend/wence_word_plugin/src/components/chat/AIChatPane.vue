@@ -634,6 +634,88 @@ export default {
     _handleStreamMessage(data, aiMessageIndex) {
       const msg = this.messages[aiMessageIndex];
 
+      // 后端请求读取文档：委托 api.js 解析文档并回传
+      if (data.type === 'read_document') {
+        console.log('[AIChatPane] 后端请求读取文档, startPos:', data.startPos, 'endPos:', data.endPos);
+        msg.contentParts.push({
+          type: 'status',
+          content: data.content || `📑 正在读取文档(${data.startPos} - ${data.endPos})`,
+          loading: true
+        });
+        this.scrollToBottom();
+        api.wsManager._handleDocumentRequest(data.startPos, data.endPos);
+        return;
+      }
+
+      if (data.type === 'read_complete') {
+        console.log('[AIChatPane] 文档读取完成');
+        this.lastReadJSON = data.documentJson || null;
+        // 反向查找最后一个 loading 状态的 status，用 splice 替换以确保 Vue 响应式更新
+        const parts = msg.contentParts;
+        let found = false;
+        for (let i = parts.length - 1; i >= 0; i--) {
+          if (parts[i].type === 'status' && parts[i].loading) {
+            console.log('[AIChatPane] 找到 loading 状态，索引:', i, '内容:', parts[i].content);
+            parts.splice(i, 1, {
+              type: 'status',
+              content: data.content || '✅ 文档读取完成',
+              loading: false
+            });
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          console.warn('[AIChatPane] 未找到 loading 状态的 read_document，直接追加');
+          parts.push({
+            type: 'status',
+            content: data.content || '✅ 文档读取完成',
+            loading: false
+          });
+        }
+        this.scrollToBottom();
+        return;
+      }
+
+      if (data.type === 'generate_document') {
+        console.log('[AIChatPane] 生成文档中...');
+        msg.contentParts.push({
+          type: 'status',
+          content: data.content || '📝 正在生成文档',
+          loading: true
+        });
+        this.scrollToBottom();
+        return;
+      }
+
+      if (data.type === 'generate_complete') {
+        console.log('[AIChatPane] 文档生成完成');
+        const parts = msg.contentParts;
+        let found = false;
+        for (let i = parts.length - 1; i >= 0; i--) {
+          if (parts[i].type === 'status' && parts[i].loading) {
+            console.log('[AIChatPane] 找到 loading 状态，索引:', i, '内容:', parts[i].content);
+            parts.splice(i, 1, {
+              type: 'status',
+              content: data.content || '✅ 文档已生成',
+              loading: false
+            });
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          console.warn('[AIChatPane] 未找到 loading 状态的 generate_document，直接追加');
+          parts.push({
+            type: 'status',
+            content: data.content || '✅ 文档已生成',
+            loading: false
+          });
+        }
+        this.scrollToBottom();
+        return;
+      }
+      // 其他消息类型：text, json, status 等
       if (data.type === 'status' && data.content) {
         msg.contentParts.push({
           type: 'status',
@@ -642,9 +724,7 @@ export default {
         });
         this.scrollToBottom();
         return;
-      }
-
-      if (data.type === 'text' && data.content) {
+      } else if (data.type === 'text' && data.content) {
         if (msg.thinkingStartTime && msg.thinkingExpanded) {
           const duration = Math.round((Date.now() - msg.thinkingStartTime) / 1000);
           msg.thinkingDuration = `${duration}秒`;
