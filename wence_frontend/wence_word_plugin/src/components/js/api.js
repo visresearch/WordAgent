@@ -263,14 +263,9 @@ const wsManager = {
       });
 
       console.log('[WebSocket] 已回传文档，段落数:', docData.paragraphs?.length || 0);
-      // if (this.onMessage) {
-      //   this.onMessage({ type: 'status', content: '✅ 文档读取完成' });
-      // }
+
     } catch (err) {
       console.error('[WebSocket] 解析/回传文档失败:', err);
-      // if (this.onMessage) {
-      //   this.onMessage({ type: 'status', content: '❌ 解析失败: ' + err.message });
-      // }
     }
   },
 
@@ -407,45 +402,6 @@ async function parseDocumentRange(startPos = -1, endPos = -1) {
         resolve({ error: '解析文档失败: ' + error.message });
       }
     }, 0);
-  });
-}
-
-/**
- * 发送文档 JSON 到后端 /api/chat/doc 接口
- * @param {Object} options - 配置选项
- * @param {Object} options.doc - WPS Document 对象（可选）
- * @param {Object} options.documentJson - 已解析的文档 JSON（可选，不传则自动解析）
- * @returns {Promise<Object>} - 后端返回结果
- */
-async function sendDocument(options = {}) {
-  const { doc = null, documentJson = null } = options;
-
-  // 如果没有传入 documentJson，则自动解析
-  let docData = documentJson;
-  let docName = '';
-
-  if (!docData) {
-    const currentDoc = doc || window.Application?.ActiveDocument;
-    // 使用异步解析
-    docData = await parseDocumentRange();
-    if (docData.error) {
-      return { success: false, error: docData.error };
-    }
-    docName = currentDoc?.Name || '';
-  } else {
-    // 从 documentJson 的 _meta 中获取文档名
-    docName = docData._meta?.documentName || '';
-  }
-
-  console.log('[sendDocument] 发送文档:', docName);
-
-  return await request('/api/chat/doc', {
-    method: 'POST',
-    body: {
-      documentJson: docData,
-      documentName: docName,
-      timestamp: Date.now()
-    }
   });
 }
 
@@ -820,6 +776,32 @@ async function saveSettings(settings) {
   }
 }
 
+// ============== 缓存管理 API ==============
+
+/**
+ * 扫描 WPS 图片缓存
+ * @returns {Promise<Object>} { dir, fileCount, totalSize }
+ */
+async function scanCache() {
+  const response = await request('/api/cache/scan', { method: 'GET' });
+  if (!response.success) {
+    throw new Error(response.error || '扫描缓存失败');
+  }
+  return response.data;
+}
+
+/**
+ * 清除 WPS 图片缓存
+ * @returns {Promise<Object>} { deleted }
+ */
+async function clearCache() {
+  const response = await request('/api/cache/clear', { method: 'DELETE' });
+  if (!response.success) {
+    throw new Error(response.error || '清除缓存失败');
+  }
+  return response.data;
+}
+
 // ============== 导出 ==============
 
 export default {
@@ -830,7 +812,6 @@ export default {
 
   // 文档处理
   parseDocumentRange,
-  sendDocument,
 
   // WebSocket 管理
   wsManager,
@@ -844,6 +825,10 @@ export default {
   // 设置管理 API
   getSettings,
   saveSettings,
+
+  // 缓存管理 API
+  scanCache,
+  clearCache,
 
   // 配置方法
   updateConfig,
@@ -859,7 +844,7 @@ export {
   getModels,
   fetchAvailableModels,
   parseDocumentRange,
-  sendDocument,
+
   wsManager,
   getChatHistory,
   saveMessage,
@@ -867,6 +852,8 @@ export {
   getDocuments,
   getSettings,
   saveSettings,
+  scanCache,
+  clearCache,
   updateConfig,
   getConfig,
   request

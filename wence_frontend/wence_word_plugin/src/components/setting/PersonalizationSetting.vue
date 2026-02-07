@@ -1,14 +1,5 @@
 <template>
   <div class="personalization-container">
-    <div class="page-header">
-      <h1 class="page-title">
-        个性化设置
-      </h1>
-      <p class="page-desc">
-        自定义您的AI助手行为和响应参数
-      </p>
-    </div>
-
     <div class="settings-content">
       <!-- 自定义指令 -->
       <div class="setting-section">
@@ -208,66 +199,32 @@
           </div>
         </div>
       </div>
-
-      <!-- 保存按钮 -->
-      <div class="action-bar">
-        <button class="btn btn-save" :disabled="saving" @click="saveSettings">
-          <svg
-            v-if="!saving"
-            width="16"
-            height="16"
-            viewBox="0 0 16 16"
-            fill="currentColor"
-          >
-            <path d="M2 1a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1H9.5a1 1 0 0 0-1 1v7.293l2.646-2.647a.5.5 0 0 1 .708.708l-3.5 3.5a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L7.5 9.293V2a2 2 0 0 1 2-2H14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2h2.5a.5.5 0 0 1 0 1H2z" />
-          </svg>
-          <span v-if="saving" class="loading-spinner"></span>
-          {{ saving ? '保存中...' : '保存设置' }}
-        </button>
-
-        <transition name="fade">
-          <div v-if="saveMessage" class="save-message" :class="{ success: saveSuccess, error: !saveSuccess }">
-            <svg
-              v-if="saveSuccess"
-              width="16"
-              height="16"
-              viewBox="0 0 16 16"
-              fill="currentColor"
-            >
-              <path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0zm-3.97-3.03a.75.75 0 0 0-1.08.022L7.477 9.417 5.384 7.323a.75.75 0 0 0-1.06 1.06L6.97 11.03a.75.75 0 0 0 1.079-.02l3.992-4.99a.75.75 0 0 0-.01-1.05z" />
-            </svg>
-            <svg
-              v-else
-              width="16"
-              height="16"
-              viewBox="0 0 16 16"
-              fill="currentColor"
-            >
-              <path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0zM5.354 4.646a.5.5 0 1 0-.708.708L7.293 8l-2.647 2.646a.5.5 0 0 0 .708.708L8 8.707l2.646 2.647a.5.5 0 0 0 .708-.708L8.707 8l2.647-2.646a.5.5 0 0 0-.708-.708L8 7.293 5.354 4.646z" />
-            </svg>
-            {{ saveMessage }}
-          </div>
-        </transition>
-      </div>
     </div>
   </div>
 </template>
 
 <script>
-import { ref, onMounted } from 'vue';
-import api from '../js/api.js';
+import { ref, watch } from 'vue';
 
 export default {
   name: 'PersonalizationPane',
-  setup() {
+  props: {
+    settings: {
+      type: Object,
+      required: true
+    }
+  },
+  emits: ['update:settings'],
+  setup(props, { emit }) {
     const settings = ref({
-      customPrompt: '',
-      temperature: 0.7
+      customPrompt: props.settings.customPrompt ?? '',
+      temperature: props.settings.temperature ?? 0.7
     });
 
-    const saving = ref(false);
-    const saveMessage = ref('');
-    const saveSuccess = ref(false);
+    watch(() => props.settings, (newVal) => {
+      settings.value.customPrompt = newVal.customPrompt ?? '';
+      settings.value.temperature = newVal.temperature ?? 0.7;
+    }, { deep: true });
 
     const promptTemplates = ref([
       {
@@ -300,58 +257,21 @@ export default {
       }
     ]);
 
-    const loadSettings = async () => {
-      try {
-        const data = await api.getSettings();
-        if (data) {
-          if (data.customPrompt !== undefined) {
-            settings.value.customPrompt = data.customPrompt;
-          }
-          if (data.temperature !== undefined) {
-            settings.value.temperature = data.temperature;
-          }
-        }
-      } catch (error) {
-        console.error('加载个性化设置失败:', error);
-      }
-    };
-
-    const saveSettings = async () => {
-      saving.value = true;
-      saveMessage.value = '';
-
-      try {
-        await api.saveSettings({
-          customPrompt: settings.value.customPrompt,
-          temperature: settings.value.temperature
-        });
-
-        saveMessage.value = '设置已保存！';
-        saveSuccess.value = true;
-
-        setTimeout(() => {
-          saveMessage.value = '';
-        }, 3000);
-      } catch (error) {
-        console.error('保存设置失败:', error);
-        saveMessage.value = '保存失败，请重试';
-        saveSuccess.value = false;
-
-        setTimeout(() => {
-          saveMessage.value = '';
-        }, 3000);
-      } finally {
-        saving.value = false;
-      }
+    const emitChange = () => {
+      emit('update:settings', {
+        customPrompt: settings.value.customPrompt,
+        temperature: settings.value.temperature
+      });
     };
 
     const onSettingChange = () => {
-      // 可以在这里添加自动保存逻辑
+      emitChange();
     };
 
     const clearCustomPrompt = () => {
       if (confirm('确定要清空自定义指令吗？')) {
         settings.value.customPrompt = '';
+        emitChange();
       }
     };
 
@@ -360,19 +280,12 @@ export default {
         return;
       }
       settings.value.customPrompt = template.prompt;
+      emitChange();
     };
-
-    onMounted(() => {
-      loadSettings();
-    });
 
     return {
       settings,
-      saving,
-      saveMessage,
-      saveSuccess,
       promptTemplates,
-      saveSettings,
       onSettingChange,
       clearCustomPrompt,
       applyTemplate
@@ -383,34 +296,12 @@ export default {
 
 <style scoped>
 .personalization-container {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  background-color: #ffffff;
-}
-
-.page-header {
-  padding: 24px 32px 16px 32px;
-  border-bottom: 2px solid #f0f0f0;
-}
-
-.page-title {
-  font-size: 20px;
-  font-weight: 600;
-  margin: 0 0 4px 0;
-  color: #333333;
-}
-
-.page-desc {
-  font-size: 13px;
-  margin: 0;
-  color: #888888;
+  padding: 0;
 }
 
 .settings-content {
-  flex: 1;
-  overflow-y: auto;
-  padding: 24px 32px;
+  display: flex;
+  flex-direction: column;
 }
 
 .setting-section {
@@ -418,7 +309,6 @@ export default {
   border-radius: 12px;
   padding: 24px;
   margin-bottom: 24px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 }
 
 .section-header {
@@ -692,89 +582,6 @@ export default {
   color: #7f8c8d;
   margin: 0;
   line-height: 1.5;
-}
-
-.action-bar {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 20px 24px;
-  background: white;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-}
-
-.btn {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 20px;
-  border: none;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.btn-save {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-}
-
-.btn-save:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
-}
-
-.btn-save:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.loading-spinner {
-  width: 16px;
-  height: 16px;
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  border-top-color: white;
-  border-radius: 50%;
-  animation: spin 0.6s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.save-message {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-  border-radius: 6px;
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.save-message.success {
-  background: #d4edda;
-  color: #155724;
-}
-
-.save-message.error {
-  background: #f8d7da;
-  color: #721c24;
-}
-
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.3s ease;
-}
-
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
 }
 
 /* 滚动条样式 */

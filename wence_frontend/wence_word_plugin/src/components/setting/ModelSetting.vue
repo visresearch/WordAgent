@@ -340,7 +340,10 @@ export default {
         baseUrl: p.baseUrl,
         apiKey: p.apiKey,
         models: p.models,
-        enabled: p.enabled
+        enabled: p.enabled,
+        expanded: p.expanded,
+        showKey: p.showKey,
+        fetchingModels: p.fetchingModels
       })));
     };
 

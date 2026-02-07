@@ -17,7 +17,7 @@ from app.services.agent.prompts import AGENT_PROMPT
 from app.services.agent.tools import (
     ALL_TOOLS,
     TOOL_MAP,
-    _current_session_id,
+    _current_chat_id,
     create_tool_request,
     cleanup_tool_request,
     register_loop,
@@ -31,13 +31,15 @@ from app.services.agent.tools import (
 
 def create_llm(model_name: str) -> ChatOpenAI:
     """创建 LLM 实例，使用 llm_client 统一管理配置"""
+    from app.services.llm_client import get_temperature
+
     provider_info = LLMClientManager.get_provider_info(model_name)
 
     return ChatOpenAI(
         model=model_name,
         openai_api_key=provider_info.api_key,
         openai_api_base=provider_info.base_url,
-        temperature=0.7,
+        temperature=get_temperature(),
         streaming=True,
     )
 
@@ -125,7 +127,7 @@ async def process_writing_request_stream(
     history: list | None = None,
     model: str | None = None,
     mode: str | None = None,
-    session_id: str | None = None,
+    chat_id: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     使用 LangGraph ReAct Agent 处理写作请求（流式输出）
@@ -136,7 +138,7 @@ async def process_writing_request_stream(
         history: 历史消息
         model: 用户选择的模型
         mode: 对话模式（agent/ask）
-        session_id: WebSocket 会话 ID（用于工具回调）
+        chat_id: WebSocket 会话 ID（用于工具回调）
 
     Yields:
         SSE 格式的流式输出
@@ -184,8 +186,8 @@ async def process_writing_request_stream(
 
         # 获取事件循环，注册供 tool 使用
         loop = asyncio.get_running_loop()
-        if session_id:
-            register_loop(session_id, loop)
+        if chat_id:
+            register_loop(chat_id, loop)
 
         # 队列用于线程间传递流式数据
         queue: asyncio.Queue = asyncio.Queue()
@@ -195,8 +197,8 @@ async def process_writing_request_stream(
         def run_stream():
             """在独立线程中运行同步的 LangGraph stream"""
             try:
-                if session_id:
-                    _current_session_id.set(session_id)
+                if chat_id:
+                    _current_chat_id.set(chat_id)
 
                 response = app.stream(
                     {"messages": messages},

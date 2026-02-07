@@ -18,12 +18,12 @@
         {
           "id": "deepseek-r1",
           "name": "Deepseek R1",
-          "enabled": false
+          "enabled": true
         },
         {
           "id": "deepseek-v3.2",
           "name": "Deepseek V3.2",
-          "enabled": true
+          "enabled": false
         },
         {
           "id": "claude-opus-4-6",
@@ -41,7 +41,12 @@
         {
           "id": "qwen2.5:7b",
           "name": "Qwen2.5:7b",
-          "enabled": true
+          "enabled": false
+        },
+        {
+          "id": "deepseek-r1:7b",
+          "name": "Deepseek R1:7b",
+          "enabled": false
         }
       ],
       "enabled": true
@@ -68,9 +73,19 @@
           "id": "qwen-plus",
           "name": "Qwen Plus",
           "enabled": true
+        },
+        {
+          "id": "qwen3-max",
+          "name": "Qwen3 Max",
+          "enabled": false
         }
       ],
       "enabled": true
     }
-  ]
+  ],
+  "showPanelOnStart": true,
+  "proofreadMode": "revision",
+  "customPrompt": "你是一位专业的学术写作助手，擅长撰写和编辑学术论文。请使用正式、严谨的学术语言，注重逻辑性和准确性。在回答问题时，优先考虑学术规范和专业术语的正确使用。",
+  "temperature": 0.72,
+  "latest_model": ""
 }

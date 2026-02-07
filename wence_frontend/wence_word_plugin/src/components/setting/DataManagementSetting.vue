@@ -10,6 +10,96 @@
     </div>
 
     <div class="settings-content">
+      <!-- 清除缓存 -->
+      <div class="setting-section">
+        <div class="section-header">
+          <svg
+            class="section-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path d="M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z" />
+            <line
+              x1="18"
+              y1="9"
+              x2="12"
+              y2="15"
+            />
+            <line
+              x1="12"
+              y1="9"
+              x2="18"
+              y2="15"
+            />
+          </svg>
+          <div class="section-title-group">
+            <h2 class="section-title">
+              清除缓存
+            </h2>
+            <p class="section-subtitle">
+              清除解析文档时生成的临时图片文件，释放磁盘空间
+            </p>
+          </div>
+        </div>
+
+        <div class="cache-info-box">
+          <div class="cache-info-item">
+            <span class="cache-label">缓存位置</span>
+            <span class="cache-value">{{ cacheDir || 'WPS 临时文件目录' }}</span>
+          </div>
+          <div class="cache-info-item">
+            <span class="cache-label">缓存大小</span>
+            <span class="cache-value">{{ cacheSizeText }}</span>
+          </div>
+        </div>
+
+        <div class="action-area">
+          <button
+            class="btn btn-secondary"
+            :disabled="scanningCache"
+            @click="scanCache"
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <circle cx="11" cy="11" r="8" />
+              <line
+                x1="21"
+                y1="21"
+                x2="16.65"
+                y2="16.65"
+              />
+            </svg>
+            {{ scanningCache ? '扫描中...' : '扫描缓存' }}
+          </button>
+          <button
+            class="btn btn-warning"
+            :disabled="clearingCache || cacheFileCount === 0"
+            @click="clearCache"
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <polyline points="3 6 5 6 21 6" />
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+            </svg>
+            {{ clearingCache ? '清除中...' : '清除缓存' }}
+          </button>
+        </div>
+      </div>
+
       <!-- 数据清理 -->
       <div class="setting-section danger-section">
         <div class="section-header">
@@ -191,17 +281,118 @@
 </template>
 
 <script>
-import { ref } from 'vue';
+import { ref, computed, watch } from 'vue';
 import api from '../js/api.js';
 
 export default {
   name: 'DataManagementPane',
-  setup() {
+  props: {
+    cacheInfo: {
+      type: Object,
+      required: true
+    }
+  },
+  emits: ['update:cache-info'],
+  setup(props, { emit }) {
     const showDeleteConfirm = ref(false);
     const confirmText = ref('');
     const deleting = ref(false);
     const resultMessage = ref('');
     const resultSuccess = ref(false);
+
+    // 缓存相关（从 props 同步）
+    const cacheDir = ref(props.cacheInfo.dir || '');
+    const cacheFileCount = ref(props.cacheInfo.fileCount ?? -1);
+    const cacheSizeBytes = ref(props.cacheInfo.totalSize ?? -1);
+    const scanningCache = ref(false);
+    const clearingCache = ref(false);
+
+    watch(() => props.cacheInfo, (newVal) => {
+      cacheDir.value = newVal.dir || '';
+      cacheFileCount.value = newVal.fileCount ?? -1;
+      cacheSizeBytes.value = newVal.totalSize ?? -1;
+    }, { deep: true });
+
+    /**
+     * 格式化文件大小
+     */
+    const formatSize = (bytes) => {
+      if (bytes < 1024) {
+        return bytes + ' B';
+      }
+      if (bytes < 1024 * 1024) {
+        return (bytes / 1024).toFixed(1) + ' KB';
+      }
+      if (bytes < 1024 * 1024 * 1024) {
+        return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+      }
+      return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+    };
+
+    const cacheSizeText = computed(() => {
+      if (cacheSizeBytes.value < 0) {
+        return '计算中...';
+      }
+      if (cacheSizeBytes.value === 0) {
+        return '无缓存';
+      }
+      return `${formatSize(cacheSizeBytes.value)}（${cacheFileCount.value} 个文件）`;
+    });
+
+    /**
+     * 扫描缓存文件大小
+     */
+    const scanCache = async () => {
+      scanningCache.value = true;
+      try {
+        const data = await api.scanCache();
+        cacheDir.value = data.dir || '';
+        cacheFileCount.value = data.fileCount || 0;
+        cacheSizeBytes.value = data.totalSize || 0;
+        emit('update:cache-info', { dir: cacheDir.value, fileCount: cacheFileCount.value, totalSize: cacheSizeBytes.value });
+      } catch (error) {
+        console.error('扫描缓存失败:', error);
+        cacheSizeBytes.value = 0;
+        cacheFileCount.value = 0;
+        emit('update:cache-info', { dir: '', fileCount: 0, totalSize: 0 });
+      } finally {
+        scanningCache.value = false;
+      }
+    };
+
+    /**
+     * 清除缓存图片文件
+     */
+    const clearCacheFiles = async () => {
+      if (cacheFileCount.value === 0) {
+        return;
+      }
+      if (!confirm('确定要清除所有缓存的临时图片文件吗？')) {
+        return;
+      }
+
+      clearingCache.value = true;
+      try {
+        const data = await api.clearCache();
+        cacheFileCount.value = 0;
+        cacheSizeBytes.value = 0;
+        emit('update:cache-info', { fileCount: 0, totalSize: 0 });
+        resultMessage.value = `已成功清除 ${data.deleted} 个缓存文件`;
+        resultSuccess.value = true;
+        setTimeout(() => {
+          resultMessage.value = ''; 
+        }, 3000);
+      } catch (error) {
+        console.error('清除缓存失败:', error);
+        resultMessage.value = '清除缓存失败：' + (error.message || '未知错误');
+        resultSuccess.value = false;
+        setTimeout(() => {
+          resultMessage.value = ''; 
+        }, 5000);
+      } finally {
+        clearingCache.value = false;
+      }
+    };
 
     const cancelDelete = () => {
       showDeleteConfirm.value = false;
@@ -248,7 +439,14 @@ export default {
       resultMessage,
       resultSuccess,
       cancelDelete,
-      confirmDelete
+      confirmDelete,
+      cacheDir,
+      cacheFileCount,
+      cacheSizeText,
+      scanningCache,
+      clearingCache,
+      scanCache,
+      clearCache: clearCacheFiles
     };
   }
 };
@@ -304,15 +502,23 @@ export default {
   gap: 16px;
   margin-bottom: 24px;
   padding-bottom: 16px;
-  border-bottom: 2px solid #fee2e2;
+  border-bottom: 2px solid #f0f0f0;
+}
+
+.danger-section .section-header {
+  border-bottom-color: #fee2e2;
 }
 
 .section-icon {
   width: 24px;
   height: 24px;
-  color: #e74c3c;
+  color: #d97706;
   flex-shrink: 0;
   margin-top: 2px;
+}
+
+.danger-section .section-icon {
+  color: #e74c3c;
 }
 
 .section-title-group {
@@ -323,6 +529,10 @@ export default {
   font-size: 18px;
   font-weight: 600;
   margin: 0 0 4px 0;
+  color: #2c3e50;
+}
+
+.danger-section .section-title {
   color: #c0392b;
 }
 
@@ -330,6 +540,38 @@ export default {
   font-size: 13px;
   color: #7f8c8d;
   margin: 0;
+}
+
+/* 缓存信息 */
+.cache-info-box {
+  background: #f8f9fa;
+  border: 1px solid #e9ecef;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cache-info-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.cache-label {
+  font-size: 13px;
+  color: #6b7280;
+}
+
+.cache-value {
+  font-size: 13px;
+  color: #374151;
+  font-weight: 500;
+  word-break: break-all;
+  text-align: right;
+  max-width: 60%;
 }
 
 .warning-box {
@@ -380,6 +622,38 @@ export default {
 .action-area {
   display: flex;
   justify-content: flex-start;
+  gap: 12px;
+}
+
+.btn-secondary {
+  background: #f3f4f6;
+  color: #374151;
+  border: 1px solid #d1d5db;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: #e5e7eb;
+}
+
+.btn-secondary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-warning {
+  background: #f59e0b;
+  color: white;
+}
+
+.btn-warning:hover:not(:disabled) {
+  background: #d97706;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.4);
+}
+
+.btn-warning:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .btn {

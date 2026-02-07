@@ -61,17 +61,33 @@
       </div>
 
       <!-- 个性化设置 -->
-      <div v-if="currentTab === 'personalization'" class="tab-content full-height">
-        <PersonalizationPane />
+      <div v-if="currentTab === 'personalization'" class="tab-content">
+        <div class="tab-header">
+          <h2 class="tab-title">
+            个性化设置
+          </h2>
+          <p class="tab-desc">
+            自定义您的AI助手行为和响应参数
+          </p>
+        </div>
+        <div class="setting-section">
+          <PersonalizationPane
+            :settings="personalizationSettings"
+            @update:settings="onPersonalizationChange"
+          />
+        </div>
       </div>
 
       <!-- 数据管理 -->
       <div v-if="currentTab === 'data'" class="tab-content full-height">
-        <DataManagementPane />
+        <DataManagementPane
+          :cache-info="cacheInfo"
+          @update:cache-info="onCacheUpdate"
+        />
       </div>
 
-      <!-- 底部保存按钮（通用和模型设置需要） -->
-      <div v-if="currentTab === 'general' || currentTab === 'model'" class="setting-footer">
+      <!-- 底部保存按钮（通用、模型和个性化设置需要） -->
+      <div v-if="currentTab === 'general' || currentTab === 'model' || currentTab === 'personalization'" class="setting-footer">
         <button class="btn btn-save" :disabled="saving" @click="saveSettings">
           <span v-if="saving" class="loading-spinner"></span>
           {{ saving ? '保存中...' : '保存设置' }}
@@ -134,13 +150,52 @@ export default {
     const settings = reactive({
       showPanelOnStart: true,
       proofreadMode: 'redblue',
-      providers: []
+      providers: [],
+      customPrompt: '',
+      temperature: 0.7
+    });
+
+    // 缓存信息（只加载一次）
+    const cacheInfo = reactive({
+      dir: '',
+      fileCount: -1,
+      totalSize: -1
     });
 
     const generalSettings = computed(() => ({
       showPanelOnStart: settings.showPanelOnStart,
       proofreadMode: settings.proofreadMode
     }));
+
+    const personalizationSettings = computed(() => ({
+      customPrompt: settings.customPrompt,
+      temperature: settings.temperature
+    }));
+
+    const loadCacheInfo = async () => {
+      try {
+        const data = await api.scanCache();
+        cacheInfo.dir = data.dir || '';
+        cacheInfo.fileCount = data.fileCount || 0;
+        cacheInfo.totalSize = data.totalSize || 0;
+      } catch (error) {
+        console.error('加载缓存信息失败:', error);
+        cacheInfo.fileCount = 0;
+        cacheInfo.totalSize = 0;
+      }
+    };
+
+    const onCacheUpdate = (newInfo) => {
+      if (newInfo.dir !== undefined) {
+        cacheInfo.dir = newInfo.dir;
+      }
+      if (newInfo.fileCount !== undefined) {
+        cacheInfo.fileCount = newInfo.fileCount;
+      }
+      if (newInfo.totalSize !== undefined) {
+        cacheInfo.totalSize = newInfo.totalSize;
+      }
+    };
 
     const loadSettings = async () => {
       try {
@@ -160,6 +215,12 @@ export default {
               showKey: false,
               fetchingModels: false
             }));
+          }
+          if (data.customPrompt !== undefined) {
+            settings.customPrompt = data.customPrompt;
+          }
+          if (data.temperature !== undefined) {
+            settings.temperature = data.temperature;
           }
         }
       } catch (error) {
@@ -181,7 +242,9 @@ export default {
             apiKey: p.apiKey,
             models: p.models,
             enabled: p.enabled
-          }))
+          })),
+          customPrompt: settings.customPrompt,
+          temperature: settings.temperature
         };
 
         await api.saveSettings(settingsToSave);
@@ -206,18 +269,24 @@ export default {
       settings.proofreadMode = newSettings.proofreadMode;
     };
 
+    const onPersonalizationChange = (newSettings) => {
+      settings.customPrompt = newSettings.customPrompt;
+      settings.temperature = newSettings.temperature;
+    };
+
     const onProvidersChange = (newProviders) => {
       settings.providers = newProviders.map(p => ({
         ...p,
         enabled: p.enabled !== false,
-        expanded: false,
-        showKey: false,
-        fetchingModels: false
+        expanded: p.expanded ?? false,
+        showKey: p.showKey ?? false,
+        fetchingModels: p.fetchingModels ?? false
       }));
     };
 
     onMounted(() => {
       loadSettings();
+      loadCacheInfo();
     });
 
     return {
@@ -225,12 +294,16 @@ export default {
       tabs,
       settings,
       generalSettings,
+      personalizationSettings,
       saving,
       saveMessage,
       saveSuccess,
+      cacheInfo,
       saveSettings,
       onGeneralSettingsChange,
-      onProvidersChange
+      onPersonalizationChange,
+      onProvidersChange,
+      onCacheUpdate
     };
   }
 };
@@ -347,6 +420,7 @@ export default {
   background: white;
   border-top: 1px solid #e8e8e8;
   display: flex;
+  justify-content: flex-end;
   align-items: center;
   gap: 16px;
 }

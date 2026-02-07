@@ -394,7 +394,7 @@ export default {
 
     onMounted(() => {
       loadSessions();
-      
+
       // 获取当前会话ID
       if (window.Application && window.Application.PluginStorage) {
         const savedSessionId = window.Application.PluginStorage.getItem('current_session_id');

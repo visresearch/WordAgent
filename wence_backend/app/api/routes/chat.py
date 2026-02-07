@@ -46,11 +46,11 @@ async def chat_websocket(websocket: WebSocket):
       - {"type": "error", "content": "..."}
     """
     await websocket.accept()
-    session_id = str(uuid.uuid4())
-    print(f"[WebSocket] 连接建立 session={session_id}")
+    chat_id = str(uuid.uuid4())
+    print(f"[WebSocket] 连接建立 session={chat_id}")
 
     # 为此会话创建工具回调队列
-    create_tool_request(session_id)
+    create_tool_request(chat_id)
 
     # 单一接收者：所有 WebSocket 消息通过此队列分发
     # 避免多个协程同时调用 websocket.receive_text() 导致 RuntimeError
@@ -98,7 +98,7 @@ async def chat_websocket(websocket: WebSocket):
 
                 # 启动流式处理
                 stream_task = asyncio.create_task(
-                    _run_ws_stream(websocket, session_id, message, mode, model, document_range, history)
+                    _run_ws_stream(websocket, chat_id, message, mode, model, document_range, history)
                 )
 
                 # 在流式生成期间，继续从队列读取消息（document_response / stop）
@@ -116,7 +116,7 @@ async def chat_websocket(websocket: WebSocket):
                         incoming_type = incoming.get("type", "")
                         if incoming_type == "document_response":
                             print(f"[WebSocket] 收到前端回传文档")
-                            await submit_tool_response(session_id, incoming)
+                            await submit_tool_response(chat_id, incoming)
                         elif incoming_type == "stop":
                             print(f"[WebSocket] 收到停止请求")
                             stream_task.cancel()
@@ -138,13 +138,13 @@ async def chat_websocket(websocket: WebSocket):
 
             elif msg_type == "document_response":
                 # 非流式过程中的文档回传（fallback）
-                await submit_tool_response(session_id, data)
+                await submit_tool_response(chat_id, data)
 
             elif msg_type == "stop":
                 pass
 
     except WebSocketDisconnect:
-        print(f"[WebSocket] 连接断开 session={session_id}")
+        print(f"[WebSocket] 连接断开 session={chat_id}")
     except Exception as e:
         print(f"[WebSocket] 错误: {e}")
         import traceback
@@ -156,13 +156,13 @@ async def chat_websocket(websocket: WebSocket):
             pass
     finally:
         recv_task.cancel()
-        cleanup_tool_request(session_id)
-        print(f"[WebSocket] 清理完成 session={session_id}")
+        cleanup_tool_request(chat_id)
+        print(f"[WebSocket] 清理完成 session={chat_id}")
 
 
 async def _run_ws_stream(
     websocket: WebSocket,
-    session_id: str,
+    chat_id: str,
     message: str,
     mode: str,
     model: str,
@@ -177,7 +177,7 @@ async def _run_ws_stream(
             history=history,
             model=model,
             mode=mode,
-            session_id=session_id,
+            chat_id=chat_id,
         ):
             # chunk 格式: "data: {...}\n\n" 或 "data: [DONE]\n\n"
             # 解析 SSE 格式，转为 WebSocket JSON

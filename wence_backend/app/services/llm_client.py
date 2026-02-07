@@ -113,6 +113,12 @@ def get_first_available_model() -> tuple[LLMProvider | None, str]:
     return None, ""
 
 
+def get_temperature() -> float:
+    """从用户设置中获取 temperature 值"""
+    settings = load_user_settings()
+    return settings.get("temperature", 0.7)
+
+
 class LLMClientManager:
     """LLM 客户端管理器"""
 

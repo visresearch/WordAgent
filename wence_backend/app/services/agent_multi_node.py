@@ -19,39 +19,39 @@ from app.services.llm_client import LLMClientManager, resolve_model
 # ============== 工具回调等待机制 ==============
 # 用于 WebSocket 模式下，agent 调用 tool 后等待前端回传结果
 
-# 存储每个会话的等待队列：{session_id: asyncio.Queue}
+# 存储每个会话的等待队列：{chat_id: asyncio.Queue}
 _pending_tool_requests: dict[str, asyncio.Queue] = {}
 # 存储每个会话的事件循环引用（供 tool 在同步线程中回到异步）
 _pending_loops: dict[str, asyncio.AbstractEventLoop] = {}
-# 当前线程使用的 session_id（通过 contextvars 传递到 tool 函数中）
-_current_session_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("_current_session_id", default=None)
+# 当前线程使用的 chat_id（通过 contextvars 传递到 tool 函数中）
+_current_chat_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("_current_chat_id", default=None)
 
 
-def create_tool_request(session_id: str) -> asyncio.Queue:
+def create_tool_request(chat_id: str) -> asyncio.Queue:
     """为一个会话创建等待队列"""
     q = asyncio.Queue()
-    _pending_tool_requests[session_id] = q
+    _pending_tool_requests[chat_id] = q
     return q
 
 
-def register_loop(session_id: str, loop: asyncio.AbstractEventLoop):
+def register_loop(chat_id: str, loop: asyncio.AbstractEventLoop):
     """注册会话使用的事件循环（供 tool 函数中跨线程调用）"""
-    _pending_loops[session_id] = loop
+    _pending_loops[chat_id] = loop
 
 
-def cleanup_tool_request(session_id: str):
+def cleanup_tool_request(chat_id: str):
     """清理会话的等待队列"""
-    _pending_tool_requests.pop(session_id, None)
-    _pending_loops.pop(session_id, None)
+    _pending_tool_requests.pop(chat_id, None)
+    _pending_loops.pop(chat_id, None)
 
 
-async def submit_tool_response(session_id: str, data: dict):
+async def submit_tool_response(chat_id: str, data: dict):
     """前端通过 WebSocket 回传工具结果时调用"""
-    q = _pending_tool_requests.get(session_id)
+    q = _pending_tool_requests.get(chat_id)
     if q:
         await q.put(data)
     else:
-        print(f"[ToolCallback] ⚠️ 找不到 session {session_id} 的等待队列")
+        print(f"[ToolCallback] ⚠️ 找不到 session {chat_id} 的等待队列")
 
 
 # # ============== Query DSL 模型定义 ==============
@@ -221,15 +221,15 @@ def read_document(startPos: int = -1, endPos: int = -1) -> str:
     writer({"type": "read_document", "content": "📑 正在读取文档", "startPos": startPos, "endPos": endPos})
     print(f"[read_document] 请求前端发送文档 (startPos={startPos}, endPos={endPos})")
 
-    # 检查是否在 WebSocket 会话中（有 session_id）
-    session_id = _current_session_id.get(None)
-    if session_id:
-        q = _pending_tool_requests.get(session_id)
+    # 检查是否在 WebSocket 会话中（有 chat_id）
+    chat_id = _current_chat_id.get(None)
+    if chat_id:
+        q = _pending_tool_requests.get(chat_id)
         if q:
-            print(f"[read_document] WebSocket 模式，等待前端回传文档 (session={session_id})")
+            print(f"[read_document] WebSocket 模式，等待前端回传文档 (session={chat_id})")
             import concurrent.futures
 
-            loop = _pending_loops.get(session_id)
+            loop = _pending_loops.get(chat_id)
             if loop:
                 future = asyncio.run_coroutine_threadsafe(
                     asyncio.wait_for(q.get(), timeout=60),
@@ -473,13 +473,15 @@ SUMMARY_PROMPT = """你是文档内容分析助手。请分析生成的文档内
 
 def create_llm(model_name: str) -> ChatOpenAI:
     """创建 LLM 实例，使用 llm_client 统一管理配置"""
+    from app.services.llm_client import get_temperature
+
     provider_info = LLMClientManager.get_provider_info(model_name)
 
     return ChatOpenAI(
         model=model_name,
         openai_api_key=provider_info.api_key,
         openai_api_base=provider_info.base_url,
-        temperature=0.7,
+        temperature=get_temperature(),
         streaming=True,  # 启用流式输出
     )
 
@@ -658,7 +660,7 @@ async def process_writing_request_stream(
     history: list | None = None,
     model: str | None = None,
     mode: str | None = None,
-    session_id: str | None = None,
+    chat_id: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     使用 LangGraph 处理写作请求（流式输出）
@@ -669,7 +671,7 @@ async def process_writing_request_stream(
         history: 历史消息
         model: 用户选择的模型
         mode: 对话模式（agent/ask）
-        session_id: WebSocket 会话 ID（用于工具回调）
+        chat_id: WebSocket 会话 ID（用于工具回调）
 
     Yields:
         SSE 格式的流式输出
@@ -741,9 +743,9 @@ async def process_writing_request_stream(
         # 在异步环境中使用同步的 stream
         loop = asyncio.get_running_loop()
 
-        # 如果有 session_id，注册事件循环供 tool 使用
-        if session_id:
-            register_loop(session_id, loop)
+        # 如果有 chat_id，注册事件循环供 tool 使用
+        if chat_id:
+            register_loop(chat_id, loop)
 
         # 创建队列用于在线程间传递数据
         queue = asyncio.Queue()
@@ -752,9 +754,9 @@ async def process_writing_request_stream(
         def run_stream():
             """在独立线程中运行同步的 stream"""
             try:
-                # 设置当前线程的 session_id，供 tool 函数使用
-                if session_id:
-                    _current_session_id.set(session_id)
+                # 设置当前线程的 chat_id，供 tool 函数使用
+                if chat_id:
+                    _current_chat_id.set(chat_id)
 
                 response = app.stream({"messages": messages}, stream_mode=["messages", "custom", "updates"])
 

@@ -14,39 +14,39 @@ from pydantic import BaseModel, Field
 # ============== 工具回调等待机制 ==============
 # 用于 WebSocket 模式下，agent 调用 tool 后等待前端回传结果
 
-# 存储每个会话的等待队列：{session_id: asyncio.Queue}
+# 存储每个会话的等待队列：{chat_id: asyncio.Queue}
 _pending_tool_requests: dict[str, asyncio.Queue] = {}
 # 存储每个会话的事件循环引用（供 tool 在同步线程中回到异步）
 _pending_loops: dict[str, asyncio.AbstractEventLoop] = {}
-# 当前线程使用的 session_id（通过 contextvars 传递到 tool 函数中）
-_current_session_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("_current_session_id", default=None)
+# 当前线程使用的 chat_id（通过 contextvars 传递到 tool 函数中）
+_current_chat_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("_current_chat_id", default=None)
 
 
-def create_tool_request(session_id: str) -> asyncio.Queue:
+def create_tool_request(chat_id: str) -> asyncio.Queue:
     """为一个会话创建等待队列"""
     q = asyncio.Queue()
-    _pending_tool_requests[session_id] = q
+    _pending_tool_requests[chat_id] = q
     return q
 
 
-def register_loop(session_id: str, loop: asyncio.AbstractEventLoop):
+def register_loop(chat_id: str, loop: asyncio.AbstractEventLoop):
     """注册会话使用的事件循环（供 tool 函数中跨线程调用）"""
-    _pending_loops[session_id] = loop
+    _pending_loops[chat_id] = loop
 
 
-def cleanup_tool_request(session_id: str):
+def cleanup_tool_request(chat_id: str):
     """清理会话的等待队列"""
-    _pending_tool_requests.pop(session_id, None)
-    _pending_loops.pop(session_id, None)
+    _pending_tool_requests.pop(chat_id, None)
+    _pending_loops.pop(chat_id, None)
 
 
-async def submit_tool_response(session_id: str, data: dict):
+async def submit_tool_response(chat_id: str, data: dict):
     """前端通过 WebSocket 回传工具结果时调用"""
-    q = _pending_tool_requests.get(session_id)
+    q = _pending_tool_requests.get(chat_id)
     if q:
         await q.put(data)
     else:
-        print(f"[ToolCallback] ⚠️ 找不到 session {session_id} 的等待队列")
+        print(f"[ToolCallback] ⚠️ 找不到 session {chat_id} 的等待队列")
 
 
 # region Tools Schema
@@ -152,14 +152,14 @@ def read_document(startPos: int = -1, endPos: int = -1) -> str:
     )
     print(f"[read_document] 请求前端发送文档 (startPos={startPos}, endPos={endPos})")
 
-    # 检查是否在 WebSocket 会话中（有 session_id）
-    session_id = _current_session_id.get(None)
-    if session_id:
-        q = _pending_tool_requests.get(session_id)
+    # 检查是否在 WebSocket 会话中（有 chat_id）
+    chat_id = _current_chat_id.get(None)
+    if chat_id:
+        q = _pending_tool_requests.get(chat_id)
         if q:
-            print(f"[read_document] WebSocket 模式，等待前端回传文档 (session={session_id})")
+            print(f"[read_document] WebSocket 模式，等待前端回传文档 (session={chat_id})")
 
-            loop = _pending_loops.get(session_id)
+            loop = _pending_loops.get(chat_id)
             if loop:
                 future = asyncio.run_coroutine_threadsafe(
                     asyncio.wait_for(q.get(), timeout=60),
@@ -187,7 +187,7 @@ def read_document(startPos: int = -1, endPos: int = -1) -> str:
                     print(f"[read_document] ❌ 等待文档出错: {e}")
                     return ""
 
-    # 非 WebSocket 模式（无 session_id），无法双向通信获取文档
+    # 非 WebSocket 模式（无 chat_id），无法双向通信获取文档
     print("[read_document] ⚠️ 非 WebSocket 模式，无法请求文档")
     return ""
 
