@@ -24,6 +24,11 @@
           "id": "deepseek-v3.2",
           "name": "Deepseek V3.2",
           "enabled": true
+        },
+        {
+          "id": "claude-opus-4-6",
+          "name": "Claude Opus 4.6",
+          "enabled": true
         }
       ],
       "enabled": true

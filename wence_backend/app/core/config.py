@@ -59,26 +59,6 @@ class Settings(BaseSettings):
     # CORS 配置
     CORS_ORIGINS: list[str] = ["*"]
 
-    # AI 模型配置 - OpenAI
-    OPENAI_DEFAULT_MODEL: str = "gpt-4o"
-    OPENAI_API_KEY: str = ""
-    OPENAI_BASE_URL: str = ""
-
-    # 智谱
-    ZHIPU_API_KEY: str = ""
-    ZHIPU_BASE_URL: str = ""
-    ZHIPU_DEFAULT_MODEL: str = "glm-4.7"
-
-    # 千问
-    QWEN_API_KEY: str = ""
-    QWEN_BASE_URL: str = ""
-    QWEN_DEFAULT_MODEL: str = "qwen-plus"
-
-    # Ollama
-    OLLAMA_API_KEY: str = "anystring"  # Ollama 不需要真正的 API Key，但必须提供一个字符串
-    OLLAMA_BASE_URL: str = "http://localhost:11434/v1"
-    OLLAMA_DEFAULT_MODEL: str = "qwen2.5:7b"
-
     # SQLite 数据库配置（嵌入式，无需安装）
     # 动态获取，支持打包后运行
     @property
@@ -86,9 +66,8 @@ class Settings(BaseSettings):
         return get_database_url()
 
     class Config:
-        env_file = ".env"
         case_sensitive = True
-        extra = "ignore"  # 忽略 .env 中多余的字段
+        extra = "ignore"
 
 
 # 全局配置实例
