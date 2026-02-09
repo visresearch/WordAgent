@@ -2,6 +2,19 @@
 
 > 中南大学计算机学院毕业设计——基于多智能体的AI辅助写作系统“文策AI”
 
+# 删掉tag重新提交
+
+```bash
+# 删除本地和远程的 tag
+git tag -d v0.1.1
+git push github --delete v0.1.1
+
+# 修改完代码后重新打 tag 并推送
+git add . && git commit -m "fix: fix a few bugs"
+git tag v0.1.1
+git push github && git push github --tags
+```
+
 
 # 参考文献
 

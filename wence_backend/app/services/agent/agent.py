@@ -32,6 +32,7 @@ def create_llm(model_name: str):
     provider_info = LLMClientManager.get_provider_info(model_name)
 
     from langchain_openai import ChatOpenAI
+
     return ChatOpenAI(
         model=model_name,
         openai_api_key=provider_info.api_key,

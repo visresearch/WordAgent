@@ -19,18 +19,19 @@ from app.core.db import close_db, init_db
 
 def get_static_dir() -> Path:
     """获取静态文件目录"""
-    # 打包后的路径
-    if getattr(sys, "frozen", False):
-        base = Path(sys.executable).parent
-    else:
-        # 开发环境
-        base = Path(__file__).parent.parent
-
+    # 环境变量优先
     static_dir = os.environ.get("WENCE_STATIC_DIR")
     if static_dir:
         return Path(static_dir)
 
-    return base / "static"
+    # 打包后的路径（onefile 模式解压到 _MEIPASS）
+    if getattr(sys, "frozen", False):
+        base = Path(sys._MEIPASS)
+        return base / "frontend"
+    else:
+        # 开发环境
+        base = Path(__file__).parent.parent
+        return base / "static"
 
 
 @asynccontextmanager
@@ -61,9 +62,6 @@ app = FastAPI(
     title=settings.APP_NAME,
     description="文策 AI 写作助手后端服务",
     version=settings.VERSION,
-    openapi_url=f"{settings.API_PREFIX}/openapi.json",
-    docs_url=f"{settings.API_PREFIX}/docs",
-    redoc_url=f"{settings.API_PREFIX}/redoc",
     lifespan=lifespan,
 )
 
