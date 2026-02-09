@@ -15,7 +15,6 @@ root_dir = os.path.abspath('..')
 
 # 收集所有需要的数据文件
 datas = [
-    ('../.env.example', '.'),  # 示例配置文件
     ('../README.md', '.'),
     # 打包 app 模块（FastAPI 应用）
     ('../app', 'app'),
