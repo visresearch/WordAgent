@@ -358,6 +358,7 @@ export default {
   font-size: 14px;
   color: #999;
   font-weight: 500;
+  user-select: none;
 }
 
 .help-icon {

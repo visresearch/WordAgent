@@ -17,21 +17,48 @@
           </svg>
         </div>
         <div class="selection-bar-info">
-          <span class="selection-bar-preview">{{ currentSelection.preview }}</span>
-          <span class="selection-bar-range">{{ currentSelection.startText }} → {{ currentSelection.endText }}</span>
+          <span class="selection-bar-preview">{{ currentSelection.startText }} → {{ currentSelection.endText }} ({{ currentSelection.startPos }} - {{ currentSelection.endPos }})</span>
         </div>
         <button class="selection-bar-clear" title="清除选区" @click="$emit('clear-selection')">
           <svg
-            width="10"
-            height="10"
+            width="12"
+            height="12"
+            viewBox="0 0 16 16"
+            fill="currentColor"
+          >
+            <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z" />
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- 修改预览条 -->
+    <div v-if="pendingDocument" class="current-selection-bar pending-document-bar">
+      <div class="selection-bar-content">
+        <div class="selection-bar-icon pending-icon">
+          <svg
+            width="14"
+            height="14"
             viewBox="0 0 16 16"
             fill="currentColor"
           >
             <path
-              d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"
+              d="M14 1H2a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1zM2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2H2z"
             />
+            <path d="M3 4h10v1H3V4zm0 3h10v1H3V7zm0 3h6v1H3v-1z" />
           </svg>
-        </button>
+        </div>
+        <div class="selection-bar-info">
+          <span class="selection-bar-preview">{{ pendingDocument.preview }}</span>
+        </div>
+        <div class="pending-actions">
+          <button class="pending-btn confirm-btn" @click="$emit('confirm-document')">
+            确定
+          </button>
+          <button class="pending-btn cancel-btn" @click="$emit('cancel-document')">
+            取消
+          </button>
+        </div>
       </div>
     </div>
 
@@ -228,9 +255,13 @@ export default {
     currentSelection: {
       type: Object,
       default: null
+    },
+    pendingDocument: {
+      type: Object,
+      default: null
     }
   },
-  emits: ['send', 'stop', 'add-selection', 'clear-selection', 'update:mode', 'update:selectedModel', 'refresh-models'],
+  emits: ['send', 'stop', 'add-selection', 'clear-selection', 'update:mode', 'update:selectedModel', 'refresh-models', 'confirm-document', 'cancel-document'],
   data() {
     return {
       inputText: '',
@@ -364,10 +395,10 @@ export default {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: white;
+  background: none;
   color: #333;
-  border: 1px solid #e0e0e0;
-  border-radius: 50%;
+  border: none;
+  border-radius: 0;
   cursor: pointer;
   transition: all 0.2s;
 }
@@ -375,6 +406,56 @@ export default {
 .selection-bar-clear:hover {
   background: #f5f5f5;
   color: #000;
+  border-color: #ccc;
+}
+
+/* 修改预览条 */
+.pending-document-bar {
+  border-top: 1px solid #d8d8d8;
+  border-bottom: 1px solid #d8d8d8;
+  background: #f0f0f0;
+}
+
+.pending-icon {
+  color: #e74c3c !important;
+}
+
+.pending-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.pending-btn {
+  padding: 2px 10px;
+  font-size: 11px;
+  border-radius: 4px;
+  border: 1px solid #ddd;
+  cursor: pointer;
+  transition: all 0.2s;
+  line-height: 1.4;
+}
+
+.confirm-btn {
+  background: #667eea;
+  color: white;
+  border-color: #667eea;
+}
+
+.confirm-btn:hover {
+  background: #5a6fd6;
+  border-color: #5a6fd6;
+}
+
+.cancel-btn {
+  background: white;
+  color: #666;
+  border-color: #ddd;
+}
+
+.cancel-btn:hover {
+  background: #f5f5f5;
+  color: #333;
   border-color: #ccc;
 }
 
@@ -407,6 +488,7 @@ export default {
   min-height: 20px;
   max-height: 150px;
   line-height: 1.4;
+  user-select: none;
 }
 
 .chat-input::placeholder {

@@ -20,6 +20,7 @@
       :models-loading="modelsLoading"
       :is-loading="isLoading"
       :current-selection="currentSelection"
+      :pending-document="pendingDocument"
       @update:mode="mode = $event"
       @update:selected-model="selectedModel = $event"
       @send="handleSend"
@@ -27,6 +28,8 @@
       @add-selection="addSelectionManually"
       @clear-selection="clearSelection"
       @refresh-models="loadModels"
+      @confirm-document="confirmDocument"
+      @cancel-document="cancelDocument"
     />
   </div>
 </template>
@@ -57,6 +60,8 @@ export default {
       currentStreamCtrl: null,
       currentDocId: null,
       currentDocName: null,
+      pendingDocument: null,
+      pendingDocumentMsg: null,
       historyLoading: false,
       hasHistory: false,
       historyLoaded: false
@@ -494,6 +499,8 @@ export default {
         preview: selectionInfo.preview,
         startText: selectionInfo.startText,
         endText: selectionInfo.endText,
+        startPos: selectionInfo.range.startPos,
+        endPos: selectionInfo.range.endPos,
         charCount: selectionInfo.charCount,
         hasMore: selectionInfo.hasMore
       };
@@ -748,12 +755,70 @@ export default {
         console.log('收到完整JSON，自动输出到文档');
         this.$nextTick(() => {
           this.insertToWord(msg, false);
+
+          // 插入后显示预览条，等待用户确认或取消
+          const paragraphs = data.content.paragraphs || [];
+          const previewText = paragraphs.map(p => p.content || '').join(' ').slice(0, 60);
+          const paraCount = paragraphs.length;
+          const tableCount = (data.content.tables || []).length;
+          let summary = `${paraCount} 个段落`;
+          if (tableCount > 0) {
+            summary += `，${tableCount} 个表格`;
+          }
+
+          this.pendingDocument = {
+            preview: previewText ? `“${previewText}…” ${summary}` : `AI 已生成文档（${summary}）`
+          };
+          this.pendingDocumentMsg = msg;
         });
 
         this.scrollToBottom();
       } else if (data.error) {
         msg.content += `\n\n错误: ${data.error}`;
       }
+    },
+
+    /**
+     * 确认文档修改 —— 去掉文策AI批注
+     */
+    confirmDocument() {
+      if (this.pendingDocumentMsg) {
+        try {
+          const doc = window.Application.ActiveDocument;
+          const msg = this.pendingDocumentMsg;
+          if (doc && msg.insertStartPos !== undefined && msg.insertEndPos !== undefined) {
+            // 遍历批注，删除文策AI的批注
+            const comments = doc.Comments;
+            for (let i = comments.Count; i >= 1; i--) {
+              const comment = comments.Item(i);
+              if (comment.Author === '文策AI') {
+                const commentRange = comment.Scope;
+                // 只删除当前插入范围内的批注
+                if (commentRange.Start >= msg.insertStartPos && commentRange.End <= msg.insertEndPos) {
+                  comment.Delete();
+                  console.log('已删除文策AI批注');
+                }
+              }
+            }
+          }
+        } catch (e) {
+          console.error('删除批注失败:', e);
+        }
+      }
+      this.pendingDocument = null;
+      this.pendingDocumentMsg = null;
+    },
+
+    /**
+     * 取消文档修改 —— 撤销插入
+     */
+    cancelDocument() {
+      if (this.pendingDocumentMsg) {
+        this.revertToMessage(this.pendingDocumentMsg);
+      }
+      this.pendingDocument = null;
+      this.pendingDocumentMsg = null;
+      console.log('用户取消了文档插入，已撤销');
     },
 
     /**

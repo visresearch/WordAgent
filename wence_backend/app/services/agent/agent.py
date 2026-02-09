@@ -9,7 +9,6 @@ import traceback
 from collections.abc import AsyncGenerator
 
 from langchain_core.messages import AIMessageChunk, HumanMessage, SystemMessage, ToolMessage
-from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, MessagesState, StateGraph
 
 from app.services.llm_client import LLMClientManager, resolve_model
@@ -18,10 +17,7 @@ from app.services.agent.tools import (
     ALL_TOOLS,
     TOOL_MAP,
     _current_chat_id,
-    create_tool_request,
-    cleanup_tool_request,
     register_loop,
-    submit_tool_response,
     read_document,
 )
 
@@ -29,12 +25,13 @@ from app.services.agent.tools import (
 # region Create LLM
 
 
-def create_llm(model_name: str) -> ChatOpenAI:
-    """创建 LLM 实例，使用 llm_client 统一管理配置"""
+def create_llm(model_name: str):
+    """创建 LLM 实例，根据提供商类型返回对应的 Chat 实例"""
     from app.services.llm_client import get_temperature
 
     provider_info = LLMClientManager.get_provider_info(model_name)
 
+    from langchain_openai import ChatOpenAI
     return ChatOpenAI(
         model=model_name,
         openai_api_key=provider_info.api_key,

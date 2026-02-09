@@ -41,7 +41,7 @@
         {
           "id": "qwen2.5:7b",
           "name": "Qwen2.5:7b",
-          "enabled": false
+          "enabled": true
         },
         {
           "id": "deepseek-r1:7b",
@@ -65,7 +65,7 @@
       "enabled": true
     },
     {
-      "name": "千问",
+      "name": "qwen",
       "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
       "apiKey": "sk-1f2d30db7d96449daabee21123fbf09b",
       "models": [
