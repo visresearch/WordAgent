@@ -1,7 +1,7 @@
 <template>
   <div>
-    <!-- 当前选中内容预览 -->
-    <div v-if="currentSelection" class="current-selection-bar">
+    <!-- 多选区预览列表 -->
+    <div v-for="(sel, index) in selections" :key="index" class="current-selection-bar">
       <div class="selection-bar-content">
         <div class="selection-bar-icon">
           <svg
@@ -17,9 +17,9 @@
           </svg>
         </div>
         <div class="selection-bar-info">
-          <span class="selection-bar-preview">{{ currentSelection.startText }} → {{ currentSelection.endText }} ({{ currentSelection.startPos }} - {{ currentSelection.endPos }})</span>
+          <span class="selection-bar-preview">{{ sel.startText }} → {{ sel.endText }} ({{ sel.startPos }} - {{ sel.endPos }})</span>
         </div>
-        <button class="selection-bar-clear" title="清除选区" @click="$emit('clear-selection')">
+        <button class="selection-bar-clear" title="清除选区" @click="$emit('remove-selection', index)">
           <svg
             width="12"
             height="12"
@@ -252,16 +252,16 @@ export default {
       type: Boolean,
       default: false
     },
-    currentSelection: {
-      type: Object,
-      default: null
+    selections: {
+      type: Array,
+      default: () => []
     },
     pendingDocument: {
       type: Object,
       default: null
     }
   },
-  emits: ['send', 'stop', 'add-selection', 'clear-selection', 'update:mode', 'update:selectedModel', 'refresh-models', 'confirm-document', 'cancel-document'],
+  emits: ['send', 'stop', 'add-selection', 'remove-selection', 'update:mode', 'update:selectedModel', 'refresh-models', 'confirm-document', 'cancel-document'],
   data() {
     return {
       inputText: '',

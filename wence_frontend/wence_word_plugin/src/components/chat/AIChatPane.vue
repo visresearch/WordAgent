@@ -1,5 +1,8 @@
 <template>
   <div class="ai-chat-container">
+    <div v-if="currentSessionTitle" class="session-header">
+      <span class="session-title">{{ currentSessionTitle }}</span>
+    </div>
     <ChatMessages
       ref="chatMessages"
       :messages="messages"
@@ -19,14 +22,14 @@
       :available-models="availableModels"
       :models-loading="modelsLoading"
       :is-loading="isLoading"
-      :current-selection="currentSelection"
+      :selections="selections"
       :pending-document="pendingDocument"
       @update:mode="mode = $event"
       @update:selected-model="selectedModel = $event"
       @send="handleSend"
       @stop="stopGeneration"
       @add-selection="addSelectionManually"
-      @clear-selection="clearSelection"
+      @remove-selection="removeSelection"
       @refresh-models="loadModels"
       @confirm-document="confirmDocument"
       @cancel-document="cancelDocument"
@@ -55,11 +58,12 @@ export default {
       messages: [],
       isLoading: false,
       lastReadJSON: null,
-      currentSelection: null,
-      currentSelectionRange: null,
+      selections: [],  // 多选区数组 [{preview, startText, endText, startPos, endPos, charCount, hasMore}]
       currentStreamCtrl: null,
       currentDocId: null,
       currentDocName: null,
+      currentSessionId: null,
+      currentSessionTitle: null,
       pendingDocument: null,
       pendingDocumentMsg: null,
       historyLoading: false,
@@ -69,7 +73,13 @@ export default {
   },
   mounted() {
     this.loadModels();
-    this.initDocumentAndLoadHistory();
+    this.initSessionAndLoadHistory();
+
+    // 监听 SessionPane 切换会话的事件
+    window.addEventListener('session-changed', this.onSessionChanged);
+  },
+  beforeUnmount() {
+    window.removeEventListener('session-changed', this.onSessionChanged);
   },
   methods: {
     /**
@@ -193,20 +203,49 @@ export default {
     },
 
     /**
-     * 初始化文档标识并检查是否有历史记录
+     * 初始化会话并加载历史记录
+     * 优先使用 PluginStorage 中保存的 session_id，否则查找当前文档的最新会话
      */
-    async initDocumentAndLoadHistory() {
+    async initSessionAndLoadHistory() {
       try {
-        console.log('[初始化] 开始获取文档信息');
+        console.log('[初始化] 开始获取文档信息和会话');
         const docInfo = this.getDocumentInfo();
-        console.log('[初始化] 文档信息:', docInfo);
         if (docInfo) {
           this.currentDocId = docInfo.docId;
           this.currentDocName = docInfo.docName;
-          console.log('[初始化] 已设置 currentDocId:', this.currentDocId);
-          await this.checkHasHistory();
+        }
+
+        // 尝试从 PluginStorage 恢复上次的 session_id
+        let savedSessionId = null;
+        if (window.Application && window.Application.PluginStorage) {
+          savedSessionId = window.Application.PluginStorage.getItem('current_session_id');
+        }
+
+        if (savedSessionId) {
+          // 有保存的 session_id，直接加载该会话
+          console.log('[初始化] 恢复上次会话:', savedSessionId);
+          this.currentSessionId = Number(savedSessionId) || savedSessionId;
+          await this.loadSessionMessages();
         } else {
-          console.warn('[初始化] 未获取到文档信息');
+          // 没有保存的 session_id，查找当前文档的最新会话
+          console.log('[初始化] 查找最新会话, docId:', this.currentDocId);
+          const result = await api.getLatestSession(this.currentDocId);
+          if (result.success && result.data?.session) {
+            this.currentSessionId = result.data.session.id;
+            this.currentSessionTitle = result.data.session.title || null;
+            console.log('[初始化] 找到最新会话:', this.currentSessionId);
+
+            // 保存到 PluginStorage
+            if (window.Application && window.Application.PluginStorage) {
+              window.Application.PluginStorage.setItem('current_session_id', String(this.currentSessionId));
+            }
+
+            // 如果有消息，标记有历史
+            this.hasHistory = result.data.messages && result.data.messages.length > 0;
+          } else {
+            console.log('[初始化] 当前文档没有历史会话');
+            this.hasHistory = false;
+          }
         }
       } catch (e) {
         console.error('[初始化] 失败:', e);
@@ -214,39 +253,36 @@ export default {
     },
 
     /**
-     * 检查当前文档是否有历史聊天记录
+     * 监听 SessionPane 切换会话的事件
      */
-    async checkHasHistory() {
-      if (!this.currentDocId) {
+    async onSessionChanged(event) {
+      const { sessionId, title } = event.detail || {};
+      console.log('[会话切换] 收到事件, sessionId:', sessionId, 'title:', title);
+
+      if (!sessionId) {
+        // 会话被清空（如删除了当前会话）
+        this.currentSessionId = null;
+        this.currentSessionTitle = null;
+        this.messages = [];
         this.hasHistory = false;
+        this.historyLoaded = false;
         return;
       }
 
-      console.log('[检查历史] docId:', this.currentDocId);
-
-      try {
-        const result = await api.getChatHistory(this.currentDocId, { limit: 1 });
-        console.log('[检查历史] 返回:', result);
-        this.hasHistory = result.success && result.data?.messages && result.data.messages.length > 0;
-        console.log('[检查历史] hasHistory:', this.hasHistory);
-      } catch (e) {
-        console.warn('检查历史记录失败:', e);
-        this.hasHistory = false;
+      this.currentSessionId = sessionId;
+      if (title) {
+        this.currentSessionTitle = title;
       }
+      // 加载该会话的消息
+      await this.loadSessionMessages();
     },
 
     /**
      * 点击显示历史记录
      */
     async loadAndShowHistory() {
-      console.log('[显示历史] 点击按钮，当前 docId:', this.currentDocId);
-      const docInfo = this.getDocumentInfo();
-      if (docInfo) {
-        this.currentDocId = docInfo.docId;
-        this.currentDocName = docInfo.docName;
-        console.log('[显示历史] 更新后的 docId:', this.currentDocId);
-      }
-      await this.loadChatHistory();
+      console.log('[显示历史] 点击按钮，当前 sessionId:', this.currentSessionId);
+      await this.loadSessionMessages();
       this.historyLoaded = true;
     },
 
@@ -297,19 +333,19 @@ export default {
     },
 
     /**
-     * 加载当前文档的聊天历史
+     * 加载当前会话的聊天历史
      */
-    async loadChatHistory() {
-      if (!this.currentDocId) {
-        console.warn('[加载历史] 缺少 docId');
+    async loadSessionMessages() {
+      if (!this.currentSessionId) {
+        console.warn('[加载历史] 缺少 sessionId');
         return;
       }
 
-      console.log('[加载历史] 开始加载', { docId: this.currentDocId, docName: this.currentDocName });
+      console.log('[加载历史] 开始加载, sessionId:', this.currentSessionId);
 
       this.historyLoading = true;
       try {
-        const result = await api.getChatHistory(this.currentDocId, { limit: 200 });
+        const result = await api.getSession(this.currentSessionId);
         console.log('[加载历史] API 返回:', result);
 
         if (result.success && result.data?.messages) {
@@ -329,6 +365,14 @@ export default {
             this.mode = result.data.lastUsedMode;
           }
 
+          // 更新文档信息（来自会话关联的文档）
+          if (result.data.session) {
+            this.currentDocId = result.data.session.docId || this.currentDocId;
+            this.currentDocName = result.data.session.docName || this.currentDocName;
+            this.currentSessionTitle = result.data.session.title || null;
+          }
+
+          this.hasHistory = this.messages.length > 0;
           this.historyLoaded = true;
           this.scrollToBottom();
         } else {
@@ -341,25 +385,61 @@ export default {
     },
 
     /**
-     * 保存消息到后端
+     * 确保当前有一个活跃的会话，如果没有则自动创建
+     * @returns {number|null} sessionId
+     */
+    async ensureSession() {
+      if (this.currentSessionId) {
+        return this.currentSessionId;
+      }
+
+      console.log('[自动创建会话] docId:', this.currentDocId);
+      try {
+        const result = await api.createSession({
+          docId: this.currentDocId || null,
+          docName: this.currentDocName || null,
+          title: '新对话'
+        });
+
+        if (result.success && result.data?.session) {
+          this.currentSessionId = result.data.session.id;
+          console.log('[自动创建会话] 新会话ID:', this.currentSessionId);
+
+          // 保存到 PluginStorage
+          if (window.Application && window.Application.PluginStorage) {
+            window.Application.PluginStorage.setItem('current_session_id', String(this.currentSessionId));
+          }
+
+          // 通知 SessionPane 刷新列表
+          window.dispatchEvent(new CustomEvent('session-created'));
+
+          return this.currentSessionId;
+        }
+      } catch (e) {
+        console.error('[自动创建会话] 失败:', e);
+      }
+      return null;
+    },
+
+    /**
+     * 保存消息到后端（基于会话）
      */
     async saveMessageToHistory(role, content, documentJson = null, selectionContext = null, contentParts = null) {
-      if (!this.currentDocId) {
-        console.warn('[保存消息] 缺少 docId，无法保存');
+      // 确保有会话
+      const sessionId = await this.ensureSession();
+      if (!sessionId) {
+        console.warn('[保存消息] 无法获取会话ID，消息未保存');
         return;
       }
 
       console.log('[保存消息]', {
-        docId: this.currentDocId,
-        docName: this.currentDocName,
+        sessionId,
         role,
         contentLength: content.length
       });
 
       try {
-        await api.saveMessage({
-          docId: this.currentDocId,
-          docName: this.currentDocName,
+        await api.addSessionMessage(sessionId, {
           role,
           content,
           documentJson,
@@ -369,24 +449,43 @@ export default {
           mode: this.mode
         });
         console.log('[保存消息] 成功');
+
+        // 第一条用户消息会自动设置会话标题，更新本地标题
+        if (role === 'user' && (!this.currentSessionTitle || this.currentSessionTitle === '新对话')) {
+          this.currentSessionTitle = content.length > 30 ? content.substring(0, 30) + '...' : content;
+        }
+
+        // 通知 SessionPane 更新列表（预览和标题可能变了）
+        window.dispatchEvent(new CustomEvent('session-updated'));
       } catch (e) {
         console.warn('保存消息失败:', e);
       }
     },
 
     /**
-     * 清空当前文档的聊天历史
+     * 清空当前会话的聊天历史
      */
     async clearChatHistory() {
-      if (!this.currentDocId) {
+      if (!this.currentSessionId) {
         this.messages = [];
         return;
       }
 
       try {
-        const result = await api.clearChatHistory(this.currentDocId);
+        const result = await api.deleteSessionApi(this.currentSessionId);
         if (result.success) {
           this.messages = [];
+          this.currentSessionId = null;
+          this.hasHistory = false;
+          this.historyLoaded = false;
+
+          // 清除 PluginStorage
+          if (window.Application && window.Application.PluginStorage) {
+            window.Application.PluginStorage.removeItem('current_session_id');
+          }
+
+          // 通知 SessionPane 刷新
+          window.dispatchEvent(new CustomEvent('session-updated'));
         }
       } catch (e) {
         console.warn('清空历史记录失败:', e);
@@ -490,12 +589,21 @@ export default {
     },
 
     /**
-     * 处理添加的选区
+     * 处理添加的选区（追加到列表）
      */
     handleSelectionAdd(selectionInfo) {
       console.log('[AIChatPane] 收到选区信息:', selectionInfo);
 
-      this.currentSelection = {
+      // 检查是否已存在相同范围的选区，避免重复
+      const exists = this.selections.some(
+        s => s.startPos === selectionInfo.range.startPos && s.endPos === selectionInfo.range.endPos
+      );
+      if (exists) {
+        console.log('[AIChatPane] 该选区已存在，跳过');
+        return;
+      }
+
+      this.selections.push({
         preview: selectionInfo.preview,
         startText: selectionInfo.startText,
         endText: selectionInfo.endText,
@@ -503,19 +611,26 @@ export default {
         endPos: selectionInfo.range.endPos,
         charCount: selectionInfo.charCount,
         hasMore: selectionInfo.hasMore
-      };
+      });
 
-      this.currentSelectionRange = selectionInfo.range;
-
-      console.log('[AIChatPane] 选区已设置，字符数:', selectionInfo.charCount, '范围:', selectionInfo.range);
+      console.log('[AIChatPane] 选区已添加，当前共', this.selections.length, '个选区');
     },
 
     /**
-     * 清除当前选区
+     * 移除指定索引的选区
      */
-    clearSelection() {
-      this.currentSelection = null;
-      this.currentSelectionRange = null;
+    removeSelection(index) {
+      if (index >= 0 && index < this.selections.length) {
+        this.selections.splice(index, 1);
+        console.log('[AIChatPane] 移除选区，剩余', this.selections.length, '个');
+      }
+    },
+
+    /**
+     * 清除所有选区
+     */
+    clearAllSelections() {
+      this.selections = [];
       try {
         const selection = window.Application?.Selection;
         if (selection) {
@@ -549,7 +664,9 @@ export default {
 
       this.messages.splice(aiMessageIndex, 1);
 
-      const retryRanges = this.currentSelectionRange ? [this.currentSelectionRange] : null;
+      const retryRanges = this.selections.length > 0
+        ? this.selections.map(s => ({ startPos: s.startPos, endPos: s.endPos }))
+        : null;
       this._sendStreamRequest(userMessage, retryRanges);
     },
 
@@ -565,16 +682,23 @@ export default {
       let selectionContext = null;
       let documentRange = null;
 
-      if (this.currentSelection && this.currentSelectionRange) {
-        selectionContext = { ...this.currentSelection };
-        documentRange = [this.currentSelectionRange];
+      if (this.selections.length > 0) {
+        selectionContext = this.selections.map(s => ({
+          preview: s.preview,
+          startText: s.startText,
+          endText: s.endText,
+          startPos: s.startPos,
+          endPos: s.endPos,
+          charCount: s.charCount
+        }));
+        documentRange = this.selections.map(s => ({ startPos: s.startPos, endPos: s.endPos }));
         userMsgObj.selectionContext = selectionContext;
       }
 
       this.messages.push(userMsgObj);
       this.historyLoaded = true;
 
-      this.clearSelection();
+      this.clearAllSelections();
 
       this.saveMessageToHistory('user', userMessage, null, selectionContext);
 
@@ -952,5 +1076,22 @@ export default {
   background: #f7f8fa;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   box-sizing: border-box;
+}
+
+.session-header {
+  flex-shrink: 0;
+  padding: 8px 14px;
+  background: #fff;
+  border-bottom: 1px solid #e8e8e8;
+}
+
+.session-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: #333;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
 }
 </style>

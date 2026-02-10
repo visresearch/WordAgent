@@ -1,4 +1,5 @@
 import Util from './js/util.js';
+import api from './js/api.js';
 
 //这个函数在整个wps加载项中是第一个执行的
 function OnAddinLoad(ribbonUI) {
@@ -11,7 +12,40 @@ function OnAddinLoad(ribbonUI) {
     window.Application.Enum = Util.WPS_Enum;
   }
 
+  // 读取设置，如果 showPanelOnStart 为 true 则自动打开 AI Chat 面板
+  checkAutoShowPanel();
+
   return true;
+}
+
+/**
+ * 检查是否需要在启动时自动显示 AI Chat 面板
+ */
+async function checkAutoShowPanel() {
+  try {
+    const settings = await api.getSettings();
+
+    if (settings.showPanelOnStart) {
+      // 自动创建并显示 AI Chat TaskPane
+      let tsId = window.Application.PluginStorage.getItem('ai_taskpane_id');
+      if (!tsId) {
+        let tskpane = window.Application.CreateTaskPane(
+          Util.GetUrlPath() + Util.GetRouterHash() + '/aichat',
+          '文策AI助手'
+        );
+        let id = tskpane.ID;
+        window.Application.PluginStorage.setItem('ai_taskpane_id', id);
+        tskpane.DockPosition = window.Application.Enum.msoCTPDockPositionRight;
+        tskpane.Width = window.devicePixelRatio * 500;
+        tskpane.Visible = true;
+      } else {
+        let tskpane = window.Application.GetTaskPane(tsId);
+        tskpane.Visible = true;
+      }
+    }
+  } catch (e) {
+    console.warn('自动打开面板失败:', e);
+  }
 }
 
 function OnAction(control) {

@@ -606,68 +606,134 @@ async function getModels() {
   });
 }
 
-// ============== 聊天历史 API ==============
+// ============== 会话管理 API ==============
 
 /**
- * 获取指定文档的聊天历史
+ * 获取会话列表
  *
- * @param {string} docId - 文档唯一标识符
  * @param {Object} options - 选项
- * @param {number} options.limit - 返回消息数量限制
- * @param {number} options.offset - 偏移量
- * @returns {Promise<Object>} - 历史消息列表
+ * @param {string} options.docId - 按文档 ID 过滤（可选）
+ * @param {number} options.limit - 返回数量限制
+ * @returns {Promise<Object>} - 会话列表
  */
-async function getChatHistory(docId, options = {}) {
-  const { limit = 50, offset = 0 } = options;
-  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
-  return await request(`/api/chat/history/${encodeURIComponent(docId)}?${params}`, {
-    method: 'GET'
+async function getSessions(options = {}) {
+  const { docId, limit = 50 } = options;
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (docId) {
+    params.append('doc_id', docId);
+  }
+  return await request(`/api/sessions?${params}`, { method: 'GET' });
+}
+
+/**
+ * 创建新会话
+ *
+ * @param {Object} data - 创建数据
+ * @param {string} data.docId - 文档标识（可选）
+ * @param {string} data.docName - 文档名称（可选）
+ * @param {string} data.title - 会话标题（可选，默认"新对话"）
+ * @returns {Promise<Object>} - 创建的会话
+ */
+async function createSession(data = {}) {
+  return await request('/api/sessions', {
+    method: 'POST',
+    body: data
   });
 }
 
 /**
- * 保存聊天消息
+ * 获取最新会话（含消息）
  *
+ * @param {string} docId - 按文档 ID 过滤（可选）
+ * @returns {Promise<Object>} - 最新会话及其消息
+ */
+async function getLatestSession(docId = null) {
+  const params = new URLSearchParams();
+  if (docId) {
+    params.append('doc_id', docId);
+  }
+  const qs = params.toString();
+  return await request(`/api/sessions/latest${qs ? '?' + qs : ''}`, { method: 'GET' });
+}
+
+/**
+ * 获取会话详情（含消息）
+ *
+ * @param {number} sessionId - 会话 ID
+ * @returns {Promise<Object>} - 会话详情及消息列表
+ */
+async function getSession(sessionId) {
+  return await request(`/api/sessions/${sessionId}`, { method: 'GET' });
+}
+
+/**
+ * 重命名会话
+ *
+ * @param {number} sessionId - 会话 ID
+ * @param {string} title - 新标题
+ * @returns {Promise<Object>} - 更新后的会话
+ */
+async function renameSessionApi(sessionId, title) {
+  return await request(`/api/sessions/${sessionId}`, {
+    method: 'PATCH',
+    body: { title }
+  });
+}
+
+/**
+ * 删除会话
+ *
+ * @param {number} sessionId - 会话 ID
+ * @returns {Promise<Object>} - 操作结果
+ */
+async function deleteSessionApi(sessionId) {
+  return await request(`/api/sessions/${sessionId}`, { method: 'DELETE' });
+}
+
+/**
+ * 获取会话消息列表
+ *
+ * @param {number} sessionId - 会话 ID
+ * @param {Object} options - 选项
+ * @param {number} options.limit - 返回数量限制
+ * @param {number} options.offset - 偏移量
+ * @returns {Promise<Object>} - 消息列表
+ */
+async function getSessionMessages(sessionId, options = {}) {
+  const { limit = 200, offset = 0 } = options;
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  return await request(`/api/sessions/${sessionId}/messages?${params}`, { method: 'GET' });
+}
+
+/**
+ * 向会话添加消息
+ *
+ * @param {number} sessionId - 会话 ID
  * @param {Object} messageData - 消息数据
- * @param {string} messageData.docId - 文档唯一标识符
- * @param {string} messageData.docName - 文档名称
  * @param {string} messageData.role - 消息角色（user/assistant）
  * @param {string} messageData.content - 消息内容
- * @param {Object} messageData.documentJson - AI 生成的文档 JSON
- * @param {Object} messageData.selectionContext - 选区上下文
- * @param {string} messageData.model - 使用的模型
- * @param {string} messageData.mode - 使用的模式
+ * @param {Object} messageData.documentJson - AI 生成的文档 JSON（可选）
+ * @param {Object} messageData.selectionContext - 选区上下文（可选）
+ * @param {Array} messageData.contentParts - 结构化消息内容（可选）
+ * @param {string} messageData.model - 使用的模型（可选）
+ * @param {string} messageData.mode - 使用的模式（可选）
  * @returns {Promise<Object>} - 保存结果
  */
-async function saveMessage(messageData) {
-  return await request('/api/chat/history/save', {
+async function addSessionMessage(sessionId, messageData) {
+  return await request(`/api/sessions/${sessionId}/messages`, {
     method: 'POST',
     body: messageData
   });
 }
 
 /**
- * 清空指定文档的聊天历史
+ * 清空所有会话及消息
  *
- * @param {string} docId - 文档唯一标识符
  * @returns {Promise<Object>} - 操作结果
  */
-async function clearChatHistory(docId) {
-  return await request(`/api/chat/history/${encodeURIComponent(docId)}`, {
+async function clearAllSessions() {
+  return await request('/api/sessions', {
     method: 'DELETE'
-  });
-}
-
-/**
- * 获取所有有聊天记录的文档列表
- *
- * @param {number} limit - 返回数量限制
- * @returns {Promise<Object>} - 文档列表
- */
-async function getDocuments(limit = 100) {
-  const params = new URLSearchParams({ limit: String(limit) });
-  return await request(`/api/chat/documents?${params}`, {
-    method: 'GET'
   });
 }
 
@@ -816,11 +882,16 @@ export default {
   // WebSocket 管理
   wsManager,
 
-  // 聊天历史 API
-  getChatHistory,
-  saveMessage,
-  clearChatHistory,
-  getDocuments,
+  // 会话管理 API
+  getSessions,
+  createSession,
+  getLatestSession,
+  getSession,
+  renameSessionApi,
+  deleteSessionApi,
+  getSessionMessages,
+  addSessionMessage,
+  clearAllSessions,
 
   // 设置管理 API
   getSettings,
@@ -846,10 +917,17 @@ export {
   parseDocumentRange,
 
   wsManager,
-  getChatHistory,
-  saveMessage,
-  clearChatHistory,
-  getDocuments,
+
+  getSessions,
+  createSession,
+  getLatestSession,
+  getSession,
+  renameSessionApi,
+  deleteSessionApi,
+  getSessionMessages,
+  addSessionMessage,
+  clearAllSessions,
+
   getSettings,
   saveSettings,
   scanCache,

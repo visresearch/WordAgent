@@ -409,7 +409,7 @@ export default {
 
       try {
         // 调用清除所有聊天记录的 API
-        await api.clearChatHistory('all');
+        await api.clearAllSessions();
         
         resultMessage.value = '所有数据已成功删除！';
         resultSuccess.value = true;

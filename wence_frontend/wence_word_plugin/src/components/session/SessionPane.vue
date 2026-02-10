@@ -132,6 +132,7 @@
 
 <script>
 import { ref, computed, onMounted, nextTick } from 'vue';
+import api from '../js/api.js';
 
 export default {
   name: 'SessionPane',
@@ -150,126 +151,61 @@ export default {
     const showDeleteDialog = ref(false);
     const deleteTarget = ref(null);
 
-    // 模拟数据 - 实际使用时替换为API调用
-    const mockSessions = [
-      {
-        id: '1',
-        title: '如何写一篇论文',
-        preview: '论文写作需要遵循一定的结构和规范...',
-        messageCount: 12,
-        createdAt: new Date(Date.now() - 1000 * 60 * 30), // 30分钟前
-        updatedAt: new Date(Date.now() - 1000 * 60 * 30)
-      },
-      {
-        id: '2', 
-        title: '项目计划书撰写',
-        preview: '项目计划书应该包含项目背景、目标、时间线...',
-        messageCount: 8,
-        createdAt: new Date(Date.now() - 1000 * 60 * 60 * 3), // 3小时前
-        updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 3)
-      },
-      {
-        id: '3',
-        title: '工作周报模板',
-        preview: '本周完成的主要工作如下...',
-        messageCount: 5,
-        createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24), // 1天前
-        updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 24)
-      },
-      {
-        id: '4',
-        title: '会议纪要整理',
-        preview: '会议时间：2月5日 参会人员：...',
-        messageCount: 3,
-        createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 3), // 3天前
-        updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 3)
-      },
-      {
-        id: '5',
-        title: '产品需求文档',
-        preview: '1. 需求背景 2. 功能描述 3. 交互设计...',
-        messageCount: 15,
-        createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7), // 7天前
-        updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7)
-      },
-      {
-        id: '5',
-        title: '产品需求文档',
-        preview: '1. 需求背景 2. 功能描述 3. 交互设计...',
-        messageCount: 15,
-        createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7), // 7天前
-        updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7)
-      },
-      {
-        id: '5',
-        title: '产品需求文档',
-        preview: '1. 需求背景 2. 功能描述 3. 交互设计...',
-        messageCount: 15,
-        createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7), // 7天前
-        updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7)
-      },
-      {
-        id: '5',
-        title: '产品需求文档',
-        preview: '1. 需求背景 2. 功能描述 3. 交互设计...',
-        messageCount: 15,
-        createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7), // 7天前
-        updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7)
-      },
-      {
-        id: '5',
-        title: '产品需求文档',
-        preview: '1. 需求背景 2. 功能描述 3. 交互设计...',
-        messageCount: 15,
-        createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7), // 7天前
-        updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7)
-      },
-      {
-        id: '5',
-        title: '产品需求文档',
-        preview: '1. 需求背景 2. 功能描述 3. 交互设计...',
-        messageCount: 15,
-        createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7), // 7天前
-        updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7)
-      },
-      {
-        id: '5',
-        title: '产品需求文档',
-        preview: '1. 需求背景 2. 功能描述 3. 交互设计...',
-        messageCount: 15,
-        createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7), // 7天前
-        updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7)
-      },
-      {
-        id: '5',
-        title: '产品需求文档',
-        preview: '1. 需求背景 2. 功能描述 3. 交互设计...',
-        messageCount: 15,
-        createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7), // 7天前
-        updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7)
-      }
-    ];
-
-    // 按修改时间排序的会话列表
+    // 按修改时间排序的会话列表（后端已排序，这里做兜底）
     const sortedSessions = computed(() => {
       return [...sessions.value].sort((a, b) => 
         new Date(b.updatedAt) - new Date(a.updatedAt)
       );
     });
 
+    // 获取当前文档信息
+    const getDocumentInfo = () => {
+      try {
+        const doc = window.Application?.ActiveDocument;
+        if (!doc) {
+          return null;
+        }
+        const fullPath = doc.FullName || '';
+        const docName = doc.Name || 'Untitled';
+        let docId;
+        if (fullPath && fullPath !== docName) {
+          let hash = 0;
+          for (let i = 0; i < fullPath.length; i++) {
+            const char = fullPath.charCodeAt(i);
+            hash = (hash << 5) - hash + char;
+            hash = hash & hash;
+          }
+          docId = 'doc_' + Math.abs(hash).toString(36);
+        } else {
+          const storedId = window.Application.PluginStorage.getItem(`unsaved_doc_${docName}`);
+          if (storedId) {
+            docId = storedId;
+          } else {
+            docId = `unsaved_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            window.Application.PluginStorage.setItem(`unsaved_doc_${docName}`, docId);
+          }
+        }
+        return { docId, docName };
+      } catch (e) {
+        console.warn('获取文档信息失败:', e);
+        return null;
+      }
+    };
+
     // 加载会话列表
     const loadSessions = async () => {
       isLoading.value = true;
       try {
-        // TODO: 替换为实际的API调用
-        // const response = await fetch('/api/sessions');
-        // sessions.value = await response.json();
-        
-        // 使用模拟数据
-        await new Promise(resolve => setTimeout(resolve, 500));
-        sessions.value = mockSessions;
+        const result = await api.getSessions({ limit: 100 });
+        if (result.success && result.data?.sessions) {
+          sessions.value = result.data.sessions;
+        } else {
+          console.warn('加载会话列表失败:', result.error);
+          sessions.value = [];
+        }
       } catch (error) {
         console.error('加载会话列表失败:', error);
+        sessions.value = [];
       } finally {
         isLoading.value = false;
       }
@@ -278,24 +214,21 @@ export default {
     // 创建新会话
     const createNewSession = async () => {
       try {
-        // TODO: 替换为实际的API调用
-        // const response = await fetch('/api/sessions', { method: 'POST' });
-        // const newSession = await response.json();
-        
-        const newSession = {
-          id: Date.now().toString(),
-          title: '新对话',
-          preview: '',
-          messageCount: 0,
-          createdAt: new Date(),
-          updatedAt: new Date()
-        };
-        
-        sessions.value.unshift(newSession);
-        currentSessionId.value = newSession.id;
-        
-        // 通知 AI 对话面板切换到新会话
-        notifySessionChange(newSession.id);
+        const docInfo = getDocumentInfo();
+        const result = await api.createSession({
+          docId: docInfo?.docId || null,
+          docName: docInfo?.docName || null,
+          title: '新对话'
+        });
+
+        if (result.success && result.data?.session) {
+          const newSession = result.data.session;
+          sessions.value.unshift(newSession);
+          currentSessionId.value = newSession.id;
+          notifySessionChange(newSession.id, newSession.title);
+        } else {
+          console.error('创建会话失败:', result.error);
+        }
       } catch (error) {
         console.error('创建会话失败:', error);
       }
@@ -304,19 +237,16 @@ export default {
     // 选择会话
     const selectSession = (session) => {
       currentSessionId.value = session.id;
-      notifySessionChange(session.id);
+      notifySessionChange(session.id, session.title);
     };
 
     // 通知会话变更
-    const notifySessionChange = (sessionId) => {
-      // 使用 PluginStorage 进行跨面板通信
+    const notifySessionChange = (sessionId, title = null) => {
       if (window.Application && window.Application.PluginStorage) {
-        window.Application.PluginStorage.setItem('current_session_id', sessionId);
+        window.Application.PluginStorage.setItem('current_session_id', String(sessionId));
       }
-      
-      // 也可以使用自定义事件
       window.dispatchEvent(new CustomEvent('session-changed', { 
-        detail: { sessionId } 
+        detail: { sessionId, title } 
       }));
     };
 
@@ -343,13 +273,16 @@ export default {
       }
       
       try {
-        // TODO: 替换为实际的API调用
-        // await fetch(`/api/sessions/${renameTarget.value.id}`, {
-        //   method: 'PATCH',
-        //   body: JSON.stringify({ title: renameValue.value })
-        // });
-        
-        renameTarget.value.title = renameValue.value.trim();
+        const result = await api.renameSessionApi(renameTarget.value.id, renameValue.value.trim());
+        if (result.success && result.data?.session) {
+          // 更新本地列表中的标题
+          const target = sessions.value.find(s => s.id === renameTarget.value.id);
+          if (target) {
+            target.title = result.data.session.title;
+          }
+        } else {
+          console.error('重命名失败:', result.error);
+        }
         closeRenameDialog();
       } catch (error) {
         console.error('重命名失败:', error);
@@ -373,23 +306,36 @@ export default {
       }
       
       try {
-        // TODO: 替换为实际的API调用
-        // await fetch(`/api/sessions/${deleteTarget.value.id}`, { method: 'DELETE' });
-        
-        const index = sessions.value.findIndex(s => s.id === deleteTarget.value.id);
-        if (index > -1) {
-          sessions.value.splice(index, 1);
+        const result = await api.deleteSessionApi(deleteTarget.value.id);
+        if (result.success) {
+          const index = sessions.value.findIndex(s => s.id === deleteTarget.value.id);
+          if (index > -1) {
+            sessions.value.splice(index, 1);
+          }
+          
+          // 如果删除的是当前会话，切换到最新会话或清空
+          if (currentSessionId.value === deleteTarget.value.id) {
+            if (sessions.value.length > 0) {
+              const latest = sortedSessions.value[0];
+              currentSessionId.value = latest.id;
+              notifySessionChange(latest.id, latest.title);
+            } else {
+              currentSessionId.value = null;
+              notifySessionChange(null);
+            }
+          }
+        } else {
+          console.error('删除失败:', result.error);
         }
-        
-        // 如果删除的是当前会话，清除选中状态
-        if (currentSessionId.value === deleteTarget.value.id) {
-          currentSessionId.value = null;
-        }
-        
         closeDeleteDialog();
       } catch (error) {
         console.error('删除失败:', error);
       }
+    };
+
+    // 监听外部会话创建事件（AIChatPane 自动创建会话时通知刷新列表）
+    const onSessionCreated = () => {
+      loadSessions();
     };
 
     onMounted(() => {
@@ -399,9 +345,13 @@ export default {
       if (window.Application && window.Application.PluginStorage) {
         const savedSessionId = window.Application.PluginStorage.getItem('current_session_id');
         if (savedSessionId) {
-          currentSessionId.value = savedSessionId;
+          currentSessionId.value = Number(savedSessionId) || savedSessionId;
         }
       }
+
+      // 监听会话创建/更新事件
+      window.addEventListener('session-created', onSessionCreated);
+      window.addEventListener('session-updated', onSessionCreated);
     });
 
     return {
@@ -696,12 +646,12 @@ export default {
 }
 
 .confirm-btn {
-  background: #333;
+  background: #667eea;
   color: white;
 }
 
 .confirm-btn:hover {
-  background: #555;
+  background: #5a6fd6;
 }
 
 .delete-confirm-btn {
