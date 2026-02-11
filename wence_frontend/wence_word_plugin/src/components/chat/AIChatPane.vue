@@ -271,7 +271,9 @@ export default {
      * 当 SessionPane（另一个 TaskPane 窗口）写入 localStorage 时触发
      */
     onStorageChanged(event) {
-      if (event.key !== 'wence_session_change') return;
+      if (event.key !== 'wence_session_change') {
+        return;
+      }
       try {
         const data = JSON.parse(event.newValue);
         if (data) {

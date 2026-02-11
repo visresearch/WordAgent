@@ -161,7 +161,13 @@ async def process_writing_request_stream(
     app = build_graph(llm_with_tools)
 
     try:
-        messages = [SystemMessage(content=AGENT_PROMPT)]
+        from datetime import datetime
+
+        weekdays = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
+        now = datetime.now()
+        current_time = now.strftime("%Y年%m月%d日 %H:%M") + " " + weekdays[now.weekday()]
+        system_prompt = AGENT_PROMPT + f"\n\n# 当前时间\n{current_time}"
+        messages = [SystemMessage(content=system_prompt)]
 
         # 构建用户消息
         user_content = message
