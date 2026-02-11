@@ -14,6 +14,7 @@
  */
 
 import { parseDocxToJSON } from './docxJsonConverter.js';
+import { executeStyleQuery } from './docxQuery.js';
 
 // ============== 配置 ==============
 
@@ -266,6 +267,43 @@ const wsManager = {
 
     } catch (err) {
       console.error('[WebSocket] 解析/回传文档失败:', err);
+    }
+  },
+
+  /**
+   * 处理后端的文档查询请求：解析文档后执行 Style Query DSL 并通过 WebSocket 回传匹配结果
+   * @param {Object} query - Query DSL 对象 {type, filters}
+   */
+  async _handleQueryRequest(query) {
+    try {
+      // 先解析全文文档 JSON
+      const docData = await parseDocumentRange(-1, -1);
+
+      if (docData.error) {
+        throw new Error(docData.error);
+      }
+
+      // 执行样式查询
+      const result = executeStyleQuery(docData, query);
+
+      // 通过 WebSocket 回传查询结果
+      await this.send({
+        type: 'query_response',
+        matches: result.matches,
+        matchCount: result.matchCount
+      });
+
+      console.log('[WebSocket] 已回传查询结果，匹配数:', result.matchCount);
+
+    } catch (err) {
+      console.error('[WebSocket] 查询文档失败:', err);
+      // 回传空结果，避免后端一直等待
+      await this.send({
+        type: 'query_response',
+        matches: [],
+        matchCount: 0,
+        error: err.message
+      });
     }
   },
 

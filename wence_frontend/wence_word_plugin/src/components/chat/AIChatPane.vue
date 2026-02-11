@@ -825,6 +825,46 @@ export default {
         return;
       }
 
+      // 后端请求查询文档：委托 api.js 解析文档并执行 Style Query DSL
+      if (data.type === 'query_document') {
+        console.log('[AIChatPane] 后端请求查询文档, query:', data.query);
+        msg.contentParts.push({
+          type: 'status',
+          content: data.content || '🔍 正在搜索文档...',
+          loading: true
+        });
+        this.scrollToBottom();
+        api.wsManager._handleQueryRequest(data.query);
+        return;
+      }
+
+      // 查询完成：替换 loading 状态
+      if (data.type === 'query_complete') {
+        console.log('[AIChatPane] 文档查询完成');
+        const parts = msg.contentParts;
+        let found = false;
+        for (let i = parts.length - 1; i >= 0; i--) {
+          if (parts[i].type === 'status' && parts[i].loading) {
+            parts.splice(i, 1, {
+              type: 'status',
+              content: data.content || '✅ 搜索完成',
+              loading: false
+            });
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          parts.push({
+            type: 'status',
+            content: data.content || '✅ 搜索完成',
+            loading: false
+          });
+        }
+        this.scrollToBottom();
+        return;
+      }
+
       if (data.type === 'read_complete') {
         console.log('[AIChatPane] 文档读取完成');
         this.lastReadJSON = data.documentJson || null;

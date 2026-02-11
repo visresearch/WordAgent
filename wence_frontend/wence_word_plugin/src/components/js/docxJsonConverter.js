@@ -8,7 +8,6 @@
  * JSON 数据结构（精简版）：
  * {
  *   paragraphs: [{             // 段落数组
- *     text: string,            // 段落文本
  *     pStyle: [                // 段落样式数组（按顺序）
  *       alignment,             // [0] 对齐: left/center/right/justify
  *       lineSpacing,           // [1] 行间距

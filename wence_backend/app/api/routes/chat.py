@@ -117,6 +117,9 @@ async def chat_websocket(websocket: WebSocket):
                         if incoming_type == "document_response":
                             print(f"[WebSocket] 收到前端回传文档")
                             await submit_tool_response(chat_id, incoming)
+                        elif incoming_type == "query_response":
+                            print(f"[WebSocket] 收到前端回传查询结果")
+                            await submit_tool_response(chat_id, incoming)
                         elif incoming_type == "stop":
                             print(f"[WebSocket] 收到停止请求")
                             stream_task.cancel()
@@ -138,6 +141,10 @@ async def chat_websocket(websocket: WebSocket):
 
             elif msg_type == "document_response":
                 # 非流式过程中的文档回传（fallback）
+                await submit_tool_response(chat_id, data)
+
+            elif msg_type == "query_response":
+                # 非流式过程中的查询结果回传（fallback）
                 await submit_tool_response(chat_id, data)
 
             elif msg_type == "stop":

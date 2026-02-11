@@ -365,9 +365,317 @@ export function generateSummary(docJson) {
   };
 }
 
+// ============== Style Query 执行器 ==============
+
+/**
+ * 数值范围匹配
+ * @param {number} value - 实际值
+ * @param {number|Object} filter - 精确值 或 {gt, lt, gte, lte} 范围对象
+ * @returns {boolean}
+ */
+function matchNumber(value, filter) {
+  if (typeof filter === 'number') {
+    return value === filter;
+  }
+  if (typeof filter === 'object' && filter !== null) {
+    if (filter.gt !== undefined && value <= filter.gt) {
+      return false;
+    }
+    if (filter.lt !== undefined && value >= filter.lt) {
+      return false;
+    }
+    if (filter.gte !== undefined && value < filter.gte) {
+      return false;
+    }
+    if (filter.lte !== undefined && value > filter.lte) {
+      return false;
+    }
+    return true;
+  }
+  return false;
+}
+
+/**
+ * 检查 run 是否匹配 filters
+ * @param {Object} run - run 对象 {text, rStyle}
+ * @param {Object} filters - 筛选条件
+ * @returns {boolean}
+ */
+function matchRunFilters(run, filters) {
+  const rs = run.rStyle || [];
+  
+  for (const [key, expected] of Object.entries(filters)) {
+    switch (key) {
+      case 'text':
+        if (!(run.text || '').toLowerCase().includes(String(expected).toLowerCase())) {
+          return false;
+        }
+        break;
+      case 'fontName':
+        if ((rs[RSTYLE.FONT_NAME] || '').toLowerCase() !== String(expected).toLowerCase()) {
+          return false;
+        }
+        break;
+      case 'fontSize':
+        if (!matchNumber(rs[RSTYLE.FONT_SIZE] || 12, expected)) {
+          return false;
+        }
+        break;
+      case 'bold':
+        if (!!rs[RSTYLE.BOLD] !== !!expected) {
+          return false;
+        }
+        break;
+      case 'italic':
+        if (!!rs[RSTYLE.ITALIC] !== !!expected) {
+          return false;
+        }
+        break;
+      case 'underline':
+        if (typeof expected === 'boolean') {
+          if (expected && !rs[RSTYLE.UNDERLINE]) {
+            return false;
+          }
+          if (!expected && rs[RSTYLE.UNDERLINE]) {
+            return false;
+          }
+        } else {
+          if (rs[RSTYLE.UNDERLINE] !== expected) {
+            return false;
+          }
+        }
+        break;
+      case 'color':
+        if ((rs[RSTYLE.COLOR] || '').toUpperCase() !== String(expected).toUpperCase()) {
+          return false;
+        }
+        break;
+      case 'highlight':
+        if (typeof expected === 'boolean') {
+          if (expected && !rs[RSTYLE.HIGHLIGHT]) {
+            return false;
+          }
+          if (!expected && rs[RSTYLE.HIGHLIGHT]) {
+            return false;
+          }
+        } else {
+          if (rs[RSTYLE.HIGHLIGHT] !== expected) {
+            return false;
+          }
+        }
+        break;
+      case 'strikethrough':
+        if (!!rs[RSTYLE.STRIKETHROUGH] !== !!expected) {
+          return false;
+        }
+        break;
+      case 'superscript':
+        if (!!rs[RSTYLE.SUPERSCRIPT] !== !!expected) {
+          return false;
+        }
+        break;
+      case 'subscript':
+        if (!!rs[RSTYLE.SUBSCRIPT] !== !!expected) {
+          return false;
+        }
+        break;
+      // run 级别忽略 paragraph 专属 filter
+      case 'alignment':
+      case 'styleName':
+      case 'lineSpacing':
+        break;
+      default:
+        break;
+    }
+  }
+  return true;
+}
+
+/**
+ * 检查 paragraph 是否匹配 filters
+ * @param {Object} para - 段落对象 {pStyle, runs, position, ...}
+ * @param {Object} filters - 筛选条件
+ * @returns {boolean}
+ */
+function matchParagraphFilters(para, filters) {
+  const ps = para.pStyle || [];
+  
+  for (const [key, expected] of Object.entries(filters)) {
+    switch (key) {
+      case 'text': {
+        const paraText = getFieldValue(para, 'text').toLowerCase();
+        if (!paraText.includes(String(expected).toLowerCase())) {
+          return false;
+        }
+        break;
+      }
+      case 'alignment':
+        if ((ps[PSTYLE.ALIGNMENT] || 'left').toLowerCase() !== String(expected).toLowerCase()) {
+          return false;
+        }
+        break;
+      case 'styleName': {
+        const sn = (ps[PSTYLE.STYLE_NAME] || '').toLowerCase();
+        if (!sn.includes(String(expected).toLowerCase())) {
+          return false;
+        }
+        break;
+      }
+      case 'lineSpacing':
+        if (!matchNumber(ps[PSTYLE.LINE_SPACING] || 0, expected)) {
+          return false;
+        }
+        break;
+      // paragraph 级别忽略 run 专属 filter，但可以检查"段落中是否有符合条件的 run"
+      case 'fontName':
+      case 'fontSize':
+      case 'bold':
+      case 'italic':
+      case 'underline':
+      case 'color':
+      case 'highlight':
+      case 'strikethrough':
+      case 'superscript':
+      case 'subscript': {
+        // 段落级搜索 run 样式：检测段落中是否有任意 run 匹配
+        const runs = para.runs || [];
+        const hasMatch = runs.some(run => matchRunFilters(run, { [key]: expected }));
+        if (!hasMatch) {
+          return false;
+        }
+        break;
+      }
+      default:
+        break;
+    }
+  }
+  return true;
+}
+
+/**
+ * 计算段落中 run 的文档位置（基于段落 position + 文本偏移）
+ * @param {Object} para - 段落对象
+ * @param {number} runIndex - run 在段落 runs 数组中的索引
+ * @returns {{start: number, end: number}}
+ */
+function getRunPosition(para, runIndex) {
+  const paraStart = para.position || 0;
+  const runs = para.runs || [];
+  let offset = 0;
+  for (let i = 0; i < runIndex; i++) {
+    offset += (runs[i].text || '').length;
+  }
+  const runText = runs[runIndex]?.text || '';
+  return {
+    start: paraStart + offset,
+    end: paraStart + offset + runText.length
+  };
+}
+
+/**
+ * 计算段落的文档结束位置
+ * @param {Object} para - 段落对象
+ * @returns {{start: number, end: number}}
+ */
+function getParagraphPosition(para) {
+  const start = para.position || 0;
+  const runs = para.runs || [];
+  let totalLen = 0;
+  for (const run of runs) {
+    totalLen += (run.text || '').length;
+  }
+  return {
+    start,
+    end: start + totalLen + 1  // +1 for paragraph mark
+  };
+}
+
+/**
+ * 执行样式查询（Style Query DSL 执行器）
+ * 
+ * 用于按样式条件（字体、颜色、粗体等）搜索文档内容。
+ * 
+ * @param {Object} docJson - 完整文档 JSON
+ * @param {Object} queryDSL - Query DSL 对象
+ *   {
+ *     type: "run" | "paragraph",
+ *     filters: { color: "#FF0000", bold: true, fontSize: {gt: 14}, text: "xxx", ... }
+ *   }
+ * @returns {Object} { matches: [...], matchCount: number }
+ */
+export function executeStyleQuery(docJson, queryDSL) {
+  const paragraphs = docJson.paragraphs || [];
+  const { type = 'run', filters = {} } = queryDSL;
+  
+  if (!paragraphs.length || !Object.keys(filters).length) {
+    return { matches: [], matchCount: 0 };
+  }
+  
+  const matches = [];
+  const MAX_MATCHES = 100;  // 限制最大返回数量
+  
+  if (type === 'run') {
+    // Run 级别搜索：遍历每个段落的每个 run
+    for (let pi = 0; pi < paragraphs.length && matches.length < MAX_MATCHES; pi++) {
+      const para = paragraphs[pi];
+      if (para.isParaEmpty) {
+        continue;
+      }
+      
+      const runs = para.runs || [];
+      for (let ri = 0; ri < runs.length && matches.length < MAX_MATCHES; ri++) {
+        const run = runs[ri];
+        if (!run.text) {
+          continue;
+        }
+        
+        if (matchRunFilters(run, filters)) {
+          const runPos = getRunPosition(para, ri);
+          const paraPos = getParagraphPosition(para);
+          
+          matches.push({
+            text: run.text,
+            matchPosition: runPos,
+            paragraphPosition: paraPos,
+            paragraphIndex: pi,
+            rStyle: run.rStyle || []
+          });
+        }
+      }
+    }
+  } else if (type === 'paragraph') {
+    // Paragraph 级别搜索
+    for (let pi = 0; pi < paragraphs.length && matches.length < MAX_MATCHES; pi++) {
+      const para = paragraphs[pi];
+      if (para.isParaEmpty) {
+        continue;
+      }
+      
+      if (matchParagraphFilters(para, filters)) {
+        const paraPos = getParagraphPosition(para);
+        const paraText = getFieldValue(para, 'text');
+        
+        matches.push({
+          text: paraText.substring(0, 200),  // 截断过长文本
+          matchPosition: paraPos,             // 段落级搜索时 matchPosition 等于 paragraphPosition
+          paragraphPosition: paraPos,
+          paragraphIndex: pi,
+          pStyle: para.pStyle || []
+        });
+      }
+    }
+  }
+  
+  return {
+    matches,
+    matchCount: matches.length
+  };
+}
+
 // ============== 导出 ==============
 
 export default {
   executeQuery,
-  generateSummary
+  generateSummary,
+  executeStyleQuery
 };

@@ -7,6 +7,8 @@ import concurrent.futures
 import contextvars
 import json
 
+from typing import Literal
+
 from langchain_core.tools import tool
 from langgraph.config import get_stream_writer
 from pydantic import BaseModel, Field, model_validator
@@ -133,6 +135,57 @@ class DocumentOutput(BaseModel):
         return data
 
 
+class RangeFilter(BaseModel):
+    """数值范围筛选，用于 fontSize、lineSpacing 等字段"""
+
+    gt: float | None = Field(default=None, description="大于")
+    lt: float | None = Field(default=None, description="小于")
+    gte: float | None = Field(default=None, description="大于等于")
+    lte: float | None = Field(default=None, description="小于等于")
+
+
+class QueryFilter(BaseModel):
+    """查询筛选条件，所有字段为 AND 关系。只需填写需要筛选的字段，其余留空。"""
+
+    # 文本匹配
+    text: str | None = Field(
+        default=None, description="文本包含匹配（run 级别匹配 run.text；paragraph 级别拼接所有 runs 的 text）"
+    )
+
+    # Run 级别样式（type=run 时直接匹配；type=paragraph 时检查段落中是否存在匹配的 run）
+    fontName: str | None = Field(default=None, description="字体名，精确匹配，如 '宋体'、'楷体'、'Times New Roman'")
+    fontSize: float | RangeFilter | None = Field(
+        default=None, description="字号。精确值如 14；或范围如 {gt: 14}、{gte: 14, lte: 18}"
+    )
+    bold: bool | None = Field(default=None, description="粗体")
+    italic: bool | None = Field(default=None, description="斜体")
+    underline: int | None = Field(default=None, description="下划线: 0=无, 1=单线, 3=双线, 4=虚线, 6=粗线, 11=波浪线")
+    color: str | None = Field(default=None, description="字体颜色 #RRGGBB 格式，如 '#FF0000' 为红色")
+    highlight: int | None = Field(
+        default=None, description="高亮色: 0=无, 1=黑, 2=蓝, 3=青绿, 4=鲜绿, 5=粉红, 6=红, 7=黄"
+    )
+    strikethrough: bool | None = Field(default=None, description="删除线")
+    superscript: bool | None = Field(default=None, description="上标")
+    subscript: bool | None = Field(default=None, description="下标")
+
+    # Paragraph 级别样式（仅 type=paragraph 时有效）
+    alignment: str | None = Field(default=None, description="段落对齐: left/center/right/justify")
+    styleName: str | None = Field(
+        default=None, description="段落样式名，包含匹配（如 '标题' 可匹配 '标题 1'、'标题 2'）"
+    )
+    lineSpacing: float | RangeFilter | None = Field(default=None, description="行距。精确值如 1.5；或范围如 {gt: 1.5}")
+
+
+class DocumentQuery(BaseModel):
+    """文档查询 DSL"""
+
+    type: Literal["run", "paragraph"] = Field(
+        default="run",
+        description="搜索粒度：run=格式块级别（精确到同一格式的文字片段），paragraph=段落级别",
+    )
+    filters: QueryFilter = Field(description="筛选条件，所有字段为 AND 关系，只填需要的字段")
+
+
 # region Tools 定义
 
 
@@ -194,7 +247,7 @@ def read_document(startPos: int = -1, endPos: int = -1) -> str:
                         # time.sleep(1.0)  # 加一个延时
 
                         print(f"[read_document] ✅ 收到文档，段落数: {len(doc_json['paragraphs'])}")
-                        writer({"type": "read_complete", "content": "✅ 文档读取完成"})
+                        writer({"type": "read_complete", "content": f"✅ 文档读取完成({startPos} - {endPos})"})
                         return json.dumps(doc_json, ensure_ascii=False)
                     else:
                         print("[read_document] ⚠️ 收到空文档")
@@ -234,25 +287,95 @@ def generate_document(document: DocumentOutput) -> dict:
     """
     writer = get_stream_writer()
     doc_dict = document.model_dump()
-    writer({"type": "generate_complete", "content": "✅ 文档已生成"})
+    para_count = len(doc_dict.get("paragraphs", []))
+    writer({"type": "generate_complete", "content": f"✅ 文档已生成，共 {para_count} 个段落"})
     return doc_dict
 
 
 @tool
-def grep_document(keyword: str) -> str:
+def query_document(query: DocumentQuery) -> str:
     """
-    搜索文档内容。根据关键词搜索文档并返回相关内容。
+    搜索文档内容 - 在前端文档中按文本或样式条件搜索匹配内容。
+
+    【调用场景】
+    - 用户说"找到红色的字": type=run, filters={color: "#FF0000"}
+    - 用户说"加粗的楷体文字": type=run, filters={bold: true, fontName: "楷体"}
+    - 用户说"所有标题": type=paragraph, filters={styleName: "标题"}
+    - 用户说"字号大于14的文字": type=run, filters={fontSize: {gt: 14}}
+    - 用户说"搜索关键词xxx": type=run, filters={text: "xxx"}
+    - 用户说"找到实习目的": type=run, filters={text: "实习目的"}
+
+    【JSON 结构说明】
+    文档中 paragraph 没有顶层 text 字段，文本通过 runs[].text 拼接获得。
+    标题通过 pStyle[7]（styleName）识别，如 "标题 1"。
+    type=paragraph 时也可使用 run 样式 filter，会检查段落中是否存在匹配的 run。
+
+    【返回值说明】
+    返回 JSON 字符串，包含 matches 列表，每项含：
+    - text: 匹配的文本内容
+    - matchPosition: {start, end} 匹配位置
+    - paragraphPosition: {start, end} 所在段落位置
+    - paragraphIndex: 段落索引
+    根据 position 可进一步调用 read_document 读取完整段落。
 
     Args:
-        keyword: 搜索关键词
+        query: 查询条件，包含搜索粒度 type 和筛选条件 filters
 
     Returns:
-        搜索结果字符串
+        匹配结果 JSON 字符串
     """
     writer = get_stream_writer()
-    writer({"type": "grep_document", "content": f"🔍 正在搜索文档: {keyword}"})
-    print(f"[grep_document] 请求前端搜索文档 (keyword={keyword})")
-    return f"搜索结果: 找到与 '{keyword}' 相关的内容..."
+
+    query_dict = query.model_dump(exclude_none=True)
+    query_type = query_dict.get("type", "run")
+    filters = query_dict.get("filters", {})
+    filter_desc = ", ".join(f"{k}={v}" for k, v in filters.items())
+    writer(
+        {
+            "type": "query_document",
+            "content": f"🔍 正在搜索文档: {filter_desc}",
+            "query": query_dict,
+        }
+    )
+    print(f"[query_document] 请求前端搜索文档 (type={query_type}, filters={filters})")
+
+    # 通过 WebSocket 回调等待前端查询结果
+    chat_id = _current_chat_id.get(None)
+    if chat_id:
+        q = _pending_tool_requests.get(chat_id)
+        if q:
+            print(f"[query_document] WebSocket 模式，等待前端回传查询结果 (session={chat_id})")
+
+            loop = _pending_loops.get(chat_id)
+            if loop:
+                future = asyncio.run_coroutine_threadsafe(
+                    asyncio.wait_for(q.get(), timeout=30),
+                    loop,
+                )
+                try:
+                    result = future.result(timeout=35)
+                    matches = result.get("matches", [])
+                    match_count = result.get("matchCount", 0)
+
+                    if match_count > 0:
+                        print(f"[query_document] ✅ 查询完成，匹配 {match_count} 项")
+                        writer({"type": "query_complete", "content": f"✅ 搜索完成，找到 {match_count} 处匹配"})
+                        return json.dumps({"matches": matches, "matchCount": match_count}, ensure_ascii=False)
+                    else:
+                        print("[query_document] ⚠️ 未找到匹配项")
+                        writer({"type": "query_complete", "content": "⚠️ 未找到匹配内容"})
+                        return json.dumps({"matches": [], "matchCount": 0}, ensure_ascii=False)
+                except (TimeoutError, concurrent.futures.TimeoutError):
+                    print("[query_document] ⏰ 等待查询结果超时")
+                    writer({"type": "status", "content": "⏰ 搜索超时"})
+                    return '{"matches": [], "matchCount": 0, "error": "timeout"}'
+                except Exception as e:
+                    print(f"[query_document] ❌ 等待查询结果出错: {e}")
+                    return '{"matches": [], "matchCount": 0, "error": "' + str(e) + '"}'
+
+    # 非 WebSocket 模式
+    print("[query_document] ⚠️ 非 WebSocket 模式，无法执行查询")
+    return '{"matches": [], "matchCount": 0, "error": "non-websocket"}'
 
 
 @tool
@@ -306,14 +429,23 @@ def web_fetch(url: str) -> str:
             soup.find("article")
             or soup.find("main")
             or soup.find(attrs={"role": "main"})
-            or soup.find("div", class_=lambda c: c and any(k in (c if isinstance(c, str) else " ".join(c)) for k in ["content", "article", "post", "entry", "main"]))
+            or soup.find(
+                "div",
+                class_=lambda c: c
+                and any(
+                    k in (c if isinstance(c, str) else " ".join(c))
+                    for k in ["content", "article", "post", "entry", "main"]
+                ),
+            )
         )
 
         target = main_content if main_content else soup.body if soup.body else soup
 
         # 提取文本，保留基本结构
         lines = []
-        for elem in target.find_all(["h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "td", "th", "blockquote", "pre", "code"]):
+        for elem in target.find_all(
+            ["h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "td", "th", "blockquote", "pre", "code"]
+        ):
             text = elem.get_text(strip=True)
             if not text:
                 continue
@@ -462,5 +594,5 @@ def comment_document(comment: str, startPos: int = -1, endPos: int = -1) -> str:
 
 # region Tools 注册
 
-ALL_TOOLS = [read_document, generate_document, web_search, web_fetch]
+ALL_TOOLS = [read_document, generate_document, query_document, web_search, web_fetch]
 TOOL_MAP = {t.name: t for t in ALL_TOOLS}
