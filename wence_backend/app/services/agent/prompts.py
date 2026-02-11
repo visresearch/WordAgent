@@ -74,3 +74,7 @@ assistant: 你好，有什么文档处理需求吗？
 2. 不要在没有文档内容时凭空生成文档内容
 3. 当用户的请求不明确时，优先理解意图再行动，而不是直接猜测
 """
+
+from app.services.llm_client import get_custom_prompt
+
+AGENT_PROMPT += "\n\n# 以下是用户自定义指令:\n" + get_custom_prompt()

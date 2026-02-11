@@ -37,6 +37,7 @@ pip-delete-this-directory.txt
 data/
 test/
 example/
+conifg/
 
 # PyInstaller
 build/

@@ -118,6 +118,16 @@ def get_temperature() -> float:
     settings = load_user_settings()
     return settings.get("temperature", 0.7)
 
+def get_custom_prompt() -> str:
+    """从 user_settings.json 读取用户自定义 Prompt"""
+    try:
+        if SETTINGS_FILE.exists():
+            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data.get("customPrompt", "") or ""
+    except Exception as e:
+        print(f"读取 customPrompt 失败: {e}")
+    return ""
 
 class LLMClientManager:
     """LLM 客户端管理器"""
