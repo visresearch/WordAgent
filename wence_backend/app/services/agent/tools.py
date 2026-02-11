@@ -9,7 +9,7 @@ import json
 
 from langchain_core.tools import tool
 from langgraph.config import get_stream_writer
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 # ============== 工具回调等待机制 ==============
 # 用于 WebSocket 模式下，agent 调用 tool 后等待前端回传结果
@@ -106,10 +106,31 @@ class Table(BaseModel):
 
 
 class DocumentOutput(BaseModel):
-    """文档输出结构"""
+    """文档输出结构。paragraphs 和 tables 是两个独立的顶级字段，不要混合。"""
 
-    paragraphs: list[Paragraph] = Field(description="段落数组")
-    tables: list[Table] = Field(default_factory=list, description="表格数组")
+    paragraphs: list[Paragraph] = Field(description="段落数组，每个元素必须是 Paragraph 对象，不要放字符串")
+    tables: list[Table] = Field(default_factory=list, description="表格数组，每个元素必须是 Table 对象")
+
+    @model_validator(mode="before")
+    @classmethod
+    def filter_invalid_paragraphs(cls, data):
+        """过滤 paragraphs 中的非法项：字符串、空段落标记(isParaEmpty)等"""
+        if isinstance(data, dict) and "paragraphs" in data:
+            cleaned = []
+            for p in data["paragraphs"]:
+                if isinstance(p, Paragraph):
+                    cleaned.append(p)
+                elif isinstance(p, dict):
+                    # 跳过空段落标记（前端文档JSON中 isParaEmpty:true 的段落没有 runs）
+                    if p.get("isParaEmpty"):
+                        continue
+                    # 跳过没有 runs 的非法段落
+                    if "runs" not in p:
+                        continue
+                    cleaned.append(p)
+                # 跳过字符串等非法类型
+            data["paragraphs"] = cleaned
+        return data
 
 
 # region Tools 定义
@@ -200,8 +221,13 @@ def generate_document(document: DocumentOutput) -> dict:
     【重要】格式属性必须100%原样复制！
     除非用户明确要求修改格式，否则所有格式属性（fontName, fontSize, alignment 等）必须与原文档完全一致。
 
+    【结构要求】document 包含两个独立字段：
+    - paragraphs: Paragraph 对象的数组
+    - tables: Table 对象的数组（可选）
+    不要把 "tables" 字符串放进 paragraphs 数组里！
+
     Args:
-        document: 文档结构，包含段落和表格
+        document: 文档结构，包含 paragraphs 和 tables 两个独立字段
 
     Returns:
         文档 JSON 对象

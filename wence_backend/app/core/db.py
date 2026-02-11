@@ -47,9 +47,23 @@ async def get_db():
 async def init_db():
     """
     初始化数据库，创建所有表
+    如果检测到旧表结构（无 sessions 表），则自动迁移
     """
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+
+        def _check_and_create(connection):
+            from sqlalchemy import inspect as sa_inspect
+
+            inspector = sa_inspect(connection)
+            tables = inspector.get_table_names()
+            # 如果旧的 documents 表存在但新的 sessions 表不存在，需要迁移
+            if "documents" in tables and "sessions" not in tables:
+                print("🔄 检测到旧表结构，正在迁移到 Session 模式...")
+                Base.metadata.drop_all(connection)
+                print("   ✅ 旧表已清除")
+            Base.metadata.create_all(connection)
+
+        await conn.run_sync(_check_and_create)
 
 
 async def close_db():

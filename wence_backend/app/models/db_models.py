@@ -1,5 +1,8 @@
 """
 数据库 ORM 模型
+
+会话(Session)模型：每个聊天会话是一个独立的 Session，关联到具体文档。
+消息(ChatMessage)模型：每条消息属于一个 Session。
 """
 
 from datetime import datetime
@@ -10,29 +13,45 @@ from sqlalchemy.orm import relationship
 from app.core.db import Base
 
 
-class Document(Base):
+class Session(Base):
     """
-    Word 文档记录
-    使用文件的唯一标识（如文件路径 hash 或自定义 ID）来区分不同文档
+    聊天会话记录
+    每个会话是一轮独立的对话，可关联到某个文档
     """
 
-    __tablename__ = "documents"
+    __tablename__ = "sessions"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    # 文档唯一标识符（前端传入，可以是文件路径、文件名 hash 等）
-    doc_id = Column(String(128), unique=True, nullable=False, index=True)
+    # 关联的文档唯一标识符（可选，前端传入）
+    doc_id = Column(String(128), nullable=True, index=True)
     # 文档名称（用于显示）
     doc_name = Column(String(255), nullable=True)
+    # 会话标题（默认取第一条用户消息的前50字）
+    title = Column(String(255), default="新对话")
+    # 最后一条消息预览
+    preview = Column(Text, nullable=True)
     # 创建时间
     created_at = Column(DateTime, default=datetime.utcnow)
     # 最后更新时间
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # 关联的聊天消息
-    messages = relationship("ChatMessage", back_populates="document", cascade="all, delete-orphan")
+    messages = relationship("ChatMessage", back_populates="session", cascade="all, delete-orphan")
 
     def __repr__(self):
-        return f"<Document(id={self.id}, doc_id='{self.doc_id}', doc_name='{self.doc_name}')>"
+        return f"<Session(id={self.id}, title='{self.title}', doc_id='{self.doc_id}')>"
+
+    def to_dict(self):
+        """转换为字典，用于 API 返回"""
+        return {
+            "id": self.id,
+            "docId": self.doc_id,
+            "docName": self.doc_name,
+            "title": self.title,
+            "preview": self.preview,
+            "createdAt": self.created_at.isoformat() if self.created_at else None,
+            "updatedAt": self.updated_at.isoformat() if self.updated_at else None,
+        }
 
 
 class ChatMessage(Base):
@@ -43,8 +62,8 @@ class ChatMessage(Base):
     __tablename__ = "chat_messages"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    # 关联的文档 ID
-    document_id = Column(Integer, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
+    # 关联的会话 ID
+    session_id = Column(Integer, ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False)
     # 消息角色：user / assistant
     role = Column(String(20), nullable=False)
     # 消息内容（文本）
@@ -62,14 +81,14 @@ class ChatMessage(Base):
     # 创建时间
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    # 关联的文档
-    document = relationship("Document", back_populates="messages")
+    # 关联的会话
+    session = relationship("Session", back_populates="messages")
 
-    # 添加索引以加速按文档查询
-    __table_args__ = (Index("idx_document_created", "document_id", "created_at"),)
+    # 添加索引以加速按会话查询
+    __table_args__ = (Index("idx_session_created", "session_id", "created_at"),)
 
     def __repr__(self):
-        return f"<ChatMessage(id={self.id}, role='{self.role}', document_id={self.document_id})>"
+        return f"<ChatMessage(id={self.id}, role='{self.role}', session_id={self.session_id})>"
 
     def to_dict(self):
         """转换为字典，用于 API 返回"""

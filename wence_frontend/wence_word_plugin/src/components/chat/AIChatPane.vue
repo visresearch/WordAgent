@@ -75,11 +75,14 @@ export default {
     this.loadModels();
     this.initSessionAndLoadHistory();
 
-    // 监听 SessionPane 切换会话的事件
+    // 监听同窗口 SessionPane 切换会话的事件
     window.addEventListener('session-changed', this.onSessionChanged);
+    // 监听跨 TaskPane 的 localStorage storage 事件（WPS 中各 TaskPane 是独立窗口）
+    window.addEventListener('storage', this.onStorageChanged);
   },
   beforeUnmount() {
     window.removeEventListener('session-changed', this.onSessionChanged);
+    window.removeEventListener('storage', this.onStorageChanged);
   },
   methods: {
     /**
@@ -215,10 +218,21 @@ export default {
           this.currentDocName = docInfo.docName;
         }
 
-        // 尝试从 PluginStorage 恢复上次的 session_id
+        // 尝试从 PluginStorage 或 localStorage 恢复上次的 session_id
         let savedSessionId = null;
         if (window.Application && window.Application.PluginStorage) {
           savedSessionId = window.Application.PluginStorage.getItem('current_session_id');
+        }
+        if (!savedSessionId) {
+          try {
+            const stored = localStorage.getItem('wence_session_change');
+            if (stored) {
+              const data = JSON.parse(stored);
+              savedSessionId = data?.sessionId ? String(data.sessionId) : null;
+            }
+          } catch (e) {
+            // ignore
+          }
         }
 
         if (savedSessionId) {
@@ -253,6 +267,23 @@ export default {
     },
 
     /**
+     * 跨 TaskPane 通信：监听 localStorage 的 storage 事件
+     * 当 SessionPane（另一个 TaskPane 窗口）写入 localStorage 时触发
+     */
+    onStorageChanged(event) {
+      if (event.key !== 'wence_session_change') return;
+      try {
+        const data = JSON.parse(event.newValue);
+        if (data) {
+          console.log('[跨窗口会话切换] storage 事件, data:', data);
+          this.onSessionChanged({ detail: data });
+        }
+      } catch (e) {
+        console.error('[跨窗口会话切换] 解析失败:', e);
+      }
+    },
+
+    /**
      * 监听 SessionPane 切换会话的事件
      */
     async onSessionChanged(event) {
@@ -269,10 +300,24 @@ export default {
         return;
       }
 
-      this.currentSessionId = sessionId;
-      if (title) {
-        this.currentSessionTitle = title;
+      // 如果已经是当前会话，不重复加载
+      if (this.currentSessionId === sessionId && this.historyLoaded) {
+        console.log('[会话切换] 已是当前会话，跳过');
+        return;
       }
+
+      // 先清空旧消息，再加载新会话
+      this.messages = [];
+      this.hasHistory = false;
+      this.historyLoaded = false;
+      this.currentSessionId = sessionId;
+      this.currentSessionTitle = title || null;
+
+      // 同步到 PluginStorage
+      if (window.Application && window.Application.PluginStorage) {
+        window.Application.PluginStorage.setItem('current_session_id', String(sessionId));
+      }
+
       // 加载该会话的消息
       await this.loadSessionMessages();
     },
@@ -1081,7 +1126,7 @@ export default {
 .session-header {
   flex-shrink: 0;
   padding: 8px 14px;
-  background: #fff;
+  background: #f7f8fa;
   border-bottom: 1px solid #e8e8e8;
 }
 

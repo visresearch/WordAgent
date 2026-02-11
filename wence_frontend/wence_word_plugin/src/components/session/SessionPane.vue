@@ -240,11 +240,21 @@ export default {
       notifySessionChange(session.id, session.title);
     };
 
-    // 通知会话变更
+    // 通知会话变更（跨 TaskPane 通信）
     const notifySessionChange = (sessionId, title = null) => {
+      // 1. 保存到 PluginStorage（WPS 持久化）
       if (window.Application && window.Application.PluginStorage) {
-        window.Application.PluginStorage.setItem('current_session_id', String(sessionId));
+        window.Application.PluginStorage.setItem('current_session_id', String(sessionId || ''));
       }
+      // 2. 写入 localStorage 触发其他 TaskPane 的 storage 事件（跨窗口通信）
+      try {
+        localStorage.setItem('wence_session_change', JSON.stringify({
+          sessionId, title, timestamp: Date.now()
+        }));
+      } catch (e) {
+        console.warn('localStorage 写入失败:', e);
+      }
+      // 3. 同窗口 CustomEvent（兜底，开发环境下同页面切换）
       window.dispatchEvent(new CustomEvent('session-changed', { 
         detail: { sessionId, title } 
       }));
