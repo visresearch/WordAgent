@@ -39,7 +39,7 @@ class AddMessageRequest(BaseModel):
     role: str  # user / assistant
     content: str
     documentJson: Any | None = None
-    selectionContext: dict | None = None
+    selectionContext: list | dict | None = None
     contentParts: list[dict] | None = None
     model: str | None = None
     mode: str | None = None

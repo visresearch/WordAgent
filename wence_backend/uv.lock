@@ -133,15 +133,6 @@ wheels = [
 ]
 
 [[package]]
-name = "cachetools"
-version = "6.2.4"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/bc/1d/ede8680603f6016887c062a2cf4fc8fdba905866a3ab8831aa8aa651320c/cachetools-6.2.4.tar.gz", hash = "sha256:82c5c05585e70b6ba2d3ae09ea60b79548872185d2f24ae1f2709d37299fd607", size = 31731, upload-time = "2025-12-15T18:24:53.744Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/2c/fc/1d7b80d0eb7b714984ce40efc78859c022cd930e402f599d8ca9e39c78a4/cachetools-6.2.4-py3-none-any.whl", hash = "sha256:69a7a52634fed8b8bf6e24a050fb60bff1c9bd8f6d24572b99c32d4e71e62a51", size = 11551, upload-time = "2025-12-15T18:24:52.332Z" },
-]
-
-[[package]]
 name = "certifi"
 version = "2026.1.4"
 source = { registry = "https://pypi.org/simple" }
@@ -1306,15 +1297,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pyjwt"
-version = "2.10.1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/e7/46/bd74733ff231675599650d3e47f361794b22ef3e3770998dda30d3b63726/pyjwt-2.10.1.tar.gz", hash = "sha256:3cc5772eb20009233caf06e9d8a0577824723b44e6648ee0a2aedb6cf9381953", size = 87785, upload-time = "2024-11-28T03:43:29.933Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/61/ad/689f02752eeec26aed679477e80e632ef1b682313be70793d798c1d5fc8f/PyJWT-2.10.1-py3-none-any.whl", hash = "sha256:dcdd193e30abefd5debf142f9adfcdd2b58004e644f25406ffaebd50bd98dacb", size = 22997, upload-time = "2024-11-28T03:43:27.893Z" },
-]
-
-[[package]]
 name = "pytest"
 version = "9.0.2"
 source = { registry = "https://pypi.org/simple" }
@@ -2120,10 +2102,8 @@ dependencies = [
     { name = "openai" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
-    { name = "python-dotenv" },
     { name = "sqlalchemy" },
     { name = "uvicorn", extra = ["standard"] },
-    { name = "zai-sdk" },
 ]
 
 [package.optional-dependencies]
@@ -2153,11 +2133,9 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.0.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.21.0" },
-    { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1.0" },
     { name = "sqlalchemy", specifier = ">=2.0.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.24.0" },
-    { name = "zai-sdk", specifier = ">=0.1.0" },
 ]
 provides-extras = ["dev"]
 
@@ -2277,22 +2255,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/50/55/15a7b8a56590e66ccd374bbfa3f9ffc45b810886c8c3b614e3f90bd2367c/xxhash-3.6.0-pp311-pypy311_pp73-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:881b47fc47e051b37d94d13e7455131054b56749b91b508b0907eb07900d1c13", size = 36251, upload-time = "2025-10-02T14:37:04.44Z" },
     { url = "https://files.pythonhosted.org/packages/62/b2/5ac99a041a29e58e95f907876b04f7067a0242cb85b5f39e726153981503/xxhash-3.6.0-pp311-pypy311_pp73-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:c6dc31591899f5e5666f04cc2e529e69b4072827085c1ef15294d91a004bc1bd", size = 32481, upload-time = "2025-10-02T14:37:05.869Z" },
     { url = "https://files.pythonhosted.org/packages/7b/d9/8d95e906764a386a3d3b596f3c68bb63687dfca806373509f51ce8eea81f/xxhash-3.6.0-pp311-pypy311_pp73-win_amd64.whl", hash = "sha256:15e0dac10eb9309508bfc41f7f9deaa7755c69e35af835db9cb10751adebc35d", size = 31565, upload-time = "2025-10-02T14:37:06.966Z" },
-]
-
-[[package]]
-name = "zai-sdk"
-version = "0.2.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "cachetools" },
-    { name = "httpx" },
-    { name = "pydantic" },
-    { name = "pydantic-core" },
-    { name = "pyjwt" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/34/0a/39ee180e7857c6fc340d5a39da5aebb59ead22c6163351b1c9e6aad2c828/zai_sdk-0.2.1.tar.gz", hash = "sha256:3823026267e32dc296df261e10e678b8f1907ab49478e5a0591f4886a8c09a5f", size = 75330, upload-time = "2026-01-12T10:55:24.603Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/df/4c/7e7f95daa8882423f71016735905f8a1d969efd8b1c5b2998ee236108bfc/zai_sdk-0.2.1-py3-none-any.whl", hash = "sha256:4f71093b28d5f210e619e9bf183b947b8222aeb9d90095ba5d42dde4e41697a6", size = 123304, upload-time = "2026-01-12T10:55:23.591Z" },
 ]
 
 [[package]]

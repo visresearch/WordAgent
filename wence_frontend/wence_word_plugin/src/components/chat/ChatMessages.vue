@@ -53,8 +53,8 @@
       :class="['message-wrapper', msg.role === 'user' ? 'user-wrapper' : 'ai-wrapper']"
     >
       <div :class="['message', msg.role === 'user' ? 'user-message' : 'ai-message']">
-        <!-- 显示选中内容上下文 -->
-        <div v-if="msg.selectionContext" class="selection-context">
+        <!-- 显示选中内容上下文（支持多个选区） -->
+        <div v-if="msg.selectionContext && msg.selectionContext.length" class="selection-context">
           <div class="context-header">
             <svg
               width="12"
@@ -67,15 +67,11 @@
               />
               <path d="M3 4h10v1H3V4zm0 3h10v1H3V7zm0 3h6v1H3v-1z" />
             </svg>
-            <span>选中的内容</span>
+            <span>引用选区 ({{ msg.selectionContext.length }})</span>
           </div>
-          <div class="context-preview">
-            <span class="context-text">{{ msg.selectionContext.preview }}</span>
-            <span v-if="msg.selectionContext.hasMore" class="context-more">...</span>
-          </div>
-          <div class="context-range">
-            {{ msg.selectionContext.startText }} → {{ msg.selectionContext.endText }}
-            <span class="context-stats">({{ msg.selectionContext.charCount }} 字符)</span>
+          <div v-for="(ctx, ctxIdx) in msg.selectionContext" :key="ctxIdx" class="context-item">
+            <span class="context-text">{{ ctx.startText }} → {{ ctx.endText }}</span>
+            <span class="context-pos">({{ ctx.startPos }} - {{ ctx.endPos }})</span>
           </div>
         </div>
         <div class="message-content">
@@ -755,10 +751,7 @@ export default {
 
 /* 选中内容上下文样式 */
 .selection-context {
-  background: #dce4ff;
-  border: 1px solid #c5d3ff;
-  border-radius: 6px;
-  padding: 8px;
+  padding: 2px;
   margin-bottom: 8px;
   font-size: 11px;
 }
@@ -772,35 +765,32 @@ export default {
   margin-bottom: 4px;
 }
 
-.context-preview {
-  background: white;
+.context-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: #f7f8fa;
   border-radius: 4px;
-  padding: 6px 8px;
-  margin-bottom: 4px;
-  color: #333;
+  margin-top: 4px;
+  font-size: 11px;
   line-height: 1.4;
-  max-height: 60px;
-  overflow: hidden;
 }
 
 .context-text {
+  color: #333;
   word-break: break-all;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.context-more {
+.context-pos {
   color: #999;
-}
-
-.context-range {
-  color: #888;
   font-size: 10px;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.context-stats {
-  color: #999;
-  margin-left: auto;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 </style>

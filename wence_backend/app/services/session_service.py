@@ -157,7 +157,7 @@ class SessionService:
         role: str,
         content: str,
         document_json: dict | None = None,
-        selection_context: dict | None = None,
+        selection_context: list | dict | None = None,
         content_parts: list[dict] | None = None,
         model: str | None = None,
         mode: str | None = None,

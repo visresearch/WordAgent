@@ -12,7 +12,7 @@ from langchain_core.messages import AIMessageChunk, HumanMessage, SystemMessage,
 from langgraph.graph import END, START, MessagesState, StateGraph
 
 from app.services.llm_client import LLMClientManager, resolve_model
-from app.services.agent.prompts import AGENT_PROMPT
+from app.services.agent.prompts import get_agent_prompt
 from app.services.agent.tools import (
     ALL_TOOLS,
     TOOL_MAP,
@@ -166,7 +166,7 @@ async def process_writing_request_stream(
         weekdays = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
         now = datetime.now()
         current_time = now.strftime("%Y年%m月%d日 %H:%M") + " " + weekdays[now.weekday()]
-        system_prompt = AGENT_PROMPT + f"\n\n# 当前时间\n{current_time}"
+        system_prompt = get_agent_prompt() + f"\n\n# 当前时间\n{current_time}"
         messages = [SystemMessage(content=system_prompt)]
 
         # 构建用户消息

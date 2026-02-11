@@ -49,6 +49,13 @@ def start_frontend():
             def __init__(self, *args, **kwargs):
                 super().__init__(*args, directory=str(frontend_build_dir), **kwargs)
 
+            def end_headers(self):
+                # 禁用缓存，确保每次加载最新前端资源
+                self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+                self.send_header("Pragma", "no-cache")
+                self.send_header("Expires", "0")
+                super().end_headers()
+
         with socketserver.TCPServer(("", 3889), CustomHandler) as httpd:
             print(f"✅ 前端服务启动成功: http://localhost:3889")
             httpd.serve_forever()
