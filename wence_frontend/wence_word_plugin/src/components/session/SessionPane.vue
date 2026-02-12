@@ -131,7 +131,7 @@
 </template>
 
 <script>
-import { ref, computed, onMounted, nextTick } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import api from '../js/api.js';
 
 export default {
@@ -348,6 +348,34 @@ export default {
       loadSessions();
     };
 
+    // 监听跨 TaskPane 的标题更新（通过 localStorage storage 事件）
+    const onStorageChanged = (event) => {
+      if (event.key === 'wence_session_title_update') {
+        try {
+          const data = JSON.parse(event.newValue);
+          if (data && data.sessionId) {
+            const target = sessions.value.find(s => s.id === data.sessionId);
+            if (target) {
+              if (data.title) {
+                target.title = data.title;
+              }
+              if (data.preview) {
+                target.preview = data.preview;
+              }
+            } else {
+              // 可能是新创建的会话，刷新列表
+              loadSessions();
+            }
+          }
+        } catch (e) {
+          console.warn('解析标题更新事件失败:', e);
+        }
+      } else if (event.key === 'wence_session_change') {
+        // 跨窗口会话切换，刷新列表
+        loadSessions();
+      }
+    };
+
     onMounted(() => {
       loadSessions();
 
@@ -362,6 +390,14 @@ export default {
       // 监听会话创建/更新事件
       window.addEventListener('session-created', onSessionCreated);
       window.addEventListener('session-updated', onSessionCreated);
+      // 监听跨 TaskPane 的 localStorage storage 事件
+      window.addEventListener('storage', onStorageChanged);
+    });
+
+    onBeforeUnmount(() => {
+      window.removeEventListener('session-created', onSessionCreated);
+      window.removeEventListener('session-updated', onSessionCreated);
+      window.removeEventListener('storage', onStorageChanged);
     });
 
     return {

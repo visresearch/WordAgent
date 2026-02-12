@@ -499,7 +499,31 @@ export default {
 
         // 第一条用户消息会自动设置会话标题，更新本地标题
         if (role === 'user' && (!this.currentSessionTitle || this.currentSessionTitle === '新对话')) {
-          this.currentSessionTitle = content.length > 30 ? content.substring(0, 30) + '...' : content;
+          const newTitle = content.length > 30 ? content.substring(0, 30) + '...' : content;
+          this.currentSessionTitle = newTitle;
+
+          // 通过 localStorage 通知 SessionPane 更新标题和预览（跨 TaskPane 窗口通信）
+          try {
+            localStorage.setItem('wence_session_title_update', JSON.stringify({
+              sessionId: this.currentSessionId,
+              title: newTitle,
+              preview: content.length > 50 ? content.substring(0, 50) + '...' : content,
+              timestamp: Date.now()
+            }));
+          } catch (e) {
+            console.warn('localStorage 写入标题更新失败:', e);
+          }
+        } else {
+          // 非首条消息也同步预览
+          try {
+            localStorage.setItem('wence_session_title_update', JSON.stringify({
+              sessionId: this.currentSessionId,
+              preview: content.length > 50 ? content.substring(0, 50) + '...' : content,
+              timestamp: Date.now()
+            }));
+          } catch (e) {
+            console.warn('localStorage 写入预览更新失败:', e);
+          }
         }
 
         // 通知 SessionPane 更新列表（预览和标题可能变了）
@@ -1025,7 +1049,10 @@ export default {
      */
     cancelDocument() {
       if (this.pendingDocumentMsg) {
-        this.revertToMessage(this.pendingDocumentMsg);
+        const msgIndex = this.messages.indexOf(this.pendingDocumentMsg);
+        if (msgIndex !== -1) {
+          this.revertToMessage(msgIndex);
+        }
       }
       this.pendingDocument = null;
       this.pendingDocumentMsg = null;

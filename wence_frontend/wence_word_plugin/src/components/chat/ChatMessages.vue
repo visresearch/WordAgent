@@ -192,7 +192,7 @@
           </button>
           <span class="icon-tooltip">重试</span>
         </div>
-        <div v-if="index > 0" class="icon-btn-wrapper">
+        <!-- <div v-if="index > 0" class="icon-btn-wrapper">
           <button class="icon-btn" @click="$emit('revert', index)">
             <svg
               width="14"
@@ -210,7 +210,7 @@
             </svg>
           </button>
           <span class="icon-tooltip">撤消</span>
-        </div>
+        </div> -->
       </div>
     </div>
   </div>

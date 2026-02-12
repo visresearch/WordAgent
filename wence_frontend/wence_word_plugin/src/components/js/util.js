@@ -12,10 +12,12 @@ function GetUrlPath() {
     return path.substring(0, path.lastIndexOf('/'));
   }
 
-  // 在非本地网页的情况下获取根路径
-  const { protocol, hostname, port } = window.location;
+  // 在非本地网页的情况下获取根路径（包含 pathname 中的基础路径）
+  const { protocol, hostname, port, pathname } = window.location;
   const portPart = port ? `:${port}` : '';
-  return `${protocol}//${hostname}${portPart}`;
+  // 去掉 pathname 末尾的文件名（如 index.html），保留目录部分
+  const basePath = pathname.substring(0, pathname.lastIndexOf('/') + 1).replace(/\/+$/, '');
+  return `${protocol}//${hostname}${portPart}${basePath}`;
 }
 
 function GetRouterHash() {

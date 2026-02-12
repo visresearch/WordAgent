@@ -21,49 +21,6 @@ def get_base_path():
         return Path(__file__).parent
 
 
-def start_frontend():
-    """启动前端静态文件服务器"""
-    try:
-        base_path = get_base_path()
-
-        # PyInstaller 打包后在 frontend 目录
-        frontend_build_dir = base_path / "frontend"
-
-        # 如果打包目录不存在，尝试开发环境路径
-        if not frontend_build_dir.exists():
-            frontend_build_dir = Path(__file__).parent.parent / "wence_frontend" / "wence_word_plugin" / "dist"
-
-        if not frontend_build_dir.exists():
-            print("⚠️  前端构建目录不存在，跳过启动前端服务")
-            return
-
-        print(f"🎨 启动前端插件服务器 (端口 3889)...")
-        print(f"📂 静态文件目录: {frontend_build_dir}")
-
-        # 使用 Python 内置 HTTP 服务器提供静态文件
-        import http.server
-        import socketserver
-
-        # 不改变工作目录，而是使用自定义 Handler
-        class CustomHandler(http.server.SimpleHTTPRequestHandler):
-            def __init__(self, *args, **kwargs):
-                super().__init__(*args, directory=str(frontend_build_dir), **kwargs)
-
-            def end_headers(self):
-                # 禁用缓存，确保每次加载最新前端资源
-                self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
-                self.send_header("Pragma", "no-cache")
-                self.send_header("Expires", "0")
-                super().end_headers()
-
-        with socketserver.TCPServer(("", 3889), CustomHandler) as httpd:
-            print(f"✅ 前端服务启动成功: http://localhost:3889")
-            httpd.serve_forever()
-
-    except Exception as e:
-        print(f"⚠️  前端服务启动失败: {e}")
-
-
 def start_api_server():
     """启动 FastAPI 服务"""
     try:
@@ -90,6 +47,14 @@ def start_api_server():
         traceback.print_exc()
 
 
+def start_gui():
+    """启动 GUI 桌面程序"""
+    sys.path.insert(0, str(Path(__file__).parent))
+    from gui.main import start_gui as _start_gui
+
+    _start_gui(base_path=str(get_base_path()))
+
+
 if __name__ == "__main__":
 
     def signal_handler(sig, frame):
@@ -108,22 +73,22 @@ if __name__ == "__main__":
  ╚══╝╚══╝ ╚══════╝╚═╝  ╚═══╝ ╚═════╝╚══════╝    ╚═╝  ╚═╝╚═╝
     """)
 
+    gui_proc = None
     try:
         # 在后台线程启动 API 服务
         api_thread = threading.Thread(target=start_api_server, daemon=True)
         api_thread.start()
 
-        # 等待 API 服务启动
+        # 等待 1 秒确保 API 先就绪
         time.sleep(1)
 
-        # 在后台线程启动前端服务
-        # frontend_thread = threading.Thread(target=start_frontend, daemon=True)
-        # frontend_thread.start()
+        # 在主线程启动 GUI（Qt 必须在主线程运行）
+        print("🖥️  启动 GUI 桌面程序...")
+        start_gui()
 
-        # 主线程保持运行
-        print("\n✅ 所有服务已启动，按 Ctrl+C 退出")
-        while True:
-            time.sleep(1)
+        # GUI 关闭后退出
+        print("🖥️  GUI 已关闭，正在退出...")
+        os._exit(0)
 
     except KeyboardInterrupt:
         print("\n👋 程序已退出")

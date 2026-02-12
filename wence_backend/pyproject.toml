@@ -22,6 +22,7 @@ dependencies = [
     "httpx>=0.28.1",
     "beautifulsoup4>=4.14.3",
     "lxml>=6.0.2",
+    "pyside6>=6.10.0",
 ]
 
 [project.optional-dependencies]

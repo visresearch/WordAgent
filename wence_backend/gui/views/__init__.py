@@ -3,6 +3,6 @@
 """
 
 from .main_window import MainWindow
-from .chat_interface import ChatInterface
 from .home_interface import HomeInterface
+from .install_interface import InstallInterface
 from .setting_interface import SettingInterface

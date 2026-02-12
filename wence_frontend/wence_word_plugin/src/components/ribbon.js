@@ -42,6 +42,23 @@ async function checkAutoShowPanel() {
         let tskpane = window.Application.GetTaskPane(tsId);
         tskpane.Visible = true;
       }
+
+      // 自动创建并显示 Session TaskPane
+      let sessionTsId = window.Application.PluginStorage.getItem('session_taskpane_id');
+      if (!sessionTsId) {
+        let sessionPane = window.Application.CreateTaskPane(
+          Util.GetUrlPath() + Util.GetRouterHash() + '/session',
+          '历史会话'
+        );
+        let sessionId = sessionPane.ID;
+        window.Application.PluginStorage.setItem('session_taskpane_id', sessionId);
+        sessionPane.DockPosition = window.Application.Enum.msoCTPDockPositionRight;
+        sessionPane.Width = window.devicePixelRatio * 500;
+        sessionPane.Visible = true;
+      } else {
+        let sessionPane = window.Application.GetTaskPane(sessionTsId);
+        sessionPane.Visible = true;
+      }
     }
   } catch (e) {
     console.warn('自动打开面板失败:', e);
@@ -82,7 +99,7 @@ function OnAction(control) {
           let id = tskpane.ID;
           window.Application.PluginStorage.setItem('session_taskpane_id', id);
           tskpane.DockPosition = window.Application.Enum.msoCTPDockPositionRight;
-          tskpane.Width = window.devicePixelRatio * 400;
+          tskpane.Width = window.devicePixelRatio * 500;
           tskpane.Visible = true;
         } else {
           let tskpane = window.Application.GetTaskPane(tsId);

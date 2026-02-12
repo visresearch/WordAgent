@@ -67,7 +67,7 @@
         <textarea
           ref="chatInput"
           v-model="inputText"
-          placeholder="描述下一步要构建的内容"
+          :placeholder="mode === 'agent' ? '描述下一步要构建的内容' : '浏览并理解文档'"
           class="chat-input"
           rows="1"
           @keydown.enter.exact.prevent="sendMessage"

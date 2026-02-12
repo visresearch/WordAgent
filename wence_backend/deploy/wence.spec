@@ -22,6 +22,8 @@ datas = [
     ('../../wence_frontend/wence_word_plugin/dist', 'frontend'),
     # 配置文件目录
     ('../config', 'config'),
+    # GUI 资源文件（publish.html 等）
+    ('../gui/resources', 'gui/resources'),
 ]
 
 # 收集隐藏导入（LangChain 和依赖库的所有模块）
@@ -71,6 +73,14 @@ hiddenimports = [
     'dotenv',
     'json',
     'asyncio',
+    
+    # PySide6 / GUI
+    'PySide6',
+    'PySide6.QtCore',
+    'PySide6.QtGui',
+    'PySide6.QtWidgets',
+    'PySide6.QtWebEngineCore',
+    'PySide6.QtWebEngineWidgets',
     
     # App 模块
     'app',

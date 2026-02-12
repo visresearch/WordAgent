@@ -34,6 +34,17 @@ def get_static_dir() -> Path:
         return base / "static"
 
 
+def get_frontend_dist_dir() -> Path:
+    """获取前端构建产物目录（dist）"""
+    if getattr(sys, "frozen", False):
+        base = Path(sys._MEIPASS)
+        return base / "frontend"
+    else:
+        # 开发环境：wence_frontend/wence_word_plugin/dist
+        base = Path(__file__).parent.parent.parent
+        return base / "wence_frontend" / "wence_word_plugin" / "dist"
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
@@ -89,6 +100,14 @@ if STATIC_DIR.exists():
     assets_dir = STATIC_DIR / "assets"
     if assets_dir.exists():
         app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+
+# 挂载前端 dist 到 /jsplugindir/（WPS 在线插件加载路径）
+FRONTEND_DIST_DIR = get_frontend_dist_dir()
+if FRONTEND_DIST_DIR.exists():
+    app.mount("/jsplugindir", StaticFiles(directory=str(FRONTEND_DIST_DIR), html=True), name="jsplugindir")
+    print(f"📂 前端插件已挂载: /jsplugindir/ -> {FRONTEND_DIST_DIR}")
+else:
+    print(f"⚠️  前端 dist 目录不存在: {FRONTEND_DIST_DIR}")
 
 
 @app.get("/")

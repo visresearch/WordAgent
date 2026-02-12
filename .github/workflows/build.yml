@@ -45,7 +45,7 @@ jobs:
         working-directory: wence_backend
         run: |
           uv sync
-          uv pip install pyinstaller
+          uv pip install pyinstaller pyside6
       
       - name: Build binary with PyInstaller
         working-directory: wence_backend
@@ -103,7 +103,7 @@ jobs:
         working-directory: wence_backend
         run: |
           uv sync
-          uv pip install pyinstaller
+          uv pip install pyinstaller pyside6
       
       - name: Build binary with PyInstaller
         working-directory: wence_backend
