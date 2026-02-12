@@ -6,12 +6,12 @@
 
 ```bash
 # 删除本地和远程的 tag
-git tag -d v0.1.1
-git push github --delete v0.1.1
+git tag -d v0.2.0
+git push github --delete v0.2.0
 
 # 修改完代码后重新打 tag 并推送
-git add . && git commit -m "fix: fix a few bugs"
-git tag v0.1.1
+git add . && git commit -m "fix: fix config bug"
+git tag v0.2.0
 git push github && git push github --tags
 ```
 

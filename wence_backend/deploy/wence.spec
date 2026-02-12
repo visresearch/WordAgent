@@ -20,11 +20,18 @@ datas = [
     ('../app', 'app'),
     # 打包前端构建目录（pnpm build 输出到 dist）
     ('../../wence_frontend/wence_word_plugin/dist', 'frontend'),
-    # 配置文件目录
-    ('../config', 'config'),
     # GUI 资源文件（publish.html 等）
     ('../gui/resources', 'gui/resources'),
 ]
+
+# 可选数据文件（config 目录包含用户配置，不提交到 git）
+optional_dirs = [
+    ('../config', 'config'),
+]
+for src, dst in optional_dirs:
+    src_path = os.path.abspath(os.path.join(os.path.dirname(SPEC), src))
+    if os.path.exists(src_path):
+        datas.append((src, dst))
 
 # 收集隐藏导入（LangChain 和依赖库的所有模块）
 hiddenimports = [
