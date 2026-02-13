@@ -10,11 +10,16 @@ git tag -d v0.2.0
 git push github --delete v0.2.0
 
 # 修改完代码后重新打 tag 并推送
-git add . && git commit -m "fix: fix config bug"
+git add . && git commit -m "fix:修复QT启动不了wpscloudsrv的问题"
 git tag v0.2.0
 git push github && git push github --tags
 ```
 
+在58890端口会运行一个wpscloudsrv的服务，要启动，不然看不到wps加载项列表
+
+```bash
+sudo pkill -f wpsclouds
+```
 
 # 参考文献
 

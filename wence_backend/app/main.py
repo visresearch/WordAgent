@@ -110,6 +110,13 @@ else:
     print(f"⚠️  前端 dist 目录不存在: {FRONTEND_DIST_DIR}")
 
 
+@app.get("/publish")
+async def publish():
+    """发布页 - WPS 加载项配置页面"""
+    publish_file = Path(__file__).parent / "publish.html"
+    return FileResponse(publish_file, media_type="text/html")
+
+
 @app.get("/")
 async def root():
     """根路由 - 返回前端页面或 API 信息"""
