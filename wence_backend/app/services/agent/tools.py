@@ -396,6 +396,7 @@ def web_fetch(url: str) -> str:
     """
     import httpx
     from bs4 import BeautifulSoup
+    from app.services.llm_client import get_httpx_proxy_url
 
     writer = get_stream_writer()
     writer({"type": "status", "content": f"🌐 正在拓取网页: {url}"})
@@ -407,7 +408,8 @@ def web_fetch(url: str) -> str:
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
         }
-        with httpx.Client(timeout=20, follow_redirects=True, headers=headers) as client:
+        proxy_url = get_httpx_proxy_url()
+        with httpx.Client(timeout=20, follow_redirects=True, headers=headers, proxy=proxy_url) as client:
             resp = client.get(url)
             resp.raise_for_status()
 
@@ -512,6 +514,7 @@ def web_search(query: str, max_results: int = 5) -> str:
     """
     import httpx
     from bs4 import BeautifulSoup
+    from app.services.llm_client import get_httpx_proxy_url
 
     writer = get_stream_writer()
     writer({"type": "status", "content": f"🔎 正在搜索: {query}"})
@@ -526,8 +529,9 @@ def web_search(query: str, max_results: int = 5) -> str:
     try:
         url = "https://cn.bing.com/search"
         params = {"q": query, "count": str(max_results * 2)}
+        proxy_url = get_httpx_proxy_url()
 
-        with httpx.Client(timeout=15, follow_redirects=True, headers=headers) as client:
+        with httpx.Client(timeout=15, follow_redirects=True, headers=headers, proxy=proxy_url) as client:
             resp = client.get(url, params=params)
             resp.raise_for_status()
 

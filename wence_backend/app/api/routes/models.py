@@ -11,7 +11,6 @@ from fastapi import APIRouter
 from openai import AsyncOpenAI
 from pydantic import BaseModel
 
-from app.core.config import settings
 from app.models.chat import ModelInfo, ModelsResponse
 
 router = APIRouter()

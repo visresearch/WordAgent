@@ -65,6 +65,72 @@
         </label>
       </div>
     </div>
+
+    <!-- 网络代理 独立 section -->
+    <div class="section-divider"></div>
+
+    <div class="section-header">
+      <svg
+        class="section-icon"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+      >
+        <circle cx="12" cy="12" r="10" />
+        <path d="M2 12h20" />
+        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+      </svg>
+      <div class="section-title-group">
+        <h2 class="section-title">
+          网络代理
+        </h2>
+        <p class="section-subtitle">
+          配置 HTTP/HTTPS 请求的代理服务器
+        </p>
+      </div>
+    </div>
+
+    <div class="proxy-section">
+      <div class="setting-row" style="border-bottom: none; padding-bottom: 8px;">
+        <span class="setting-label">启用代理</span>
+        <label class="switch">
+          <input v-model="localSettings.proxy.enabled" type="checkbox" @change="emitChange" />
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div class="proxy-inputs" :class="{ disabled: !localSettings.proxy.enabled }">
+        <div class="proxy-row">
+          <div class="input-group flex-grow">
+            <label class="input-label">代理地址 (IP)</label>
+            <input
+              v-model="localSettings.proxy.host"
+              type="text"
+              class="text-input"
+              placeholder="127.0.0.1"
+              :disabled="!localSettings.proxy.enabled"
+              @input="emitChange"
+            />
+          </div>
+          <div class="input-group port-input">
+            <label class="input-label">端口</label>
+            <input
+              v-model.number="localSettings.proxy.port"
+              type="number"
+              class="text-input"
+              placeholder="7897"
+              min="1"
+              max="65535"
+              :disabled="!localSettings.proxy.enabled"
+              @input="emitChange"
+            />
+          </div>
+        </div>
+        <p class="proxy-hint">
+          提示：HTTP 和 HTTPS 请求将统一使用此代理。仅支持 HTTP 代理协议，不支持 SOCKS。
+        </p>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -83,18 +149,27 @@ export default {
   setup(props, { emit }) {
     const localSettings = ref({
       showPanelOnStart: props.settings.showPanelOnStart ?? true,
-      proofreadMode: props.settings.proofreadMode ?? 'redblue'
+      proofreadMode: props.settings.proofreadMode ?? 'redblue',
+      proxy: {
+        enabled: props.settings.proxy?.enabled ?? false,
+        host: props.settings.proxy?.host ?? '',
+        port: props.settings.proxy?.port ?? 0
+      }
     });
 
     watch(() => props.settings, (newVal) => {
       localSettings.value.showPanelOnStart = newVal.showPanelOnStart ?? true;
       localSettings.value.proofreadMode = newVal.proofreadMode ?? 'redblue';
+      localSettings.value.proxy.enabled = newVal.proxy?.enabled ?? false;
+      localSettings.value.proxy.host = newVal.proxy?.host ?? '';
+      localSettings.value.proxy.port = newVal.proxy?.port ?? 7897;
     }, { deep: true });
 
     const emitChange = () => {
       emit('update:settings', {
         showPanelOnStart: localSettings.value.showPanelOnStart,
-        proofreadMode: localSettings.value.proofreadMode
+        proofreadMode: localSettings.value.proofreadMode,
+        proxy: { ...localSettings.value.proxy }
       });
     };
 
@@ -292,5 +367,104 @@ export default {
 .radio-desc {
   font-size: 12px;
   color: #888;
+}
+
+/* 代理设置 */
+.proxy-section {
+  background: white;
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  padding: 12px 16px;
+}
+
+.proxy-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: opacity 0.2s;
+}
+
+.proxy-inputs.disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.proxy-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.flex-grow {
+  flex: 1;
+}
+
+.port-input {
+  width: 90px;
+  flex-shrink: 0;
+}
+
+.input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.input-label {
+  font-size: 13px;
+  color: #555;
+  font-weight: 500;
+}
+
+.text-input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #333;
+  background: #fafafa;
+  outline: none;
+  transition: border-color 0.2s, background-color 0.2s;
+  box-sizing: border-box;
+}
+
+.text-input:focus {
+  border-color: #667eea;
+  background: white;
+}
+
+.text-input:disabled {
+  background: #f5f5f5;
+  color: #aaa;
+  cursor: not-allowed;
+}
+
+.text-input::placeholder {
+  color: #bbb;
+}
+
+/* 隐藏 number input 的上下箭头 */
+.text-input[type="number"]::-webkit-inner-spin-button,
+.text-input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.text-input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+.proxy-hint {
+  font-size: 12px;
+  color: #999;
+  margin: 4px 0 0 0;
+  line-height: 1.5;
+}
+
+/* section 分隔线 */
+.section-divider {
+  height: 1px;
+  background: #e8e8e8;
+  margin: 32px 0;
 }
 </style>

@@ -27,6 +27,14 @@ class ProviderConfig(BaseModel):
     enabled: bool = True
 
 
+class ProxyConfig(BaseModel):
+    """代理配置"""
+
+    enabled: bool = False
+    host: str = ""  # 代理 IP，如 127.0.0.1
+    port: int = 0  # 代理端口，如 7897
+
+
 class UserSettings(BaseModel):
     """用户设置"""
 
@@ -34,6 +42,8 @@ class UserSettings(BaseModel):
     # 基础设置
     showPanelOnStart: bool = True
     proofreadMode: str = "redblue"
+    # 代理设置
+    proxy: ProxyConfig = ProxyConfig()
     # 个性化设置
     customPrompt: str = ""
     temperature: float = 0.7
@@ -73,6 +83,14 @@ async def save_settings(settings: UserSettings):
         # 保存设置
         with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
             json.dump(merged, f, ensure_ascii=False, indent=2)
+
+        # 清除 LLM 客户端缓存，使代理等配置变更生效
+        try:
+            from app.services.llm_client import LLMClientManager
+
+            LLMClientManager.clear_cache()
+        except Exception:
+            pass
 
         return {"message": "设置保存成功"}
     except Exception as e:

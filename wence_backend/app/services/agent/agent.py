@@ -32,6 +32,17 @@ def create_llm(model_name: str):
     provider_info = LLMClientManager.get_provider_info(model_name)
 
     from langchain_openai import ChatOpenAI
+    from app.services.llm_client import get_https_proxy_url, get_http_proxy_url
+
+    # 获取代理配置
+    proxy_url = get_https_proxy_url() or get_http_proxy_url()
+    http_client = None
+    http_async_client = None
+    if proxy_url:
+        import httpx
+
+        http_client = httpx.Client(proxy=proxy_url)
+        http_async_client = httpx.AsyncClient(proxy=proxy_url)
 
     return ChatOpenAI(
         model=model_name,
@@ -39,6 +50,8 @@ def create_llm(model_name: str):
         openai_api_base=provider_info.base_url,
         temperature=get_temperature(),
         streaming=True,
+        http_client=http_client,
+        http_async_client=http_async_client,
     )
 
 

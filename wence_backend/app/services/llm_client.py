@@ -131,6 +131,44 @@ def get_custom_prompt() -> str:
     return ""
 
 
+def get_proxy_config() -> dict:
+    """从用户设置中获取代理配置
+
+    Returns:
+        {"enabled": bool, "host": str, "port": int}
+    """
+    settings = load_user_settings()
+    proxy = settings.get("proxy", {})
+    return {
+        "enabled": proxy.get("enabled", False),
+        "host": proxy.get("host", ""),
+        "port": proxy.get("port", 0),
+    }
+
+
+def get_proxy_url() -> str | None:
+    """根据 host + port 构建 http 代理 URL，未启用则返回 None"""
+    cfg = get_proxy_config()
+    if cfg["enabled"] and cfg["host"] and cfg["port"]:
+        return f"http://{cfg['host']}:{cfg['port']}"
+    return None
+
+
+def get_http_proxy_url() -> str | None:
+    """获取 http 代理 URL，未启用则返回 None"""
+    return get_proxy_url()
+
+
+def get_https_proxy_url() -> str | None:
+    """获取 https 代理 URL，未启用则返回 None"""
+    return get_proxy_url()
+
+
+def get_httpx_proxy_url() -> str | None:
+    """获取 httpx 使用的单一代理 URL，未启用则返回 None"""
+    return get_proxy_url()
+
+
 class LLMClientManager:
     """LLM 客户端管理器"""
 
@@ -159,15 +197,25 @@ class LLMClientManager:
         if not provider.api_key:
             raise ValueError(f"提供商 {provider.name} 未配置 API Key")
 
-        # 使用 provider name + base_url 作为缓存 key
-        cache_key = f"{provider.name}:{provider.base_url}"
+        # 获取代理配置
+        proxy_url = get_proxy_url()
+
+        # 使用 provider name + base_url + proxy 作为缓存 key
+        cache_key = f"{provider.name}:{provider.base_url}:{proxy_url or ''}"
 
         # 使用缓存
         if cache_key in cls._clients:
             return cls._clients[cache_key]
 
         # 创建新客户端
-        client = AsyncOpenAI(api_key=provider.api_key, base_url=provider.base_url)
+        import httpx as _httpx
+
+        http_client = _httpx.AsyncClient(proxy=proxy_url) if proxy_url else None
+        client = AsyncOpenAI(
+            api_key=provider.api_key,
+            base_url=provider.base_url,
+            http_client=http_client,
+        )
 
         cls._clients[cache_key] = client
         return client

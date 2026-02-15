@@ -150,6 +150,11 @@ export default {
     const settings = reactive({
       showPanelOnStart: true,
       proofreadMode: 'redblue',
+      proxy: {
+        enabled: false,
+        host: '',
+        port: 0
+      },
       providers: [],
       customPrompt: '',
       temperature: 0.7
@@ -164,7 +169,8 @@ export default {
 
     const generalSettings = computed(() => ({
       showPanelOnStart: settings.showPanelOnStart,
-      proofreadMode: settings.proofreadMode
+      proofreadMode: settings.proofreadMode,
+      proxy: { ...settings.proxy }
     }));
 
     const personalizationSettings = computed(() => ({
@@ -216,6 +222,11 @@ export default {
               fetchingModels: false
             }));
           }
+          if (data.proxy) {
+            settings.proxy.enabled = data.proxy.enabled ?? false;
+            settings.proxy.host = data.proxy.host ?? '';
+            settings.proxy.port = data.proxy.port ?? 0;
+          }
           if (data.customPrompt !== undefined) {
             settings.customPrompt = data.customPrompt;
           }
@@ -236,6 +247,7 @@ export default {
         const settingsToSave = {
           showPanelOnStart: settings.showPanelOnStart,
           proofreadMode: settings.proofreadMode,
+          proxy: { ...settings.proxy },
           providers: settings.providers.map(p => ({
             name: p.name,
             baseUrl: p.baseUrl,
@@ -267,6 +279,11 @@ export default {
     const onGeneralSettingsChange = (newSettings) => {
       settings.showPanelOnStart = newSettings.showPanelOnStart;
       settings.proofreadMode = newSettings.proofreadMode;
+      if (newSettings.proxy) {
+        settings.proxy.enabled = newSettings.proxy.enabled;
+        settings.proxy.host = newSettings.proxy.host;
+        settings.proxy.port = newSettings.proxy.port;
+      }
     };
 
     const onPersonalizationChange = (newSettings) => {

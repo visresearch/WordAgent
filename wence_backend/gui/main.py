@@ -32,6 +32,7 @@ def _find_wpscloudsvr():
                 candidates.append(os.path.join(base, "Kingsoft", "WPS Office", "ksolaunch.exe"))
         # 也在 PATH 中搜索
         import shutil
+
         path_found = shutil.which("wpscloudsvr.exe") or shutil.which("wpscloudsvr")
         if path_found:
             candidates.insert(0, path_found)
@@ -51,6 +52,7 @@ def _find_wpscloudsvr():
             if os.path.isfile(c):
                 return c
         import shutil
+
         return shutil.which("wpscloudsvr")
 
 
@@ -81,8 +83,7 @@ def ensure_wps_cloud_service():
                 # Windows: 使用 CREATE_NO_WINDOW 避免弹出命令行窗口
                 CREATE_NO_WINDOW = 0x08000000
                 subprocess.Popen(
-                    [svr_path, "/jsapihttpserver",
-                     "ksowpscloudsvr://start=RelayHttpServer"],
+                    [svr_path, "/jsapihttpserver", "ksowpscloudsvr://start=RelayHttpServer"],
                     creationflags=CREATE_NO_WINDOW,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
@@ -90,8 +91,7 @@ def ensure_wps_cloud_service():
             else:
                 # Linux
                 subprocess.Popen(
-                    [svr_path, "/jsapihttpserver",
-                     "ksowpscloudsvr://start=RelayHttpServer"],
+                    [svr_path, "/jsapihttpserver", "ksowpscloudsvr://start=RelayHttpServer"],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                 )
@@ -114,10 +114,11 @@ def ensure_wps_cloud_service():
 
     # 等待服务启动
     import time
+
     for i in range(10):
         time.sleep(1)
         if is_port_listening(58890):
-            print(f"[GUI] wpscloudsvr 已启动 (等待了 {i+1} 秒)")
+            print(f"[GUI] wpscloudsvr 已启动 (等待了 {i + 1} 秒)")
             return True
     print("[GUI] wpscloudsvr 启动超时")
     return False
@@ -158,7 +159,9 @@ def start_gui(base_path=None):
     settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls, True)
 
     # 直接加载后端 /publish 页面
-    view.setUrl(QUrl("http://127.0.0.1:3880/publish"))
+    from app.core.config import settings
+
+    view.setUrl(QUrl(f"http://{settings.HOST}:{settings.PORT}/publish"))
 
     view.resize(900, 600)
     view.setWindowTitle("WPS 加载项配置")
