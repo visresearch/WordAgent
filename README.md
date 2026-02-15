@@ -10,8 +10,8 @@ git tag -d v0.2.0
 git push github --delete v0.2.0
 
 # 修改完代码后重新打 tag 并推送
-git add . && git commit -m "fix:修复QT启动不了wpscloudsrv的问题"
-git tag v0.2.0
+git add . && git commit -m "feat: 添加了新版QT界面"
+git tag v0.2.1
 git push github && git push github --tags
 ```
 

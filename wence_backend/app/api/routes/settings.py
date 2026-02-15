@@ -31,8 +31,8 @@ class ProxyConfig(BaseModel):
     """代理配置"""
 
     enabled: bool = False
-    host: str = ""  # 代理 IP，如 127.0.0.1
-    port: int = 0  # 代理端口，如 7897
+    host: str = "127.0.0.1"  # 代理 IP，如 127.0.0.1
+    port: int = 7897  # 代理端口，如 7897
 
 
 class UserSettings(BaseModel):

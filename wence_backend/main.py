@@ -64,6 +64,12 @@ if __name__ == "__main__":
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
+    # 尽早安装 OutputBuffer，这样 uvicorn / logging 拿到的
+    # sys.stdout / sys.stderr 都是我们的 wrapper，终端界面才能显示所有输出
+    from gui.views.console_interface import OutputBuffer
+
+    OutputBuffer.install()
+
     print(r"""
 ██╗    ██╗███████╗███╗   ██╗ ██████╗███████╗     █████╗ ██╗
 ██║    ██║██╔════╝████╗  ██║██╔════╝██╔════╝    ██╔══██╗██║

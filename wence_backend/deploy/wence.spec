@@ -133,28 +133,18 @@ a = Analysis(
         'tkinter',
         'jupyter',
         'notebook',
-        'pytest',
-        'setuptools',
-        
+
         # 排除深度学习框架（不需要）
         'tensorflow',
         'torch',
         'torchvision',
         'keras',
         'jax',
-        
-        # 排除数据科学库（不需要）
-        'pandas',
-        'numpy',
-        'scipy',
-        'sklearn',
-        'pytz',
-        
+
         # 排除其他不需要的库
         'babel',
         'sphinx',
         'docutils',
-        'lxml',
         'openpyxl',
         'pygraphviz',
         'fsspec',

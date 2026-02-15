@@ -5,4 +5,4 @@
 from .main_window import MainWindow
 from .home_interface import HomeInterface
 from .install_interface import InstallInterface
-from .setting_interface import SettingInterface
+from .console_interface import ConsoleInterface

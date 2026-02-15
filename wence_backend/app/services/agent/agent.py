@@ -182,6 +182,32 @@ async def process_writing_request_stream(
         system_prompt = get_agent_prompt() + f"\n\n# 当前时间\n{current_time}"
         messages = [SystemMessage(content=system_prompt)]
 
+        # 注入历史对话（最近 N 轮），让 Agent 了解上下文
+        if history:
+            from langchain_core.messages import AIMessage
+
+            MAX_HISTORY_PAIRS = 3  # 最多保留最近 3 轮对话
+            # history 来自前端，格式: [{role: "user", content: "..."}, {role: "assistant", content: "..."}, ...]
+            # 只取纯文本的 user/assistant 消息，跳过工具调用等
+            hist_msgs = []
+            for h in history:
+                role = h.get("role", "")
+                content = h.get("content", "")
+                if not content or not isinstance(content, str):
+                    continue
+                if role == "user":
+                    hist_msgs.append(HumanMessage(content=content))
+                elif role == "assistant":
+                    hist_msgs.append(AIMessage(content=content))
+
+            # 只保留最近 MAX_HISTORY_PAIRS 轮（每轮 = 1 user + 1 assistant）
+            if len(hist_msgs) > MAX_HISTORY_PAIRS * 2:
+                hist_msgs = hist_msgs[-(MAX_HISTORY_PAIRS * 2):]
+
+            if hist_msgs:
+                messages.extend(hist_msgs)
+                print(f"[Agent] 注入 {len(hist_msgs)} 条历史消息")
+
         # 构建用户消息
         user_content = message
         if document_range:
