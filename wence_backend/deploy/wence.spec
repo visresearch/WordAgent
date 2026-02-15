@@ -20,12 +20,11 @@ datas = [
     ('../app', 'app'),
     # 打包前端构建目录（pnpm build 输出到 dist）
     ('../../wence_frontend/wence_word_plugin/dist', 'frontend'),
-    # GUI 资源文件（publish.html 等）
-    ('../gui/resources', 'gui/resources'),
 ]
 
-# 可选数据文件（config 目录包含用户配置，不提交到 git）
+# 可选数据文件（不一定存在于 CI 环境）
 optional_dirs = [
+    ('../gui/resources', 'gui/resources'),
     ('../config', 'config'),
 ]
 for src, dst in optional_dirs:
