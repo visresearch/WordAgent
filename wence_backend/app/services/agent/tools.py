@@ -394,7 +394,7 @@ def web_fetch(url: str) -> str:
     Returns:
         网页正文内容（纯文本），最多返回 8000 字符
     """
-    import httpx
+    from curl_cffi import requests as curl_requests
     from bs4 import BeautifulSoup
     from app.services.llm_client import get_httpx_proxy_url
 
@@ -403,15 +403,33 @@ def web_fetch(url: str) -> str:
     print(f"[web_fetch] 开始拓取: {url}")
 
     try:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(url)
+        origin = f"{parsed.scheme}://{parsed.netloc}"
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
             "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            "Referer": origin + "/",
+            "Cache-Control": "max-age=0",
         }
         proxy_url = get_httpx_proxy_url()
-        with httpx.Client(timeout=20, follow_redirects=True, headers=headers, proxy=proxy_url) as client:
-            resp = client.get(url)
-            resp.raise_for_status()
+        proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
+
+        # 使用 Session 维持 Cookie，应对知乎等需要 Cookie 的网站
+        session = curl_requests.Session(impersonate="chrome131")
+        if proxies:
+            session.proxies = proxies
+
+        resp = session.get(url, headers=headers, timeout=20, allow_redirects=True)
+
+        # 403 时尝试先访问首页获取 Cookie 再重试
+        if resp.status_code == 403:
+            print(f"[web_fetch] 收到 403，尝试预热 Cookie: {origin}")
+            session.get(origin, headers=headers, timeout=10, allow_redirects=True)
+            resp = session.get(url, headers=headers, timeout=20, allow_redirects=True)
+
+        resp.raise_for_status()
 
         content_type = resp.headers.get("content-type", "")
         if "text/html" not in content_type and "application/xhtml" not in content_type:
@@ -483,8 +501,9 @@ def web_fetch(url: str) -> str:
         writer({"type": "status", "content": "✅ 网页拓取完成"})
         return result
 
-    except httpx.HTTPStatusError as e:
-        msg = f"拓取失败: HTTP {e.response.status_code}"
+    except curl_requests.errors.RequestsError as e:
+        status = getattr(getattr(e, "response", None), "status_code", None)
+        msg = f"拓取失败: HTTP {status}" if status else f"拓取失败: {e}"
         print(f"[web_fetch] ❌ {msg}")
         writer({"type": "status", "content": f"❌ {msg}"})
         return msg
@@ -512,7 +531,7 @@ def web_search(query: str, max_results: int = 5) -> str:
     Returns:
         搜索结果摘要，包含标题、链接和摘要
     """
-    import httpx
+    from curl_cffi import requests as curl_requests
     from bs4 import BeautifulSoup
     from app.services.llm_client import get_httpx_proxy_url
 
@@ -521,19 +540,27 @@ def web_search(query: str, max_results: int = 5) -> str:
     print(f"[web_search] 开始搜索: {query}")
 
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
     }
 
     try:
-        url = "https://cn.bing.com/search"
-        params = {"q": query, "count": str(max_results * 2)}
         proxy_url = get_httpx_proxy_url()
+        proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
+        # 有代理时用国际版 bing（代理出口通常在海外，cn.bing.com 可能异常）
+        bing_url = "https://www.bing.com/search" if proxy_url else "https://cn.bing.com/search"
+        params = {"q": query, "count": str(max_results * 2)}
 
-        with httpx.Client(timeout=15, follow_redirects=True, headers=headers, proxy=proxy_url) as client:
-            resp = client.get(url, params=params)
-            resp.raise_for_status()
+        resp = curl_requests.get(
+            bing_url,
+            params=params,
+            headers=headers,
+            impersonate="chrome131",
+            timeout=15,
+            allow_redirects=True,
+            proxies=proxies,
+        )
+        resp.raise_for_status()
 
         soup = BeautifulSoup(resp.text, "lxml")
 

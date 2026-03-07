@@ -1,5 +1,5 @@
 """
-主窗口 - 纯 PySide6，左侧导航 + 右侧 StackedWidget
+主窗口 - QWidget 基类 + qfluentwidgets 导航组件
 """
 
 from PySide6.QtCore import Qt
@@ -8,24 +8,19 @@ from PySide6.QtWidgets import (
     QWidget,
     QHBoxLayout,
     QVBoxLayout,
-    QPushButton,
     QStackedWidget,
     QApplication,
+)
+from qfluentwidgets import (
+    NavigationInterface,
+    NavigationItemPosition,
+    FluentIcon,
+    isDarkTheme,
 )
 
 from .home_interface import HomeInterface
 from .install_interface import InstallInterface
 from .console_interface import ConsoleInterface
-
-
-class NavButton(QPushButton):
-    """导航按钮"""
-
-    def __init__(self, text, parent=None):
-        super().__init__(text, parent)
-        self.setCheckable(True)
-        self.setFixedHeight(40)
-        self.setCursor(Qt.PointingHandCursor)
 
 
 class MainWindow(QMainWindow):
@@ -54,53 +49,13 @@ class MainWindow(QMainWindow):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # --- 左侧导航 ---
-        nav = QWidget()
-        nav.setFixedWidth(140)
-        nav.setStyleSheet(
-            """
-            QWidget {
-                background: #f7f7f8;
-                border-right: 1px solid #e0e0e0;
-            }
-            QPushButton {
-                text-align: left;
-                padding: 8px 20px;
-                border: none;
-                border-radius: 6px;
-                font-size: 14px;
-                color: #555;
-                background: transparent;
-                margin: 2px 8px;
-            }
-            QPushButton:hover {
-                background: #eaeaec;
-            }
-            QPushButton:checked {
-                background: #dde1f7;
-                color: #3355cc;
-                font-weight: 600;
-            }
-            """
-        )
-        nav_layout = QVBoxLayout(nav)
-        nav_layout.setContentsMargins(0, 16, 0, 16)
-        nav_layout.setSpacing(2)
-
-        self._btnHome = NavButton("🏠  主页")
-        self._btnInstall = NavButton("📦  安装管理")
-        self._btnConsole = NavButton("🖥  终端")
-
-        self._navButtons = [self._btnHome, self._btnInstall, self._btnConsole]
-        for btn in self._navButtons:
-            nav_layout.addWidget(btn)
-
-        nav_layout.addStretch(1)
-        root.addWidget(nav)
+        # --- 左侧导航（qfluentwidgets NavigationInterface） ---
+        self._nav = NavigationInterface(self, showMenuButton=False, showReturnButton=False)
+        self._nav.setFixedWidth(48)  # 收起状态宽度
+        self._nav.setExpandWidth(160)
 
         # --- 右侧内容区 ---
         self._stack = QStackedWidget()
-        self._stack.setStyleSheet("background: #ffffff;")
 
         self._homeInterface = HomeInterface(self)
         self._installInterface = InstallInterface(self)
@@ -110,17 +65,39 @@ class MainWindow(QMainWindow):
         self._stack.addWidget(self._installInterface)
         self._stack.addWidget(self._consoleInterface)
 
+        # 注册导航项
+        self._nav.addItem(
+            routeKey="homeInterface",
+            icon=FluentIcon.HOME,
+            text="主页",
+            onClick=lambda: self._switchPage(self._homeInterface),
+            position=NavigationItemPosition.TOP,
+        )
+        self._nav.addItem(
+            routeKey="installInterface",
+            icon=FluentIcon.APPLICATION,
+            text="安装管理",
+            onClick=lambda: self._switchPage(self._installInterface),
+            position=NavigationItemPosition.TOP,
+        )
+        self._nav.addItem(
+            routeKey="consoleInterface",
+            icon=FluentIcon.COMMAND_PROMPT,
+            text="终端",
+            onClick=lambda: self._switchPage(self._consoleInterface),
+            position=NavigationItemPosition.BOTTOM,
+        )
+
+        root.addWidget(self._nav)
         root.addWidget(self._stack, 1)
 
-        # 绑定导航
-        self._btnHome.clicked.connect(lambda: self._switchPage(0))
-        self._btnInstall.clicked.connect(lambda: self._switchPage(1))
-        self._btnConsole.clicked.connect(lambda: self._switchPage(2))
-
         # 默认主页
-        self._switchPage(0)
+        self._switchPage(self._homeInterface)
+        self._nav.setCurrentItem("homeInterface")
 
-    def _switchPage(self, index):
-        self._stack.setCurrentIndex(index)
-        for i, btn in enumerate(self._navButtons):
-            btn.setChecked(i == index)
+    def _switchPage(self, widget):
+        self._stack.setCurrentWidget(widget)
+
+    def resizeEvent(self, event):
+        self._nav.setFixedHeight(self.height())
+        super().resizeEvent(event)

@@ -993,7 +993,7 @@ export default {
 
           // 插入后显示预览条，等待用户确认或取消
           const paragraphs = data.content.paragraphs || [];
-          const previewText = paragraphs.map(p => p.content || '').join(' ').slice(0, 60);
+          // const previewText = paragraphs.map(p => p.content || '').join(' ').slice(0, 60);
           const paraCount = paragraphs.length;
           const tableCount = (data.content.tables || []).length;
           let summary = `${paraCount} 个段落`;
@@ -1002,7 +1002,7 @@ export default {
           }
 
           this.pendingDocument = {
-            preview: previewText ? `“${previewText}…” ${summary}` : `AI 已生成文档（${summary}）`
+            preview: `AI 已生成（${summary}）`
           };
           this.pendingDocumentMsg = msg;
         });

@@ -1,70 +1,48 @@
-"""主页界面 - 纯 PySide6"""
+"""主页界面 - 使用 qfluentwidgets 组件 + QWidget 基类"""
 
 import os
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont, QPainter, QBrush, QColor
+from PySide6.QtGui import QFont, QColor
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
-    QLabel,
-    QFrame,
 )
 from PySide6.QtSvgWidgets import QSvgWidget
+from qfluentwidgets import (
+    TitleLabel,
+    CaptionLabel,
+    BodyLabel,
+    StrongBodyLabel,
+    CardWidget,
+    IconInfoBadge,
+    FluentIcon,
+    InfoBadge,
+)
 
 
-class _StatusDot(QWidget):
-    """小圆点状态指示器"""
+class _InfoCard(CardWidget):
+    """功能信息卡片"""
 
-    def __init__(self, color="#4CAF50", parent=None):
+    def __init__(self, icon: FluentIcon, title: str, desc: str, parent=None):
         super().__init__(parent)
-        self.setFixedSize(10, 10)
-        self._color = color
-
-    def paintEvent(self, event):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
-        p.setBrush(QBrush(QColor(self._color)))
-        p.setPen(Qt.NoPen)
-        p.drawEllipse(0, 0, 10, 10)
-        p.end()
-
-
-class _InfoCard(QFrame):
-    """简单信息卡片"""
-
-    def __init__(self, emoji: str, title: str, desc: str, parent=None):
-        super().__init__(parent)
-        self.setFrameShape(QFrame.StyledPanel)
         self.setFixedHeight(80)
-        self.setStyleSheet(
-            """
-            QFrame {
-                background: #f9f9fb;
-                border: 1px solid #e8e8e8;
-                border-radius: 8px;
-            }
-            """
-        )
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(16, 12, 16, 12)
         layout.setSpacing(12)
 
-        icon_label = QLabel(emoji, self)
-        icon_label.setFont(QFont("", 22))
-        icon_label.setFixedWidth(36)
-        icon_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(icon_label)
+        icon_widget = IconInfoBadge.info(icon, self)
+        icon_widget.setFixedSize(36, 36)
+        layout.addWidget(icon_widget, alignment=Qt.AlignVCenter)
 
         text_layout = QVBoxLayout()
         text_layout.setSpacing(2)
 
-        t = QLabel(title, self)
-        t.setFont(QFont("", 13, QFont.Weight.DemiBold))
-        d = QLabel(desc, self)
-        d.setStyleSheet("color: #888; font-size: 12px;")
+        t = StrongBodyLabel(title, self)
+        d = CaptionLabel(desc, self)
+        d.setTextColor(QColor("#888888"), QColor("#aaaaaa"))
 
         text_layout.addWidget(t)
         text_layout.addWidget(d)
@@ -95,10 +73,9 @@ class HomeInterface(QWidget):
 
         title_col = QVBoxLayout()
         title_col.setSpacing(4)
-        title = QLabel("WenCe AI", self)
-        title.setFont(QFont("", 22, QFont.Weight.Bold))
-        subtitle = QLabel("智能写作助手，让创作更简单", self)
-        subtitle.setStyleSheet("color: #888; font-size: 14px;")
+        title = TitleLabel("WenCe AI", self)
+        subtitle = CaptionLabel("智能写作助手，让创作更简单", self)
+        subtitle.setTextColor(QColor("#888888"), QColor("#aaaaaa"))
         title_col.addWidget(title)
         title_col.addWidget(subtitle)
         header.addLayout(title_col, 1)
@@ -107,24 +84,20 @@ class HomeInterface(QWidget):
         layout.addSpacing(28)
 
         # --- 状态栏 ---
-        status = QFrame(self)
-        status.setFrameShape(QFrame.StyledPanel)
-        status.setStyleSheet(
-            "QFrame { background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; }"
-        )
+        status = CardWidget(self)
         sl = QHBoxLayout(status)
         sl.setContentsMargins(16, 12, 16, 12)
         sl.setSpacing(10)
 
-        self._dot = _StatusDot("#4CAF50", self)
+        self._dot = InfoBadge.success("", self)
+        self._dot.setFixedSize(10, 10)
         sl.addWidget(self._dot, alignment=Qt.AlignVCenter)
 
-        self._status_label = QLabel("后端服务运行中", self)
-        self._status_label.setStyleSheet("font-size: 14px; color: #333; border: none;")
+        self._status_label = BodyLabel("后端服务运行中", self)
         sl.addWidget(self._status_label, 1)
 
-        self._version_label = QLabel("v0.2.0", self)
-        self._version_label.setStyleSheet("color: #888; font-size: 13px; border: none;")
+        self._version_label = CaptionLabel("v0.2.0", self)
+        self._version_label.setTextColor(QColor("#888888"), QColor("#aaaaaa"))
         sl.addWidget(self._version_label, alignment=Qt.AlignVCenter)
 
         layout.addWidget(status)
@@ -133,16 +106,15 @@ class HomeInterface(QWidget):
         # --- 功能卡片 ---
         row1 = QHBoxLayout()
         row1.setSpacing(16)
-        row1.addWidget(_InfoCard("✏️", "AI 校对", "智能检查文档中的错误并给出修改建议", self))
-        row1.addWidget(_InfoCard("💬", "AI 对话", "与 AI 助手自由对话，获取写作灵感", self))
+        row1.addWidget(_InfoCard(FluentIcon.EDIT, "AI 校对", "智能检查文档中的错误并给出修改建议", self))
+        row1.addWidget(_InfoCard(FluentIcon.CHAT, "AI 对话", "与 AI 助手自由对话，获取写作灵感", self))
         layout.addLayout(row1)
         layout.addSpacing(16)
 
         row2 = QHBoxLayout()
         row2.setSpacing(16)
-        row2.addWidget(_InfoCard("📝", "全文润色", "一键优化文档的表达和结构", self))
-        row2.addWidget(_InfoCard("📦", "插件管理", "安装和管理 WPS Office 加载项", self))
+        row2.addWidget(_InfoCard(FluentIcon.DOCUMENT, "全文润色", "一键优化文档的表达和结构", self))
+        row2.addWidget(_InfoCard(FluentIcon.APPLICATION, "插件管理", "安装和管理 WPS Office 加载项", self))
         layout.addLayout(row2)
 
         layout.addStretch(1)
-

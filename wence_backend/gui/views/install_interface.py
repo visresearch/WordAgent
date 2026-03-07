@@ -1,42 +1,39 @@
-"""安装界面 - 纯 PySide6，直接内嵌 WebEngine 加载 /publish"""
+"""安装界面 - 使用 qfluentwidgets 组件 + QWidget 基类，内嵌 WebEngine"""
 
-from PySide6.QtCore import QUrl, Qt
-from PySide6.QtGui import QFont
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel
+from PySide6.QtCore import QUrl
+from PySide6.QtGui import QColor
+from PySide6.QtWidgets import QWidget, QVBoxLayout
 from PySide6.QtWebEngineWidgets import QWebEngineView
+from qfluentwidgets import SubtitleLabel, CaptionLabel, CardWidget
 
 
 class InstallInterface(QWidget):
-    """安装管理界面 - 直接内嵌 WebEngine"""
+    """安装管理界面 - 内嵌 WebEngine"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("installInterface")
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        layout.setContentsMargins(24, 20, 24, 24)
+        layout.setSpacing(12)
 
         # --- 标题栏 ---
-        header = QWidget(self)
-        header.setStyleSheet("background: #f7f7f8; border-bottom: 1px solid #e8e8e8;")
-        hl = QVBoxLayout(header)
-        hl.setContentsMargins(24, 16, 24, 12)
-        hl.setSpacing(4)
+        title = SubtitleLabel("安装管理", self)
+        layout.addWidget(title)
 
-        title = QLabel("📦 安装管理", self)
-        title.setFont(QFont("", 18, QFont.Weight.Bold))
-        hl.addWidget(title)
+        subtitle = CaptionLabel("管理 WPS Office 加载项的安装与卸载", self)
+        subtitle.setTextColor(QColor("#888888"), QColor("#aaaaaa"))
+        layout.addWidget(subtitle)
 
-        subtitle = QLabel("管理 WPS Office 加载项的安装与卸载", self)
-        subtitle.setStyleSheet("color: #888; font-size: 13px;")
-        hl.addWidget(subtitle)
+        # --- WebEngine（包裹在 CardWidget 中） ---
+        card = CardWidget(self)
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(2, 2, 2, 2)
 
-        layout.addWidget(header)
-
-        # --- WebEngine ---
-        self._webview = QWebEngineView(self)
-        layout.addWidget(self._webview, 1)
+        self._webview = QWebEngineView(card)
+        card_layout.addWidget(self._webview)
+        layout.addWidget(card, 1)
 
         from app.core.config import settings as app_settings
 

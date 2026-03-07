@@ -12,7 +12,7 @@ from langchain_core.messages import AIMessageChunk, HumanMessage, SystemMessage,
 from langgraph.graph import END, START, MessagesState, StateGraph
 
 from app.services.llm_client import LLMClientManager, resolve_model
-from app.services.agent.prompts import get_agent_prompt
+from app.services.agent.prompts import get_agent_prompt_skills, get_agent_prompt
 from app.services.agent.tools import (
     ALL_TOOLS,
     TOOL_MAP,
@@ -27,6 +27,8 @@ from app.services.agent.tools import (
 
 def create_llm(model_name: str):
     """创建 LLM 实例，根据提供商类型返回对应的 Chat 实例"""
+    import os
+
     from app.services.llm_client import get_temperature
 
     provider_info = LLMClientManager.get_provider_info(model_name)
@@ -36,23 +38,37 @@ def create_llm(model_name: str):
 
     # 获取代理配置
     proxy_url = get_https_proxy_url() or get_http_proxy_url()
-    http_client = None
-    http_async_client = None
-    if proxy_url:
+
+    # 当用户未启用代理时，临时清除环境变量中的代理设置
+    # 防止 openai/httpx 读取到系统的 socks:// 代理导致 scheme 不支持报错
+    _proxy_env_keys = [
+        "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
+        "http_proxy", "https_proxy", "all_proxy",
+    ]
+    saved_env = {}
+    if not proxy_url:
+        for key in _proxy_env_keys:
+            if key in os.environ:
+                saved_env[key] = os.environ.pop(key)
+
+    try:
         import httpx
 
         http_client = httpx.Client(proxy=proxy_url)
         http_async_client = httpx.AsyncClient(proxy=proxy_url)
 
-    return ChatOpenAI(
-        model=model_name,
-        openai_api_key=provider_info.api_key,
-        openai_api_base=provider_info.base_url,
-        temperature=get_temperature(),
-        streaming=True,
-        http_client=http_client,
-        http_async_client=http_async_client,
-    )
+        return ChatOpenAI(
+            model=model_name,
+            openai_api_key=provider_info.api_key,
+            openai_api_base=provider_info.base_url,
+            temperature=get_temperature(),
+            streaming=True,
+            http_client=http_client,
+            http_async_client=http_async_client,
+        )
+    finally:
+        # 恢复环境变量
+        os.environ.update(saved_env)
 
 
 # region LangGraph Agent（ReAct）
@@ -174,13 +190,30 @@ async def process_writing_request_stream(
     app = build_graph(llm_with_tools)
 
     try:
+        # 构建初始消息列表
+        messages = []
+
+        # # 注入系统提示技能（拆分为多个 SystemMessage，便于维护和按模式裁剪）
+        # for skill_prompt in get_agent_prompt_skills(mode=mode):
+        #     messages.append(SystemMessage(content=skill_prompt))
+
+        # 注入系统提示（从模块化 md 文件加载，合并为单条 SystemMessage 以兼容小模型）
+        messages.append(SystemMessage(content=get_agent_prompt(mode=mode)))
+
+        # 注入自定义提示（如果有）
+        from app.services.llm_client import get_custom_prompt
+
+        custom_prompt = get_custom_prompt()
+        if custom_prompt:
+            messages.append(SystemMessage(content=f"用户自定义指令: {custom_prompt}"))
+
+        # 注入当前时间
         from datetime import datetime
 
         weekdays = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
         now = datetime.now()
         current_time = now.strftime("%Y年%m月%d日 %H:%M") + " " + weekdays[now.weekday()]
-        system_prompt = get_agent_prompt() + f"\n\n# 当前时间\n{current_time}"
-        messages = [SystemMessage(content=system_prompt)]
+        messages.append(SystemMessage(content=f"当前时间: {current_time}"))  # 注入当前时间，帮助模型做出与时俱进的回复
 
         # 注入历史对话（最近 N 轮），让 Agent 了解上下文
         if history:
@@ -202,7 +235,7 @@ async def process_writing_request_stream(
 
             # 只保留最近 MAX_HISTORY_PAIRS 轮（每轮 = 1 user + 1 assistant）
             if len(hist_msgs) > MAX_HISTORY_PAIRS * 2:
-                hist_msgs = hist_msgs[-(MAX_HISTORY_PAIRS * 2):]
+                hist_msgs = hist_msgs[-(MAX_HISTORY_PAIRS * 2) :]
 
             if hist_msgs:
                 messages.extend(hist_msgs)
@@ -235,6 +268,7 @@ async def process_writing_request_stream(
         # 队列用于线程间传递流式数据
         queue: asyncio.Queue = asyncio.Queue()
         has_tool_result = False
+        generate_tool_result = False
         generating_notified = False  # 是否已通知前端"正在生成文档"
 
         def run_stream():
@@ -286,8 +320,9 @@ async def process_writing_request_stream(
                     for tc in tool_call_chunks:
                         if tc.get("name") == "generate_document":
                             generating_notified = True
-                            print("[Agent] 📝 检测到 LLM 开始生成文档")
-                            yield f"data: {json.dumps({'type': 'generate_document', 'content': '📝 正在生成文档'}, ensure_ascii=False)}\n\n"
+                            print("[Agent] 📝 检测到 LLM 准备生成文档")
+                            # 这里是流式 chunk 的早期信号，模型后续仍可能放弃 tool call
+                            yield f"data: {json.dumps({'type': 'generate_document', 'content': '📝 正在准备生成文档'}, ensure_ascii=False)}\n\n"
                             break
 
                 if isinstance(msg, ToolMessage):
@@ -302,6 +337,7 @@ async def process_writing_request_stream(
 
                     if tool_name == "generate_document":
                         # generate_document 结果发给前端渲染
+                        generate_tool_result = True
                         try:
                             doc_json = json.loads(content)
                             if "paragraphs" in doc_json:
@@ -330,6 +366,10 @@ async def process_writing_request_stream(
         # 只在 agent 模式下且期望生成文档时显示警告
         if not has_tool_result and not is_ask_mode and document_range:
             yield f"data: {json.dumps({'type': 'status', 'content': '⚠️ 没有检测到调用工具，模型可能不支持'}, ensure_ascii=False)}\n\n"
+
+        # 处理"看到生成草稿但最终未真正调用 generate_document"的场景（仅打印日志，不推送给前端避免困惑）
+        if generating_notified and not generate_tool_result:
+            print("[Agent] ℹ️ 模型取消了文档生成，已直接输出文本结果")
 
         yield "data: [DONE]\n\n"
 

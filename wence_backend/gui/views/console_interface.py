@@ -1,4 +1,4 @@
-"""终端界面 - 纯 PySide6，实时显示所有 Python 输出（含 uvicorn 日志）
+"""终端界面 - 使用 qfluentwidgets 组件 + QWidget 基类
 
 核心思路：
   OutputBuffer 在 QApplication 创建之前就替换 sys.stdout/stderr，
@@ -17,14 +17,20 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QHBoxLayout,
     QPlainTextEdit,
-    QLabel,
-    QPushButton,
+)
+from qfluentwidgets import (
+    SubtitleLabel,
+    CaptionLabel,
+    PushButton,
+    FluentIcon,
+    CardWidget,
 )
 
 
 # ────────────────────────────────────────────────────────────
 # 线程安全输出缓冲区（不依赖 Qt，可在任何时机安装）
 # ────────────────────────────────────────────────────────────
+
 
 class OutputBuffer:
     """全局单例，替换 sys.stdout / sys.stderr 并缓冲所有输出"""
@@ -38,7 +44,6 @@ class OutputBuffer:
             self._buf = buf
             self._name = name
             self.original = original
-            # 兼容 logging.StreamHandler / io 检测
             self.encoding = getattr(original, "encoding", "utf-8")
 
         def write(self, text: str):
@@ -66,8 +71,6 @@ class OutputBuffer:
         self.stdout_stream = self._Stream(self, "stdout", sys.stdout)
         self.stderr_stream = self._Stream(self, "stderr", sys.stderr)
 
-    # ---------- 公开 API ----------
-
     @classmethod
     def install(cls) -> "OutputBuffer":
         """替换 sys.stdout / sys.stderr，返回单例"""
@@ -93,6 +96,7 @@ class OutputBuffer:
 # 终端界面
 # ────────────────────────────────────────────────────────────
 
+
 class ConsoleInterface(QWidget):
     """终端输出界面"""
 
@@ -109,39 +113,32 @@ class ConsoleInterface(QWidget):
         header = QHBoxLayout()
         header.setSpacing(10)
 
-        title = QLabel("🖥 终端", self)
-        title.setFont(QFont("", 18, QFont.Weight.Bold))
+        title = SubtitleLabel("终端", self)
         header.addWidget(title)
         header.addStretch(1)
 
-        _btn_style = """
-            QPushButton {
-                border: 1px solid #ccc; border-radius: 4px;
-                padding: 4px 12px; font-size: 13px;
-            }
-            QPushButton:hover { background: #eee; }
-        """
-
-        self._clearBtn = QPushButton("🗑 清空", self)
-        self._clearBtn.setStyleSheet(_btn_style)
+        self._clearBtn = PushButton(FluentIcon.DELETE, "清空", self)
         self._clearBtn.setToolTip("清空日志")
         self._clearBtn.clicked.connect(self._clearLog)
         header.addWidget(self._clearBtn)
 
-        self._scrollBtn = QPushButton("⬇ 底部", self)
-        self._scrollBtn.setStyleSheet(_btn_style)
+        self._scrollBtn = PushButton(FluentIcon.DOWN, "底部", self)
         self._scrollBtn.setToolTip("滚动到底部")
         self._scrollBtn.clicked.connect(self._scrollToBottom)
         header.addWidget(self._scrollBtn)
 
         layout.addLayout(header)
 
-        hint = QLabel("显示应用运行过程中的所有日志输出", self)
-        hint.setStyleSheet("color: #888; font-size: 12px;")
+        hint = CaptionLabel("显示应用运行过程中的所有日志输出", self)
+        hint.setTextColor(QColor("#888888"), QColor("#aaaaaa"))
         layout.addWidget(hint)
 
-        # --- 日志区 ---
-        self._textEdit = QPlainTextEdit(self)
+        # --- 日志区（包裹在 CardWidget 中） ---
+        card = CardWidget(self)
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(2, 2, 2, 2)
+
+        self._textEdit = QPlainTextEdit(card)
         self._textEdit.setReadOnly(True)
         self._textEdit.setFont(QFont("Consolas, Menlo, monospace", 11))
         self._textEdit.setStyleSheet(
@@ -149,27 +146,25 @@ class ConsoleInterface(QWidget):
             QPlainTextEdit {
                 background: #1e1e1e;
                 color: #d4d4d4;
-                border: 1px solid #333;
-                border-radius: 8px;
+                border: none;
+                border-radius: 6px;
                 padding: 8px;
                 selection-background-color: #264f78;
             }
             """
         )
         self._textEdit.setLineWrapMode(QPlainTextEdit.NoWrap)
-        layout.addWidget(self._textEdit, 1)
+        card_layout.addWidget(self._textEdit)
+        layout.addWidget(card, 1)
 
         # --- 从全局 OutputBuffer 轮询 ---
         self._buf = OutputBuffer.get()
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._pollBuffer)
-        self._timer.start(100)  # 100 ms
+        self._timer.start(100)
 
-        # 首次立即读取已缓冲的历史内容
         self._pollBuffer()
-
-    # ---- 轮询 ----
 
     def _pollBuffer(self):
         if self._buf is None:
@@ -179,8 +174,6 @@ class ConsoleInterface(QWidget):
             return
         for text, stream_name in items:
             self._appendText(text, stream_name)
-
-    # ---- 追加文本 ----
 
     def _appendText(self, text: str, stream_name: str):
         cursor = self._textEdit.textCursor()
