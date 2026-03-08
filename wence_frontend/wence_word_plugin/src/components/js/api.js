@@ -245,10 +245,10 @@ const wsManager = {
 
   /**
    * 处理后端的文档读取请求：根据 startPos/endPos 解析文档并通过 WebSocket 回传
-   * @param {number} startPos - 起始位置，-1 表示文档开头
+   * @param {number} startPos - 起始位置，0 表示文档开头
    * @param {number} endPos - 结束位置，-1 表示文档结尾
    */
-  async _handleDocumentRequest(startPos = -1, endPos = -1) {
+  async _handleDocumentRequest(startPos = 0, endPos = -1) {
     // 注意：不在这里发送 loading 状态，AIChatPane 在收到 read_document 时已经推入了 loading 状态
     try {
       const docData = await parseDocumentRange(startPos, endPos);
@@ -267,6 +267,12 @@ const wsManager = {
 
     } catch (err) {
       console.error('[WebSocket] 解析/回传文档失败:', err);
+      // 回传错误，避免后端一直等待 q.get()
+      await this.send({
+        type: 'document_response',
+        documentJson: {},
+        error: err?.message || String(err)
+      });
     }
   },
 
@@ -277,7 +283,7 @@ const wsManager = {
   async _handleQueryRequest(query) {
     try {
       // 先解析全文文档 JSON
-      const docData = await parseDocumentRange(-1, -1);
+      const docData = await parseDocumentRange(0, -1);
 
       if (docData.error) {
         throw new Error(docData.error);
@@ -393,11 +399,11 @@ function chatStream(message, options = {}) {
  * 异步解析文档范围（推迟到下一个事件循环，避免阻塞 UI）
  * 不传参数或传 (-1, -1) 时解析全文，传入具体位置则解析指定范围
  *
- * @param {number} [startPos=-1] - 起始位置，-1 表示文档开头
+ * @param {number} [startPos=0] - 起始位置，0 表示文档开头
  * @param {number} [endPos=-1] - 结束位置，-1 表示文档结尾
  * @returns {Promise<Object>} - 解析结果
  */
-async function parseDocumentRange(startPos = -1, endPos = -1) {
+async function parseDocumentRange(startPos = 0, endPos = -1) {
   return new Promise((resolve) => {
     // 使用 setTimeout 将任务推迟到下一个事件循环
     // 这样可以让 UI 有时间响应，避免卡顿
@@ -409,8 +415,11 @@ async function parseDocumentRange(startPos = -1, endPos = -1) {
           return;
         }
 
-        const isFullDocument = (startPos === -1 && endPos === -1);
+        const normalizedStart = Number(startPos);
+        const normalizedEnd = Number(endPos);
+        const isFullDocument = (normalizedStart === 0 && normalizedEnd === -1);
         let result;
+        let actualEnd = normalizedEnd;
 
         if (isFullDocument) {
           // 解析全文
@@ -421,15 +430,16 @@ async function parseDocumentRange(startPos = -1, endPos = -1) {
           }
           result = parseDocxToJSON(fullRange);
         } else {
-          // 解析指定范围
-          result = parseDocxToJSON(startPos, endPos);
+          // 解析指定范围，endPos=-1 表示到文档结尾
+          actualEnd = (normalizedEnd === -1) ? doc.Content.End : normalizedEnd;
+          result = parseDocxToJSON(normalizedStart, actualEnd);
         }
 
         if (!result.error) {
           result._meta = {
             isFullDocument,
-            startPos: isFullDocument ? 0 : startPos,
-            endPos: isFullDocument ? doc.Content.End : endPos,
+            startPos: isFullDocument ? 0 : normalizedStart,
+            endPos: isFullDocument ? doc.Content.End : actualEnd,
             documentName: doc.Name || '',
             parsedAt: new Date().toISOString()
           };

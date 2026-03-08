@@ -26,6 +26,7 @@ sudo pkill -f wpsclouds
 (学院要求参考文献引用至少30篇以上，包括中英文，以及近5年论文为主，必须有2025年论文)
 
 1. https://github.com/HuggingAGI/AwesomeAgentPapers?tab=readme-ov-file 2025年AI Agent论文综述资料
+2. https://vscode.js.cn/docs/copilot/agents/subagents
 
 # 调研报告参考文献
 

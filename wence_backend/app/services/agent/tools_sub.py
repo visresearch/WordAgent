@@ -112,12 +112,6 @@ class DocumentOutput(BaseModel):
 
     paragraphs: list[Paragraph] = Field(description="段落数组，每个元素必须是 Paragraph 对象，不要放字符串")
     tables: list[Table] = Field(default_factory=list, description="表格数组，每个元素必须是 Table 对象")
-    position: int = Field(
-        default=0,
-        description="插入位置（字符偏移），前端会在文档的该位置处插入生成的内容。"
-        "如果用户选中了文档范围，应设为该范围的 startPos；"
-        "如果是新建内容无特定位置，设为 0（文档开头）或 -1（文档末尾）。",
-    )
 
     @model_validator(mode="before")
     @classmethod
@@ -201,11 +195,12 @@ def read_document(startPos: int = -1, endPos: int = -1) -> str:
     读取文档内容。通过 WebSocket 请求前端解析指定范围的文档并返回。
 
     Args:
-        startPos: 文档读取起始位置（字符位置）。0 表示从文档开头开始。
+        startPos: 文档读取起始位置（字符位置）。-1 表示从文档开头开始。
         endPos: 文档读取结束位置（字符位置）。-1 表示到文档结尾。
+        两个都传 -1 表示读取全文。
 
     【调用场景】
-    1. 读取全文（startPos=0, endPos=-1）：
+    1. 读取全文（startPos=-1, endPos=-1）：
        - 用户说"润色全文"但没有提供文档内容
        - 用户说"看看这篇文档"但没有文档内容
        - 用户说"分析一下文档"但文档为空
@@ -246,13 +241,11 @@ def read_document(startPos: int = -1, endPos: int = -1) -> str:
                 )
                 try:
                     result = future.result(timeout=65)
-                    if result.get("error"):
-                        err_msg = result.get("error")
-                        print(f"[read_document] ⚠️ 前端读取失败: {err_msg}")
-                        writer({"type": "status", "content": f"⚠️ 读取文档失败: {err_msg}"})
-                        return ""
                     doc_json = result.get("documentJson", {})
                     if doc_json and doc_json.get("paragraphs"):
+                        # import time
+                        # time.sleep(1.0)  # 加一个延时
+
                         print(f"[read_document] ✅ 收到文档，段落数: {len(doc_json['paragraphs'])}")
                         writer({"type": "read_complete", "content": f"✅ 文档读取完成({startPos} - {endPos})"})
                         return json.dumps(doc_json, ensure_ascii=False)
@@ -265,7 +258,7 @@ def read_document(startPos: int = -1, endPos: int = -1) -> str:
                     writer({"type": "status", "content": "⏰ 等待文档超时"})
                     return ""
                 except Exception as e:
-                    print(f"[read_document] ❌ 等待文档出错: {repr(e)}")
+                    print(f"[read_document] ❌ 等待文档出错: {e}")
                     return ""
 
     # 非 WebSocket 模式（无 chat_id），无法双向通信获取文档
@@ -281,18 +274,13 @@ def generate_document(document: DocumentOutput) -> dict:
     【重要】格式属性必须100%原样复制！
     除非用户明确要求修改格式，否则所有格式属性（fontName, fontSize, alignment 等）必须与原文档完全一致。
 
-    【结构要求】document 包含三个字段：
+    【结构要求】document 包含两个独立字段：
     - paragraphs: Paragraph 对象的数组
     - tables: Table 对象的数组（可选）
-    - position: 插入位置（字符偏移），前端在文档该位置插入内容
     不要把 "tables" 字符串放进 paragraphs 数组里！
 
-    【position 规则】
-    - 修改/润色用户选中内容时：position = 用户选区的 startPos
-    - 新建内容无特定位置时：position = 0（文档开头）或 -1（文档末尾）
-
     Args:
-        document: 文档结构，包含 paragraphs、tables 和 position
+        document: 文档结构，包含 paragraphs 和 tables 两个独立字段
 
     Returns:
         文档 JSON 对象
@@ -301,20 +289,6 @@ def generate_document(document: DocumentOutput) -> dict:
     doc_dict = document.model_dump()
     para_count = len(doc_dict.get("paragraphs", []))
     writer({"type": "generate_complete", "content": f"✅ 文档已生成，共 {para_count} 个段落"})
-
-    # 保存生成的文档 JSON 到 example 文件夹
-    try:
-        from datetime import datetime
-        from pathlib import Path
-
-        example_dir = Path(__file__).resolve().parent.parent.parent.parent / "example"
-        example_dir.mkdir(exist_ok=True)
-        filename = f"generated_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-        (example_dir / filename).write_text(json.dumps(doc_dict, ensure_ascii=False, indent=2), encoding="utf-8")
-        print(f"[generate_document] 已保存到 example/{filename}")
-    except Exception as e:
-        print(f"[generate_document] 保存 JSON 失败: {e}")
-
     return doc_dict
 
 
@@ -647,7 +621,34 @@ def comment_document(comment: str, startPos: int = -1, endPos: int = -1) -> str:
     return f"已在文档位置 ({startPos} - {endPos}) 添加评论: '{comment}'"
 
 
+@tool
+def run_subagent(task: str) -> str:
+    """
+    委派任务给专门的子 Agent 执行。子 Agent 拥有 generate_document 工具，擅长生成带格式的文档。
+
+    【调用场景 - 必须调用】
+    - 用户要求"写一篇..."、"生成文档"、"撰写报告"等需要生成 Word 文档的任务
+    - 搜索完资料后，需要基于搜索结果生成文档
+    - 任何需要调用 generate_document 的场景（你没有 generate_document 工具，必须通过 run_subagent 委派）
+
+    【重要】你自己没有 generate_document 工具！当用户需要生成文档时，必须调用 run_subagent。
+
+    Args:
+        task: 需要子 Agent 完成的具体任务描述，应包含完整的写作要求
+
+    Returns:
+        子 Agent 的执行结果（文档 JSON）
+    """
+    # 实际执行在 MainAgent 的 tools_node 中拦截处理，这里是占位
+    return "SubAgent 已执行"
+
 # region Tools 注册
 
-ALL_TOOLS = [read_document, generate_document, query_document, web_search, web_fetch]
-TOOL_MAP = {t.name: t for t in ALL_TOOLS}
+# MainAgent 工具集：信息收集 + 文档读取/查询 + 委派
+# 注意：generate_document 不在这里，由 SubAgent 持有
+MAIN_TOOLS = [read_document, query_document, web_search, web_fetch, run_subagent]
+TOOL_MAP = {t.name: t for t in MAIN_TOOLS}
+
+# SubAgent 工具集：文档生成 + 读取（SubAgent 可能需要读文档来修改）
+SUBAGENT_TOOLS = [generate_document, read_document]
+SUBAGENT_TOOL_MAP = {t.name: t for t in SUBAGENT_TOOLS}

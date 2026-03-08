@@ -989,7 +989,7 @@ export default {
 
         console.log('收到完整JSON，自动输出到文档');
         this.$nextTick(() => {
-          this.insertToWord(msg, false);
+          this.insertToWord(msg);
 
           // 插入后显示预览条，等待用户确认或取消
           const paragraphs = data.content.paragraphs || [];
@@ -1062,7 +1062,7 @@ export default {
     /**
      * 插入内容到 Word 文档
      */
-    insertToWord(msg, insertAtCursor = true) {
+    insertToWord(msg) {
       try {
         const doc = window.Application.ActiveDocument;
         if (!doc) {
@@ -1095,15 +1095,22 @@ export default {
         if (jsonData && (jsonData.paragraphs || jsonData.tables)) {
           console.log('检测到文档 JSON，使用格式化输出');
 
-          const selection = window.Application.Selection;
-          let insertPos;
-
-          if (insertAtCursor) {
-            insertPos = selection.Range.Start;
-            console.log('插入到光标位置:', insertPos);
+          // 统一使用 JSON 中 AI 指定的 position 作为插入位置
+          let insertPos = 0;
+          if (jsonData.position !== null && jsonData.position !== undefined) {
+            if (jsonData.position === -1) {
+              // -1 表示文档末尾
+              insertPos = doc.Content.End - 1;
+              console.log('插入到文档末尾:', insertPos);
+            } else {
+              insertPos = jsonData.position;
+              console.log('插入到 AI 指定位置:', insertPos);
+            }
           } else {
-            insertPos = selection.Range.End;
-            console.log('插入到选区末尾:', insertPos, 'Start:', selection.Range.Start);
+            // 兼容旧数据：没有 position 时用光标位置
+            const selection = window.Application.Selection;
+            insertPos = selection ? selection.Range.Start : 0;
+            console.log('无 position，回退到光标位置:', insertPos);
           }
 
           msg.docLengthBefore = doc.Content.End;
