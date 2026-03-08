@@ -503,15 +503,13 @@ def web_fetch(url: str) -> str:
 
     except curl_requests.errors.RequestsError as e:
         status = getattr(getattr(e, "response", None), "status_code", None)
-        msg = f"拓取失败: HTTP {status}" if status else f"拓取失败: {e}"
-        print(f"[web_fetch] ❌ {msg}")
-        writer({"type": "status", "content": f"❌ {msg}"})
-        return msg
+        print(f"[web_fetch] ❌ 拓取失败: HTTP {status or e}")
+        writer({"type": "status", "content": f"❌ 该网页无法访问，跳过"})
+        return "该网页无法访问（已跳过）。请直接使用已有的搜索摘要继续完成任务，不要因此放弃生成文档。"
     except Exception as e:
-        msg = f"拓取失败: {e}"
-        print(f"[web_fetch] ❌ {msg}")
-        writer({"type": "status", "content": f"❌ {msg}"})
-        return msg
+        print(f"[web_fetch] ❌ 拓取失败: {e}")
+        writer({"type": "status", "content": f"❌ 该网页无法访问，跳过"})
+        return "该网页无法访问（已跳过）。请直接使用已有的搜索摘要继续完成任务，不要因此放弃生成文档。"
 
 
 @tool

@@ -178,16 +178,7 @@ class ConsoleInterface(QWidget):
     def _appendText(self, text: str, stream_name: str):
         cursor = self._textEdit.textCursor()
         cursor.movePosition(QTextCursor.End)
-
-        if stream_name == "stderr":
-            fmt = cursor.charFormat()
-            fmt.setForeground(QColor("#f48771"))
-            cursor.setCharFormat(fmt)
-            cursor.insertText(text)
-            fmt.setForeground(QColor("#d4d4d4"))
-            cursor.setCharFormat(fmt)
-        else:
-            cursor.insertText(text)
+        cursor.insertText(text)
 
         if self._textEdit.blockCount() > self._maxLines:
             cursor.movePosition(QTextCursor.Start)
