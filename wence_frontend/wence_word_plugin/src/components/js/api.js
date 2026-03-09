@@ -453,196 +453,6 @@ async function parseDocumentRange(startPos = 0, endPos = -1) {
   });
 }
 
-// /**
-//  * 阶段1：定位 - 发送文档摘要，获取 Query DSL
-//  * 
-//  * @param {string} message - 用户消息
-//  * @param {Object} options - 配置选项
-//  * @param {Object} options.documentSummary - 文档摘要（由 generateSummary 生成）
-//  * @param {Function} options.onQuery - 收到 Query DSL 时的回调
-//  * @param {Function} options.onText - 收到纯文本回复时的回调
-//  * @param {Function} options.onError - 发生错误时的回调
-//  * @param {Function} options.onComplete - 完成时的回调
-//  * @returns {Object} - 包含 abort 方法的控制对象
-//  */
-// function locateContent(message, options = {}) {
-//   const {
-//     documentSummary = null,
-//     model = 'auto',
-//     onQuery,
-//     onText,
-//     onStatus,
-//     onError,
-//     onComplete
-//   } = options;
-
-//   const controller = new AbortController();
-
-//   const execute = async () => {
-//     try {
-//       const response = await fetch(`${CONFIG.baseURL}/api/chat/locate`, {
-//         method: 'POST',
-//         headers: CONFIG.headers,
-//         body: JSON.stringify({
-//           message: message.trim(),
-//           documentSummary,
-//           model
-//         }),
-//         signal: controller.signal
-//       });
-
-//       if (!response.ok) {
-//         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-//       }
-
-//       const reader = response.body.getReader();
-//       const decoder = new TextDecoder();
-//       let buffer = '';
-
-//       while (true) {
-//         const { done, value } = await reader.read();
-
-//         if (done) {
-//           if (onComplete) {
-//             onComplete();
-//           }
-//           break;
-//         }
-
-//         buffer += decoder.decode(value, { stream: true });
-//         const lines = buffer.split('\n');
-//         buffer = lines.pop() || '';
-
-//         for (const line of lines) {
-//           if (line.startsWith('data: ')) {
-//             const data = line.slice(6);
-//             if (data === '[DONE]') {
-//               if (onComplete) {
-//                 onComplete();
-//               }
-//               return;
-//             }
-//             try {
-//               const parsed = JSON.parse(data);
-//               if (parsed.type === 'query' && onQuery) {
-//                 onQuery(parsed.queryDSL, parsed.message);
-//               } else if (parsed.type === 'text' && onText) {
-//                 onText(parsed.content);
-//               } else if (parsed.type === 'status' && onStatus) {
-//                 onStatus(parsed.content);
-//               } else if (parsed.type === 'error' && onError) {
-//                 onError(new Error(parsed.content));
-//               }
-//             } catch (e) {
-//               console.error('解析响应失败:', e);
-//             }
-//           }
-//         }
-//       }
-//     } catch (error) {
-//       if (error.name !== 'AbortError' && onError) {
-//         onError(error);
-//       }
-//     }
-//   };
-
-//   execute();
-//   return { abort: () => controller.abort() };
-// }
-
-// /**
-//  * 阶段2：修改 - 发送匹配的段落，获取修改结果
-//  * 
-//  * @param {string} message - 用户消息
-//  * @param {Object} options - 配置选项
-//  * @param {Array} options.matchedParagraphs - 匹配的段落数组
-//  * @param {Array} options.originalIndices - 原始段落索引
-//  * @param {Function} options.onMessage - 收到消息时的回调
-//  * @param {Function} options.onError - 发生错误时的回调
-//  * @param {Function} options.onComplete - 完成时的回调
-//  * @returns {Object} - 包含 abort 方法的控制对象
-//  */
-// function modifyContent(message, options = {}) {
-//   const {
-//     matchedParagraphs = [],
-//     originalIndices = [],
-//     model = 'auto',
-//     onMessage,
-//     onError,
-//     onComplete
-//   } = options;
-
-//   const controller = new AbortController();
-
-//   const execute = async () => {
-//     try {
-//       const response = await fetch(`${CONFIG.baseURL}/api/chat/modify`, {
-//         method: 'POST',
-//         headers: CONFIG.headers,
-//         body: JSON.stringify({
-//           message: message.trim(),
-//           matchedParagraphs,
-//           originalIndices,
-//           model
-//         }),
-//         signal: controller.signal
-//       });
-
-//       if (!response.ok) {
-//         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-//       }
-
-//       const reader = response.body.getReader();
-//       const decoder = new TextDecoder();
-//       let buffer = '';
-
-//       while (true) {
-//         const { done, value } = await reader.read();
-
-//         if (done) {
-//           if (onComplete) {
-//             onComplete();
-//           }
-//           break;
-//         }
-
-//         buffer += decoder.decode(value, { stream: true });
-//         const lines = buffer.split('\n');
-//         buffer = lines.pop() || '';
-
-//         for (const line of lines) {
-//           if (line.startsWith('data: ')) {
-//             const data = line.slice(6);
-//             if (data === '[DONE]') {
-//               if (onComplete) {
-//                 onComplete();
-//               }
-//               return;
-//             }
-//             try {
-//               const parsed = JSON.parse(data);
-//               if (onMessage) {
-//                 onMessage(parsed);
-//               }
-//             } catch (e) {
-//               if (onMessage) {
-//                 onMessage({ content: data });
-//               }
-//             }
-//           }
-//         }
-//       }
-//     } catch (error) {
-//       if (error.name !== 'AbortError' && onError) {
-//         onError(error);
-//       }
-//     }
-//   };
-
-//   execute();
-//   return { abort: () => controller.abort() };
-// }
-
 /**
  * 获取可用模型列表
  *
@@ -660,16 +470,12 @@ async function getModels() {
  * 获取会话列表
  *
  * @param {Object} options - 选项
- * @param {string} options.docId - 按文档 ID 过滤（可选）
  * @param {number} options.limit - 返回数量限制
  * @returns {Promise<Object>} - 会话列表
  */
 async function getSessions(options = {}) {
-  const { docId, limit = 50 } = options;
+  const { limit = 50 } = options;
   const params = new URLSearchParams({ limit: String(limit) });
-  if (docId) {
-    params.append('doc_id', docId);
-  }
   return await request(`/api/sessions?${params}`, { method: 'GET' });
 }
 
@@ -677,8 +483,6 @@ async function getSessions(options = {}) {
  * 创建新会话
  *
  * @param {Object} data - 创建数据
- * @param {string} data.docId - 文档标识（可选）
- * @param {string} data.docName - 文档名称（可选）
  * @param {string} data.title - 会话标题（可选，默认"新对话"）
  * @returns {Promise<Object>} - 创建的会话
  */
@@ -692,16 +496,10 @@ async function createSession(data = {}) {
 /**
  * 获取最新会话（含消息）
  *
- * @param {string} docId - 按文档 ID 过滤（可选）
  * @returns {Promise<Object>} - 最新会话及其消息
  */
-async function getLatestSession(docId = null) {
-  const params = new URLSearchParams();
-  if (docId) {
-    params.append('doc_id', docId);
-  }
-  const qs = params.toString();
-  return await request(`/api/sessions/latest${qs ? '?' + qs : ''}`, { method: 'GET' });
+async function getLatestSession() {
+  return await request('/api/sessions/latest', { method: 'GET' });
 }
 
 /**

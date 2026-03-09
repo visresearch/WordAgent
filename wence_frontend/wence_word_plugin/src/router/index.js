@@ -31,7 +31,7 @@ const router = createRouter({
     {
       path: '/debug',
       name: '调试',
-      component: () => import('../components/TaskPane.vue')
+      component: () => import('../components/debug/DebugPane.vue')
     }
   ]
 });

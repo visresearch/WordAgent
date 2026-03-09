@@ -11,12 +11,13 @@ from fastapi import APIRouter
 from openai import AsyncOpenAI
 from pydantic import BaseModel
 
+from app.core.config import get_user_settings_file
 from app.models.chat import ModelInfo, ModelsResponse
 
 router = APIRouter()
 
 # 设置文件路径
-SETTINGS_FILE = Path("config/user_settings.json")
+SETTINGS_FILE = get_user_settings_file()
 
 
 # ============== 模型名称格式化 ==============

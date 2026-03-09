@@ -22,10 +22,6 @@ class Session(Base):
     __tablename__ = "sessions"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    # 关联的文档唯一标识符（可选，前端传入）
-    doc_id = Column(String(128), nullable=True, index=True)
-    # 文档名称（用于显示）
-    doc_name = Column(String(255), nullable=True)
     # 会话标题（默认取第一条用户消息的前50字）
     title = Column(String(255), default="新对话")
     # 最后一条消息预览
@@ -39,14 +35,12 @@ class Session(Base):
     messages = relationship("ChatMessage", back_populates="session", cascade="all, delete-orphan")
 
     def __repr__(self):
-        return f"<Session(id={self.id}, title='{self.title}', doc_id='{self.doc_id}')>"
+        return f"<Session(id={self.id}, title='{self.title}')>"
 
     def to_dict(self):
         """转换为字典，用于 API 返回"""
         return {
             "id": self.id,
-            "docId": self.doc_id,
-            "docName": self.doc_name,
             "title": self.title,
             "preview": self.preview,
             "createdAt": self.created_at.isoformat() if self.created_at else None,

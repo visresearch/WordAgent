@@ -21,24 +21,18 @@ class SessionService:
 
     async def create_session(
         self,
-        doc_id: str | None = None,
-        doc_name: str | None = None,
         title: str = "新对话",
     ) -> Session:
         """
         创建新会话
 
         Args:
-            doc_id: 关联的文档标识（可选）
-            doc_name: 文档名称（可选）
             title: 会话标题
 
         Returns:
             Session 对象
         """
         session = Session(
-            doc_id=doc_id,
-            doc_name=doc_name,
             title=title,
         )
         self.db.add(session)
@@ -52,38 +46,29 @@ class SessionService:
 
     async def get_sessions(
         self,
-        doc_id: str | None = None,
         limit: int = 50,
     ) -> list[Session]:
         """
         获取会话列表
 
         Args:
-            doc_id: 按文档 ID 过滤（可选，不传则返回所有）
             limit: 返回数量限制
 
         Returns:
             Session 列表，按更新时间倒序
         """
         query = select(Session).order_by(desc(Session.updated_at)).limit(limit)
-        if doc_id:
-            query = query.where(Session.doc_id == doc_id)
         result = await self.db.execute(query)
         return list(result.scalars().all())
 
-    async def get_latest_session(self, doc_id: str | None = None) -> Session | None:
+    async def get_latest_session(self) -> Session | None:
         """
         获取最新的会话
-
-        Args:
-            doc_id: 按文档 ID 过滤（可选）
 
         Returns:
             最新的 Session 或 None
         """
         query = select(Session).order_by(desc(Session.updated_at)).limit(1)
-        if doc_id:
-            query = query.where(Session.doc_id == doc_id)
         result = await self.db.execute(query)
         return result.scalar_one_or_none()
 

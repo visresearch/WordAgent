@@ -11,10 +11,12 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from app.core.config import get_user_settings_file
+
 router = APIRouter()
 
 # 设置文件路径
-SETTINGS_FILE = Path("config/user_settings.json")
+SETTINGS_FILE = get_user_settings_file()
 
 
 class ProviderConfig(BaseModel):

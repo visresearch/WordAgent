@@ -18,6 +18,21 @@
         <button class="btn btn-success" @click="parseFullDocument">
           解析全文
         </button>
+        <button class="btn btn-docs" @click="listOpenDocuments">
+          显示所有文件名
+        </button>
+      </div>
+    </div>
+
+    <!-- 已打开文档列表 -->
+    <div v-if="openDocuments.length" class="divItem">
+      <h4>已打开文档（{{ openDocuments.length }}）</h4>
+      <div class="docs-container">
+        <ul class="docs-list">
+          <li v-for="(name, index) in openDocuments" :key="`${name}-${index}`">
+            {{ name }}
+          </li>
+        </ul>
       </div>
     </div>
 
@@ -58,13 +73,14 @@
 </template>
 
 <script>
-import { parseDocxToJSON } from './js/docxJsonConverter.js';
+import { parseDocxToJSON } from '../js/docxJsonConverter.js';
 
 export default {
   name: 'TaskPane',
   data() {
     return {
       parsedData: null,
+      openDocuments: [],
       statusMessage: '',
       statusType: 'info'
     };
@@ -116,6 +132,38 @@ export default {
       } catch (e) {
         console.error('解析选中内容出错:', e);
         this.showStatus('解析出错: ' + e.message, 'error');
+      }
+    },
+
+    // 列出当前 WPS 进程中所有已打开文档名称
+    listOpenDocuments() {
+      try {
+        const app = window.Application;
+        if (!app) {
+          this.showStatus('WPS 环境未就绪', 'error');
+          return;
+        }
+
+        const docs = app.Documents;
+        if (!docs || docs.Count === 0) {
+          this.openDocuments = [];
+          this.showStatus('当前没有已打开文档', 'info');
+          return;
+        }
+
+        const names = [];
+        for (let i = 1; i <= docs.Count; i++) {
+          const doc = docs.Item(i);
+          const name = doc?.Name || `未命名文档_${i}`;
+          names.push(name);
+          console.log('[DebugPane] 文档:', name);
+        }
+
+        this.openDocuments = names;
+        this.showStatus(`共找到 ${names.length} 个已打开文档`, 'success');
+      } catch (e) {
+        console.error('获取文档列表失败:', e);
+        this.showStatus('获取文档列表失败: ' + e.message, 'error');
       }
     },
 
@@ -307,6 +355,26 @@ hr {
 .btn-info {
   background-color: #00bcd4;
   color: white;
+}
+
+.btn-docs {
+  background-color: #7e57c2;
+  color: white;
+}
+
+.docs-container {
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  background: #fafafa;
+  padding: 8px 10px;
+}
+
+.docs-list {
+  margin: 0;
+  padding-left: 18px;
+  color: #333;
+  font-size: 13px;
+  line-height: 1.6;
 }
 
 .stats {

@@ -3,7 +3,7 @@
 import os
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont, QColor
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -16,7 +16,7 @@ from qfluentwidgets import (
     BodyLabel,
     StrongBodyLabel,
     CardWidget,
-    IconInfoBadge,
+    IconWidget,
     FluentIcon,
     InfoBadge,
 )
@@ -33,8 +33,8 @@ class _InfoCard(CardWidget):
         layout.setContentsMargins(16, 12, 16, 12)
         layout.setSpacing(12)
 
-        icon_widget = IconInfoBadge.info(icon, self)
-        icon_widget.setFixedSize(36, 36)
+        icon_widget = IconWidget(icon, self)
+        icon_widget.setFixedSize(20, 20)
         layout.addWidget(icon_widget, alignment=Qt.AlignVCenter)
 
         text_layout = QVBoxLayout()

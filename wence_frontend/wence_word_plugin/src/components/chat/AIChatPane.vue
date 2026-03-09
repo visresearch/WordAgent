@@ -60,8 +60,6 @@ export default {
       lastReadJSON: null,
       selections: [],  // 多选区数组 [{preview, startText, endText, startPos, endPos, charCount, hasMore}]
       currentStreamCtrl: null,
-      currentDocId: null,
-      currentDocName: null,
       currentSessionId: null,
       currentSessionTitle: null,
       pendingDocument: null,
@@ -207,16 +205,11 @@ export default {
 
     /**
      * 初始化会话并加载历史记录
-     * 优先使用 PluginStorage 中保存的 session_id，否则查找当前文档的最新会话
+     * 优先使用 PluginStorage 中保存的 session_id，否则查找全局最新会话
      */
     async initSessionAndLoadHistory() {
       try {
-        console.log('[初始化] 开始获取文档信息和会话');
-        const docInfo = this.getDocumentInfo();
-        if (docInfo) {
-          this.currentDocId = docInfo.docId;
-          this.currentDocName = docInfo.docName;
-        }
+        console.log('[初始化] 开始获取会话');
 
         // 尝试从 PluginStorage 或 localStorage 恢复上次的 session_id
         let savedSessionId = null;
@@ -241,9 +234,9 @@ export default {
           this.currentSessionId = Number(savedSessionId) || savedSessionId;
           await this.loadSessionMessages();
         } else {
-          // 没有保存的 session_id，查找当前文档的最新会话
-          console.log('[初始化] 查找最新会话, docId:', this.currentDocId);
-          const result = await api.getLatestSession(this.currentDocId);
+          // 没有保存的 session_id，查找全局最新会话
+          console.log('[初始化] 查找全局最新会话');
+          const result = await api.getLatestSession();
           if (result.success && result.data?.session) {
             this.currentSessionId = result.data.session.id;
             this.currentSessionTitle = result.data.session.title || null;
@@ -257,7 +250,7 @@ export default {
             // 如果有消息，标记有历史
             this.hasHistory = result.data.messages && result.data.messages.length > 0;
           } else {
-            console.log('[初始化] 当前文档没有历史会话');
+            console.log('[初始化] 当前没有历史会话');
             this.hasHistory = false;
           }
         }
@@ -334,52 +327,6 @@ export default {
     },
 
     /**
-     * 获取当前 Word 文档的唯一标识信息
-     */
-    getDocumentInfo() {
-      try {
-        const doc = window.Application?.ActiveDocument;
-        if (!doc) {
-          return null;
-        }
-
-        const fullPath = doc.FullName || '';
-        const docName = doc.Name || 'Untitled';
-
-        let docId;
-        if (fullPath && fullPath !== docName) {
-          docId = this.hashString(fullPath);
-        } else {
-          const storedId = window.Application.PluginStorage.getItem(`unsaved_doc_${docName}`);
-          if (storedId) {
-            docId = storedId;
-          } else {
-            docId = `unsaved_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-            window.Application.PluginStorage.setItem(`unsaved_doc_${docName}`, docId);
-          }
-        }
-
-        return { docId, docName };
-      } catch (e) {
-        console.warn('获取文档信息失败:', e);
-        return null;
-      }
-    },
-
-    /**
-     * 简单的字符串 hash 函数
-     */
-    hashString(str) {
-      let hash = 0;
-      for (let i = 0; i < str.length; i++) {
-        const char = str.charCodeAt(i);
-        hash = (hash << 5) - hash + char;
-        hash = hash & hash;
-      }
-      return 'doc_' + Math.abs(hash).toString(36);
-    },
-
-    /**
      * 加载当前会话的聊天历史
      */
     async loadSessionMessages() {
@@ -412,10 +359,8 @@ export default {
             this.mode = result.data.lastUsedMode;
           }
 
-          // 更新文档信息（来自会话关联的文档）
+          // 更新会话标题
           if (result.data.session) {
-            this.currentDocId = result.data.session.docId || this.currentDocId;
-            this.currentDocName = result.data.session.docName || this.currentDocName;
             this.currentSessionTitle = result.data.session.title || null;
           }
 
@@ -424,6 +369,17 @@ export default {
           this.scrollToBottom();
         } else {
           console.warn('[加载历史] 返回数据格式不正确:', result);
+          if (result && result.success === false) {
+            // 会话不存在或已失效，清理本地状态，避免后续继续写入无效 session_id
+            this.currentSessionId = null;
+            this.currentSessionTitle = null;
+            this.messages = [];
+            this.hasHistory = false;
+            this.historyLoaded = false;
+            if (window.Application && window.Application.PluginStorage) {
+              window.Application.PluginStorage.removeItem('current_session_id');
+            }
+          }
         }
       } catch (e) {
         console.error('[加载历史] 失败:', e);
@@ -437,16 +393,26 @@ export default {
      */
     async ensureSession() {
       if (this.currentSessionId) {
-        return this.currentSessionId;
+        try {
+          const existsResult = await api.getSession(this.currentSessionId);
+          if (existsResult.success && existsResult.data?.session) {
+            return this.currentSessionId;
+          }
+          console.warn('[自动创建会话] 当前 session 已失效，准备重建:', this.currentSessionId);
+        } catch (e) {
+          console.warn('[自动创建会话] 校验 session 失败，准备重建:', e);
+        }
+
+        this.currentSessionId = null;
+        this.currentSessionTitle = null;
+        if (window.Application && window.Application.PluginStorage) {
+          window.Application.PluginStorage.removeItem('current_session_id');
+        }
       }
 
-      console.log('[自动创建会话] docId:', this.currentDocId);
+      console.log('[自动创建会话] 开始创建');
       try {
-        const result = await api.createSession({
-          docId: this.currentDocId || null,
-          docName: this.currentDocName || null,
-          title: '新对话'
-        });
+        const result = await api.createSession({ title: '新对话' });
 
         if (result.success && result.data?.session) {
           this.currentSessionId = result.data.session.id;
@@ -473,7 +439,7 @@ export default {
      */
     async saveMessageToHistory(role, content, documentJson = null, selectionContext = null, contentParts = null) {
       // 确保有会话
-      const sessionId = await this.ensureSession();
+      let sessionId = await this.ensureSession();
       if (!sessionId) {
         console.warn('[保存消息] 无法获取会话ID，消息未保存');
         return;
@@ -486,7 +452,7 @@ export default {
       });
 
       try {
-        await api.addSessionMessage(sessionId, {
+        let saveResult = await api.addSessionMessage(sessionId, {
           role,
           content,
           documentJson,
@@ -495,6 +461,38 @@ export default {
           model: this.selectedModel || 'auto',
           mode: this.mode
         });
+
+        // 兼容旧缓存导致的无效 session_id：自动重建并重试一次
+        if (!saveResult?.success) {
+          console.warn('[保存消息] 会话失效，尝试重建后重试:', saveResult?.error);
+          this.currentSessionId = null;
+          this.currentSessionTitle = null;
+          if (window.Application && window.Application.PluginStorage) {
+            window.Application.PluginStorage.removeItem('current_session_id');
+          }
+
+          sessionId = await this.ensureSession();
+          if (!sessionId) {
+            console.warn('[保存消息] 重建会话失败，消息未保存');
+            return;
+          }
+
+          saveResult = await api.addSessionMessage(sessionId, {
+            role,
+            content,
+            documentJson,
+            selectionContext,
+            contentParts,
+            model: this.selectedModel || 'auto',
+            mode: this.mode
+          });
+        }
+
+        if (!saveResult?.success) {
+          console.warn('[保存消息] 最终保存失败:', saveResult?.error);
+          return;
+        }
+
         console.log('[保存消息] 成功');
 
         // 第一条用户消息会自动设置会话标题，更新本地标题

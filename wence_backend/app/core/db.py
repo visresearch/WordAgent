@@ -56,12 +56,29 @@ async def init_db():
 
             inspector = sa_inspect(connection)
             tables = inspector.get_table_names()
-            # 如果旧的 documents 表存在但新的 sessions 表不存在，需要迁移
-            if "documents" in tables and "sessions" not in tables:
-                print("🔄 检测到旧表结构，正在迁移到 Session 模式...")
-                Base.metadata.drop_all(connection)
-                print("   ✅ 旧表已清除")
+
             Base.metadata.create_all(connection)
+
+            # 清理历史遗留 documents 表
+            if "documents" in tables:
+                try:
+                    connection.exec_driver_sql("DROP TABLE IF EXISTS documents")
+                    print("🧹 已移除遗留表: documents")
+                except Exception as e:
+                    print(f"⚠️ 移除遗留表 documents 失败: {e}")
+
+            # 清理 sessions 表中的历史字段（若存在）
+            try:
+                columns = {col["name"] for col in sa_inspect(connection).get_columns("sessions")}
+                for legacy_col in ("doc_id", "doc_name"):
+                    if legacy_col in columns:
+                        try:
+                            connection.exec_driver_sql(f"ALTER TABLE sessions DROP COLUMN {legacy_col}")
+                            print(f"🧹 已移除历史字段: sessions.{legacy_col}")
+                        except Exception as drop_err:
+                            print(f"⚠️ 移除字段 sessions.{legacy_col} 失败: {drop_err}")
+            except Exception as e:
+                print(f"⚠️ 清理 sessions 历史字段失败: {e}")
 
         await conn.run_sync(_check_and_create)
 

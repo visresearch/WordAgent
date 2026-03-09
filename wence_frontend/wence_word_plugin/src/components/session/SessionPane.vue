@@ -158,40 +158,6 @@ export default {
       );
     });
 
-    // 获取当前文档信息
-    const getDocumentInfo = () => {
-      try {
-        const doc = window.Application?.ActiveDocument;
-        if (!doc) {
-          return null;
-        }
-        const fullPath = doc.FullName || '';
-        const docName = doc.Name || 'Untitled';
-        let docId;
-        if (fullPath && fullPath !== docName) {
-          let hash = 0;
-          for (let i = 0; i < fullPath.length; i++) {
-            const char = fullPath.charCodeAt(i);
-            hash = (hash << 5) - hash + char;
-            hash = hash & hash;
-          }
-          docId = 'doc_' + Math.abs(hash).toString(36);
-        } else {
-          const storedId = window.Application.PluginStorage.getItem(`unsaved_doc_${docName}`);
-          if (storedId) {
-            docId = storedId;
-          } else {
-            docId = `unsaved_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-            window.Application.PluginStorage.setItem(`unsaved_doc_${docName}`, docId);
-          }
-        }
-        return { docId, docName };
-      } catch (e) {
-        console.warn('获取文档信息失败:', e);
-        return null;
-      }
-    };
-
     // 加载会话列表
     const loadSessions = async () => {
       isLoading.value = true;
@@ -214,10 +180,7 @@ export default {
     // 创建新会话
     const createNewSession = async () => {
       try {
-        const docInfo = getDocumentInfo();
         const result = await api.createSession({
-          docId: docInfo?.docId || null,
-          docName: docInfo?.docName || null,
           title: '新对话'
         });
 

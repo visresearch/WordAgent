@@ -11,9 +11,11 @@ from pathlib import Path
 
 from openai import AsyncOpenAI
 
+from app.core.config import get_user_settings_file
+
 # ============== 配置文件路径 ==============
 
-SETTINGS_FILE = Path("config/user_settings.json")
+SETTINGS_FILE = get_user_settings_file()
 
 
 # ============== 数据结构 ==============

@@ -34,7 +34,7 @@ __pycache__
 *.pyd
 pip-log.txt
 pip-delete-this-directory.txt
-data/
+wence_data/
 test/
 example/
 config/

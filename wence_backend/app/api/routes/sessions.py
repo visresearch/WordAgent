@@ -22,8 +22,6 @@ router = APIRouter()
 class CreateSessionRequest(BaseModel):
     """创建会话请求"""
 
-    docId: str | None = None
-    docName: str | None = None
     title: str | None = "新对话"
 
 
@@ -95,18 +93,17 @@ class CommonResponse(BaseModel):
 
 @router.get("/sessions", response_model=SessionListResponse)
 async def list_sessions(
-    doc_id: str | None = Query(default=None, description="按文档 ID 过滤"),
     limit: int = Query(default=50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
 ):
     """
     获取会话列表
 
-    可选按 doc_id 过滤，返回按更新时间倒序排列的会话
+    返回按更新时间倒序排列的会话
     """
     try:
         service = SessionService(db)
-        sessions = await service.get_sessions(doc_id=doc_id, limit=limit)
+        sessions = await service.get_sessions(limit=limit)
         return SessionListResponse(
             success=True,
             sessions=[s.to_dict() for s in sessions],
@@ -126,8 +123,6 @@ async def create_session(
     try:
         service = SessionService(db)
         session = await service.create_session(
-            doc_id=request.docId,
-            doc_name=request.docName,
             title=request.title or "新对话",
         )
         return SessionResponse(success=True, session=session.to_dict())
@@ -152,7 +147,6 @@ async def clear_all_sessions(
 
 @router.get("/sessions/latest", response_model=SessionDetailResponse)
 async def get_latest_session(
-    doc_id: str | None = Query(default=None, description="按文档 ID 过滤"),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -162,7 +156,7 @@ async def get_latest_session(
     """
     try:
         service = SessionService(db)
-        session = await service.get_latest_session(doc_id=doc_id)
+        session = await service.get_latest_session()
         if not session:
             return SessionDetailResponse(success=True, session=None, messages=[])
 

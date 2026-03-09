@@ -18,10 +18,10 @@ def get_data_dir() -> Path:
 
     # 打包后的路径
     if getattr(sys, "frozen", False):
-        return Path(sys.executable).parent / "data"
+        return Path(sys.executable).parent / "wence_data"
 
     # 开发环境
-    return Path(__file__).parent.parent.parent / "data"
+    return Path(__file__).parent.parent.parent / "wence_data"
 
 
 def get_database_url() -> str:
@@ -41,6 +41,28 @@ def get_database_url() -> str:
         db_path = temp_dir / "wence_ai.db"
         print(f"Warning: Using temp directory for database: {db_path}")
         return f"sqlite+aiosqlite:///{db_path.absolute()}"
+
+
+def get_wence_data_dir() -> Path:
+    """获取 wence_data 目录（用于配置文件等持久化数据）"""
+    # 环境变量优先
+    data_dir = os.environ.get("WENCE_DATA_DIR")
+    if data_dir:
+        return Path(data_dir)
+
+    # 打包后的路径
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).parent / "wence_data"
+
+    # 开发环境
+    return Path(__file__).parent.parent.parent / "wence_data"
+
+
+def get_user_settings_file() -> Path:
+    """获取用户设置文件路径（固定在 wence_data 目录）"""
+    new_dir = get_wence_data_dir()
+    new_dir.mkdir(parents=True, exist_ok=True, mode=0o755)
+    return new_dir / "user_settings.json"
 
 
 class Settings(BaseSettings):
