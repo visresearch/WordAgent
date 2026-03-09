@@ -12,14 +12,14 @@ class ModeEnum(str, Enum):
     """模式枚举"""
 
     agent = "agent"
-    ask = "ask"
+    plan = "plan"
 
 
 class ChatRequest(BaseModel):
     """聊天请求模型"""
 
     message: str  # 用户消息
-    mode: ModeEnum  # 模式：agent 或 ask（必选）
+    mode: ModeEnum  # 模式：agent 或 plan（必选）
     history: list[Any] = []  # 历史消息
     model: str = "gpt-4"  # 模型
     timestamp: int | None = None  # 时间戳

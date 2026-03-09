@@ -168,7 +168,7 @@ async def process_writing_request_stream(
         document_range: 文档范围列表 [{startPos: int, endPos: int}, ...]
         history: 历史消息
         model: 用户选择的模型
-        mode: 对话模式（agent/ask）
+        mode: 对话模式（agent/plan）
         chat_id: WebSocket 会话 ID（用于工具回调）
 
     Yields:
@@ -180,15 +180,8 @@ async def process_writing_request_stream(
     model_name = resolve_model(model or "auto")
     llm = create_llm(model_name)
 
-    # 根据模式决定绑定哪些工具
-    is_ask_mode = mode == "ask"
-
-    if is_ask_mode:
-        tools = [read_document]
-        print("[Agent] ask 模式，已绑定 read_document")
-    else:
-        tools = ALL_TOOLS
-        print(f"[Agent] agent 模式，已绑定 {[t.name for t in tools]}")
+    tools = ALL_TOOLS
+    print(f"[Agent] 已绑定 {[t.name for t in tools]}")
 
     llm_with_tools = llm.bind_tools(tools)
     app = build_graph(llm_with_tools)
@@ -368,7 +361,7 @@ async def process_writing_request_stream(
                         yield f"data: {json.dumps({'type': 'status', 'content': str(chunk)}, ensure_ascii=False)}\n\n"
 
         # 只在 agent 模式下且期望生成文档时显示警告
-        if not has_tool_result and not is_ask_mode and document_range:
+        if not has_tool_result and document_range:
             yield f"data: {json.dumps({'type': 'status', 'content': '⚠️ 没有检测到调用工具，模型可能不支持'}, ensure_ascii=False)}\n\n"
 
         # 处理"看到生成草稿但最终未真正调用 generate_document"的场景（仅打印日志，不推送给前端避免困惑）

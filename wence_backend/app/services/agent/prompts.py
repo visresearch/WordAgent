@@ -12,10 +12,9 @@ _COMMON_SKILL_FILES = [
     "read_document.md",
     "no_tool_scenario.md",
     "execution_rules.md",
+    "generate_document.md",
+    "web_tools.md",
 ]
-
-_ASK_MODE_SKILL_FILES = ["ask_mode_limit.md"]
-_AGENT_MODE_SKILL_FILES = ["generate_document.md", "web_tools.md"]
 
 
 @lru_cache(maxsize=64)
@@ -29,13 +28,7 @@ def _read_skill_file(file_name: str) -> str:
 
 def get_agent_prompt_skills(mode: str | None = None) -> list[str]:
     """返回按顺序注入的系统提示技能列表（从 markdown 文件加载）。"""
-    file_names = list(_COMMON_SKILL_FILES)
-    if mode == "ask":
-        file_names.extend(_ASK_MODE_SKILL_FILES)
-    else:
-        file_names.extend(_AGENT_MODE_SKILL_FILES)
-
-    return [_read_skill_file(file_name) for file_name in file_names]
+    return [_read_skill_file(f) for f in _COMMON_SKILL_FILES]
 
 
 def get_agent_prompt(mode: str | None = None) -> str:

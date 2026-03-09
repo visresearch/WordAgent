@@ -67,7 +67,7 @@
         <textarea
           ref="chatInput"
           v-model="inputText"
-          :placeholder="mode === 'agent' ? '描述下一步要构建的内容' : '浏览并理解文档'"
+          :placeholder="mode === 'plan' ? '概述需要研究的目标或问题' : '描述下一步要构建的内容'"
           class="chat-input"
           rows="1"
           @keydown.enter.exact.prevent="sendMessage"
@@ -78,7 +78,7 @@
             <!-- 模式选择 -->
             <div class="custom-select" :class="{ open: modeDropdownOpen }">
               <div class="select-trigger" @click="toggleModeDropdown">
-                <span>{{ mode === 'agent' ? 'Agent' : 'Ask' }}</span>
+                <span>{{ mode === 'plan' ? 'Plan' : 'Agent' }}</span>
                 <svg
                   class="select-arrow"
                   width="8"
@@ -105,10 +105,10 @@
                 </div>
                 <div
                   class="select-option"
-                  :class="{ active: mode === 'ask' }"
-                  @click="selectMode('ask')"
+                  :class="{ active: mode === 'plan' }"
+                  @click="selectMode('plan')"
                 >
-                  Ask
+                  Plan
                 </div>
               </div>
             </div>
