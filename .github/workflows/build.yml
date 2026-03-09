@@ -11,6 +11,9 @@ jobs:
     name: Build Linux Binary
     runs-on: ubuntu-22.04  # 使用 Ubuntu 22.04 以兼容更多系统 (glibc 2.31)
     
+    permissions:
+      contents: write
+    
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -62,15 +65,23 @@ jobs:
           cp dist/wence_ai package/wence_ai-linux-x86_64
           chmod +x package/wence_ai-linux-x86_64
       
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+      - name: Upload to Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
         with:
-          name: linux-binary
-          path: wence_backend/package/wence_ai-linux-x86_64
+          files: wence_backend/package/wence_ai-linux-x86_64
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   
   build-windows:
     name: Build Windows Binary
     runs-on: windows-latest
+    
+    permissions:
+      contents: write
     
     steps:
       - name: Checkout
@@ -122,39 +133,11 @@ jobs:
           New-Item -ItemType Directory -Force -Path package
           Copy-Item dist/wence_ai.exe package/wence_ai-windows-x86_64.exe
       
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-binary
-          path: wence_backend/package/wence_ai-windows-x86_64.exe
-  
-  create-release:
-    name: Create Release
-    needs: [build-linux, build-windows]
-    runs-on: ubuntu-22.04
-    if: startsWith(github.ref, 'refs/tags/')
-    
-    permissions:
-      contents: write
-    
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-      
-      - name: Display structure
-        run: ls -R artifacts
-      
-      - name: Create Release
+      - name: Upload to Release
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
         with:
-          files: |
-            artifacts/linux-binary/*
-            artifacts/windows-binary/*
+          files: wence_backend/package/wence_ai-windows-x86_64.exe
           draft: false
           prerelease: false
           generate_release_notes: true
