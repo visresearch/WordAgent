@@ -66,7 +66,9 @@ export default {
       pendingDocumentMsg: null,
       historyLoading: false,
       hasHistory: false,
-      historyLoaded: false
+      historyLoaded: false,
+      _streamingSessionId: null,   // 正在流式生成的 session ID
+      _streamingCache: {}          // {sessionId: messages[]} 流式生成期间切走时缓存消息
     };
   },
   mounted() {
@@ -295,13 +297,35 @@ export default {
         return;
       }
 
-      // 如果已经是当前会话，不重复加载
+      // 如果已经是当前会话且已加载，不重复加载
       if (this.currentSessionId === sessionId && this.historyLoaded) {
         console.log('[会话切换] 已是当前会话，跳过');
         return;
       }
 
-      // 先清空旧消息，再加载新会话
+      // 如果当前 session 正在流式生成，缓存消息以便切回时恢复
+      if (this.isLoading && this._streamingSessionId === this.currentSessionId) {
+        console.log('[会话切换] 缓存正在流式生成的会话消息:', this.currentSessionId);
+        this._streamingCache[this.currentSessionId] = this.messages;
+      }
+
+      // 切换到的目标 session 有缓存（正在流式生成中），直接恢复
+      if (this._streamingCache[sessionId]) {
+        console.log('[会话切换] 从缓存恢复流式会话:', sessionId);
+        this.messages = this._streamingCache[sessionId];
+        this.currentSessionId = sessionId;
+        this.currentSessionTitle = title || null;
+        this.hasHistory = this.messages.length > 0;
+        this.historyLoaded = true;
+
+        if (window.Application && window.Application.PluginStorage) {
+          window.Application.PluginStorage.setItem('current_session_id', String(sessionId));
+        }
+        this.$nextTick(() => this.scrollToBottom());
+        return;
+      }
+
+      // 正常流程：清空旧消息，加载新会话
       this.messages = [];
       this.hasHistory = false;
       this.historyLoaded = false;
@@ -779,9 +803,10 @@ export default {
      */
     _sendStreamRequest(userMessage, documentRange) {
       this.isLoading = true;
+      const streamSessionId = this.currentSessionId;
+      this._streamingSessionId = streamSessionId;
       this.scrollToBottom();
 
-      const aiMessageIndex = this.messages.length;
       this.messages.push({
         role: 'assistant',
         content: '',
@@ -793,6 +818,8 @@ export default {
         thinkingDuration: '',
         statusText: ''
       });
+      // 必须从响应式数组中取引用（Vue 3 push 后内部对象会被包装为 Proxy）
+      const aiMsg = this.messages[this.messages.length - 1];
 
       const streamCtrl = api.chatStream(userMessage, {
         mode: this.mode,
@@ -801,27 +828,46 @@ export default {
         history: this.messages.slice(0, -1).slice(-10),
 
         onMessage: (data) => {
-          this._handleStreamMessage(data, aiMessageIndex);
+          this._handleStreamMessage(data, aiMsg);
         },
 
         onError: (error) => {
           console.error('请求失败:', error);
-          this.messages[aiMessageIndex].content = `网络错误：${error.message}。请确保后端服务运行在 localhost:3880`;
+          aiMsg.content = `网络错误：${error.message}。请确保后端服务运行在 localhost:3880`;
         },
 
         onComplete: () => {
           this.isLoading = false;
+          this._streamingSessionId = null;
 
-          const msg = this.messages[aiMessageIndex];
-          if (msg.thinking && msg.thinkingExpanded) {
-            msg.thinkingExpanded = false;
+          if (aiMsg.thinking && aiMsg.thinkingExpanded) {
+            aiMsg.thinkingExpanded = false;
           }
 
-          this.scrollToBottom();
-
-          if (msg.content) {
-            this.saveMessageToHistory('assistant', msg.content, msg.documentJson, null, msg.contentParts);
+          // 流完成时用户可能已切到其他 session
+          if (this.currentSessionId === streamSessionId) {
+            // 仍在原 session，正常保存
+            this.scrollToBottom();
+            if (aiMsg.content) {
+              this.saveMessageToHistory('assistant', aiMsg.content, aiMsg.documentJson, null, aiMsg.contentParts);
+            }
+          } else {
+            // 用户已切走，直接调用 API 保存到原 session
+            console.log('[流完成] 用户已切走，保存到原 session:', streamSessionId);
+            if (aiMsg.content) {
+              api.addSessionMessage(streamSessionId, {
+                role: 'assistant',
+                content: aiMsg.content,
+                documentJson: aiMsg.documentJson,
+                contentParts: aiMsg.contentParts,
+                model: this.selectedModel || 'auto',
+                mode: this.mode
+              });
+            }
           }
+
+          // 清理缓存
+          delete this._streamingCache[streamSessionId];
         }
       });
 
@@ -831,8 +877,8 @@ export default {
     /**
      * 处理流式消息
      */
-    _handleStreamMessage(data, aiMessageIndex) {
-      const msg = this.messages[aiMessageIndex];
+    _handleStreamMessage(data, aiMsg) {
+      const msg = aiMsg;
 
       // 后端请求读取文档：委托 api.js 解析文档并回传
       if (data.type === 'read_document') {

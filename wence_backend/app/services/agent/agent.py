@@ -42,8 +42,12 @@ def create_llm(model_name: str):
     # 当用户未启用代理时，临时清除环境变量中的代理设置
     # 防止 openai/httpx 读取到系统的 socks:// 代理导致 scheme 不支持报错
     _proxy_env_keys = [
-        "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
-        "http_proxy", "https_proxy", "all_proxy",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
     ]
     saved_env = {}
     if not proxy_url:
@@ -369,7 +373,8 @@ async def process_writing_request_stream(
 
         # 处理"看到生成草稿但最终未真正调用 generate_document"的场景（仅打印日志，不推送给前端避免困惑）
         if generating_notified and not generate_tool_result:
-            print("[Agent] ℹ️ 模型取消了文档生成，已直接输出文本结果")
+            print("[Agent] ❗ 模型取消了文档生成")
+            yield f"data: {json.dumps({'type': 'status', 'content': '❗ 模型取消了文档生成，请重新尝试'}, ensure_ascii=False)}\n\n"
 
         yield "data: [DONE]\n\n"
 

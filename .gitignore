@@ -35,9 +35,7 @@ __pycache__
 pip-log.txt
 pip-delete-this-directory.txt
 wence_data/
-test/
 example/
-config/
 
 # PyInstaller
 build/
