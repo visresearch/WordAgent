@@ -750,7 +750,7 @@ TOOL_MAP = {t.name: t for t in ALL_TOOLS}
 PLANNER_TOOLS = [create_workflow]
 RESEARCH_TOOLS = [web_search, web_fetch]
 OUTLINE_TOOLS = [read_document, query_document]
-WRITER_TOOLS = [generate_document]
+WRITER_TOOLS = [generate_document, read_document, query_document]
 REVIEWER_TOOLS = [review_document]
 
 AGENT_TOOLS = {

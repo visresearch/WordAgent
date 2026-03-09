@@ -168,8 +168,8 @@ def _run_sub_agent(
         if not hasattr(response, "tool_calls") or not response.tool_calls:
             # 没有 tool call，agent 给出了最终文字回复
             text_output = response.content or ""
-            # writer 必须调用 generate_document，如果没调用则追加提醒重试一次
-            if agent_name == "writer" and not _writer_generated and iteration == 0:
+            # writer 必须调用 generate_document，如果没调用则追加提醒重试
+            if agent_name == "writer" and not _writer_generated:
                 messages.append(
                     HumanMessage(
                         content="你必须调用 generate_document 工具将内容输出为文档，不要在对话中直接输出文本。请立即调用 generate_document。"
