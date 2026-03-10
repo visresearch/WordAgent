@@ -107,6 +107,7 @@ def _create_llm(model_name: str):
             openai_api_key=provider_info.api_key,
             openai_api_base=provider_info.base_url,
             temperature=get_temperature(),
+            max_tokens=16384,
             streaming=True,
             http_client=http_client,
             http_async_client=http_async_client,
@@ -125,15 +126,16 @@ def _run_sub_agent(
     tools: list,
     context: str = "",
     max_iterations: int = 10,
-) -> tuple[str, dict | None]:
+) -> tuple[str, dict | None, list[dict]]:
     """
     运行一个 sub-agent 的 ReAct 循环（同步，在线程中运行）。
 
     Returns:
-        (text_output, tool_result_json | None)
+        (text_output, tool_result_json | None, tool_data)
         text_output: agent 最终的文字回复
         tool_result_json: 如果 agent 调用了 generate_document / create_workflow / review_document，
                           返回最后一次调用的结构化结果
+        tool_data: 收集的文档相关工具调用记录（read_document / query_document）
     """
     tool_map = {t.name: t for t in tools}
     llm_with_tools = llm.bind_tools(tools)
@@ -160,9 +162,40 @@ def _run_sub_agent(
     last_structured_result = None
     text_output = ""
     _writer_generated = False  # writer 是否已成功调用 generate_document
+    _tool_data: list[dict] = []  # 收集文档相关工具调用结果
+    _retry_count = 0  # 无效 tool call 重试计数
 
     for iteration in range(max_iterations):
         response = llm_with_tools.invoke(messages)
+
+        # 处理无效的工具调用（模型生成了不完整的 tool call JSON）
+        invalid_calls = getattr(response, "invalid_tool_calls", [])
+        if invalid_calls:
+            if not hasattr(response, "tool_calls") or not response.tool_calls:
+                # 只有无效工具调用，没有有效的 — 跳过这条消息，提示重试
+                _retry_count += 1
+                invalid_names = [tc.get("name", "?") for tc in invalid_calls]
+                print(f"  [{agent_name}] ⚠️ 检测到无效工具调用: {invalid_names}，重试 ({_retry_count})")
+                if _retry_count <= 2:
+                    messages.append(
+                        SystemMessage(
+                            content="你刚才的工具调用格式不完整（JSON 被截断）。请重新调用工具，可以简化格式参数（pStyle/rStyle 使用默认值），确保 JSON 结构完整。"
+                        )
+                    )
+                    continue
+                else:
+                    # 重试次数超限，放弃
+                    text_output = response.content or ""
+                    print(f"  [{agent_name}] ❌ 重试次数超限，放弃工具调用")
+                    break
+            else:
+                # 同时有有效和无效的工具调用 — 重建干净的 AIMessage，只保留有效的
+                print(f"  [{agent_name}] ⚠️ 过滤掉无效工具调用，保留有效的")
+                response = AIMessage(
+                    content=response.content,
+                    tool_calls=response.tool_calls,
+                )
+
         messages.append(response)
 
         if not hasattr(response, "tool_calls") or not response.tool_calls:
@@ -201,6 +234,11 @@ def _run_sub_agent(
 
                 messages.append(ToolMessage(content=content, tool_call_id=tc["id"], name=tool_name))
 
+                # 收集文档搜索工具的调用结果（位置信息），供下游 agent 共享
+                # 注意：只收集 query_document（位置信息小），不收集 read_document（文档内容大）
+                if tool_name == "query_document":
+                    _tool_data.append({"tool": tool_name, "args": tc["args"], "result": content})
+
                 # writer 调用 generate_document 完成后标记退出
                 if agent_name == "writer" and tool_name == "generate_document":
                     _writer_generated = True
@@ -223,7 +261,27 @@ def _run_sub_agent(
                 text_output = m.content
                 break
 
-    return text_output, last_structured_result
+    return text_output, last_structured_result, _tool_data
+
+
+def _format_shared_tool_data(tool_data: list[dict]) -> str:
+    """将收集的工具调用数据格式化为可共享的上下文文本（仅包含搜索定位结果）。"""
+    if not tool_data:
+        return ""
+    parts = []
+    for item in tool_data:
+        tool_name = item["tool"]
+        args = item["args"]
+        result = item["result"]
+        if tool_name == "query_document":
+            filters = args.get("filters", {})
+            filter_desc = ", ".join(f"{k}={v}" for k, v in filters.items())
+            parts.append(f"### 文档搜索: {filter_desc}\n{result}")
+    result_text = "\n\n".join(parts)
+    # 安全截断，避免上下文过大
+    if len(result_text) > 8000:
+        result_text = result_text[:8000] + "\n\n...(已截断)"
+    return result_text
 
 
 # region Graph Nodes
@@ -255,7 +313,7 @@ def _build_multi_agent_graph(llm, model_name: str):
             range_info = json.dumps(state.document_range, ensure_ascii=False)
             task += f"\n\n用户选中了文档范围: {range_info}"
 
-        text, structured = _run_sub_agent(llm, "planner", task, AGENT_TOOLS["planner"])
+        text, structured, _ = _run_sub_agent(llm, "planner", task, AGENT_TOOLS["planner"])
 
         workflow = {}
         if structured and "steps" in structured:
@@ -290,6 +348,7 @@ def _build_multi_agent_graph(llm, model_name: str):
         document_json = {}
         review_result = {}
         rewrite_count = 0
+        shared_doc_data: list[dict] = []  # 跨步骤共享的文档工具数据
 
         for i, step in enumerate(steps):
             agent_name = step["agent"]
@@ -316,10 +375,19 @@ def _build_multi_agent_graph(llm, model_name: str):
                 context_parts.insert(0, f"[研究资料]\n{research_data}")
             if agent_name == "writer" and outline:
                 context_parts.insert(0, f"[写作大纲]\n{outline}")
+            # 将前序步骤收集的文档数据共享给 outline / writer
+            if agent_name in ("outline", "writer") and shared_doc_data:
+                formatted = _format_shared_tool_data(shared_doc_data)
+                if formatted:
+                    context_parts.insert(0, f"[前序步骤获取的文档数据]\n{formatted}")
 
             context = "\n\n---\n\n".join(context_parts)
 
-            text, structured = _run_sub_agent(llm, agent_name, task, tools, context=context)
+            text, structured, tool_data = _run_sub_agent(llm, agent_name, task, tools, context=context)
+
+            # 累积文档工具数据供后续步骤使用
+            if tool_data:
+                shared_doc_data.extend(tool_data)
 
             step_results.append(text)
 
@@ -375,7 +443,7 @@ def _build_multi_agent_graph(llm, model_name: str):
                             rewrite_context_parts.append(f"[写作大纲]\n{outline}")
                         rewrite_context = "\n\n---\n\n".join(rewrite_context_parts)
 
-                        w_text, w_structured = _run_sub_agent(
+                        w_text, w_structured, _ = _run_sub_agent(
                             llm,
                             "writer",
                             rewrite_task,
@@ -390,7 +458,7 @@ def _build_multi_agent_graph(llm, model_name: str):
                         writer({"type": "__phase", "agent": "reviewer"})
                         review_task = "请审核 writer 重写后的文档质量。"
                         review_context = w_text
-                        r_text, r_structured = _run_sub_agent(
+                        r_text, r_structured, _ = _run_sub_agent(
                             llm,
                             "reviewer",
                             review_task,

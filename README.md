@@ -18,7 +18,7 @@ git push github && git push github --tags
 在58890端口会运行一个wpscloudsrv的服务，要启动，不然看不到wps加载项列表
 
 ```bash
-sudo pkill -f wpsclouds
+ps -aux | grep wpscloud
 ```
 
 # 参考文献

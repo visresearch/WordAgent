@@ -54,7 +54,7 @@ async def submit_tool_response(chat_id: str, data: dict):
 # region Tools Schema
 
 # 样式数组索引常量（与前端 docxJsonConverter.js 保持一致）
-# pStyle: [alignment, lineSpacing, indentLeft, indentRight, indentFirstLine, spaceBefore, spaceAfter, styleName, lineSpacingRule]
+# pStyle: [alignment, lineSpacing(磅), indentLeft(磅), indentRight(磅), indentFirstLine(磅), spaceBefore(磅), spaceAfter(磅), styleName, lineSpacingRule]
 # rStyle: [fontName, fontSize, bold, italic, underline, underlineColor, color, highlight, strikethrough, superscript, subscript]
 # cStyle: [rowSpan, colSpan, alignment, verticalAlignment]
 # tStyle: [tableAlignment]
@@ -77,10 +77,16 @@ class Paragraph(BaseModel):
     """段落"""
 
     pStyle: list = Field(
-        default_factory=lambda: ["left", 12, 0, 0, 0, 0, 6, "正文", 0],
+        default_factory=lambda: ["justify", 18, 0, 0, 24, 0, 0, "正文", 1],
         description="""段落样式数组，按顺序: [对齐, 行距, 左缩进, 右缩进, 首行缩进, 段前, 段后, 样式名, 行距规则]
 - 对齐: left/center/right/justify
-- 行距规则: 0=多倍行距, 1=至少, 2=固定值""",
+- 行距: 磅值（points）。仅在行距规则=3/4/5时生效（规则0/1/2为预设档位，WPS忽略此字段）。以12pt字号为例：单倍=12, 1.5倍=18, 双倍=24
+- 左缩进/右缩进/首行缩进: 磅值。每个中文字符≈12磅，2字符缩进=24，0=无缩进
+- 段前/段后: 磅值（points），如12=约1行，0=无间距
+- 样式名: 如 '正文'、'标题 1'、'标题 2' 等
+- 行距规则（WPS常量）: 0=单倍行距, 1=1.5倍行距, 2=双倍行距, 3=至少, 4=固定值, 5=多倍行距
+  注意：规则0/1/2为预设档位（WPS自动计算行距，忽略行距字段）；规则3/4/5使用行距字段的磅值；
+  普通文档推荐用 行距规则=3(至少) 配合明确的磅值""",
     )
     runs: list[Run] = Field(description="格式块数组")
 
@@ -179,7 +185,7 @@ class QueryFilter(BaseModel):
     styleName: str | None = Field(
         default=None, description="段落样式名，包含匹配（如 '标题' 可匹配 '标题 1'、'标题 2'）"
     )
-    lineSpacing: float | RangeFilter | None = Field(default=None, description="行距。精确值如 1.5；或范围如 {gt: 1.5}")
+    lineSpacing: float | RangeFilter | None = Field(default=None, description="行距（磅值）。单倍=12, 1.5倍=18, 双倍=24；精确值如 18；或范围如 {gt: 18}")
 
 
 class DocumentQuery(BaseModel):

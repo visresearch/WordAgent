@@ -1188,7 +1188,7 @@ function generateDocxFromJSON(jsonData, doc, startPosition = null) {
         // 如果没有 text 字段，从 runs 拼接
         const paraText = para.text ? para.text.trim() : (para.runs || []).map(r => r.text || '').join('').trim();
         const isImagePlaceholder = paraText === '/' || paraText === '[图片]';
-        
+
         // 获取段落样式
         const pStyle = para.pStyle || DEFAULT_PSTYLE;
         const alignment = pStyle[PSTYLE.ALIGNMENT] || 'left';
@@ -1257,7 +1257,7 @@ function generateDocxFromJSON(jsonData, doc, startPosition = null) {
 
         // 处理普通段落
         const paraStartPos = currentPos;  // 记录段落开始位置（移到外面避免未定义）
-        
+
         if (para.runs && para.runs.length > 0) {
           for (const run of para.runs) {
             const runText = run.text || '';
@@ -1273,7 +1273,7 @@ function generateDocxFromJSON(jsonData, doc, startPosition = null) {
 
             // 应用字符样式（直接使用JSON中的值）
             const rStyle = run.rStyle || DEFAULT_RSTYLE;
-            
+
             // 字体和字号
             if (rStyle[RSTYLE.FONT_NAME]) {
               font.Name = rStyle[RSTYLE.FONT_NAME];
@@ -1281,14 +1281,14 @@ function generateDocxFromJSON(jsonData, doc, startPosition = null) {
             if (rStyle[RSTYLE.FONT_SIZE]) {
               font.Size = rStyle[RSTYLE.FONT_SIZE];
             }
-            
+
             // 字体样式 - 直接设置，不做条件判断
             font.Bold = rStyle[RSTYLE.BOLD] ? -1 : 0;
             font.Italic = rStyle[RSTYLE.ITALIC] ? -1 : 0;
             font.StrikeThrough = rStyle[RSTYLE.STRIKETHROUGH] ? -1 : 0;
             font.Superscript = rStyle[RSTYLE.SUPERSCRIPT] ? -1 : 0;
             font.Subscript = rStyle[RSTYLE.SUBSCRIPT] ? -1 : 0;
-            
+
             // 下划线
             if (rStyle[RSTYLE.UNDERLINE]) {
               font.Underline = rStyle[RSTYLE.UNDERLINE];
@@ -1298,14 +1298,14 @@ function generateDocxFromJSON(jsonData, doc, startPosition = null) {
             } else {
               font.Underline = 0;
             }
-            
+
             // 颜色
             if (rStyle[RSTYLE.COLOR] && rStyle[RSTYLE.COLOR] !== '#000000') {
               font.Color = parseRGBColor(rStyle[RSTYLE.COLOR]);
             } else {
               font.Color = 0;
             }
-            
+
             // 高亮（使用 Range 的 HighlightColorIndex）
             if (rStyle[RSTYLE.HIGHLIGHT]) {
               try {
@@ -1355,12 +1355,12 @@ function generateDocxFromJSON(jsonData, doc, startPosition = null) {
             paraFormat.FirstLineIndent = indentFirstLine;
             paraFormat.SpaceBefore = spaceBefore;
             paraFormat.SpaceAfter = spaceAfter;
-            
-            // 设置行距（同时设置行距值和行距规则）
+
+            // 设置行距（先设磅值，再设规则，确保规则最终生效）
             if (lineSpacing && lineSpacing > 0) {
               try {
-                paraFormat.LineSpacingRule = lineSpacingRule;
                 paraFormat.LineSpacing = lineSpacing;
+                paraFormat.LineSpacingRule = lineSpacingRule;
               } catch (e) {
                 console.warn('设置行距失败:', e);
               }

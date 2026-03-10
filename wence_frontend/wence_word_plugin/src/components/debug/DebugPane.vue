@@ -15,9 +15,6 @@
         <button class="btn btn-primary" @click="parseSelection">
           解析选中内容
         </button>
-        <button class="btn btn-success" @click="parseFullDocument">
-          解析全文
-        </button>
         <button class="btn btn-docs" @click="listOpenDocuments">
           显示所有文件名
         </button>
@@ -33,6 +30,25 @@
             {{ name }}
           </li>
         </ul>
+      </div>
+    </div>
+
+    <!-- JSON 转文档 -->
+    <div class="divItem">
+      <h3>📥 JSON 转文档</h3>
+      <textarea
+        v-model="jsonInput"
+        class="json-input"
+        placeholder="粘贴 JSON 到此处..."
+        rows="8"
+      ></textarea>
+      <div class="button-group" style="margin-top: 8px">
+        <button class="btn btn-apply" @click="applyJSONToDocument">
+          应用到文档
+        </button>
+        <button class="btn btn-warning" @click="jsonInput = ''">
+          清空
+        </button>
       </div>
     </div>
 
@@ -73,7 +89,7 @@
 </template>
 
 <script>
-import { parseDocxToJSON } from '../js/docxJsonConverter.js';
+import { parseDocxToJSON, generateDocxFromJSON } from '../js/docxJsonConverter.js';
 
 export default {
   name: 'TaskPane',
@@ -82,7 +98,8 @@ export default {
       parsedData: null,
       openDocuments: [],
       statusMessage: '',
-      statusType: 'info'
+      statusType: 'info',
+      jsonInput: ''
     };
   },
   computed: {
@@ -167,8 +184,21 @@ export default {
       }
     },
 
-    // 解析全文
-    parseFullDocument() {
+    // JSON 转文档
+    applyJSONToDocument() {
+      if (!this.jsonInput.trim()) {
+        this.showStatus('请先粘贴 JSON 内容', 'error');
+        return;
+      }
+
+      let jsonData;
+      try {
+        jsonData = JSON.parse(this.jsonInput);
+      } catch (e) {
+        this.showStatus('JSON 格式错误: ' + e.message, 'error');
+        return;
+      }
+
       try {
         const app = window.Application;
         if (!app) {
@@ -182,23 +212,19 @@ export default {
           return;
         }
 
-        const content = doc.Content;
-        if (!content) {
-          this.showStatus('无法获取文档内容', 'error');
+        const startPos = jsonData.position ?? null;
+        const result = generateDocxFromJSON(jsonData, doc, startPos);
+        if (result && result.error) {
+          this.showStatus('转换失败: ' + result.error, 'error');
           return;
         }
 
-        const result = parseDocxToJSON(content);
-        if (result.error) {
-          this.showStatus(result.error, 'error');
-          return;
-        }
-
-        this.parsedData = result;
-        this.showStatus(`解析成功！共 ${result.paragraphs?.length || 0} 个段落`, 'success');
+        const paraCount = jsonData.paragraphs?.length || 0;
+        const tableCount = jsonData.tables?.length || 0;
+        this.showStatus(`已写入文档：${paraCount} 段落 / ${tableCount} 表格`, 'success');
       } catch (e) {
-        console.error('解析全文出错:', e);
-        this.showStatus('解析出错: ' + e.message, 'error');
+        console.error('JSON 转文档出错:', e);
+        this.showStatus('写入失败: ' + e.message, 'error');
       }
     },
 
@@ -360,6 +386,24 @@ hr {
 .btn-docs {
   background-color: #7e57c2;
   color: white;
+}
+
+.btn-apply {
+  background-color: #e91e63;
+  color: white;
+}
+
+.json-input {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 11px;
+  resize: vertical;
+  box-sizing: border-box;
+  background: #1e1e1e;
+  color: #d4d4d4;
 }
 
 .docs-container {

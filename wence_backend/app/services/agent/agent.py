@@ -8,7 +8,7 @@ import json
 import traceback
 from collections.abc import AsyncGenerator
 
-from langchain_core.messages import AIMessageChunk, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessageChunk, HumanMessage, RemoveMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, START, MessagesState, StateGraph
 
 from app.services.llm_client import LLMClientManager, resolve_model
@@ -66,6 +66,7 @@ def create_llm(model_name: str):
             openai_api_key=provider_info.api_key,
             openai_api_base=provider_info.base_url,
             temperature=get_temperature(),
+            max_tokens=16384,  # max_tokens 只限制“模型生成的输出”
             streaming=True,
             http_client=http_client,
             http_async_client=http_async_client,
@@ -126,6 +127,23 @@ def build_graph(llm_with_tools):
 
         return {"messages": results}
 
+    def retry_node(state: MessagesState) -> dict:
+        """当模型中途放弃 tool call 时，移除失败的消息并提示重试"""
+        last_message = state["messages"][-1]
+        invalid_calls = getattr(last_message, "invalid_tool_calls", [])
+        tool_names = [tc.get("name", "?") for tc in invalid_calls] if invalid_calls else []
+        print(f"[Retry] 移除失败的消息 (invalid tools: {tool_names})，添加重试提示")
+        return {
+            "messages": [
+                RemoveMessage(id=last_message.id),
+                SystemMessage(
+                    content="[RETRY_GENERATE] 你刚才尝试调用 generate_document 但输出被截断未能完成。"
+                    "请再次调用 generate_document 工具生成文档。可以简化格式：pStyle 和 rStyle 使用默认值，"
+                    "只需设置每个 Run 的 text 内容。确保 JSON 结构完整。"
+                ),
+            ]
+        }
+
     # ---- 路由 ----
 
     def should_continue(state: MessagesState) -> str:
@@ -134,6 +152,33 @@ def build_graph(llm_with_tools):
         if hasattr(last_message, "tool_calls") and last_message.tool_calls:
             print("[Router] -> tools")
             return "tools"
+
+        # 检测中途放弃的工具调用，自动重试一次
+        should_retry = False
+
+        # 信号1: invalid_tool_calls（模型生成了不完整的 tool call JSON）
+        invalid_calls = getattr(last_message, "invalid_tool_calls", [])
+        if invalid_calls:
+            print(f"[Router] ⚠️ 检测到无效的工具调用: {[tc.get('name', '?') for tc in invalid_calls]}")
+            should_retry = True
+
+        # 信号2: finish_reason 为 length（输出被截断）
+        metadata = getattr(last_message, "response_metadata", {})
+        if metadata.get("finish_reason") == "length":
+            print("[Router] ⚠️ 模型输出被截断 (finish_reason=length)")
+            should_retry = True
+
+        if should_retry:
+            # 检查是否已经重试过（防止无限循环）
+            has_retried = any(
+                isinstance(m, SystemMessage) and "[RETRY_GENERATE]" in m.content for m in state["messages"]
+            )
+            if not has_retried:
+                print("[Router] -> retry")
+                return "retry"
+            else:
+                print("[Router] -> END (已重试过，不再重试)")
+
         print("[Router] -> END")
         return END
 
@@ -141,10 +186,12 @@ def build_graph(llm_with_tools):
 
     graph.add_node("agent", agent_node)
     graph.add_node("tools", tools_node)
+    graph.add_node("retry", retry_node)
 
     graph.add_edge(START, "agent")
-    graph.add_conditional_edges("agent", should_continue, {"tools": "tools", END: END})
+    graph.add_conditional_edges("agent", should_continue, {"tools": "tools", "retry": "retry", END: END})
     graph.add_edge("tools", "agent")  # 工具执行完毕，始终回到 Agent
+    graph.add_edge("retry", "agent")  # 重试后回到 Agent 重新生成
 
     return graph.compile()
 
@@ -190,12 +237,12 @@ async def process_writing_request_stream(
         # 构建初始消息列表
         messages = []
 
-        # # 注入系统提示技能（拆分为多个 SystemMessage，便于维护和按模式裁剪）
-        # for skill_prompt in get_agent_prompt_skills(mode=mode):
-        #     messages.append(SystemMessage(content=skill_prompt))
+        # 注入系统提示技能（拆分为多个 SystemMessage，便于维护和按模式裁剪）
+        for skill_prompt in get_agent_prompt_skills(mode=mode):
+            messages.append(SystemMessage(content=skill_prompt))
 
         # 注入系统提示（从模块化 md 文件加载，合并为单条 SystemMessage 以兼容小模型）
-        messages.append(SystemMessage(content=get_agent_prompt(mode=mode)))
+        # messages.append(SystemMessage(content=get_agent_prompt(mode=mode)))
 
         # 注入自定义提示（如果有）
         from app.services.llm_client import get_custom_prompt
