@@ -4,9 +4,9 @@
 
 > 文策AI：让写作有策略，让表达更智能
 
-![](./docs/WenceAI.png)
+![](./docs/WenceAI_small.png)
 
-## 项目概述
+## 一、项目概述
 
 本项目是一个基于(多)智能体的AI辅助写作系统，用户在 **办公软件(如WPS、Microsoft Word)** 中安装 **加载项** 后，可以通过自然语言与AI智能体进行交互，获取写作建议、内容生成、结构优化等服务。生成文档Agent的核心就是生成 **“结构化Word文档”**。
 
@@ -19,18 +19,18 @@
 
 对比市面上已有的AI辅助写作工具，文策AI的优势在于：
 
-1. 以国民级办公软件为载体，让普通用户无门槛获得优质的AI写作辅助体验。
+1. 以国民级办公软件为载体，让普通用户无门槛获得优质的AI写作辅助体验。并且同时支持Windows和Linux系统。
 2. 对比常见的在Word中的AI写作工具，本项目智能体能够理解Word文章结构，能够自主联网搜集资料信息，生成符合Word文档结构的内容，能够根据用户需求进行文章结构修改和内容修改。
 3. 采用多智能体协作架构，多智能体扮演不同专家角色，协同完成写作任务，以生成有深度的长文章为目标。
 4. 本项目使用的大模型服务APIKey来自于用户自己，目前支持世界上大多数主流的LLM服务商，用户可以根据自己的需求选择不同的LLM服务商和不同的模型。
 
-## 项目预览
+## 二、项目预览
 
 |WPS加载项界面|后端服务QT界面|
 |--|--|
 |![](./docs/wps_addon.png)|![](./docs/pyQt.png)|
 
-## 系统架构
+## 三、系统架构
 
 为了能够更好地满足用户需求，保证系统生成文章的稳定性和深度，本项目设计了两种智能体架构：
 
@@ -40,15 +40,114 @@
 
 ![](./docs/single_agent_loop.png)
 
+前端设计的WPS加载项将用户的提问和当前用户选择的文章段落转化成特定json格式发送给后端。
+
+在后端单智能体架构中，系统设计了一个标准的ReAct智能体循环架构，智能体在每个循环中根据用户输入和当前文档状态进行思考，选择调用哪种工具（如联网搜索工具）还是选择直接结束，选择调用了工具然后再思考，再选择调用哪种工具(如写作工具)或者选择结束，直到智能体选择结束循环。
+
+- **read_document tool**: 负责读取(startPosition, endPosition)范围内的文章内容并转化成特定json格式回传给智能体。
+- **generate_document tool**: 负责生成特定json格式的文章内容传给前端加载项。
+- **query_document tool**: 负责查询某种格式或文字信息的段落位置并返回给智能体。
+- **web_search tool**: 负责根据用户输入的关键词进行联网搜索并返回搜索结果给智能体。
+
 ### Multi Agent 架构
 
-## 快速开始
+#### 整体架构图
+
+![](./docs/multi_agent.png)
+
+前端部分和单智能体架构相同，后端多智能体协作框架中设计了一个 **planner agent** 负责编排和调度其他多个专家智能体的工作流。
+
+- **research agent**: 负责联网搜集资料信息
+- **outline agent**: 负责根据资料信息和用户需求生成文章大纲
+- **writer agent**: 负责根据资料信息和用户需求生成文章内容
+- **reviewer agent**: 负责根据资料信息和用户需求对生成的文章进行审阅和修改建议
+
+## 四、项目结构
+
+```
+wence_ai/
+├── backend/                        # FastAPI后端 + 智能体核心
+│   ├── main.py
+│   ├── pyproject.toml
+│   ├── README.md
+│   ├── app/
+│   │   ├── main.py
+│   │   ├── utils.py
+│   │   ├── publish.html
+│   │   ├── api/
+│   │   │   ├── deps.py
+│   │   │   └── routes/
+│   │   │       ├── chat.py
+│   │   │       ├── sessions.py
+│   │   │       ├── settings.py
+│   │   │       └── models.py
+│   │   ├── core/
+│   │   │   ├── config.py
+│   │   │   └── db.py
+│   │   ├── models/
+│   │   │   ├── chat.py
+│   │   │   ├── doc.py
+│   │   │   └── db_models.py
+│   │   └── services/
+│   │       ├── llm_client.py
+│   │       ├── session_service.py
+│   │       ├── agent/              # Single Agent实现
+│   │       │   ├── agent.py
+│   │       │   ├── prompts.py
+│   │       │   ├── tools.py
+│   │       │   └── skills/
+│   │       └── multi_agent/        # Multi Agent实现
+│   │           ├── agent.py
+│   │           ├── prompts.py
+│   │           ├── tools.py
+│   │           └── skills/
+│   │               ├── common/
+│   │               ├── planner_agent/
+│   │               ├── research_agent/
+│   │               ├── outline_agent/
+│   │               ├── writer_agent/
+│   │               └── reviewer_agent/
+│   ├── gui/                        # PySide6桌面端界面
+│   │   ├── main.py
+│   │   ├── common/
+│   │   ├── resources/
+│   │   └── views/
+│   ├── deploy/
+│   │   ├── wence.spec
+│   │   └── appimagetool-x86_64.AppImage
+│   ├── example/                    # 示例文档与JSON
+│   └── wence_data/                 # 本地配置与数据库
+├── frontend/
+│   └── wps_word_plugin/            # Vue3 + WPS加载项前端
+│       ├── package.json
+│       ├── vite.config.js
+│       ├── manifest.xml
+│       ├── src/
+│       │   ├── App.vue
+│       │   ├── main.js
+│       │   ├── router/
+│       │   ├── assets/
+│       │   └── components/
+│       │       ├── chat/
+│       │       ├── about/
+│       │       ├── debug/
+│       │       ├── session/
+│       │       ├── setting/
+│       │       └── js/
+│       └── public/
+└── .github/
+    └── workflows/
+        └── build.yml
+```
+
+## 五、快速开始
 
 ### 环境配置
 
 - node v22.12.0
 - wpsjs 2.2.3
 - python 3.10.12
+- Win10/11、Ubuntu22.04
 
 ### 构建前端WPS加载项
 
@@ -70,15 +169,17 @@ uv run python main.py
 ### 项目软件打包
 
 ```bash
-
+cd backend/deploy
+uv run pyinstaller wence.spec
 ```
+打包生成的可执行文件在`backend/deploy/dist`目录下
 
-如果你不想自己打包，可以直接下载release中的打包的可执行文件进行体验。
+如果你不想自己打包，可以直接下载release中的打包好的可执行文件体验。
 
-## 关于作者
+## 六、关于作者
 
 与我交流：https://cmcblog.netlify.app/about/
 
-## 开源协议
+## 七、开源协议
 
 Apache License 2.0

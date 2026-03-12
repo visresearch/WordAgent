@@ -54,12 +54,6 @@ backend/
 └── BUILD.md                  # 打包详细文档
 ```
 
-## 技术栈
-
-- **Web 框架**: FastAPI
-- **AI**: LangChain + OpenAI API
-- **数据库**: SQLite + SQLAlchemy
-- **打包**: PyInstaller + uv
 
 
 # 删掉tag重新提交

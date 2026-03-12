@@ -1,12 +1,6 @@
-# wence_word_plugin
+# wps_word_plugin
 
-文策AI word 前端插件
-
-## 环境配置
-
-- node v22.12.0
-- pnpm 10.28.0
-- wpsjs
+文策AI WPS word 前端加载项
 
 ## 构建项目
 
