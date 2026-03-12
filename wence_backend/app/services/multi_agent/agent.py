@@ -179,7 +179,7 @@ def _run_sub_agent(
                 if _retry_count <= 2:
                     messages.append(
                         SystemMessage(
-                            content="你刚才的工具调用格式不完整（JSON 被截断）。请重新调用工具，可以简化格式参数（pStyle/rStyle 使用默认值），确保 JSON 结构完整。"
+                            content="你刚才的工具调用格式不完整（JSON 被截断）。请重新调用工具，确保 JSON 结构完整。必须使用新版样式引用格式：pStyle/rStyle/cStyle/tStyle 只能是样式ID（如 pS_1/rS_1/cS_1/tS_1），禁止直接传样式数组；并在 styles 字典提供对应定义。"
                         )
                     )
                     continue
@@ -217,31 +217,36 @@ def _run_sub_agent(
             print(f"  [{agent_name}] 调用工具: {tool_name}")
             tool_fn = tool_map.get(tool_name)
             if tool_fn:
-                result = tool_fn.invoke(tc["args"])
-                if isinstance(result, dict):
-                    content = json.dumps(result, ensure_ascii=False)
-                    last_structured_result = result
-                elif isinstance(result, str):
-                    content = result
-                    try:
-                        parsed = json.loads(content)
-                        if isinstance(parsed, dict):
-                            last_structured_result = parsed
-                    except (json.JSONDecodeError, ValueError):
-                        pass
-                else:
-                    content = str(result)
+                try:
+                    result = tool_fn.invoke(tc["args"])
+                    if isinstance(result, dict):
+                        content = json.dumps(result, ensure_ascii=False)
+                        last_structured_result = result
+                    elif isinstance(result, str):
+                        content = result
+                        try:
+                            parsed = json.loads(content)
+                            if isinstance(parsed, dict):
+                                last_structured_result = parsed
+                        except (json.JSONDecodeError, ValueError):
+                            pass
+                    else:
+                        content = str(result)
 
-                messages.append(ToolMessage(content=content, tool_call_id=tc["id"], name=tool_name))
+                    messages.append(ToolMessage(content=content, tool_call_id=tc["id"], name=tool_name))
 
-                # 收集文档搜索工具的调用结果（位置信息），供下游 agent 共享
-                # 注意：只收集 query_document（位置信息小），不收集 read_document（文档内容大）
-                if tool_name == "query_document":
-                    _tool_data.append({"tool": tool_name, "args": tc["args"], "result": content})
+                    # 收集文档搜索工具的调用结果（位置信息），供下游 agent 共享
+                    # 注意：只收集 query_document（位置信息小），不收集 read_document（文档内容大）
+                    if tool_name == "query_document":
+                        _tool_data.append({"tool": tool_name, "args": tc["args"], "result": content})
 
-                # writer 调用 generate_document 完成后标记退出
-                if agent_name == "writer" and tool_name == "generate_document":
-                    _writer_generated = True
+                    # writer 调用 generate_document 完成后标记退出
+                    if agent_name == "writer" and tool_name == "generate_document":
+                        _writer_generated = True
+                except Exception as e:
+                    err = f"错误: 工具 {tool_name} 调用失败: {e}。请严格按工具 schema 重新构造参数。"
+                    print(f"  [{agent_name}] ❌ {err}")
+                    messages.append(ToolMessage(content=err, tool_call_id=tc["id"], name=tool_name))
             else:
                 messages.append(
                     ToolMessage(

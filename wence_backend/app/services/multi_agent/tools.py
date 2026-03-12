@@ -58,47 +58,36 @@ async def submit_tool_response(chat_id: str, data: dict):
 # rStyle: [fontName, fontSize, bold, italic, underline, underlineColor, color, highlight, strikethrough, superscript, subscript]
 # cStyle: [rowSpan, colSpan, alignment, verticalAlignment]
 # tStyle: [tableAlignment]
+#
+# 新版 JSON 仅支持样式引用写法：
+# - pStyle/rStyle/cStyle/tStyle 必须为字符串引用（如 "pS_1"、"rS_1"）
+# - 顶层 styles 字典必须提供对应样式数组定义
 
 
 class Run(BaseModel):
     """格式块 - 一段具有相同格式的文字"""
 
     text: str = Field(description="文字内容")
-    rStyle: list = Field(
-        default_factory=lambda: ["宋体", 12, False, False, 0, "#000000", "#000000", 0, False, False, False],
-        description="""字符样式数组，按顺序: [字体, 字号, 粗体, 斜体, 下划线, 下划线颜色, 颜色, 高亮, 删除线, 上标, 下标]
-- 下划线: 0=无, 1=单线, 3=双线, 4=虚线, 6=粗线, 11=波浪线
-- 下划线颜色/颜色: #RRGGBB 格式
-- 高亮: 0=无, 1=黑, 2=蓝, 3=青绿, 4=鲜绿, 5=粉红, 6=红, 7=黄, 9=深蓝, 10=青, 11=绿, 12=紫罗兰, 13=深红, 14=深黄, 15=深灰, 16=浅灰""",
-    )
+    rStyle: str = Field(description='字符样式引用ID，如 "rS_1"，对应 document.styles["rS_1"]')
 
 
 class Paragraph(BaseModel):
-    """段落"""
+    """段落 - 每行内容独立为一个段落，禁止在 text 中使用 \\n 换行。需要空行时用 isEmpty=true 的空段落"""
 
-    pStyle: list = Field(
-        default_factory=lambda: ["justify", 18, 0, 0, 24, 0, 0, "正文", 1],
-        description="""段落样式数组，按顺序: [对齐, 行距, 左缩进, 右缩进, 首行缩进, 段前, 段后, 样式名, 行距规则]
-- 对齐: left/center/right/justify
-- 行距: 磅值（points）。仅在行距规则=3/4/5时生效（规则0/1/2为预设档位，WPS忽略此字段）。以12pt字号为例：单倍=12, 1.5倍=18, 双倍=24
-- 左缩进/右缩进/首行缩进: 磅值。每个中文字符≈12磅，2字符缩进=24，0=无缩进
-- 段前/段后: 磅值（points），如12=约1行，0=无间距
-- 样式名: 如 '正文'、'标题 1'、'标题 2' 等
-- 行距规则（WPS常量）: 0=单倍行距, 1=1.5倍行距, 2=双倍行距, 3=至少, 4=固定值, 5=多倍行距
-  注意：规则0/1/2为预设档位（WPS自动计算行距，忽略行距字段）；规则3/4/5使用行距字段的磅值；
-  普通文档推荐用 行距规则=3(至少) 配合明确的磅值""",
+    pStyle: str = Field(description='段落样式引用ID，如 "pS_1"，对应 document.styles["pS_1"]。空段落时可省略', default='')
+    runs: list[Run] = Field(
+        description="格式块数组。一个段落可包含多个 run（不同格式的文字拆为不同 run）。"
+        "禁止在 text 中使用 \\n 换行，换行必须新建段落。空段落时为空数组。",
+        default_factory=list,
     )
-    runs: list[Run] = Field(description="格式块数组")
+    isEmpty: bool = Field(default=False, description='空段落标记。设为 true 时表示该段落为空行（装饰性空行），无需 runs 和 pStyle')
 
 
 class Cell(BaseModel):
     """表格单元格"""
 
     text: str = Field(description="单元格文本")
-    cStyle: list = Field(
-        default_factory=lambda: [1, 1, "left", "center"],
-        description="单元格样式数组: [跨行数, 跨列数, 水平对齐(left/center/right), 垂直对齐(top/center/bottom)]",
-    )
+    cStyle: str = Field(description='单元格样式引用ID，如 "cS_1"，对应 document.styles["cS_1"]')
 
 
 class Table(BaseModel):
@@ -107,10 +96,7 @@ class Table(BaseModel):
     rows: int = Field(description="行数")
     columns: int = Field(description="列数")
     cells: list[list[Cell]] = Field(description="单元格二维数组")
-    tStyle: list = Field(
-        default_factory=lambda: ["center"],
-        description="表格样式数组: [表格对齐(left/center/right)]",
-    )
+    tStyle: str = Field(description='表格样式引用ID，如 "tS_1"，对应 document.styles["tS_1"]')
 
 
 class DocumentOutput(BaseModel):
@@ -118,6 +104,27 @@ class DocumentOutput(BaseModel):
 
     paragraphs: list[Paragraph] = Field(description="段落数组，每个元素必须是 Paragraph 对象，不要放字符串")
     tables: list[Table] = Field(default_factory=list, description="表格数组，每个元素必须是 Table 对象")
+    styles: dict[str, list] = Field(
+        description="样式字典（必填）。key 为引用ID（如 pS_1、rS_1、cS_1、tS_1），value 为样式数组。"
+        "必须包含所有 pStyle/rStyle/cStyle/tStyle 引用到的样式定义。\n"
+        "pStyle 数组格式: [对齐, 行距, 左缩进, 右缩进, 首行缩进, 段前, 段后, 样式名, 行距规则]。"
+        "对齐: left/center/right/justify; "
+        "行距: 磅值(points)，仅在行距规则=3/4/5时生效(规则0/1/2为预设档位，WPS忽略此字段)，以12pt字号为例：单倍=12,1.5倍=18,双倍=24; "
+        "左缩进/右缩进/首行缩进: 磅值，每个中文字符≈12磅，2字符缩进=24，0=无缩进; "
+        "段前/段后: 磅值，如12=约1行，0=无间距; "
+        "样式名: 如'正文','标题 1','标题 2'等; "
+        "行距规则(WPS常量): 0=单倍行距,1=1.5倍行距,2=双倍行距,3=至少,4=固定值,5=多倍行距。"
+        "注意：规则0/1/2为预设档位(WPS自动计算行距，忽略行距字段)；规则3/4/5使用行距字段的磅值；普通文档推荐用行距规则=3(至少)配合明确的磅值。\n"
+        "rStyle 数组格式: [字体, 字号, 粗体, 斜体, 下划线, 下划线颜色, 颜色, 高亮, 删除线, 上标, 下标]。"
+        "字体: 如'宋体','Times New Roman'; 字号: 磅值; 粗体/斜体: bool; "
+        "下划线: 0=无,1=单线,3=双线,4=虚线,6=粗线,11=波浪线; "
+        "下划线颜色/颜色: #RRGGBB格式; "
+        "高亮: 0=无,1=黑,2=蓝,3=青绿,4=鲜绿,5=粉红,6=红,7=黄,9=深蓝,10=青,11=绿,12=紫罗兰,13=深红,14=深黄,15=深灰,16=浅灰; "
+        "删除线/上标/下标: bool。\n"
+        "cStyle 数组格式: [rowSpan, colSpan, alignment, verticalAlignment]。"
+        "rowSpan/colSpan: 合并行/列数; alignment: 同pStyle; verticalAlignment: 0=顶端,1=居中,2=底端。\n"
+        "tStyle 数组格式: [tableAlignment]。tableAlignment: 0=左对齐,1=居中,2=右对齐。"
+    )
     position: int = Field(
         default=0,
         description="插入位置（字符偏移），前端会在文档的该位置处插入生成的内容。"
@@ -128,15 +135,18 @@ class DocumentOutput(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def filter_invalid_paragraphs(cls, data):
-        """过滤 paragraphs 中的非法项：字符串、空段落标记(isParaEmpty)等"""
+        """过滤 paragraphs 中的非法项，保留空段落标记"""
         if isinstance(data, dict) and "paragraphs" in data:
             cleaned = []
             for p in data["paragraphs"]:
                 if isinstance(p, Paragraph):
                     cleaned.append(p)
                 elif isinstance(p, dict):
-                    # 跳过空段落标记（前端文档JSON中 isParaEmpty:true 的段落没有 runs）
-                    if p.get("isParaEmpty"):
+                    # 保留空段落标记（isEmpty 或 isParaEmpty），统一为 isEmpty
+                    if p.get("isEmpty") or p.get("isParaEmpty"):
+                        p["isEmpty"] = True
+                        p.pop("isParaEmpty", None)
+                        cleaned.append(p)
                         continue
                     # 跳过没有 runs 的非法段落
                     if "runs" not in p:
@@ -145,6 +155,34 @@ class DocumentOutput(BaseModel):
                 # 跳过字符串等非法类型
             data["paragraphs"] = cleaned
         return data
+
+    @model_validator(mode="after")
+    def validate_style_references(self):
+        """校验样式引用必须存在于 styles 字典中。"""
+        style_keys = set(self.styles.keys())
+        missing: set[str] = set()
+
+        for para in self.paragraphs:
+            if para.isEmpty:
+                continue
+            if para.pStyle not in style_keys:
+                missing.add(para.pStyle)
+            for run in para.runs:
+                if run.rStyle not in style_keys:
+                    missing.add(run.rStyle)
+
+        for table in self.tables:
+            if table.tStyle not in style_keys:
+                missing.add(table.tStyle)
+            for row in table.cells:
+                for cell in row:
+                    if cell.cStyle not in style_keys:
+                        missing.add(cell.cStyle)
+
+        if missing:
+            refs = ", ".join(sorted(missing))
+            raise ValueError(f"styles 缺少引用定义: {refs}")
+        return self
 
 
 class RangeFilter(BaseModel):
@@ -287,9 +325,10 @@ def generate_document(document: DocumentOutput) -> dict:
     【重要】格式属性必须100%原样复制！
     除非用户明确要求修改格式，否则所有格式属性（fontName, fontSize, alignment 等）必须与原文档完全一致。
 
-    【结构要求】document 包含三个字段：
+    【结构要求】document 包含以下字段：
     - paragraphs: Paragraph 对象的数组
     - tables: Table 对象的数组（可选）
+    - styles: 样式字典（必填，且必须覆盖所有样式引用）
     - position: 插入位置（字符偏移），前端在文档该位置插入内容
     不要把 "tables" 字符串放进 paragraphs 数组里！
 
@@ -308,18 +347,18 @@ def generate_document(document: DocumentOutput) -> dict:
     para_count = len(doc_dict.get("paragraphs", []))
     writer({"type": "generate_complete", "content": f"✅ 文档已生成，共 {para_count} 个段落"})
 
-    # 保存生成的文档 JSON 到 example 文件夹
-    try:
-        from datetime import datetime
-        from pathlib import Path
+    # # 保存生成的文档 JSON 到 example 文件夹
+    # try:
+    #     from datetime import datetime
+    #     from pathlib import Path
 
-        example_dir = Path(__file__).resolve().parent.parent.parent.parent / "example"
-        example_dir.mkdir(exist_ok=True)
-        filename = f"generated_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-        (example_dir / filename).write_text(json.dumps(doc_dict, ensure_ascii=False, indent=2), encoding="utf-8")
-        print(f"[generate_document] 已保存到 example/{filename}")
-    except Exception as e:
-        print(f"[generate_document] 保存 JSON 失败: {e}")
+    #     example_dir = Path(__file__).resolve().parent.parent.parent.parent / "example"
+    #     example_dir.mkdir(exist_ok=True)
+    #     filename = f"generated_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    #     (example_dir / filename).write_text(json.dumps(doc_dict, ensure_ascii=False, indent=2), encoding="utf-8")
+    #     print(f"[generate_document] 已保存到 example/{filename}")
+    # except Exception as e:
+    #     print(f"[generate_document] 保存 JSON 失败: {e}")
 
     return doc_dict
 
@@ -634,23 +673,23 @@ def web_search(query: str, max_results: int = 5) -> str:
         return msg
 
 
-@tool
-def comment_document(comment: str, startPos: int = -1, endPos: int = -1) -> str:
-    """
-    在文档指定位置添加评论。
+# @tool
+# def comment_document(comment: str, startPos: int = -1, endPos: int = -1) -> str:
+#     """
+#     在文档指定位置添加评论。
 
-    Args:
-        comment: 评论内容
-        startPos: 文档起始位置（字符位置），-1 表示文档开头
-        endPos: 文档结束位置（字符位置），-1 表示文档结尾
+#     Args:
+#         comment: 评论内容
+#         startPos: 文档起始位置（字符位置），-1 表示文档开头
+#         endPos: 文档结束位置（字符位置），-1 表示文档结尾
 
-    Returns:
-        添加评论的确认字符串
-    """
-    writer = get_stream_writer()
-    writer({"type": "comment_document", "content": f"💬 正在添加评论: {comment} ({startPos} - {endPos})"})
-    print(f"[comment_document] 请求前端添加评论 (comment={comment}, startPos={startPos}, endPos={endPos})")
-    return f"已在文档位置 ({startPos} - {endPos}) 添加评论: '{comment}'"
+#     Returns:
+#         添加评论的确认字符串
+#     """
+#     writer = get_stream_writer()
+#     writer({"type": "comment_document", "content": f"💬 正在添加评论: {comment} ({startPos} - {endPos})"})
+#     print(f"[comment_document] 请求前端添加评论 (comment={comment}, startPos={startPos}, endPos={endPos})")
+#     return f"已在文档位置 ({startPos} - {endPos}) 添加评论: '{comment}'"
 
 
 # region 多智能体专用工具

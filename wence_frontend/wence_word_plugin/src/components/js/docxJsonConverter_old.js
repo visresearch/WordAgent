@@ -5,7 +5,7 @@
  * 1. parseDocxToJSON - 将 Word 文档内容解析为 JSON 格式
  * 2. generateDocxFromJSON - 从 JSON 数据生成 Word 文档
  *
- * JSON schema 数据结构（精简版）：
+ * JSON 数据结构（精简版）：
  * {
  *   paragraphs: [{             // 段落数组
  *     pStyle: [                // 段落样式数组（按顺序）
@@ -51,17 +51,8 @@
  *   }],
  *   images: [{...}],          // 图片数组（保持不变）
  *   fields: [],               // 域代码数组
- *   hasTOC: boolean,          // 是否包含目录
- *   styles: {                 // 样式字典（去重）
- *     pS_1: [...],            // 段落样式，键名 pS_N
- *     rS_1: [...],            // 字符样式，键名 rS_N
- *     cS_1: [...],            // 单元格样式，键名 cS_N
- *     tS_1: [...]             // 表格样式，键名 tS_N
- *   }
+ *   hasTOC: boolean           // 是否包含目录
  * }
- *
- * 段落/run/单元格中的 pStyle/rStyle/cStyle/tStyle 为字符串引用（如 "pS_1"），
- * 指向 styles 字典中的完整样式数组，以去重节约 token。
  */
 
 // ============== 格式转换辅助函数 ==============
@@ -104,111 +95,6 @@ const CSTYLE = {
 const DEFAULT_PSTYLE = ['left', 0, 0, 0, 0, 0, 0, '', 0];
 const DEFAULT_RSTYLE = ['', 12, false, false, 0, '#000000', '#000000', 0, false, false, false];
 const DEFAULT_CSTYLE = [1, 1, 'left', 'center'];
-
-// ============== 样式去重与解析 ==============
-
-/**
- * 创建样式注册表
- */
-function createStyleRegistry() {
-  return {
-    _maps: { p: new Map(), r: new Map(), c: new Map(), t: new Map() },
-    _counts: { p: 0, r: 0, c: 0, t: 0 },
-    _prefixes: { p: 'pS_', r: 'rS_', c: 'cS_', t: 'tS_' },
-    styles: {}
-  };
-}
-
-/**
- * 注册样式并返回引用ID，相同样式返回同一ID
- */
-function registerStyle(registry, type, styleArray) {
-  const key = JSON.stringify(styleArray);
-  const map = registry._maps[type];
-  if (map.has(key)) {
-    return map.get(key);
-  }
-  registry._counts[type]++;;
-  const id = registry._prefixes[type] + registry._counts[type];
-  map.set(key, id);
-  registry.styles[id] = styleArray;
-  return id;
-}
-
-/**
- * 解析样式引用：字符串则查字典，数组则直接使用（向后兼容）
- */
-function resolveStyle(styles, ref, defaultStyle) {
-  if (!ref) {
-    return defaultStyle;
-  }
-  if (Array.isArray(ref)) {
-    return ref;
-  }
-  if (typeof ref === 'string' && styles && styles[ref]) {
-    return styles[ref];
-  }
-  return defaultStyle;
-}
-
-/**
- * 对 parseDocxToJSON 的结果进行样式去重
- */
-function deduplicateStyles(result) {
-  const registry = createStyleRegistry();
-
-  if (result.paragraphs) {
-    for (const para of result.paragraphs) {
-      if (para.pStyle && Array.isArray(para.pStyle)) {
-        para.pStyle = registerStyle(registry, 'p', para.pStyle);
-      }
-      if (para.runs) {
-        for (const run of para.runs) {
-          if (run.rStyle && Array.isArray(run.rStyle)) {
-            run.rStyle = registerStyle(registry, 'r', run.rStyle);
-          }
-        }
-      }
-    }
-  }
-
-  if (result.tables) {
-    for (const table of result.tables) {
-      if (table.tStyle && Array.isArray(table.tStyle)) {
-        table.tStyle = registerStyle(registry, 't', table.tStyle);
-      }
-      if (table.cells) {
-        for (const row of table.cells) {
-          for (const cell of row) {
-            if (cell.cStyle && Array.isArray(cell.cStyle)) {
-              cell.cStyle = registerStyle(registry, 'c', cell.cStyle);
-            }
-            if (cell.rStyle && Array.isArray(cell.rStyle)) {
-              cell.rStyle = registerStyle(registry, 'r', cell.rStyle);
-            }
-            if (cell.paragraphs) {
-              for (const para of cell.paragraphs) {
-                if (para.pStyle && Array.isArray(para.pStyle)) {
-                  para.pStyle = registerStyle(registry, 'p', para.pStyle);
-                }
-                if (para.runs) {
-                  for (const run of para.runs) {
-                    if (run.rStyle && Array.isArray(run.rStyle)) {
-                      run.rStyle = registerStyle(registry, 'r', run.rStyle);
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-
-  result.styles = registry.styles;
-  return result;
-}
 
 /**
  * 创建段落样式数组
@@ -936,7 +822,7 @@ function parseDocxToJSON(rangeOrStart, end) {
       }
     }
 
-    return deduplicateStyles(result);
+    return result;
   } catch (error) {
     return { error: '解析失败: ' + error.message };
   }
@@ -1018,7 +904,7 @@ function insertImage(doc, img, insertPos) {
  * @param {number} currentPos - 当前位置
  * @returns {number} - 新的位置
  */
-function generateTable(doc, tableData, currentPos, styles) {
+function generateTable(doc, tableData, currentPos) {
   // 在表格前添加换行
   if (currentPos > 0) {
     const range = doc.Range(currentPos, currentPos);
@@ -1060,7 +946,7 @@ function generateTable(doc, tableData, currentPos, styles) {
     }
 
     // 表格对齐
-    const tStyle = resolveStyle(styles, tableData.tStyle, ['center']);
+    const tStyle = tableData.tStyle || ['center'];
     table.Rows.Alignment = getTableAlignmentValue(tStyle[0] || 'center');
   } catch (e) {}
 
@@ -1069,7 +955,7 @@ function generateTable(doc, tableData, currentPos, styles) {
     for (let col = 0; col < tableData.cells[row].length; col++) {
       try {
         const cellData = tableData.cells[row][col];
-        const cStyle = resolveStyle(styles, cellData.cStyle, DEFAULT_CSTYLE);
+        const cStyle = cellData.cStyle || DEFAULT_CSTYLE;
         const rowSpan = cStyle[CSTYLE.ROW_SPAN] || 1;
         const colSpan = cStyle[CSTYLE.COL_SPAN] || 1;
         
@@ -1103,7 +989,7 @@ function generateTable(doc, tableData, currentPos, styles) {
               
               try {
                 font.Reset();  // 重置格式避免继承
-                const rStyle = resolveStyle(styles, run.rStyle, DEFAULT_RSTYLE);
+                const rStyle = run.rStyle || DEFAULT_RSTYLE;
                 if (rStyle[RSTYLE.FONT_NAME]) {
                   font.Name = rStyle[RSTYLE.FONT_NAME];
                 }
@@ -1134,7 +1020,7 @@ function generateTable(doc, tableData, currentPos, styles) {
             }
 
             // 设置段落对齐
-            const pStyle = resolveStyle(styles, para.pStyle, DEFAULT_PSTYLE);
+            const pStyle = para.pStyle || DEFAULT_PSTYLE;
             try {
               cellRange.ParagraphFormat.Alignment = getAlignmentValue(pStyle[PSTYLE.ALIGNMENT] || 'left');
             } catch (e) {}
@@ -1150,7 +1036,7 @@ function generateTable(doc, tableData, currentPos, styles) {
           }
 
           // 设置字体格式
-          const rStyle = resolveStyle(styles, cellData.rStyle, DEFAULT_RSTYLE);
+          const rStyle = cellData.rStyle || DEFAULT_RSTYLE;
           const font = cellRange.Font;
           font.Reset();  // 重置格式避免继承
           if (rStyle[RSTYLE.FONT_NAME]) {
@@ -1177,9 +1063,8 @@ function generateTable(doc, tableData, currentPos, styles) {
     for (let col = 0; col < tableData.cells[row].length; col++) {
       const cellData = tableData.cells[row][col];
       if (cellData && cellData.cStyle) {
-        const mergedCStyle = resolveStyle(styles, cellData.cStyle, DEFAULT_CSTYLE);
-        const rowSpan = mergedCStyle[CSTYLE.ROW_SPAN] || 1;
-        const colSpan = mergedCStyle[CSTYLE.COL_SPAN] || 1;
+        const rowSpan = cellData.cStyle[CSTYLE.ROW_SPAN] || 1;
+        const colSpan = cellData.cStyle[CSTYLE.COL_SPAN] || 1;
         if (rowSpan > 1 || colSpan > 1) {
           mergeTasks.push({
             startRow: row + 1,
@@ -1219,9 +1104,6 @@ function generateDocxFromJSON(jsonData, doc, startPosition = null) {
       return { error: 'JSON数据格式不正确' };
     }
 
-    // 提取样式字典
-    const styles = jsonData.styles || {};
-
     if (!doc) {
       doc = window.Application.Documents.Add();
       if (!doc) {
@@ -1255,7 +1137,7 @@ function generateDocxFromJSON(jsonData, doc, startPosition = null) {
     let consecutiveEmptyCount = 0;
 
     for (const element of elements) {
-      if (element.type === 'paragraph' && (element.data.isEmpty || element.data.isParaEmpty)) {
+      if (element.type === 'paragraph' && element.data.isEmpty) {
         consecutiveEmptyCount++;
         if (consecutiveEmptyCount <= 2) {
           processedElements.push(element);
@@ -1308,7 +1190,7 @@ function generateDocxFromJSON(jsonData, doc, startPosition = null) {
         const isImagePlaceholder = paraText === '/' || paraText === '[图片]';
 
         // 获取段落样式
-        const pStyle = resolveStyle(styles, para.pStyle, DEFAULT_PSTYLE);
+        const pStyle = para.pStyle || DEFAULT_PSTYLE;
         const alignment = pStyle[PSTYLE.ALIGNMENT] || 'left';
         const lineSpacing = pStyle[PSTYLE.LINE_SPACING] || 0;
         const lineSpacingRule = pStyle[PSTYLE.LINE_SPACING_RULE] || 0;
@@ -1345,7 +1227,7 @@ function generateDocxFromJSON(jsonData, doc, startPosition = null) {
         }
 
         // 处理空段落
-        if (para.isEmpty || para.isParaEmpty) {
+        if (para.isEmpty) {
           const prevElement = i > 0 ? processedElements[i - 1] : null;
           const nextElement = i < processedElements.length - 1 ? processedElements[i + 1] : null;
 
@@ -1353,14 +1235,14 @@ function generateDocxFromJSON(jsonData, doc, startPosition = null) {
             prevElement &&
             (prevElement.type === 'table' ||
               (prevElement.type === 'paragraph' &&
-                !prevElement.data.isEmpty && !prevElement.data.isParaEmpty &&
+                !prevElement.data.isEmpty &&
                 prevElement.data.runs &&
                 prevElement.data.runs.length > 0));
           const nextHasContent =
             nextElement &&
             (nextElement.type === 'table' ||
               (nextElement.type === 'paragraph' &&
-                !nextElement.data.isEmpty && !nextElement.data.isParaEmpty &&
+                !nextElement.data.isEmpty &&
                 nextElement.data.runs &&
                 nextElement.data.runs.length > 0));
 
@@ -1390,7 +1272,7 @@ function generateDocxFromJSON(jsonData, doc, startPosition = null) {
             const font = insertedRange.Font;
 
             // 应用字符样式（直接使用JSON中的值）
-            const rStyle = resolveStyle(styles, run.rStyle, DEFAULT_RSTYLE);
+            const rStyle = run.rStyle || DEFAULT_RSTYLE;
 
             // 字体和字号
             if (rStyle[RSTYLE.FONT_NAME]) {
@@ -1474,18 +1356,14 @@ function generateDocxFromJSON(jsonData, doc, startPosition = null) {
             paraFormat.SpaceBefore = spaceBefore;
             paraFormat.SpaceAfter = spaceAfter;
 
-            // 设置行距
-            // 预设档位 (0=单倍, 1=1.5倍, 2=双倍): WPS 自动计算行距，只需设置 Rule
-            // 显式档位 (3=至少, 4=固定值, 5=多倍): 需要先设磅值再设 Rule
-            try {
-              if (lineSpacingRule >= 3 && lineSpacing && lineSpacing > 0) {
+            // 设置行距（先设磅值，再设规则，确保规则最终生效）
+            if (lineSpacing && lineSpacing > 0) {
+              try {
                 paraFormat.LineSpacing = lineSpacing;
                 paraFormat.LineSpacingRule = lineSpacingRule;
-              } else if (lineSpacingRule > 0) {
-                paraFormat.LineSpacingRule = lineSpacingRule;
+              } catch (e) {
+                console.warn('设置行距失败:', e);
               }
-            } catch (e) {
-              console.warn('设置行距失败:', e);
             }
           }
           paraIndex++;
@@ -1503,7 +1381,7 @@ function generateDocxFromJSON(jsonData, doc, startPosition = null) {
           }
         }
       } else if (element.type === 'table') {
-        currentPos = generateTable(doc, element.data, currentPos, styles);
+        currentPos = generateTable(doc, element.data, currentPos);
         paraIndex = doc.Paragraphs.Count;
 
         // 表格后换行
@@ -1514,7 +1392,7 @@ function generateDocxFromJSON(jsonData, doc, startPosition = null) {
             if (
               nextEl.type === 'table' ||
               (nextEl.type === 'paragraph' &&
-                !nextEl.data.isEmpty && !nextEl.data.isParaEmpty &&
+                !nextEl.data.isEmpty &&
                 nextEl.data.runs &&
                 nextEl.data.runs.length > 0)
             ) {
@@ -1554,8 +1432,6 @@ export default {
   cleanText,
   cleanCellText,
   exportImageToTemp,
-  deduplicateStyles,
-  resolveStyle,
 
   // 样式数组常量
   PSTYLE,
@@ -1591,8 +1467,6 @@ export {
   cleanText,
   cleanCellText,
   exportImageToTemp,
-  deduplicateStyles,
-  resolveStyle,
   PSTYLE,
   RSTYLE,
   CSTYLE,

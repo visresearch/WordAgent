@@ -110,15 +110,20 @@ def build_graph(llm_with_tools):
 
             tool_fn = TOOL_MAP.get(tool_name)
             if tool_fn:
-                result = tool_fn.invoke(tool_call["args"])
-                # 标准化结果为字符串
-                if isinstance(result, dict):
-                    content = json.dumps(result, ensure_ascii=False)
-                elif isinstance(result, str):
-                    content = result
-                else:
-                    content = str(result)
-                results.append(ToolMessage(content=content, tool_call_id=tool_call["id"], name=tool_name))
+                try:
+                    result = tool_fn.invoke(tool_call["args"])
+                    # 标准化结果为字符串
+                    if isinstance(result, dict):
+                        content = json.dumps(result, ensure_ascii=False)
+                    elif isinstance(result, str):
+                        content = result
+                    else:
+                        content = str(result)
+                    results.append(ToolMessage(content=content, tool_call_id=tool_call["id"], name=tool_name))
+                except Exception as e:
+                    err = f"错误: 工具 {tool_name} 调用失败: {e}。请按工具 schema 重新构造参数。"
+                    print(f"[Tools] ❌ {err}")
+                    results.append(ToolMessage(content=err, tool_call_id=tool_call["id"], name=tool_name))
             else:
                 print(f"[Tools] ⚠️ 未知工具: {tool_name}")
                 results.append(
@@ -138,8 +143,9 @@ def build_graph(llm_with_tools):
                 RemoveMessage(id=last_message.id),
                 SystemMessage(
                     content="[RETRY_GENERATE] 你刚才尝试调用 generate_document 但输出被截断未能完成。"
-                    "请再次调用 generate_document 工具生成文档。可以简化格式：pStyle 和 rStyle 使用默认值，"
-                    "只需设置每个 Run 的 text 内容。确保 JSON 结构完整。"
+                    "请再次调用 generate_document 工具生成文档。必须使用新版样式引用格式："
+                    "段落/字符/单元格/表格样式字段只能填样式ID（如 pS_1、rS_1、cS_1、tS_1），"
+                    "并在 styles 字典中提供对应样式数组。确保 JSON 结构完整。"
                 ),
             ]
         }
