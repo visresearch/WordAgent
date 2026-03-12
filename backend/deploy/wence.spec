@@ -19,7 +19,7 @@ datas = [
     # 打包 app 模块（FastAPI 应用）
     ('../app', 'app'),
     # 打包前端构建目录（pnpm build 输出到 dist）
-    ('../../wence_frontend/wence_word_plugin/dist', 'frontend'),
+    ('../../frontend/wps_word_plugin/dist', 'frontend'),
 ]
 
 # 可选数据文件（不一定存在于 CI 环境）

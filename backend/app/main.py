@@ -40,9 +40,9 @@ def get_frontend_dist_dir() -> Path:
         base = Path(sys._MEIPASS)
         return base / "frontend"
     else:
-        # 开发环境：wence_frontend/wence_word_plugin/dist
+        # 开发环境：frontend/wps_word_plugin/dist
         base = Path(__file__).parent.parent.parent
-        return base / "wence_frontend" / "wence_word_plugin" / "dist"
+        return base / "frontend" / "wps_word_plugin" / "dist"
 
 
 @asynccontextmanager

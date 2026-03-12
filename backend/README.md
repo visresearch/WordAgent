@@ -22,11 +22,11 @@ ruff format  # Format all files in the current directory.
 ## 打包发布
 
 ```bash
-cd wence_backend/deploy
+cd backend/deploy
 uv run pyinstaller wence.spec
 ```
 
-打包生成的可执行文件在`wence_backend/deploy/dist`目录下
+打包生成的可执行文件在`backend/deploy/dist`目录下
 
 | 运行环境 | 输出文件 | 文件名示例 |
 |---------|---------|-----------|
@@ -37,7 +37,7 @@ uv run pyinstaller wence.spec
 ## 项目结构
 
 ```
-wence_backend/
+backend/
 ├── app/
 │   ├── agent_langchain.py   # 纯 LangChain Agent（流式输出）
 │   ├── agent.py              # LangGraph Agent（结构化）
@@ -61,3 +61,22 @@ wence_backend/
 - **数据库**: SQLite + SQLAlchemy
 - **打包**: PyInstaller + uv
 
+
+# 删掉tag重新提交
+
+```bash
+# 删除本地和远程的 tag
+git tag -d v0.3.0
+git push github --delete v0.3.0
+
+# 修改完代码后重新打 tag 并推送
+git add . && git commit -m "chore：修改CLCI"
+git tag v0.3.0
+git push github && git push github --tags
+```
+
+在58890端口会运行一个wpscloudsrv的服务，要启动，不然看不到wps加载项列表
+
+```bash
+ps -aux | grep wpscloud
+```

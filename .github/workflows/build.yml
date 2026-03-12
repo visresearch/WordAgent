@@ -29,7 +29,7 @@ jobs:
           version: 9
       
       - name: Build Frontend
-        working-directory: wence_frontend/wence_word_plugin
+        working-directory: frontend/wps_word_plugin
         run: |
           pnpm install
           pnpm build
@@ -45,13 +45,13 @@ jobs:
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
       
       - name: Install dependencies
-        working-directory: wence_backend
+        working-directory: backend
         run: |
           uv sync
           uv pip install pyinstaller pyside6
       
       - name: Build binary with PyInstaller
-        working-directory: wence_backend
+        working-directory: backend
         run: |
           mkdir -p config
           echo '{}' > config/config.json
@@ -59,7 +59,7 @@ jobs:
           uv run pyinstaller deploy/wence.spec --clean --noconfirm
       
       - name: Package binary
-        working-directory: wence_backend
+        working-directory: backend
         run: |
           mkdir -p package
           cp dist/wence_ai package/wence_ai-linux-x86_64
@@ -69,7 +69,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
         with:
-          files: wence_backend/package/wence_ai-linux-x86_64
+          files: backend/package/wence_ai-linux-x86_64
           draft: false
           prerelease: false
           generate_release_notes: true
@@ -98,7 +98,7 @@ jobs:
           version: 9
       
       - name: Build Frontend
-        working-directory: wence_frontend/wence_word_plugin
+        working-directory: frontend/wps_word_plugin
         run: |
           pnpm install
           pnpm build
@@ -114,13 +114,13 @@ jobs:
           echo "$env:USERPROFILE\.cargo\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
       
       - name: Install dependencies
-        working-directory: wence_backend
+        working-directory: backend
         run: |
           uv sync
           uv pip install pyinstaller pyside6
       
       - name: Build binary with PyInstaller
-        working-directory: wence_backend
+        working-directory: backend
         run: |
           New-Item -ItemType Directory -Force -Path config
           '{}' | Out-File -Encoding utf8 config/config.json
@@ -128,7 +128,7 @@ jobs:
           uv run pyinstaller deploy/wence.spec --clean --noconfirm
       
       - name: Package binary
-        working-directory: wence_backend
+        working-directory: backend
         run: |
           New-Item -ItemType Directory -Force -Path package
           Copy-Item dist/wence_ai.exe package/wence_ai-windows-x86_64.exe
@@ -137,7 +137,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
         with:
-          files: wence_backend/package/wence_ai-windows-x86_64.exe
+          files: backend/package/wence_ai-windows-x86_64.exe
           draft: false
           prerelease: false
           generate_release_notes: true

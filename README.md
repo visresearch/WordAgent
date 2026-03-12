@@ -1,55 +1,84 @@
-# wence_ai
+# WordAgent
 
-> 中南大学计算机学院毕业设计——基于多智能体的AI辅助写作系统“文策AI”
+中南大学计算机学院毕业设计——基于多智能体的AI辅助写作系统“文策AI”
 
-# 删掉tag重新提交
+> 文策AI：让写作有策略，让表达更智能
+
+![](./docs/WenceAI.png)
+
+## 项目概述
+
+本项目是一个基于(多)智能体的AI辅助写作系统，用户在 **办公软件(如WPS、Microsoft Word)** 中安装 **加载项** 后，可以通过自然语言与AI智能体进行交互，获取写作建议、内容生成、结构优化等服务。生成文档Agent的核心就是生成 **“结构化Word文档”**。
+
+系统采用FastAPI构建后端API，前端WPS加载项与后端利用流式接口通信，使前端流式显示LLM输出的内容，实现无缝的写作辅助体验。
+
+前端采用Vue3和JavaScript开发，前端主要设计了一个DocxJson双向转化器模块，能够将带格式的Word文档内容与JSON格式进行相互转换。
+这个json schema格式类似于web开发中的html和css格式，将word文章的段落和文本块的style属性都进行了抽象和结构化，方便智能体理解和生成。
+
+后端采用Python语言，利用langchain和langraph框架实现智能体的设计和协作，用chatOpenAI接口实现SSE流式输出和工具调用，利用pySide6设计了一个简单的后端服务界面，方便安装加载项和查看终端日志。
+
+对比市面上已有的AI辅助写作工具，文策AI的优势在于：
+
+1. 以国民级办公软件为载体，让普通用户无门槛获得优质的AI写作辅助体验。
+2. 对比常见的在Word中的AI写作工具，本项目智能体能够理解Word文章结构，能够自主联网搜集资料信息，生成符合Word文档结构的内容，能够根据用户需求进行文章结构修改和内容修改。
+3. 采用多智能体协作架构，多智能体扮演不同专家角色，协同完成写作任务，以生成有深度的长文章为目标。
+4. 本项目使用的大模型服务APIKey来自于用户自己，目前支持世界上大多数主流的LLM服务商，用户可以根据自己的需求选择不同的LLM服务商和不同的模型。
+
+## 项目预览
+
+|WPS加载项界面|后端服务QT界面|
+|--|--|
+|![](./docs/wps_addon.png)|![](./docs/pyQt.png)|
+
+## 系统架构
+
+为了能够更好地满足用户需求，保证系统生成文章的稳定性和深度，本项目设计了两种智能体架构：
+
+### Single Agent loop架构
+
+#### 整体架构图
+
+![](./docs/single_agent_loop.png)
+
+### Multi Agent 架构
+
+## 快速开始
+
+### 环境配置
+
+- node v22.12.0
+- wpsjs 2.2.3
+- python 3.10.12
+
+### 构建前端WPS加载项
 
 ```bash
-# 删除本地和远程的 tag
-git tag -d v0.3.0
-git push github --delete v0.3.0
-
-# 修改完代码后重新打 tag 并推送
-git add . && git commit -m "chore：修改CLCI"
-git tag v0.3.0
-git push github && git push github --tags
+cd frontend/wps_word_plugin
+pnpm intsall
+pnpm build
 ```
 
-在58890端口会运行一个wpscloudsrv的服务，要启动，不然看不到wps加载项列表
+### 运行后端服务
 
 ```bash
-ps -aux | grep wpscloud
+cd backend
+uv venv --python 3.10.12
+uv sync
+uv run python main.py
 ```
 
-# 参考文献
+### 项目软件打包
 
-(学院要求参考文献引用至少30篇以上，包括中英文，以及近5年论文为主，必须有2025年论文)
+```bash
 
-1. https://github.com/HuggingAGI/AwesomeAgentPapers?tab=readme-ov-file 2025年AI Agent论文综述资料
-2. https://vscode.js.cn/docs/copilot/agents/subagents
+```
 
-# 调研报告参考文献
+如果你不想自己打包，可以直接下载release中的打包的可执行文件进行体验。
 
-1. Agent AI: Surveying the Horizons of Multimodal Interaction
-2. OpenAI. (2023). GPT-4 Technical Report.
-3. Adapting LLM Agents Through Communication
-4. CoMM: Collaborative Multi-Agent, Multi-Reasoning-Path Prompting for Complex Problem Solving
-5. Describe, Explain, Plan and Select: Interactive Planning with LLMs Enables Open-World Multi-Task Agents
-6. SwiftSage: A Generative Agent with Fast and Slow Thinking for Complex Interactive Tasks
-7. A survey on large language model based autonomous agents
-8. Large Language Model based Multi-Agents: A Survey of Progress and Challenges
-9. Personal LLM Agents: Insights and Survey about the Capability, Efficiency and Security
-10. Multi-Agent Collaboration Mechanisms: A Survey of LLMs
-11. Understanding the planning of LLM agents: A survey
-12. The Rise and Potential of Large Language Model Based Agents: A Survey
-13. LLM-Based Human-Agent Collaboration and Interaction Systems: A Survey
-14. GitHub: https://github.com/langchain-ai/langgraph
-15. 基于大语言模型的AI Agents https://www.breezedeus.com/article/ai-agent-part3
-16. AutoGen: Enabling Next-Gen LLM Applications via Multi-Agent Conversation
+## 关于作者
 
-# 调研报告参考文献
+与我交流：https://cmcblog.netlify.app/about/
 
-[1] Tran K T, Dao D, Nguyen M D, Pham Q V, O’Sullivan B, Nguyen H D.
-Multi-Agent Collaboration Mechanisms: A Survey of LLMs[EB/OL].
-arXiv:2501.06322, 2025.
+## 开源协议
 
+Apache License 2.0

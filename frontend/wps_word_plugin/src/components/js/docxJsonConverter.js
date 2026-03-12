@@ -128,7 +128,7 @@ function registerStyle(registry, type, styleArray) {
   if (map.has(key)) {
     return map.get(key);
   }
-  registry._counts[type]++;;
+  registry._counts[type]++;
   const id = registry._prefixes[type] + registry._counts[type];
   map.set(key, id);
   registry.styles[id] = styleArray;

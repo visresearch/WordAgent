@@ -54,7 +54,7 @@ async def submit_tool_response(chat_id: str, data: dict):
 # region Tools Schema
 
 # 样式数组索引常量（与前端 docxJsonConverter.js 保持一致）
-# pStyle: [alignment, lineSpacing, indentLeft, indentRight, indentFirstLine, spaceBefore, spaceAfter, styleName, lineSpacingRule]
+# pStyle: [alignment, lineSpacing(磅), indentLeft(磅), indentRight(磅), indentFirstLine(磅), spaceBefore(磅), spaceAfter(磅), styleName, lineSpacingRule]
 # rStyle: [fontName, fontSize, bold, italic, underline, underlineColor, color, highlight, strikethrough, superscript, subscript]
 # cStyle: [rowSpan, colSpan, alignment, verticalAlignment]
 # tStyle: [tableAlignment]
@@ -74,13 +74,17 @@ class Run(BaseModel):
 class Paragraph(BaseModel):
     """段落 - 每行内容独立为一个段落，禁止在 text 中使用 \\n 换行。需要空行时用 isEmpty=true 的空段落"""
 
-    pStyle: str = Field(description='段落样式引用ID，如 "pS_1"，对应 document.styles["pS_1"]。空段落时可省略', default='')
+    pStyle: str = Field(
+        description='段落样式引用ID，如 "pS_1"，对应 document.styles["pS_1"]。空段落时可省略', default=""
+    )
     runs: list[Run] = Field(
         description="格式块数组。一个段落可包含多个 run（不同格式的文字拆为不同 run）。"
         "禁止在 text 中使用 \\n 换行，换行必须新建段落。空段落时为空数组。",
         default_factory=list,
     )
-    isEmpty: bool = Field(default=False, description='空段落标记。设为 true 时表示该段落为空行（装饰性空行），无需 runs 和 pStyle')
+    isEmpty: bool = Field(
+        default=False, description="空段落标记。设为 true 时表示该段落为空行（装饰性空行），无需 runs 和 pStyle"
+    )
 
 
 class Cell(BaseModel):
@@ -223,7 +227,9 @@ class QueryFilter(BaseModel):
     styleName: str | None = Field(
         default=None, description="段落样式名，包含匹配（如 '标题' 可匹配 '标题 1'、'标题 2'）"
     )
-    lineSpacing: float | RangeFilter | None = Field(default=None, description="行距（磅值）。单倍=12, 1.5倍=18, 双倍=24；精确值如 18；或范围如 {gt: 18}")
+    lineSpacing: float | RangeFilter | None = Field(
+        default=None, description="行距（磅值）。单倍=12, 1.5倍=18, 双倍=24；精确值如 18；或范围如 {gt: 18}"
+    )
 
 
 class DocumentQuery(BaseModel):
@@ -692,7 +698,116 @@ def web_search(query: str, max_results: int = 5) -> str:
 #     return f"已在文档位置 ({startPos} - {endPos}) 添加评论: '{comment}'"
 
 
+# region 多智能体专用工具
+
+
+class WorkflowStep(BaseModel):
+    """工作流步骤"""
+
+    agent: Literal["research", "outline", "writer", "reviewer"] = Field(description="执行该步骤的 agent 名称")
+    task: str = Field(description="该步骤的具体任务描述，将作为指令发送给对应 agent")
+    depends_on: list[int] = Field(
+        default_factory=list,
+        description="依赖的步骤编号（从 0 开始），该步骤会等依赖步骤完成后再执行",
+    )
+
+
+class Workflow(BaseModel):
+    """工作流定义"""
+
+    steps: list[WorkflowStep] = Field(description="工作流步骤列表，按执行顺序排列")
+    summary: str = Field(description="工作流总体说明（一句话概括整个计划）")
+
+
+@tool
+def create_workflow(workflow: Workflow) -> str:
+    """
+    创建多智能体工作流 —— 规划任务执行步骤。
+
+    你是 Planner Agent，负责将用户的写作需求拆解为多步骤工作流。
+    每个步骤指定由哪个 agent 执行、具体任务、以及依赖关系。
+
+    可用的 agent：
+    - research: 负责搜索网络资料（web_search, web_fetch）
+    - outline: 负责读取文档和生成大纲（read_document, query_document）
+    - writer: 负责生成 Word 文档（generate_document）
+    - reviewer: 负责审核文档质量并打分（review_document）
+
+    典型工作流示例：
+    1. research: 搜索相关资料
+    2. outline: 根据资料生成大纲
+    3. writer: 根据大纲和资料撰写文档
+    4. reviewer: 审核文档质量
+
+    Args:
+        workflow: 工作流定义，包含步骤列表和总体说明
+
+    Returns:
+        工作流 JSON
+    """
+    writer = get_stream_writer()
+    wf_dict = workflow.model_dump()
+    step_count = len(wf_dict.get("steps", []))
+    print(f"[create_workflow] 工作流: {wf_dict['summary']}, {step_count} 个步骤")
+    return json.dumps(wf_dict, ensure_ascii=False)
+
+
+class ReviewResult(BaseModel):
+    """审查结果"""
+
+    score: int = Field(description="文档质量评分（1-10），7 分及以上视为通过", ge=1, le=10)
+    passed: bool = Field(description="是否通过审核。True=通过，False=需要重写")
+    feedback: str = Field(description="审核意见，指出优点和不足")
+    rewrite_instructions: str = Field(
+        default="",
+        description="重写指令（仅当 passed=False 时需要填写），具体说明需要改进的地方",
+    )
+
+
+@tool
+def review_document(review: ReviewResult) -> str:
+    """
+    审核文档质量并给出评分和反馈。
+
+    你是 Reviewer Agent，负责检查 Writer 生成的文档是否满足用户需求。
+
+    评分标准：
+    - 1-3 分：严重不足，需要完全重写
+    - 4-6 分：有明显不足，需要修改
+    - 7-8 分：基本合格，可以通过
+    - 9-10 分：优秀
+
+    7 分及以上视为通过（passed=True），低于 7 分需要重写（passed=False）。
+    重写时必须在 rewrite_instructions 中给出具体的改进指令。
+
+    Args:
+        review: 审查结果，包含评分、是否通过、反馈意见和重写指令
+
+    Returns:
+        审核结果 JSON
+    """
+    writer = get_stream_writer()
+    review_dict = review.model_dump()
+    print(f"[review_document] 评分: {review_dict['score']}/10, 通过: {review_dict['passed']}")
+    return json.dumps(review_dict, ensure_ascii=False)
+
+
 # region Tools 注册
 
 ALL_TOOLS = [read_document, generate_document, query_document, web_search, web_fetch]
 TOOL_MAP = {t.name: t for t in ALL_TOOLS}
+
+# 按 agent 角色分组的工具集
+PLANNER_TOOLS = [create_workflow]
+RESEARCH_TOOLS = [web_search, web_fetch]
+OUTLINE_TOOLS = [read_document, query_document]
+WRITER_TOOLS = [generate_document, read_document, query_document]
+REVIEWER_TOOLS = [review_document]
+
+AGENT_TOOLS = {
+    "planner": PLANNER_TOOLS,
+    "research": RESEARCH_TOOLS,
+    "outline": OUTLINE_TOOLS,
+    "writer": WRITER_TOOLS,
+    "reviewer": REVIEWER_TOOLS,
+}
