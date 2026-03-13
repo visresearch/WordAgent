@@ -227,12 +227,13 @@ function executeTermQuery(paragraphs, term) {
     
     switch (field) {
       case 'isEmpty':
-        fieldValue = para.isEmpty || (!para.text && (!para.runs || para.runs.length === 0));
+        fieldValue = !para.text && (!para.runs || para.runs.length === 0);
         break;
-      case 'isHeading':
+      case 'isHeading': {
         const styleName = para.pStyle?.[PSTYLE.STYLE_NAME] || '';
         fieldValue = styleName.includes('标题') || styleName.toLowerCase().includes('heading');
         break;
+      }
       case 'isBold':
         fieldValue = para.runs?.some(run => run.rStyle?.[RSTYLE.BOLD]) || false;
         break;
@@ -618,7 +619,7 @@ export function executeStyleQuery(docJson, queryDSL) {
     // Run 级别搜索：遍历每个段落的每个 run
     for (let pi = 0; pi < paragraphs.length && matches.length < MAX_MATCHES; pi++) {
       const para = paragraphs[pi];
-      if (para.isParaEmpty) {
+      if (!para.runs || para.runs.length === 0) {
         continue;
       }
       
@@ -647,7 +648,7 @@ export function executeStyleQuery(docJson, queryDSL) {
     // Paragraph 级别搜索
     for (let pi = 0; pi < paragraphs.length && matches.length < MAX_MATCHES; pi++) {
       const para = paragraphs[pi];
-      if (para.isParaEmpty) {
+      if (!para.runs || para.runs.length === 0) {
         continue;
       }
       

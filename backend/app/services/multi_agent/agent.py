@@ -27,6 +27,7 @@ from app.services.multi_agent.tools import (
     TOOL_MAP,
     _current_chat_id,
     register_loop,
+    is_stop_requested,
     create_workflow,
     review_document,
     read_document,
@@ -165,21 +166,95 @@ def _run_sub_agent(
     _tool_data: list[dict] = []  # 收集文档相关工具调用结果
     _retry_count = 0  # 无效 tool call 重试计数
 
+    chat_id = _current_chat_id.get(None)
+
+    def _should_stop() -> bool:
+        if is_stop_requested(chat_id):
+            print(f"  [{agent_name}] ⛔ 检测到停止信号，终止子Agent执行 (session={chat_id})")
+            return True
+        return False
+
+    def _fmt_invalid_tool_call(tc) -> str:
+        """格式化 invalid_tool_calls 诊断信息，便于终端排查。"""
+        if isinstance(tc, dict):
+            name = tc.get("name", "?")
+            call_id = tc.get("id", "?")
+            err = tc.get("error") or "unknown_error"
+            raw_args = tc.get("args")
+        else:
+            name = getattr(tc, "name", "?")
+            call_id = getattr(tc, "id", "?")
+            err = getattr(tc, "error", None) or "unknown_error"
+            raw_args = getattr(tc, "args", None)
+
+        raw_args_str = ""
+        if raw_args is not None:
+            raw_args_str = str(raw_args)
+            if len(raw_args_str) > 300:
+                raw_args_str = raw_args_str[:300] + "...(truncated)"
+
+        return f"name={name}, id={call_id}, error={err}, raw_args={raw_args_str}"
+
+    def _diagnose_invalid_args(tc) -> str:
+        """尝试解析 invalid tool call 的原始参数，返回可读诊断信息。"""
+        raw_args = tc.get("args") if isinstance(tc, dict) else getattr(tc, "args", None)
+        if raw_args is None:
+            return "args_missing"
+
+        # 某些模型会返回 dict；多数 invalid 情况是字符串 JSON
+        if isinstance(raw_args, dict):
+            return "args_is_dict_but_marked_invalid"
+
+        if not isinstance(raw_args, str):
+            return f"args_type_unexpected={type(raw_args).__name__}"
+
+        s = raw_args.strip()
+        if not s:
+            return "args_empty"
+
+        try:
+            json.loads(s)
+            return "json_parse_ok_but_tool_call_marked_invalid"
+        except Exception as e:
+            # 给出 json 解析的具体位置，帮助定位是截断还是引号问题
+            msg = str(e)
+            return f"json_parse_error={msg}"
+
     for iteration in range(max_iterations):
+        if _should_stop():
+            text_output = ""
+            break
+
         response = llm_with_tools.invoke(messages)
 
         # 处理无效的工具调用（模型生成了不完整的 tool call JSON）
         invalid_calls = getattr(response, "invalid_tool_calls", [])
         if invalid_calls:
+            finish_reason = None
+            if hasattr(response, "response_metadata") and isinstance(response.response_metadata, dict):
+                finish_reason = response.response_metadata.get("finish_reason")
+
             if not hasattr(response, "tool_calls") or not response.tool_calls:
                 # 只有无效工具调用，没有有效的 — 跳过这条消息，提示重试
                 _retry_count += 1
-                invalid_names = [tc.get("name", "?") for tc in invalid_calls]
+                invalid_names = [
+                    tc.get("name", "?") if isinstance(tc, dict) else getattr(tc, "name", "?")
+                    for tc in invalid_calls
+                ]
                 print(f"  [{agent_name}] ⚠️ 检测到无效工具调用: {invalid_names}，重试 ({_retry_count})")
+                for idx, tc in enumerate(invalid_calls, 1):
+                    print(f"  [{agent_name}]    ↳ invalid#{idx}: {_fmt_invalid_tool_call(tc)}")
+                    print(f"  [{agent_name}]    ↳ diagnose#{idx}: {_diagnose_invalid_args(tc)}")
+                if finish_reason:
+                    print(f"  [{agent_name}]    ↳ finish_reason={finish_reason}")
+
                 if _retry_count <= 2:
+                    if _should_stop():
+                        text_output = ""
+                        break
                     messages.append(
                         SystemMessage(
-                            content="你刚才的工具调用格式不完整（JSON 被截断）。请重新调用工具，确保 JSON 结构完整。必须使用新版样式引用格式：pStyle/rStyle/cStyle/tStyle 只能是样式ID（如 pS_1/rS_1/cS_1/tS_1），禁止直接传样式数组；并在 styles 字典提供对应定义。"
+                            content="你刚才的工具调用格式不完整（JSON 被截断或参数非法）。请重新调用工具，确保 tool arguments 是完整且可解析的 JSON，字符串中的双引号必须正确转义。必须使用新版样式引用格式：pStyle/rStyle/cStyle/tStyle 只能是样式ID（如 pS_1/rS_1/cS_1/tS_1），禁止直接传样式数组；并在 styles 字典提供对应定义。"
                         )
                     )
                     continue
@@ -191,6 +266,11 @@ def _run_sub_agent(
             else:
                 # 同时有有效和无效的工具调用 — 重建干净的 AIMessage，只保留有效的
                 print(f"  [{agent_name}] ⚠️ 过滤掉无效工具调用，保留有效的")
+                for idx, tc in enumerate(invalid_calls, 1):
+                    print(f"  [{agent_name}]    ↳ dropped_invalid#{idx}: {_fmt_invalid_tool_call(tc)}")
+                    print(f"  [{agent_name}]    ↳ diagnose#{idx}: {_diagnose_invalid_args(tc)}")
+                if finish_reason:
+                    print(f"  [{agent_name}]    ↳ finish_reason={finish_reason}")
                 response = AIMessage(
                     content=response.content,
                     tool_calls=response.tool_calls,
@@ -213,6 +293,8 @@ def _run_sub_agent(
 
         # 执行工具调用
         for tc in response.tool_calls:
+            if _should_stop():
+                break
             tool_name = tc["name"]
             print(f"  [{agent_name}] 调用工具: {tool_name}")
             tool_fn = tool_map.get(tool_name)
@@ -308,6 +390,11 @@ def _build_multi_agent_graph(llm, model_name: str):
 
     # ---- Planner 节点 ----
     def planner_node(state: MultiAgentState) -> dict:
+        chat_id = _current_chat_id.get(None)
+        if is_stop_requested(chat_id):
+            print(f"[MultiAgent] ⛔ planner 收到停止信号，终止 (session={chat_id})")
+            return {}
+
         writer = get_stream_writer()
         writer({"type": "status", "content": "🧠 开始分析任务"})
         print("[MultiAgent] Planner 开始规划")
@@ -339,6 +426,11 @@ def _build_multi_agent_graph(llm, model_name: str):
 
     # ---- 工作流执行节点 ----
     def execute_workflow_node(state: MultiAgentState) -> dict:
+        chat_id = _current_chat_id.get(None)
+        if is_stop_requested(chat_id):
+            print(f"[MultiAgent] ⛔ 工作流收到停止信号，终止 (session={chat_id})")
+            return {}
+
         writer = get_stream_writer()
         workflow = state.workflow
 
@@ -356,6 +448,10 @@ def _build_multi_agent_graph(llm, model_name: str):
         shared_doc_data: list[dict] = []  # 跨步骤共享的文档工具数据
 
         for i, step in enumerate(steps):
+            if is_stop_requested(chat_id):
+                print(f"[MultiAgent] ⛔ 用户停止，结束后续步骤 (session={chat_id})")
+                break
+
             agent_name = step["agent"]
             task = step["task"]
             tools = AGENT_TOOLS.get(agent_name, [])
@@ -561,6 +657,9 @@ async def process_writing_request_stream(
                     stream_mode=["messages", "custom"],
                 )
                 for stream_item in response:
+                    if chat_id and is_stop_requested(chat_id):
+                        print(f"[MultiAgent] ⛔ 检测到停止信号，结束流式处理 (session={chat_id})")
+                        break
                     asyncio.run_coroutine_threadsafe(queue.put(stream_item), loop)
                 asyncio.run_coroutine_threadsafe(queue.put(None), loop)
             except Exception as e:

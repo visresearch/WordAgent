@@ -12,7 +12,7 @@ pnpm install
 pnpm add -D eslint-plugin-vue prettier
 ```
 
-格式化检查代码
+格式化规范代码
 
 ```bash
 pnpm lint

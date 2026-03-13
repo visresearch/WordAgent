@@ -20,6 +20,8 @@ from pydantic import BaseModel, Field, model_validator
 _pending_tool_requests: dict[str, asyncio.Queue] = {}
 # 存储每个会话的事件循环引用（供 tool 在同步线程中回到异步）
 _pending_loops: dict[str, asyncio.AbstractEventLoop] = {}
+# 存储每个会话的停止状态（用户点击停止后置为 True）
+_stop_requested_sessions: set[str] = set()
 # 当前线程使用的 chat_id（通过 contextvars 传递到 tool 函数中）
 _current_chat_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("_current_chat_id", default=None)
 
@@ -28,6 +30,7 @@ def create_tool_request(chat_id: str) -> asyncio.Queue:
     """为一个会话创建等待队列"""
     q = asyncio.Queue()
     _pending_tool_requests[chat_id] = q
+    _stop_requested_sessions.discard(chat_id)
     return q
 
 
@@ -40,10 +43,36 @@ def cleanup_tool_request(chat_id: str):
     """清理会话的等待队列"""
     _pending_tool_requests.pop(chat_id, None)
     _pending_loops.pop(chat_id, None)
+    _stop_requested_sessions.discard(chat_id)
+
+
+def request_stop(chat_id: str):
+    """标记会话停止，并唤醒可能正在等待前端回传的工具调用。"""
+    _stop_requested_sessions.add(chat_id)
+    q = _pending_tool_requests.get(chat_id)
+    loop = _pending_loops.get(chat_id)
+    if q and loop:
+        try:
+            asyncio.run_coroutine_threadsafe(q.put({"type": "stop", "error": "stopped_by_user"}), loop)
+        except Exception:
+            pass
+
+
+def clear_stop(chat_id: str):
+    """清除会话停止标记（用于下一次新请求）。"""
+    _stop_requested_sessions.discard(chat_id)
+
+
+def is_stop_requested(chat_id: str | None) -> bool:
+    """判断会话是否收到停止请求。"""
+    return bool(chat_id) and chat_id in _stop_requested_sessions
 
 
 async def submit_tool_response(chat_id: str, data: dict):
     """前端通过 WebSocket 回传工具结果时调用"""
+    if is_stop_requested(chat_id):
+        # 停止后忽略迟到的工具回包，避免再次唤醒 agent 流程
+        return
     q = _pending_tool_requests.get(chat_id)
     if q:
         await q.put(data)
@@ -72,7 +101,7 @@ class Run(BaseModel):
 
 
 class Paragraph(BaseModel):
-    """段落 - 每行内容独立为一个段落，禁止在 text 中使用 \\n 换行。需要空行时用 isEmpty=true 的空段落"""
+    """段落 - 每行内容独立为一个段落，禁止在 text 中使用 \\n 换行。runs 为空数组时表示空段落"""
 
     pStyle: str = Field(
         description='段落样式引用ID，如 "pS_1"，对应 document.styles["pS_1"]。空段落时可省略', default=""
@@ -82,9 +111,12 @@ class Paragraph(BaseModel):
         "禁止在 text 中使用 \\n 换行，换行必须新建段落。空段落时为空数组。",
         default_factory=list,
     )
-    isEmpty: bool = Field(
-        default=False, description="空段落标记。设为 true 时表示该段落为空行（装饰性空行），无需 runs 和 pStyle"
-    )
+    @model_validator(mode="after")
+    def validate_empty_paragraph_shape(self):
+        """runs 为空时视为空段落，空段落要求 pStyle 为空字符串。"""
+        if not self.runs and self.pStyle != "":
+            raise ValueError("空段落（runs 为空数组）要求 pStyle 为空字符串")
+        return self
 
 
 class Cell(BaseModel):
@@ -139,19 +171,13 @@ class DocumentOutput(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def filter_invalid_paragraphs(cls, data):
-        """过滤 paragraphs 中的非法项，保留空段落标记"""
+        """过滤 paragraphs 中的非法项。"""
         if isinstance(data, dict) and "paragraphs" in data:
             cleaned = []
             for p in data["paragraphs"]:
                 if isinstance(p, Paragraph):
                     cleaned.append(p)
                 elif isinstance(p, dict):
-                    # 保留空段落标记（isEmpty 或 isParaEmpty），统一为 isEmpty
-                    if p.get("isEmpty") or p.get("isParaEmpty"):
-                        p["isEmpty"] = True
-                        p.pop("isParaEmpty", None)
-                        cleaned.append(p)
-                        continue
                     # 跳过没有 runs 的非法段落
                     if "runs" not in p:
                         continue
@@ -167,7 +193,7 @@ class DocumentOutput(BaseModel):
         missing: set[str] = set()
 
         for para in self.paragraphs:
-            if para.isEmpty:
+            if not para.runs:
                 continue
             if para.pStyle not in style_keys:
                 missing.add(para.pStyle)
@@ -283,6 +309,10 @@ def read_document(startPos: int = -1, endPos: int = -1) -> str:
 
     # 检查是否在 WebSocket 会话中（有 chat_id）
     chat_id = _current_chat_id.get(None)
+    if is_stop_requested(chat_id):
+        print("[read_document] ⛔ 检测到停止请求，终止读取")
+        return ""
+
     if chat_id:
         q = _pending_tool_requests.get(chat_id)
         if q:
@@ -296,6 +326,9 @@ def read_document(startPos: int = -1, endPos: int = -1) -> str:
                 )
                 try:
                     result = future.result(timeout=65)
+                    if result.get("type") == "stop" or result.get("error") == "stopped_by_user":
+                        print("[read_document] ⛔ 用户已停止，终止读取")
+                        return ""
                     if result.get("error"):
                         err_msg = result.get("error")
                         print(f"[read_document] ⚠️ 前端读取失败: {err_msg}")
@@ -418,6 +451,10 @@ def query_document(query: DocumentQuery) -> str:
 
     # 通过 WebSocket 回调等待前端查询结果
     chat_id = _current_chat_id.get(None)
+    if is_stop_requested(chat_id):
+        print("[query_document] ⛔ 检测到停止请求，终止搜索")
+        return '{"matches": [], "matchCount": 0, "error": "stopped_by_user"}'
+
     if chat_id:
         q = _pending_tool_requests.get(chat_id)
         if q:
@@ -431,6 +468,9 @@ def query_document(query: DocumentQuery) -> str:
                 )
                 try:
                     result = future.result(timeout=35)
+                    if result.get("type") == "stop" or result.get("error") == "stopped_by_user":
+                        print("[query_document] ⛔ 用户已停止，终止搜索")
+                        return '{"matches": [], "matchCount": 0, "error": "stopped_by_user"}'
                     matches = result.get("matches", [])
                     match_count = result.get("matchCount", 0)
 

@@ -34,29 +34,9 @@ uv run pyinstaller wence.spec
 | Windows | PE 可执行文件 | `wence-ai.exe` |
 | macOS | Mach-O 可执行文件 | `wence-ai` (无扩展名) |
 
-## 项目结构
+## 提交代码
 
-```
-backend/
-├── app/
-│   ├── agent_langchain.py   # 纯 LangChain Agent（流式输出）
-│   ├── agent.py              # LangGraph Agent（结构化）
-│   ├── api/                  # API 路由
-│   ├── core/                 # 核心配置
-│   ├── models/               # 数据模型
-│   └── services/             # 服务层
-├── test/                     # 测试文件
-├── pyproject.toml            # 项目配置（uv）
-├── requirements.txt          # Python 依赖
-├── wence.spec                # PyInstaller 配置
-├── build_linux.sh            # Linux 打包脚本
-├── build_windows.ps1         # Windows 打包脚本
-└── BUILD.md                  # 打包详细文档
-```
-
-
-
-# 删掉tag重新提交
+删掉tag重新提交
 
 ```bash
 # 删除本地和远程的 tag
@@ -69,8 +49,16 @@ git tag v0.3.0
 git push github && git push github --tags
 ```
 
+## 注意事项
+
 在58890端口会运行一个wpscloudsrv的服务，要启动，不然看不到wps加载项列表
+
+如果发现WPS加载项不对劲，明明正在启动，但是仍然在WPS中无法显示，可以杀掉这个wpscloudsvr服务进程，重启wenceAI后端服务，wpscloudsvr会自动重启的。
 
 ```bash
 ps -aux | grep wpscloud
+```
+
+```bash
+cmc        45969  0.1  0.5 2317780 171624 pts/1  Sl+  13:33   0:00 /opt/kingsoft/wps-office/office6/wpscloudsvr /jsapihttpserver ksowpscloudsvr://start=RelayHttpServer
 ```

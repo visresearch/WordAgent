@@ -18,11 +18,15 @@ from app.services.agent.tools import (
     create_tool_request,
     cleanup_tool_request,
     submit_tool_response,
+    request_stop,
+    clear_stop,
 )
 from app.services.multi_agent.tools import (
     create_tool_request as ma_create_tool_request,
     cleanup_tool_request as ma_cleanup_tool_request,
     submit_tool_response as ma_submit_tool_response,
+    request_stop as ma_request_stop,
+    clear_stop as ma_clear_stop,
 )
 
 router = APIRouter()
@@ -89,6 +93,10 @@ async def chat_websocket(websocket: WebSocket):
             msg_type = data.get("type", "")
 
             if msg_type == "chat":
+                # 新请求开始前，清理上一次 stop 状态
+                clear_stop(chat_id)
+                ma_clear_stop(chat_id)
+
                 # 聊天请求
                 message = data.get("message", "")
                 mode = data.get("mode", "agent")  # 默认 agent 模式（单智能体）
@@ -133,6 +141,8 @@ async def chat_websocket(websocket: WebSocket):
                             await ma_submit_tool_response(chat_id, incoming)
                         elif incoming_type == "stop":
                             print(f"[WebSocket] 收到停止请求")
+                            request_stop(chat_id)
+                            ma_request_stop(chat_id)
                             stream_task.cancel()
                             try:
                                 await stream_task
@@ -159,7 +169,9 @@ async def chat_websocket(websocket: WebSocket):
                 await submit_tool_response(chat_id, data)
 
             elif msg_type == "stop":
-                pass
+                print(f"[WebSocket] 收到停止请求(空闲态)")
+                request_stop(chat_id)
+                ma_request_stop(chat_id)
 
     except WebSocketDisconnect:
         print(f"[WebSocket] 连接断开 session={chat_id}")

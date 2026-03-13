@@ -19,6 +19,7 @@ from app.services.agent.tools import (
     _current_chat_id,
     register_loop,
     read_document,
+    is_stop_requested,
 )
 
 
@@ -95,6 +96,10 @@ def build_graph(llm_with_tools):
 
     def agent_node(state: MessagesState) -> dict:
         """单一 Agent 节点 - 决定下一步行动或直接回复"""
+        chat_id = _current_chat_id.get(None)
+        if is_stop_requested(chat_id):
+            print(f"[Agent] ⛔ 收到停止信号，终止 Agent 节点 (session={chat_id})")
+            return {"messages": []}
         print("[Agent] 开始处理")
         response = llm_with_tools.invoke(state["messages"])
         return {"messages": [response]}
@@ -103,8 +108,12 @@ def build_graph(llm_with_tools):
         """工具执行节点 - 执行 Agent 请求的所有工具"""
         last_message = state["messages"][-1]
         results = []
+        chat_id = _current_chat_id.get(None)
 
         for tool_call in last_message.tool_calls:
+            if is_stop_requested(chat_id):
+                print(f"[Tools] ⛔ 收到停止信号，终止后续工具执行 (session={chat_id})")
+                break
             tool_name = tool_call["name"]
             print(f"[Tools] 执行工具: {tool_name}")
 
@@ -142,8 +151,8 @@ def build_graph(llm_with_tools):
             "messages": [
                 RemoveMessage(id=last_message.id),
                 SystemMessage(
-                    content="[RETRY_GENERATE] 你刚才尝试调用 generate_document 但输出被截断未能完成。"
-                    "请再次调用 generate_document 工具生成文档。必须使用新版样式引用格式："
+                    content="[RETRY_GENERATE] 你刚才尝试调用 generate_document 但 tool call 无效（可能是 JSON 不完整或被截断）。"
+                    "请再次调用 generate_document 工具生成文档，并确保参数是完整合法 JSON。必须使用新版样式引用格式："
                     "段落/字符/单元格/表格样式字段只能填样式ID（如 pS_1、rS_1、cS_1、tS_1），"
                     "并在 styles 字典中提供对应样式数组。确保 JSON 结构完整。"
                 ),
@@ -154,6 +163,11 @@ def build_graph(llm_with_tools):
 
     def should_continue(state: MessagesState) -> str:
         """判断 Agent 是否还需要调用工具"""
+        chat_id = _current_chat_id.get(None)
+        if is_stop_requested(chat_id):
+            print(f"[Router] -> END (用户停止, session={chat_id})")
+            return END
+
         last_message = state["messages"][-1]
         if hasattr(last_message, "tool_calls") and last_message.tool_calls:
             print("[Router] -> tools")
@@ -166,11 +180,24 @@ def build_graph(llm_with_tools):
         invalid_calls = getattr(last_message, "invalid_tool_calls", [])
         if invalid_calls:
             print(f"[Router] ⚠️ 检测到无效的工具调用: {[tc.get('name', '?') for tc in invalid_calls]}")
+            for idx, tc in enumerate(invalid_calls, 1):
+                print(
+                    "[Router] invalid_tool_call[{idx}] name={name} id={id} error={error} args={args}".format(
+                        idx=idx,
+                        name=tc.get("name", "?"),
+                        id=tc.get("id", "?"),
+                        error=tc.get("error", "?"),
+                        args=tc.get("args", ""),
+                    )
+                )
             should_retry = True
 
         # 信号2: finish_reason 为 length（输出被截断）
         metadata = getattr(last_message, "response_metadata", {})
-        if metadata.get("finish_reason") == "length":
+        finish_reason = metadata.get("finish_reason")
+        if finish_reason:
+            print(f"[Router] finish_reason={finish_reason}")
+        if finish_reason == "length":
             print("[Router] ⚠️ 模型输出被截断 (finish_reason=length)")
             should_retry = True
 
@@ -333,6 +360,9 @@ async def process_writing_request_stream(
                 )
 
                 for stream_item in response:
+                    if chat_id and is_stop_requested(chat_id):
+                        print(f"[Agent] ⛔ 检测到停止信号，结束流式处理 (session={chat_id})")
+                        break
                     asyncio.run_coroutine_threadsafe(queue.put(stream_item), loop)
 
                 asyncio.run_coroutine_threadsafe(queue.put(None), loop)

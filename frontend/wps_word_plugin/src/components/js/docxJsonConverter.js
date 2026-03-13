@@ -105,6 +105,10 @@ const DEFAULT_PSTYLE = ['left', 0, 0, 0, 0, 0, 0, '', 0];
 const DEFAULT_RSTYLE = ['', 12, false, false, 0, '#000000', '#000000', 0, false, false, false];
 const DEFAULT_CSTYLE = [1, 1, 'left', 'center'];
 
+function isEmptyParagraph(para) {
+  return !!(para && Array.isArray(para.runs) && para.runs.length === 0);
+}
+
 // ============== 样式去重与解析 ==============
 
 /**
@@ -830,7 +834,8 @@ function parseDocxToJSON(rangeOrStart, end) {
         // 空段落
         if (paraText.match(/^[\r\n\f\u0007]*$/)) {
           result.paragraphs.push({
-            isParaEmpty: true,
+            pStyle: '',
+            runs: [],
             position: paraStart
           });
           continue;
@@ -1255,7 +1260,7 @@ function generateDocxFromJSON(jsonData, doc, startPosition = null) {
     let consecutiveEmptyCount = 0;
 
     for (const element of elements) {
-      if (element.type === 'paragraph' && (element.data.isEmpty || element.data.isParaEmpty)) {
+      if (element.type === 'paragraph' && isEmptyParagraph(element.data)) {
         consecutiveEmptyCount++;
         if (consecutiveEmptyCount <= 2) {
           processedElements.push(element);
@@ -1345,7 +1350,7 @@ function generateDocxFromJSON(jsonData, doc, startPosition = null) {
         }
 
         // 处理空段落
-        if (para.isEmpty || para.isParaEmpty) {
+        if (isEmptyParagraph(para)) {
           const prevElement = i > 0 ? processedElements[i - 1] : null;
           const nextElement = i < processedElements.length - 1 ? processedElements[i + 1] : null;
 
@@ -1353,14 +1358,14 @@ function generateDocxFromJSON(jsonData, doc, startPosition = null) {
             prevElement &&
             (prevElement.type === 'table' ||
               (prevElement.type === 'paragraph' &&
-                !prevElement.data.isEmpty && !prevElement.data.isParaEmpty &&
+                !isEmptyParagraph(prevElement.data) &&
                 prevElement.data.runs &&
                 prevElement.data.runs.length > 0));
           const nextHasContent =
             nextElement &&
             (nextElement.type === 'table' ||
               (nextElement.type === 'paragraph' &&
-                !nextElement.data.isEmpty && !nextElement.data.isParaEmpty &&
+                !isEmptyParagraph(nextElement.data) &&
                 nextElement.data.runs &&
                 nextElement.data.runs.length > 0));
 
@@ -1514,7 +1519,7 @@ function generateDocxFromJSON(jsonData, doc, startPosition = null) {
             if (
               nextEl.type === 'table' ||
               (nextEl.type === 'paragraph' &&
-                !nextEl.data.isEmpty && !nextEl.data.isParaEmpty &&
+                !isEmptyParagraph(nextEl.data) &&
                 nextEl.data.runs &&
                 nextEl.data.runs.length > 0)
             ) {
