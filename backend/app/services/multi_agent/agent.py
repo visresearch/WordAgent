@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 
 from app.services.llm_client import LLMClientManager, resolve_model
 from app.services.multi_agent.prompts import get_agent_prompt
+from app.services.utils import parse_tool_args_with_repair
 from app.services.multi_agent.tools import (
     AGENT_TOOLS,
     TOOL_MAP,
@@ -220,6 +221,76 @@ def _run_sub_agent(
             msg = str(e)
             return f"json_parse_error={msg}"
 
+    def _try_repair_and_execute_invalid_calls(invalid_calls) -> bool:
+        """尝试修复 invalid_tool_calls，并直接执行可修复的调用。"""
+        nonlocal last_structured_result, _writer_generated, _tool_data
+
+        repaired_any = False
+        repaired_tool_calls = []
+        repaired_tool_messages = []
+        for tc in invalid_calls:
+            if _should_stop():
+                break
+
+            if isinstance(tc, dict):
+                tool_name = tc.get("name", "")
+                tool_call_id = tc.get("id", "repaired_invalid_tool_call")
+                raw_args = tc.get("args")
+            else:
+                tool_name = getattr(tc, "name", "")
+                tool_call_id = getattr(tc, "id", "repaired_invalid_tool_call")
+                raw_args = getattr(tc, "args", None)
+
+            tool_fn = tool_map.get(tool_name)
+            if not tool_fn:
+                continue
+
+            parsed_args = parse_tool_args_with_repair(raw_args)
+            if parsed_args is None:
+                continue
+
+            try:
+                result = tool_fn.invoke(parsed_args)
+                if isinstance(result, dict):
+                    content = json.dumps(result, ensure_ascii=False)
+                    last_structured_result = result
+                elif isinstance(result, str):
+                    content = result
+                    try:
+                        parsed = json.loads(content)
+                        if isinstance(parsed, dict):
+                            last_structured_result = parsed
+                    except (json.JSONDecodeError, ValueError):
+                        pass
+                else:
+                    content = str(result)
+
+                repaired_tool_calls.append(
+                    {
+                        "name": tool_name,
+                        "args": parsed_args,
+                        "id": tool_call_id,
+                        "type": "tool_call",
+                    }
+                )
+                repaired_tool_messages.append(ToolMessage(content=content, tool_call_id=tool_call_id, name=tool_name))
+                repaired_any = True
+                print(f"  [{agent_name}] ✅ 已修复并执行 invalid tool_call: {tool_name}")
+
+                if tool_name == "query_document":
+                    _tool_data.append({"tool": tool_name, "args": parsed_args, "result": content})
+
+                if agent_name == "writer" and tool_name == "generate_document":
+                    _writer_generated = True
+            except Exception as e:
+                print(f"  [{agent_name}] ❌ 修复后工具执行失败: {tool_name}, error={e}")
+
+        if repaired_any:
+            messages.append(AIMessage(content="", tool_calls=repaired_tool_calls))
+            messages.extend(repaired_tool_messages)
+
+        return repaired_any
+
     for iteration in range(max_iterations):
         if _should_stop():
             text_output = ""
@@ -235,11 +306,14 @@ def _run_sub_agent(
                 finish_reason = response.response_metadata.get("finish_reason")
 
             if not hasattr(response, "tool_calls") or not response.tool_calls:
+                if _try_repair_and_execute_invalid_calls(invalid_calls):
+                    print(f"  [{agent_name}] 🔧 invalid tool_calls 已自动修复，继续流程")
+                    continue
+
                 # 只有无效工具调用，没有有效的 — 跳过这条消息，提示重试
                 _retry_count += 1
                 invalid_names = [
-                    tc.get("name", "?") if isinstance(tc, dict) else getattr(tc, "name", "?")
-                    for tc in invalid_calls
+                    tc.get("name", "?") if isinstance(tc, dict) else getattr(tc, "name", "?") for tc in invalid_calls
                 ]
                 print(f"  [{agent_name}] ⚠️ 检测到无效工具调用: {invalid_names}，重试 ({_retry_count})")
                 for idx, tc in enumerate(invalid_calls, 1):

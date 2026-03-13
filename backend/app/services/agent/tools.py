@@ -111,6 +111,7 @@ class Paragraph(BaseModel):
         "禁止在 text 中使用 \\n 换行，换行必须新建段落。空段落时为空数组。",
         default_factory=list,
     )
+
     @model_validator(mode="after")
     def validate_empty_paragraph_shape(self):
         """runs 为空时视为空段落，空段落要求 pStyle 为空字符串。"""

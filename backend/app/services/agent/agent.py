@@ -8,11 +8,12 @@ import json
 import traceback
 from collections.abc import AsyncGenerator
 
-from langchain_core.messages import AIMessageChunk, HumanMessage, RemoveMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, RemoveMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, START, MessagesState, StateGraph
 
 from app.services.llm_client import LLMClientManager, resolve_model
 from app.services.agent.prompts import get_agent_prompt_skills, get_agent_prompt
+from app.services.utils import parse_tool_args_with_repair
 from app.services.agent.tools import (
     ALL_TOOLS,
     TOOL_MAP,
@@ -155,6 +156,81 @@ def build_graph(llm_with_tools):
                     "请再次调用 generate_document 工具生成文档，并确保参数是完整合法 JSON。必须使用新版样式引用格式："
                     "段落/字符/单元格/表格样式字段只能填样式ID（如 pS_1、rS_1、cS_1、tS_1），"
                     "并在 styles 字典中提供对应样式数组。确保 JSON 结构完整。"
+                    "正文中如果需要引号，请优先使用中文引号“”，或对英文双引号进行转义。"
+                ),
+            ]
+        }
+
+    def repair_invalid_tool_call_node(state: MessagesState) -> dict:
+        """尝试修复 invalid_tool_calls 并直接执行，减少二次生成失败概率。"""
+        last_message = state["messages"][-1]
+        invalid_calls = getattr(last_message, "invalid_tool_calls", []) or []
+        chat_id = _current_chat_id.get(None)
+        repaired_tool_calls = []
+        repaired_results = []
+
+        for tc in invalid_calls:
+            if is_stop_requested(chat_id):
+                print(f"[Repair] ⛔ 收到停止信号，终止修复执行 (session={chat_id})")
+                break
+
+            tool_name = tc.get("name", "")
+            tool_fn = TOOL_MAP.get(tool_name)
+            if not tool_fn:
+                continue
+
+            parsed_args = parse_tool_args_with_repair(tc.get("args", {}))
+            if parsed_args is None:
+                print(f"[Repair] ❌ 无法修复工具参数: {tool_name}")
+                continue
+
+            try:
+                result = tool_fn.invoke(parsed_args)
+                if isinstance(result, dict):
+                    content = json.dumps(result, ensure_ascii=False)
+                elif isinstance(result, str):
+                    content = result
+                else:
+                    content = str(result)
+
+                repaired_tool_calls.append(
+                    {
+                        "name": tool_name,
+                        "args": parsed_args,
+                        "id": tc.get("id", "repaired_invalid_tool_call"),
+                        "type": "tool_call",
+                    }
+                )
+                repaired_results.append(
+                    ToolMessage(
+                        content=content,
+                        tool_call_id=tc.get("id", "repaired_invalid_tool_call"),
+                        name=tool_name,
+                    )
+                )
+                print(f"[Repair] ✅ 已修复并执行工具: {tool_name}")
+            except Exception as e:
+                print(f"[Repair] ❌ 工具执行失败: {tool_name}, error={e}")
+
+        if repaired_results:
+            print("[Repair] ✅ 已重建合法 tool_calls，继续 Agent")
+            return {
+                "messages": [
+                    RemoveMessage(id=last_message.id),
+                    AIMessage(content="", tool_calls=repaired_tool_calls),
+                    *repaired_results,
+                ]
+            }
+
+        # 无法修复时，回退到一次重试指令
+        print("[Repair] -> retry (无法自动修复参数)")
+        return {
+            "messages": [
+                RemoveMessage(id=last_message.id),
+                SystemMessage(
+                    content="[RETRY_GENERATE] 你刚才的 generate_document tool call 参数不是合法 JSON。"
+                    "请仅重试一次，并确保：1) JSON 完整；2) 样式使用 ID 引用；"
+                    "3) 文本中不要直接使用未转义的英文双引号，改用中文引号“”或先转义。"
                 ),
             ]
         }
@@ -173,10 +249,7 @@ def build_graph(llm_with_tools):
             print("[Router] -> tools")
             return "tools"
 
-        # 检测中途放弃的工具调用，自动重试一次
-        should_retry = False
-
-        # 信号1: invalid_tool_calls（模型生成了不完整的 tool call JSON）
+        # 优先尝试修复 invalid_tool_calls（模型生成了非法 JSON 参数）
         invalid_calls = getattr(last_message, "invalid_tool_calls", [])
         if invalid_calls:
             print(f"[Router] ⚠️ 检测到无效的工具调用: {[tc.get('name', '?') for tc in invalid_calls]}")
@@ -190,7 +263,11 @@ def build_graph(llm_with_tools):
                         args=tc.get("args", ""),
                     )
                 )
-            should_retry = True
+            print("[Router] -> repair")
+            return "repair"
+
+        # 检测中途放弃的工具调用，自动重试一次
+        should_retry = False
 
         # 信号2: finish_reason 为 length（输出被截断）
         metadata = getattr(last_message, "response_metadata", {})
@@ -220,11 +297,17 @@ def build_graph(llm_with_tools):
     graph.add_node("agent", agent_node)
     graph.add_node("tools", tools_node)
     graph.add_node("retry", retry_node)
+    graph.add_node("repair", repair_invalid_tool_call_node)
 
     graph.add_edge(START, "agent")
-    graph.add_conditional_edges("agent", should_continue, {"tools": "tools", "retry": "retry", END: END})
+    graph.add_conditional_edges(
+        "agent",
+        should_continue,
+        {"tools": "tools", "retry": "retry", "repair": "repair", END: END},
+    )
     graph.add_edge("tools", "agent")  # 工具执行完毕，始终回到 Agent
     graph.add_edge("retry", "agent")  # 重试后回到 Agent 重新生成
+    graph.add_edge("repair", "agent")  # 修复执行后回到 Agent 收尾
 
     return graph.compile()
 
