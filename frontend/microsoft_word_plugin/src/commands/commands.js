@@ -1,6 +1,5 @@
 /*
- * Copyright (c) Microsoft Corporation. All rights reserved. Licensed under the MIT license.
- * See LICENSE in the project root for license information.
+ * Copyright (c) WenCe Team. All rights reserved. Licensed under the MIT license.
  */
 
 /* global Office */
@@ -16,16 +15,17 @@ Office.onReady(() => {
 function action(event) {
   const message = {
     type: Office.MailboxEnums.ItemNotificationMessageType.InformationalMessage,
-    message: "Performed action.",
+    message: "文策AI助手已执行操作。",
     icon: "Icon.80x80",
     persistent: true,
   };
 
   // Show a notification message.
-  Office.context.mailbox.item.notificationMessages.replaceAsync(
-    "ActionPerformanceNotification",
-    message
-  );
+  try {
+    Office.context.mailbox.item.notificationMessages.replaceAsync("ActionPerformanceNotification", message);
+  } catch (e) {
+    // Not in mailbox context, ignore
+  }
 
   // Be sure to indicate when the add-in command function is complete.
   event.completed();

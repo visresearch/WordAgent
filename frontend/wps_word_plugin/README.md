@@ -25,6 +25,15 @@ npm install -g wpsjs
 wpsjs debug
 ```
 
+## 项目发布
+
+```bash
+wpsjs publish
+```
+
+生成一个html文件后，上传到fastapi后端上
+
+
 ## 注意事项
 
 - 如果发现wps加载项不对劲，比如是旧代码，空页面，错图标等，要清除 WPS JS 加载项的 CEF 浏览器缓存。先关闭WPS和wpsjs debug，再运行：
