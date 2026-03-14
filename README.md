@@ -172,6 +172,8 @@ pnpm build
 ```bash
 cd backend
 uv venv --python 3.10.12
+source .venv/bin/activate  # Linux
+.venv\Scripts\activate     # Windows
 uv sync
 uv run python main.py
 ```

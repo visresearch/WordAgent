@@ -2,6 +2,9 @@
 主窗口 - QWidget 基类 + qfluentwidgets 导航组件
 """
 
+import platform
+import ctypes
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QMainWindow,
@@ -15,7 +18,6 @@ from qfluentwidgets import (
     NavigationInterface,
     NavigationItemPosition,
     FluentIcon,
-    isDarkTheme,
 )
 
 from .home_interface import HomeInterface
@@ -28,8 +30,36 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
+        self._title_bar_applied = False
         self._initWindow()
         self._initUI()
+
+    def _set_windows_light_title_bar(self):
+        if platform.system() != "Windows":
+            return
+
+        hwnd = int(self.winId())
+        value = ctypes.c_int(0)
+        size = ctypes.sizeof(value)
+        DWMWA_USE_IMMERSIVE_DARK_MODE_NEW = 20
+        DWMWA_USE_IMMERSIVE_DARK_MODE_OLD = 19
+
+        try:
+            dwmapi = ctypes.windll.dwmapi
+            dwmapi.DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_USE_IMMERSIVE_DARK_MODE_NEW,
+                ctypes.byref(value),
+                size,
+            )
+            dwmapi.DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_USE_IMMERSIVE_DARK_MODE_OLD,
+                ctypes.byref(value),
+                size,
+            )
+        except Exception:
+            pass
 
     def _initWindow(self):
         self.resize(900, 600)
@@ -44,10 +74,18 @@ class MainWindow(QMainWindow):
 
     def _initUI(self):
         central = QWidget()
+        central.setObjectName("centralWidget")
         self.setCentralWidget(central)
         root = QHBoxLayout(central)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
+
+        self.setStyleSheet(
+            """
+            QMainWindow { background-color: #f5f5f5; }
+            QWidget#centralWidget { background-color: #f5f5f5; }
+            """
+        )
 
         # --- 左侧导航（qfluentwidgets NavigationInterface） ---
         self._nav = NavigationInterface(self, showMenuButton=False, showReturnButton=False)
@@ -101,3 +139,9 @@ class MainWindow(QMainWindow):
     def resizeEvent(self, event):
         self._nav.setFixedHeight(self.height())
         super().resizeEvent(event)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not self._title_bar_applied:
+            self._set_windows_light_title_bar()
+            self._title_bar_applied = True

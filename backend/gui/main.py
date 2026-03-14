@@ -15,6 +15,7 @@ os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", "--disable-gpu")
 import PySide6.QtWebEngineWidgets  # noqa: F401
 
 from PySide6.QtWidgets import QApplication
+from qfluentwidgets import setTheme, Theme
 
 IS_WINDOWS = platform.system() == "Windows"
 
@@ -121,6 +122,7 @@ def start_gui(base_path=None):
     ensure_wps_cloud_service()
 
     qt_app = QApplication(sys.argv)
+    setTheme(Theme.LIGHT, save=True, lazy=False)
 
     from gui.views import MainWindow
 
