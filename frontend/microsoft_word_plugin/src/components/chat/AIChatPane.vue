@@ -1,65 +1,115 @@
 <template>
-  <div class="ai-chat-container">
-    <div v-if="currentSessionTitle" class="session-header">
-      <span class="session-title">{{ currentSessionTitle }}</span>
+  <div ref="chatRoot" class="chat-root">
+    <div class="ai-chat-container">
+      <div v-if="currentSessionTitle" class="session-header">
+        <span class="session-title">{{ currentSessionTitle }}</span>
+      </div>
+      <ChatMessages
+        ref="chatMessages"
+        :messages="messages"
+        :is-loading="isLoading"
+        :has-history="hasHistory"
+        :history-loaded="historyLoaded"
+        @load-history="loadAndShowHistory"
+        @insert-to-word="insertToWord"
+        @copy="copyToClipboard"
+        @retry="retryMessage"
+        @toggle-thinking="toggleThinking"
+      />
+      <ChatInput
+        :mode="mode"
+        :selected-model="selectedModel"
+        :available-models="availableModels"
+        :models-loading="modelsLoading"
+        :is-loading="isLoading"
+        :selections="selections"
+        @update:mode="mode = $event"
+        @update:selected-model="selectedModel = $event"
+        @send="handleSend"
+        @stop="stopGeneration"
+        @add-selection="addSelectionFromWord"
+        @remove-selection="removeSelection"
+      />
     </div>
-    <ChatMessages
-      ref="chatMessages"
-      :messages="messages"
-      :is-loading="isLoading"
-      :has-history="hasHistory"
-      :history-loaded="historyLoaded"
-      @load-history="loadAndShowHistory"
-      @insert-to-word="insertToWord"
-      @copy="copyToClipboard"
-      @retry="retryMessage"
-      @toggle-thinking="toggleThinking"
-    />
-    <ChatInput
-      :mode="mode"
-      :selected-model="selectedModel"
-      :available-models="availableModels"
-      :models-loading="modelsLoading"
-      :is-loading="isLoading"
-      :selections="selections"
-      @update:mode="mode = $event"
-      @update:selected-model="selectedModel = $event"
-      @send="handleSend"
-      @stop="stopGeneration"
-      @add-selection="addSelectionFromWord"
-      @remove-selection="removeSelection"
-    />
+    <transition name="slide-session">
+      <div v-if="sessionVisible" class="session-panel">
+        <SessionPane
+          :current-session-id="currentSessionId"
+          @select-session="onSelectSession"
+          @create-session="onCreateSession"
+        />
+      </div>
+    </transition>
   </div>
 </template>
 
 <script>
+/* global Word */
+import { generateDocxFromJSON } from '../js/docxJsonConverter.js';
+import api from '../js/api.js';
 import ChatMessages from './ChatMessages.vue';
 import ChatInput from './ChatInput.vue';
+import SessionPane from './SessionPane.vue';
+import { sessionState } from '../../sessionState.js';
 
 export default {
   name: 'AIChatPane',
   components: {
     ChatMessages,
-    ChatInput
+    ChatInput,
+    SessionPane
   },
   data() {
     return {
       mode: 'agent',
-      selectedModel: 'auto',
-      availableModels: [
-        { id: 'auto', name: 'Auto' },
-        { id: 'gpt-4', name: 'GPT-4' },
-        { id: 'gpt-3.5-turbo', name: 'GPT-3.5' }
-      ],
+      selectedModel: '',
+      availableModels: [],
       modelsLoading: false,
       messages: [],
       isLoading: false,
       selections: [],
+      currentStreamCtrl: null,
       currentSessionId: null,
       currentSessionTitle: null,
       hasHistory: false,
-      historyLoaded: false
+      historyLoaded: false,
+      historyLoading: false,
+      _streamingSessionId: null,
+      _streamingCache: {},
+      isWide: false
     };
+  },
+  computed: {
+    sessionVisible() {
+      if (sessionState.manualValue !== null) {
+        return sessionState.manualValue;
+      }
+      return this.isWide;
+    }
+  },
+  watch: {
+    sessionVisible(val) {
+      sessionState.visible = val;
+    },
+    isWide() {
+      sessionState.manualValue = null;
+    }
+  },
+  mounted() {
+    this.loadModels();
+    this.initSessionAndLoadHistory();
+
+    this._onResize = () => {
+      this.isWide = window.innerWidth >= 600;
+    };
+    this._onResize();
+    window.addEventListener('resize', this._onResize);
+    sessionState.visible = this.sessionVisible;
+  },
+  beforeUnmount() {
+    if (this._onResize) {
+      window.removeEventListener('resize', this._onResize);
+    }
   },
   methods: {
     toggleThinking(index) {
@@ -82,23 +132,258 @@ export default {
         textarea.style.opacity = '0';
         document.body.appendChild(textarea);
         textarea.select();
-        document.execCommand('copy');
+        try { document.execCommand('copy'); } catch (e) { /* ignore */ }
         document.body.removeChild(textarea);
       }
     },
 
     stopGeneration() {
+      if (this.currentStreamCtrl) {
+        this.currentStreamCtrl.abort();
+        this.currentStreamCtrl = null;
+      }
       this.isLoading = false;
     },
 
-    loadAndShowHistory() {
-      // TODO: 后端集成后加载历史记录
+    // ============== 会话管理 ==============
+
+    async initSessionAndLoadHistory() {
+      try {
+        let savedSessionId = null;
+        try {
+          savedSessionId = localStorage.getItem('wence_current_session_id');
+        } catch (e) { /* ignore */ }
+
+        if (savedSessionId) {
+          this.currentSessionId = Number(savedSessionId) || savedSessionId;
+          await this.loadSessionMessages();
+        } else {
+          const result = await api.getLatestSession();
+          if (result.success && result.data?.session) {
+            this.currentSessionId = result.data.session.id;
+            this.currentSessionTitle = result.data.session.title || null;
+            try {
+              localStorage.setItem('wence_current_session_id', String(this.currentSessionId));
+            } catch (e) { /* ignore */ }
+            this.hasHistory = result.data.messages && result.data.messages.length > 0;
+          } else {
+            this.hasHistory = false;
+          }
+        }
+      } catch (e) {
+        console.error('[初始化] 失败:', e);
+      }
+    },
+
+    async onSelectSession(session) {
+      const sessionId = session.id;
+      const title = session.title;
+
+      if (!sessionId) {
+        this.currentSessionId = null;
+        this.currentSessionTitle = null;
+        this.messages = [];
+        this.hasHistory = false;
+        this.historyLoaded = false;
+        return;
+      }
+
+      if (this.currentSessionId === sessionId && this.historyLoaded) {
+        return;
+      }
+
+      // 缓存正在流式生成的会话消息
+      if (this.isLoading && this._streamingSessionId === this.currentSessionId) {
+        this._streamingCache[this.currentSessionId] = this.messages;
+      }
+
+      // 从缓存恢复
+      if (this._streamingCache[sessionId]) {
+        this.messages = this._streamingCache[sessionId];
+        this.currentSessionId = sessionId;
+        this.currentSessionTitle = title || null;
+        this.hasHistory = this.messages.length > 0;
+        this.historyLoaded = true;
+        try {
+          localStorage.setItem('wence_current_session_id', String(sessionId));
+        } catch (e) { /* ignore */ }
+        this.$nextTick(() => this.scrollToBottom());
+        return;
+      }
+
+      this.messages = [];
+      this.hasHistory = false;
+      this.historyLoaded = false;
+      this.currentSessionId = sessionId;
+      this.currentSessionTitle = title || null;
+
+      try {
+        localStorage.setItem('wence_current_session_id', String(sessionId));
+      } catch (e) { /* ignore */ }
+
+      await this.loadSessionMessages();
+    },
+
+    onCreateSession(session) {
+      this.currentSessionId = session.id;
+      this.currentSessionTitle = session.title;
+      this.messages = [];
+      this.historyLoaded = false;
+      this.hasHistory = false;
+      try {
+        localStorage.setItem('wence_current_session_id', String(session.id));
+      } catch (e) { /* ignore */ }
+    },
+
+    async loadAndShowHistory() {
+      await this.loadSessionMessages();
       this.historyLoaded = true;
     },
 
-    /**
-     * 通过 Office.js Word API 获取用户当前选区文本
-     */
+    async loadSessionMessages() {
+      if (!this.currentSessionId) return;
+
+      this.historyLoading = true;
+      try {
+        const result = await api.getSession(this.currentSessionId);
+        if (result.success && result.data?.messages) {
+          this.messages = result.data.messages.map((msg) => ({
+            role: msg.role,
+            content: msg.content,
+            contentParts: (msg.contentParts && msg.contentParts.length > 0)
+              ? msg.contentParts
+              : (msg.content ? [{ type: 'text', content: msg.content }] : []),
+            documentJson: msg.documentJson || null,
+            selectionContext: msg.selectionContext || null
+          }));
+
+          if (result.data.lastUsedModel) {
+            this.selectedModel = result.data.lastUsedModel;
+          }
+          if (result.data.lastUsedMode) {
+            this.mode = result.data.lastUsedMode;
+          }
+          if (result.data.session) {
+            this.currentSessionTitle = result.data.session.title || null;
+          }
+
+          this.hasHistory = this.messages.length > 0;
+          this.historyLoaded = true;
+          this.scrollToBottom();
+        } else if (result && result.success === false) {
+          this.currentSessionId = null;
+          this.currentSessionTitle = null;
+          this.messages = [];
+          this.hasHistory = false;
+          this.historyLoaded = false;
+          try { localStorage.removeItem('wence_current_session_id'); } catch (e) { /* ignore */ }
+        }
+      } catch (e) {
+        console.error('[加载历史] 失败:', e);
+      }
+      this.historyLoading = false;
+    },
+
+    async ensureSession() {
+      if (this.currentSessionId) {
+        try {
+          const existsResult = await api.getSession(this.currentSessionId);
+          if (existsResult.success && existsResult.data?.session) {
+            return this.currentSessionId;
+          }
+        } catch (e) { /* ignore */ }
+
+        this.currentSessionId = null;
+        this.currentSessionTitle = null;
+        try { localStorage.removeItem('wence_current_session_id'); } catch (e) { /* ignore */ }
+      }
+
+      try {
+        const result = await api.createSession({ title: '新对话' });
+        if (result.success && result.data?.session) {
+          this.currentSessionId = result.data.session.id;
+          try {
+            localStorage.setItem('wence_current_session_id', String(this.currentSessionId));
+          } catch (e) { /* ignore */ }
+          window.dispatchEvent(new CustomEvent('session-created'));
+          return this.currentSessionId;
+        }
+      } catch (e) {
+        console.error('[自动创建会话] 失败:', e);
+      }
+      return null;
+    },
+
+    async saveMessageToHistory(role, content, documentJson = null, selectionContext = null, contentParts = null) {
+      let sessionId = await this.ensureSession();
+      if (!sessionId) return;
+
+      try {
+        let saveResult = await api.addSessionMessage(sessionId, {
+          role,
+          content,
+          documentJson,
+          selectionContext,
+          contentParts,
+          model: this.selectedModel || 'auto',
+          mode: this.mode
+        });
+
+        if (!saveResult?.success) {
+          this.currentSessionId = null;
+          this.currentSessionTitle = null;
+          try { localStorage.removeItem('wence_current_session_id'); } catch (e) { /* ignore */ }
+
+          sessionId = await this.ensureSession();
+          if (!sessionId) return;
+
+          saveResult = await api.addSessionMessage(sessionId, {
+            role,
+            content,
+            documentJson,
+            selectionContext,
+            contentParts,
+            model: this.selectedModel || 'auto',
+            mode: this.mode
+          });
+        }
+
+        if (role === 'user' && (!this.currentSessionTitle || this.currentSessionTitle === '新对话')) {
+          this.currentSessionTitle = content.length > 30 ? content.substring(0, 30) + '...' : content;
+        }
+
+        window.dispatchEvent(new CustomEvent('session-updated'));
+      } catch (e) {
+        console.warn('保存消息失败:', e);
+      }
+    },
+
+    // ============== 模型加载 ==============
+
+    async loadModels() {
+      this.modelsLoading = true;
+      try {
+        const result = await api.getModels();
+        if (result.success && result.data?.models && result.data.models.length > 0) {
+          this.availableModels = result.data.models;
+          const modelExists = this.availableModels.some(m => m.id === this.selectedModel);
+          if (!modelExists) {
+            this.selectedModel = 'auto';
+          }
+        } else {
+          this.availableModels = [{ id: 'auto', name: 'Auto' }];
+          this.selectedModel = 'auto';
+        }
+      } catch (error) {
+        console.error('加载模型列表失败:', error);
+        this.availableModels = [{ id: 'auto', name: 'Auto' }];
+        this.selectedModel = 'auto';
+      }
+      this.modelsLoading = false;
+    },
+
+    // ============== 选区管理 ==============
+
     async addSelectionFromWord() {
       try {
         await Word.run(async (context) => {
@@ -107,9 +392,7 @@ export default {
           await context.sync();
 
           const text = (selection.text || '').trim();
-          if (!text || text.length < 2) {
-            return;
-          }
+          if (!text || text.length < 2) return;
 
           const maxPreviewLen = 50;
           let preview = text;
@@ -142,6 +425,8 @@ export default {
       }
     },
 
+    // ============== 消息发送与流式处理 ==============
+
     retryMessage(aiMessageIndex) {
       if (this.isLoading) return;
 
@@ -153,7 +438,7 @@ export default {
 
       const userMessage = this.messages[userMessageIndex].content;
       this.messages.splice(aiMessageIndex, 1);
-      this.simulateAIResponse(userMessage);
+      this._sendStreamRequest(userMessage, null);
     },
 
     handleSend(userMessage) {
@@ -162,73 +447,234 @@ export default {
         content: userMessage
       };
 
+      let selectionContext = null;
+
       if (this.selections.length > 0) {
-        userMsgObj.selectionContext = this.selections.map((s) => ({
+        selectionContext = this.selections.map((s) => ({
           preview: s.preview,
           startText: s.startText,
           endText: s.endText,
           charCount: s.charCount
         }));
+        userMsgObj.selectionContext = selectionContext;
       }
 
       this.messages.push(userMsgObj);
       this.historyLoaded = true;
       this.selections = [];
 
-      this.simulateAIResponse(userMessage);
+      this.saveMessageToHistory('user', userMessage, null, selectionContext);
+      this._sendStreamRequest(userMessage, null);
     },
 
-    /**
-     * 模拟 AI 回复（仅 UI 展示用，未接入后端）
-     */
-    simulateAIResponse(userMessage) {
+    _sendStreamRequest(userMessage, documentRange) {
       this.isLoading = true;
+      const streamSessionId = this.currentSessionId;
+      this._streamingSessionId = streamSessionId;
       this.scrollToBottom();
 
       this.messages.push({
         role: 'assistant',
         content: '',
         contentParts: [],
+        documentJson: null,
         thinking: '',
         thinkingExpanded: true,
         thinkingStartTime: null,
         thinkingDuration: '',
         statusText: ''
       });
-
       const aiMsg = this.messages[this.messages.length - 1];
 
-      // 模拟思考过程
-      setTimeout(() => {
-        aiMsg.thinking = '正在分析您的请求...';
-        aiMsg.thinkingDuration = '2s';
-        this.scrollToBottom();
-      }, 500);
+      const streamCtrl = api.chatStream(userMessage, {
+        mode: this.mode,
+        model: this.selectedModel || 'auto',
+        documentRange: documentRange,
+        history: this.messages.slice(0, -1).slice(-10),
 
-      // 模拟回复
-      setTimeout(() => {
-        aiMsg.thinkingExpanded = false;
-        aiMsg.content = `这是对"${userMessage}"的模拟回复。\n\n后端服务尚未接入，当前仅展示界面效果。接入后端后，此处将显示真实的AI回复内容。`;
-        aiMsg.contentParts = [
-          { type: 'text', content: aiMsg.content }
-        ];
-        this.isLoading = false;
-        this.scrollToBottom();
-      }, 2000);
+        onMessage: (data) => {
+          this._handleStreamMessage(data, aiMsg);
+        },
+
+        onError: (error) => {
+          console.error('请求失败:', error);
+          aiMsg.content = `网络错误：${error.message}。请确保后端服务运行在 localhost:3880`;
+          this.isLoading = false;
+        },
+
+        onComplete: () => {
+          this.isLoading = false;
+          this._streamingSessionId = null;
+
+          if (aiMsg.thinking && aiMsg.thinkingExpanded) {
+            aiMsg.thinkingExpanded = false;
+          }
+
+          if (this.currentSessionId === streamSessionId) {
+            this.scrollToBottom();
+            if (aiMsg.content) {
+              this.saveMessageToHistory('assistant', aiMsg.content, aiMsg.documentJson, null, aiMsg.contentParts);
+            }
+          } else {
+            if (aiMsg.content) {
+              api.addSessionMessage(streamSessionId, {
+                role: 'assistant',
+                content: aiMsg.content,
+                documentJson: aiMsg.documentJson,
+                contentParts: aiMsg.contentParts,
+                model: this.selectedModel || 'auto',
+                mode: this.mode
+              });
+            }
+          }
+
+          delete this._streamingCache[streamSessionId];
+        }
+      });
+
+      this.currentStreamCtrl = streamCtrl;
     },
 
-    /**
-     * 通过 Office.js 将内容插入到 Word 文档
-     */
+    _handleStreamMessage(data, aiMsg) {
+      const msg = aiMsg;
+
+      if (data.type === 'read_document') {
+        msg.contentParts.push({
+          type: 'status',
+          content: data.content || '📑 正在读取文档...',
+          loading: true
+        });
+        this.scrollToBottom();
+        api.wsManager._handleDocumentRequest();
+        return;
+      }
+
+      if (data.type === 'query_document') {
+        msg.contentParts.push({
+          type: 'status',
+          content: data.content || '🔍 正在搜索文档...',
+          loading: true
+        });
+        this.scrollToBottom();
+        api.wsManager._handleQueryRequest(data.query);
+        return;
+      }
+
+      if (data.type === 'query_complete' || data.type === 'read_complete' || data.type === 'generate_complete') {
+        const parts = msg.contentParts;
+        let found = false;
+        for (let i = parts.length - 1; i >= 0; i--) {
+          if (parts[i].type === 'status' && parts[i].loading) {
+            parts.splice(i, 1, {
+              type: 'status',
+              content: data.content || '✅ 完成',
+              loading: false
+            });
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          parts.push({ type: 'status', content: data.content || '✅ 完成', loading: false });
+        }
+        if (data.type === 'read_complete' && data.documentJson) {
+          this.lastReadJSON = data.documentJson;
+        }
+        this.scrollToBottom();
+        return;
+      }
+
+      if (data.type === 'generate_document') {
+        msg.contentParts.push({
+          type: 'status',
+          content: data.content || '📝 正在生成文档',
+          loading: true
+        });
+        this.scrollToBottom();
+        return;
+      }
+
+      if (data.type === 'status' && data.content) {
+        msg.contentParts.push({ type: 'status', content: data.content, loading: !!data.loading });
+        this.scrollToBottom();
+        return;
+      }
+
+      if (data.type === 'text' && data.content) {
+        if (msg.thinkingStartTime && msg.thinkingExpanded) {
+          const duration = Math.round((Date.now() - msg.thinkingStartTime) / 1000);
+          msg.thinkingDuration = `${duration}秒`;
+          msg.thinkingExpanded = false;
+        }
+
+        const content = data.content;
+        msg.content += content;
+
+        const parts = msg.contentParts;
+        if (parts.length > 0 && parts[parts.length - 1].type === 'text') {
+          parts[parts.length - 1].content += content;
+        } else {
+          parts.push({ type: 'text', content });
+        }
+
+        this.scrollToBottom();
+      } else if (data.type === 'json' && data.content) {
+        msg.documentJson = data.content;
+        this.$nextTick(() => {
+          this.insertToWord(msg);
+        });
+        this.scrollToBottom();
+      } else if (data.error) {
+        msg.content += `\n\n错误: ${data.error}`;
+      }
+    },
+
+    // ============== 文档操作 ==============
+
     async insertToWord(msg) {
+      try {
+        let jsonData = msg.documentJson || null;
+        const content = msg.content || '';
+
+        if (!jsonData) {
+          if (content.includes('```json')) {
+            const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
+            if (jsonMatch) {
+              try { jsonData = JSON.parse(jsonMatch[1]); } catch (e) { /* ignore */ }
+            }
+          } else if (content.trim().startsWith('{') && content.trim().endsWith('}')) {
+            try { jsonData = JSON.parse(content); } catch (e) { /* ignore */ }
+          }
+        }
+
+        if (jsonData && (jsonData.paragraphs || jsonData.tables)) {
+          const insertLocation = (jsonData.position === -1) ? 'end' : 'selection';
+          const result = await generateDocxFromJSON(jsonData, insertLocation);
+          if (result?.error) {
+            console.error('生成文档失败:', result.error);
+            await this._insertPlainText(content);
+          }
+        } else {
+          await this._insertPlainText(content);
+        }
+      } catch (error) {
+        console.error('插入文档失败:', error);
+      }
+    },
+
+    async _insertPlainText(content) {
       try {
         await Word.run(async (context) => {
           const body = context.document.body;
-          body.insertText(msg.content, Word.InsertLocation.end);
+          let cleanContent = content;
+          if (content.includes('```json')) {
+            cleanContent = content.replace(/```json\s*/g, '').replace(/```/g, '');
+          }
+          body.insertText(cleanContent, Word.InsertLocation.end);
           await context.sync();
         });
       } catch (error) {
-        console.error('插入文档失败:', error);
+        console.error('插入纯文本失败:', error);
       }
     }
   }
@@ -236,12 +682,28 @@ export default {
 </script>
 
 <style scoped>
+.chat-root {
+  display: flex;
+  height: 100%;
+  overflow: hidden;
+}
+
 .ai-chat-container {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
   background: #f7f8fa;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+.session-panel {
+  width: 300px;
+  flex-shrink: 0;
+  border-left: 1px solid #e8e8e8;
+  height: 100%;
+  overflow: hidden;
 }
 
 .session-header {
@@ -259,5 +721,17 @@ export default {
   text-overflow: ellipsis;
   white-space: nowrap;
   display: block;
+}
+
+/* Session slide transition */
+.slide-session-enter-active,
+.slide-session-leave-active {
+  transition: width 0.25s ease, opacity 0.25s ease;
+  overflow: hidden;
+}
+.slide-session-enter-from,
+.slide-session-leave-to {
+  width: 0;
+  opacity: 0;
 }
 </style>

@@ -1,5 +1,9 @@
 <template>
   <div class="session-container">
+    <!-- 标题栏 -->
+    <div class="session-title-bar">
+      <span>历史会话</span>
+    </div>
     <!-- 新聊天按钮 -->
     <div class="new-chat-section">
       <button class="new-chat-btn" @click="createNewSession">
@@ -84,18 +88,18 @@
 </template>
 
 <script>
-import { ref, computed, onMounted, nextTick } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue';
+import api from '../js/api.js';
 
 export default {
   name: 'SessionPane',
-  setup() {
-    const currentSessionId = ref(null);
-    const sessions = ref([
-      // 模拟数据 - 后端接入后替换
-      { id: 1, title: '论文写作助手', preview: '帮我写一篇关于人工智能的论文...', updatedAt: '2026-03-14T10:00:00' },
-      { id: 2, title: '代码审查', preview: '请帮我审查这段Python代码...', updatedAt: '2026-03-13T15:30:00' },
-      { id: 3, title: '文档翻译', preview: '将以下英文段落翻译为中文...', updatedAt: '2026-03-12T09:20:00' }
-    ]);
+  props: {
+    currentSessionId: { type: [Number, String, null], default: null }
+  },
+  emits: ['select-session', 'create-session'],
+  setup(props, { emit }) {
+    const isLoading = ref(false);
+    const sessions = ref([]);
 
     const showRenameDialog = ref(false);
     const renameValue = ref('');
@@ -108,19 +112,40 @@ export default {
       return [...sessions.value].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
     });
 
-    const createNewSession = () => {
-      const newSession = {
-        id: Date.now(),
-        title: '新对话',
-        preview: '暂无消息',
-        updatedAt: new Date().toISOString()
-      };
-      sessions.value.unshift(newSession);
-      currentSessionId.value = newSession.id;
+    const loadSessions = async () => {
+      isLoading.value = true;
+      try {
+        const result = await api.getSessions({ limit: 100 });
+        if (result.success && result.data?.sessions) {
+          sessions.value = result.data.sessions;
+        } else {
+          sessions.value = [];
+        }
+      } catch (error) {
+        console.error('加载会话列表失败:', error);
+        sessions.value = [];
+      } finally {
+        isLoading.value = false;
+      }
+    };
+
+    const createNewSession = async () => {
+      try {
+        const result = await api.createSession({ title: '新对话' });
+        if (result.success && result.data?.session) {
+          const newSession = result.data.session;
+          sessions.value.unshift(newSession);
+          emit('create-session', newSession);
+        } else {
+          console.error('创建会话失败:', result.error);
+        }
+      } catch (error) {
+        console.error('创建会话失败:', error);
+      }
     };
 
     const selectSession = (session) => {
-      currentSessionId.value = session.id;
+      emit('select-session', session);
     };
 
     const renameSession = (session) => {
@@ -139,13 +164,22 @@ export default {
       renameValue.value = '';
     };
 
-    const confirmRename = () => {
+    const confirmRename = async () => {
       if (!renameTarget.value || !renameValue.value.trim()) return;
-      const target = sessions.value.find((s) => s.id === renameTarget.value.id);
-      if (target) {
-        target.title = renameValue.value.trim();
+      try {
+        const result = await api.renameSessionApi(renameTarget.value.id, renameValue.value.trim());
+        if (result.success && result.data?.session) {
+          const target = sessions.value.find((s) => s.id === renameTarget.value.id);
+          if (target) {
+            target.title = result.data.session.title;
+          }
+        } else {
+          console.error('重命名失败:', result.error);
+        }
+        closeRenameDialog();
+      } catch (error) {
+        console.error('重命名失败:', error);
       }
-      closeRenameDialog();
     };
 
     const deleteSession = (session) => {
@@ -158,26 +192,48 @@ export default {
       deleteTarget.value = null;
     };
 
-    const confirmDelete = () => {
+    const confirmDelete = async () => {
       if (!deleteTarget.value) return;
-      const index = sessions.value.findIndex((s) => s.id === deleteTarget.value.id);
-      if (index > -1) {
-        sessions.value.splice(index, 1);
+      try {
+        const result = await api.deleteSessionApi(deleteTarget.value.id);
+        if (result.success) {
+          const index = sessions.value.findIndex((s) => s.id === deleteTarget.value.id);
+          if (index > -1) {
+            sessions.value.splice(index, 1);
+          }
+          if (props.currentSessionId === deleteTarget.value.id) {
+            if (sessions.value.length > 0) {
+              emit('select-session', sortedSessions.value[0]);
+            } else {
+              emit('select-session', { id: null, title: null });
+            }
+          }
+        } else {
+          console.error('删除失败:', result.error);
+        }
+        closeDeleteDialog();
+      } catch (error) {
+        console.error('删除失败:', error);
       }
-      if (currentSessionId.value === deleteTarget.value.id) {
-        currentSessionId.value = sessions.value.length > 0 ? sortedSessions.value[0].id : null;
-      }
-      closeDeleteDialog();
+    };
+
+    const onSessionCreated = () => {
+      loadSessions();
     };
 
     onMounted(() => {
-      if (sessions.value.length > 0) {
-        currentSessionId.value = sessions.value[0].id;
-      }
+      loadSessions();
+      window.addEventListener('session-created', onSessionCreated);
+      window.addEventListener('session-updated', onSessionCreated);
+    });
+
+    onBeforeUnmount(() => {
+      window.removeEventListener('session-created', onSessionCreated);
+      window.removeEventListener('session-updated', onSessionCreated);
     });
 
     return {
-      currentSessionId,
+      isLoading,
       sessions,
       sortedSessions,
       showRenameDialog,
@@ -201,9 +257,19 @@ export default {
 .session-container {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: 100%;
   background: #f7f8fa;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+.session-title-bar {
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+  background: #fff;
+  border-bottom: 1px solid #e8e8e8;
+  flex-shrink: 0;
 }
 
 .new-chat-section {

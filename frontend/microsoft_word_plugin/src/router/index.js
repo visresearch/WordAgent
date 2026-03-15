@@ -14,11 +14,6 @@ const router = createRouter({
       component: () => import('../components/chat/AIChatPane.vue')
     },
     {
-      path: '/session',
-      name: '历史会话',
-      component: () => import('../components/session/SessionPane.vue')
-    },
-    {
       path: '/setting',
       name: '设置',
       component: () => import('../components/setting/SettingPane.vue')

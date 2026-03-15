@@ -1,5 +1,9 @@
 <template>
   <div class="session-container">
+    <!-- 标题栏 -->
+    <div class="session-title-bar">
+      <span>历史会话</span>
+    </div>
     <!-- 新聊天按钮 -->
     <div class="new-chat-section">
       <button class="new-chat-btn" @click="createNewSession">
@@ -136,9 +140,15 @@ import api from '../js/api.js';
 
 export default {
   name: 'SessionPane',
-  setup() {
+  props: {
+    currentSessionId: {
+      type: [Number, String],
+      default: null
+    }
+  },
+  emits: ['select-session', 'create-session'],
+  setup(props, { emit }) {
     const isLoading = ref(false);
-    const currentSessionId = ref(null);
     const sessions = ref([]);
     
     // 重命名对话框
@@ -187,8 +197,7 @@ export default {
         if (result.success && result.data?.session) {
           const newSession = result.data.session;
           sessions.value.unshift(newSession);
-          currentSessionId.value = newSession.id;
-          notifySessionChange(newSession.id, newSession.title);
+          emit('create-session', newSession);
         } else {
           console.error('创建会话失败:', result.error);
         }
@@ -199,28 +208,7 @@ export default {
 
     // 选择会话
     const selectSession = (session) => {
-      currentSessionId.value = session.id;
-      notifySessionChange(session.id, session.title);
-    };
-
-    // 通知会话变更（跨 TaskPane 通信）
-    const notifySessionChange = (sessionId, title = null) => {
-      // 1. 保存到 PluginStorage（WPS 持久化）
-      if (window.Application && window.Application.PluginStorage) {
-        window.Application.PluginStorage.setItem('current_session_id', String(sessionId || ''));
-      }
-      // 2. 写入 localStorage 触发其他 TaskPane 的 storage 事件（跨窗口通信）
-      try {
-        localStorage.setItem('wence_session_change', JSON.stringify({
-          sessionId, title, timestamp: Date.now()
-        }));
-      } catch (e) {
-        console.warn('localStorage 写入失败:', e);
-      }
-      // 3. 同窗口 CustomEvent（兜底，开发环境下同页面切换）
-      window.dispatchEvent(new CustomEvent('session-changed', { 
-        detail: { sessionId, title } 
-      }));
+      emit('select-session', session);
     };
 
     // 重命名会话
@@ -287,14 +275,12 @@ export default {
           }
           
           // 如果删除的是当前会话，切换到最新会话或清空
-          if (currentSessionId.value === deleteTarget.value.id) {
+          if (props.currentSessionId === deleteTarget.value.id) {
             if (sessions.value.length > 0) {
               const latest = sortedSessions.value[0];
-              currentSessionId.value = latest.id;
-              notifySessionChange(latest.id, latest.title);
+              emit('select-session', latest);
             } else {
-              currentSessionId.value = null;
-              notifySessionChange(null);
+              emit('select-session', { id: null, title: null });
             }
           }
         } else {
@@ -306,66 +292,26 @@ export default {
       }
     };
 
-    // 监听外部会话创建事件（AIChatPane 自动创建会话时通知刷新列表）
+    // 监听同页面的会话创建/更新事件（AIChatPane 自动创建会话时通知刷新列表）
     const onSessionCreated = () => {
       loadSessions();
-    };
-
-    // 监听跨 TaskPane 的标题更新（通过 localStorage storage 事件）
-    const onStorageChanged = (event) => {
-      if (event.key === 'wence_session_title_update') {
-        try {
-          const data = JSON.parse(event.newValue);
-          if (data && data.sessionId) {
-            const target = sessions.value.find(s => s.id === data.sessionId);
-            if (target) {
-              if (data.title) {
-                target.title = data.title;
-              }
-              if (data.preview) {
-                target.preview = data.preview;
-              }
-            } else {
-              // 可能是新创建的会话，刷新列表
-              loadSessions();
-            }
-          }
-        } catch (e) {
-          console.warn('解析标题更新事件失败:', e);
-        }
-      } else if (event.key === 'wence_session_change') {
-        // 跨窗口会话切换，刷新列表
-        loadSessions();
-      }
     };
 
     onMounted(() => {
       loadSessions();
 
-      // 获取当前会话ID
-      if (window.Application && window.Application.PluginStorage) {
-        const savedSessionId = window.Application.PluginStorage.getItem('current_session_id');
-        if (savedSessionId) {
-          currentSessionId.value = Number(savedSessionId) || savedSessionId;
-        }
-      }
-
       // 监听会话创建/更新事件
       window.addEventListener('session-created', onSessionCreated);
       window.addEventListener('session-updated', onSessionCreated);
-      // 监听跨 TaskPane 的 localStorage storage 事件
-      window.addEventListener('storage', onStorageChanged);
     });
 
     onBeforeUnmount(() => {
       window.removeEventListener('session-created', onSessionCreated);
       window.removeEventListener('session-updated', onSessionCreated);
-      window.removeEventListener('storage', onStorageChanged);
     });
 
     return {
       isLoading,
-      currentSessionId,
       sessions,
       sortedSessions,
       showRenameDialog,
@@ -389,9 +335,19 @@ export default {
 .session-container {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: 100%;
   background: #f7f8fa;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+.session-title-bar {
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+  background: #fff;
+  border-bottom: 1px solid #e8e8e8;
+  flex-shrink: 0;
 }
 
 /* 新聊天按钮区域 */

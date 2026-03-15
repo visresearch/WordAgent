@@ -46,7 +46,9 @@
       <h4>解析结果：</h4>
       <div class="stats">
         <span>段落: {{ parsedData.paragraphs?.length || 0 }}</span>
-        <span>字数: {{ parsedData.text?.length || 0 }}</span>
+        <span>表格: {{ parsedData.tables?.length || 0 }}</span>
+        <span>图片: {{ parsedData.images?.length || 0 }}</span>
+        <span>字数: {{ totalCharCount }}</span>
       </div>
       <div class="json-container">
         <pre>{{ formattedJSON }}</pre>
@@ -61,7 +63,7 @@
 </template>
 
 <script>
-/* global Word */
+import { parseDocxToJSON, generateDocxFromJSON } from '../js/docxJsonConverter.js';
 
 export default {
   name: 'DebugPane',
@@ -76,6 +78,18 @@ export default {
   computed: {
     formattedJSON() {
       return this.parsedData ? JSON.stringify(this.parsedData, null, 2) : '';
+    },
+    totalCharCount() {
+      if (!this.parsedData || !this.parsedData.paragraphs) return 0;
+      let count = 0;
+      for (const para of this.parsedData.paragraphs) {
+        if (para.runs) {
+          for (const run of para.runs) {
+            count += (run.text || '').length;
+          }
+        }
+      }
+      return count;
     }
   },
   methods: {
@@ -87,25 +101,16 @@ export default {
 
     async parseSelection() {
       try {
-        await Word.run(async (context) => {
-          const selection = context.document.getSelection();
-          selection.load('text');
-          await context.sync();
+        this.showStatus('正在解析选中内容...', 'info');
+        const result = await parseDocxToJSON('selection');
 
-          const text = selection.text || '';
-          if (!text.trim()) {
-            this.showStatus('选中内容为空', 'error');
-            return;
-          }
+        if (result.error) {
+          this.showStatus(result.error, 'error');
+          return;
+        }
 
-          // 按段落分割
-          const paragraphs = text.split('\r').filter(p => p.trim());
-          this.parsedData = {
-            text: text,
-            paragraphs: paragraphs.map((p, i) => ({ index: i, content: p })),
-          };
-          this.showStatus(`解析成功！共 ${paragraphs.length} 个段落`, 'success');
-        });
+        this.parsedData = result;
+        this.showStatus(`解析成功！共 ${result.paragraphs?.length || 0} 个段落`, 'success');
       } catch (e) {
         console.error('解析选中内容出错:', e);
         this.showStatus('解析出错: ' + e.message, 'error');
@@ -114,22 +119,16 @@ export default {
 
     async getDocumentInfo() {
       try {
-        await Word.run(async (context) => {
-          const body = context.document.body;
-          body.load('text');
-          const properties = context.document.properties;
-          properties.load('title,author,creationDate');
-          await context.sync();
+        this.showStatus('正在获取文档信息...', 'info');
+        const result = await parseDocxToJSON('body');
 
-          this.parsedData = {
-            title: properties.title || '(无标题)',
-            author: properties.author || '(未知)',
-            creationDate: properties.creationDate ? properties.creationDate.toString() : '(未知)',
-            text: body.text,
-            paragraphs: body.text.split('\r').filter(p => p.trim()).map((p, i) => ({ index: i, content: p })),
-          };
-          this.showStatus('文档信息获取成功', 'success');
-        });
+        if (result.error) {
+          this.showStatus(result.error, 'error');
+          return;
+        }
+
+        this.parsedData = result;
+        this.showStatus(`文档解析成功！共 ${result.paragraphs?.length || 0} 个段落`, 'success');
       } catch (e) {
         console.error('获取文档信息失败:', e);
         this.showStatus('获取失败: ' + e.message, 'error');
@@ -151,20 +150,17 @@ export default {
       }
 
       try {
-        await Word.run(async (context) => {
-          const body = context.document.body;
-          if (jsonData.paragraphs && Array.isArray(jsonData.paragraphs)) {
-            for (const p of jsonData.paragraphs) {
-              const content = typeof p === 'string' ? p : p.content || '';
-              body.insertParagraph(content, Word.InsertLocation.end);
-            }
-          } else if (jsonData.text) {
-            body.insertParagraph(jsonData.text, Word.InsertLocation.end);
-          }
-          await context.sync();
-          const count = jsonData.paragraphs?.length || 1;
-          this.showStatus(`已写入文档：${count} 段落`, 'success');
-        });
+        this.showStatus('正在写入文档...', 'info');
+        const result = await generateDocxFromJSON(jsonData, 'selection');
+
+        if (result && result.error) {
+          this.showStatus('转换失败: ' + result.error, 'error');
+          return;
+        }
+
+        const paraCount = jsonData.paragraphs?.length || 0;
+        const tableCount = jsonData.tables?.length || 0;
+        this.showStatus(`已写入文档：${paraCount} 段落 / ${tableCount} 表格`, 'success');
       } catch (e) {
         console.error('JSON 转文档出错:', e);
         this.showStatus('写入失败: ' + e.message, 'error');

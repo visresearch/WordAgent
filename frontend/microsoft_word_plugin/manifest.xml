@@ -21,6 +21,7 @@
   </Hosts>
   <DefaultSettings>
     <SourceLocation DefaultValue="https://localhost:3000/taskpane.html"/>
+    <RequestedWidth>450</RequestedWidth>
   </DefaultSettings>
   <Permissions>ReadWriteDocument</Permissions>
   <VersionOverrides xmlns="http://schemas.microsoft.com/office/taskpaneappversionoverrides" xsi:type="VersionOverridesV1_0">
@@ -78,11 +79,11 @@
       <bt:ShortStrings>
         <bt:String id="GetStarted.Title" DefaultValue="文策AI助手已就绪"/>
         <bt:String id="WenCeGroup.Label" DefaultValue="文策AI"/>
-        <bt:String id="TaskpaneButton.Label" DefaultValue="打开AI助手"/>
+        <bt:String id="TaskpaneButton.Label" DefaultValue="AI辅助协作助手"/>
       </bt:ShortStrings>
       <bt:LongStrings>
-        <bt:String id="GetStarted.Description" DefaultValue="文策AI助手已加载成功。点击「开始」选项卡上的「打开AI助手」按钮开始使用。"/>
-        <bt:String id="TaskpaneButton.Tooltip" DefaultValue="点击打开文策AI写作助手面板"/>
+        <bt:String id="GetStarted.Description" DefaultValue="文策AI助手已加载成功。点击「开始」选项卡上的「AI辅助协作助手」按钮开始使用。"/>
+        <bt:String id="TaskpaneButton.Tooltip" DefaultValue="点击打开AI辅助协作助手面板"/>
       </bt:LongStrings>
     </Resources>
   </VersionOverrides>

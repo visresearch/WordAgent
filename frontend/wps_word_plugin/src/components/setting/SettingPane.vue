@@ -87,8 +87,8 @@
       </div>
 
       <!-- 底部保存按钮（通用、模型和个性化设置需要） -->
-      <div v-if="currentTab === 'general' || currentTab === 'model' || currentTab === 'personalization'" class="setting-footer">
-        <button class="btn btn-save" :disabled="saving" @click="saveSettings">
+      <div class="setting-footer">
+        <button v-if="currentTab !== 'data'" class="btn btn-save" :disabled="saving" @click="saveSettings">
           <span v-if="saving" class="loading-spinner"></span>
           {{ saving ? '保存中...' : '保存设置' }}
         </button>
@@ -437,9 +437,9 @@ export default {
   background: white;
   border-top: 1px solid #e8e8e8;
   display: flex;
-  justify-content: flex-end;
   align-items: center;
   gap: 16px;
+  flex-shrink: 0;
 }
 
 .btn {

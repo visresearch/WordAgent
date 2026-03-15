@@ -1,39 +1,50 @@
 <template>
-  <div class="ai-chat-container">
-    <div v-if="currentSessionTitle" class="session-header">
-      <span class="session-title">{{ currentSessionTitle }}</span>
+  <div ref="chatRoot" class="chat-root">
+    <div class="ai-chat-container">
+      <div v-if="currentSessionTitle" class="session-header">
+        <span class="session-title">{{ currentSessionTitle }}</span>
+      </div>
+      <ChatMessages
+        ref="chatMessages"
+        :messages="messages"
+        :is-loading="isLoading"
+        :has-history="hasHistory"
+        :history-loaded="historyLoaded"
+        @load-history="loadAndShowHistory"
+        @insert-to-word="insertToWord"
+        @copy="copyToClipboard"
+        @retry="retryMessage"
+        @revert="revertToMessage"
+        @toggle-thinking="toggleThinking"
+      />
+      <ChatInput
+        :mode="mode"
+        :selected-model="selectedModel"
+        :available-models="availableModels"
+        :models-loading="modelsLoading"
+        :is-loading="isLoading"
+        :selections="selections"
+        :pending-document="pendingDocument"
+        @update:mode="mode = $event"
+        @update:selected-model="selectedModel = $event"
+        @send="handleSend"
+        @stop="stopGeneration"
+        @add-selection="addSelectionManually"
+        @remove-selection="removeSelection"
+        @refresh-models="loadModels"
+        @confirm-document="confirmDocument"
+        @cancel-document="cancelDocument"
+      />
     </div>
-    <ChatMessages
-      ref="chatMessages"
-      :messages="messages"
-      :is-loading="isLoading"
-      :has-history="hasHistory"
-      :history-loaded="historyLoaded"
-      @load-history="loadAndShowHistory"
-      @insert-to-word="insertToWord"
-      @copy="copyToClipboard"
-      @retry="retryMessage"
-      @revert="revertToMessage"
-      @toggle-thinking="toggleThinking"
-    />
-    <ChatInput
-      :mode="mode"
-      :selected-model="selectedModel"
-      :available-models="availableModels"
-      :models-loading="modelsLoading"
-      :is-loading="isLoading"
-      :selections="selections"
-      :pending-document="pendingDocument"
-      @update:mode="mode = $event"
-      @update:selected-model="selectedModel = $event"
-      @send="handleSend"
-      @stop="stopGeneration"
-      @add-selection="addSelectionManually"
-      @remove-selection="removeSelection"
-      @refresh-models="loadModels"
-      @confirm-document="confirmDocument"
-      @cancel-document="cancelDocument"
-    />
+    <transition name="slide-session">
+      <div v-if="sessionVisible" class="session-panel">
+        <SessionPane
+          :current-session-id="currentSessionId"
+          @select-session="onSelectSession"
+          @create-session="onCreateSession"
+        />
+      </div>
+    </transition>
   </div>
 </template>
 
@@ -42,12 +53,15 @@ import { generateDocxFromJSON } from '../js/docxJsonConverter.js';
 import api from '../js/api.js';
 import ChatMessages from './ChatMessages.vue';
 import ChatInput from './ChatInput.vue';
+import SessionPane from './SessionPane.vue';
+import { sessionState } from '../../sessionState.js';
 
 export default {
   name: 'AIChatPane',
   components: {
     ChatMessages,
-    ChatInput
+    ChatInput,
+    SessionPane
   },
   data() {
     return {
@@ -68,21 +82,59 @@ export default {
       hasHistory: false,
       historyLoaded: false,
       _streamingSessionId: null,   // 正在流式生成的 session ID
-      _streamingCache: {}          // {sessionId: messages[]} 流式生成期间切走时缓存消息
+      _streamingCache: {},         // {sessionId: messages[]} 流式生成期间切走时缓存消息
+      isWide: false
     };
+  },
+  computed: {
+    sessionVisible() {
+      if (sessionState.manualValue !== null) {
+        return sessionState.manualValue;
+      }
+      return this.isWide;
+    }
+  },
+  watch: {
+    sessionVisible(val) {
+      sessionState.visible = val;
+    },
+    isWide() {
+      sessionState.manualValue = null;
+    }
   },
   mounted() {
     this.loadModels();
     this.initSessionAndLoadHistory();
 
-    // 监听同窗口 SessionPane 切换会话的事件
-    window.addEventListener('session-changed', this.onSessionChanged);
-    // 监听跨 TaskPane 的 localStorage storage 事件（WPS 中各 TaskPane 是独立窗口）
-    window.addEventListener('storage', this.onStorageChanged);
+    // 监听窗口宽度变化（600px 阈值）
+    this._onResize = () => {
+      this.isWide = window.innerWidth >= 600;
+    };
+    this._onResize();
+    window.addEventListener('resize', this._onResize);
+    sessionState.visible = this.sessionVisible;
+
+    // 监听 Ribbon 按钮通过 localStorage 发送的 session 切换信号
+    // storage 事件可能不在同一窗口触发，用轮询兜底
+    this._lastToggleVal = '';
+    try { this._lastToggleVal = localStorage.getItem('wence_session_toggle') || ''; } catch(e) {}
+    this._togglePoll = setInterval(() => {
+      try {
+        const val = localStorage.getItem('wence_session_toggle') || '';
+        if (val !== this._lastToggleVal) {
+          this._lastToggleVal = val;
+          sessionState.manualValue = !sessionState.visible;
+        }
+      } catch(e) {}
+    }, 200);
   },
   beforeUnmount() {
-    window.removeEventListener('session-changed', this.onSessionChanged);
-    window.removeEventListener('storage', this.onStorageChanged);
+    if (this._onResize) {
+      window.removeEventListener('resize', this._onResize);
+    }
+    if (this._togglePoll) {
+      clearInterval(this._togglePoll);
+    }
   },
   methods: {
     /**
@@ -213,21 +265,10 @@ export default {
       try {
         console.log('[初始化] 开始获取会话');
 
-        // 尝试从 PluginStorage 或 localStorage 恢复上次的 session_id
+        // 尝试从 PluginStorage 恢复上次的 session_id
         let savedSessionId = null;
         if (window.Application && window.Application.PluginStorage) {
           savedSessionId = window.Application.PluginStorage.getItem('current_session_id');
-        }
-        if (!savedSessionId) {
-          try {
-            const stored = localStorage.getItem('wence_session_change');
-            if (stored) {
-              const data = JSON.parse(stored);
-              savedSessionId = data?.sessionId ? String(data.sessionId) : null;
-            }
-          } catch (e) {
-            // ignore
-          }
         }
 
         if (savedSessionId) {
@@ -262,33 +303,14 @@ export default {
     },
 
     /**
-     * 跨 TaskPane 通信：监听 localStorage 的 storage 事件
-     * 当 SessionPane（另一个 TaskPane 窗口）写入 localStorage 时触发
+     * SessionPane 选择会话事件
      */
-    onStorageChanged(event) {
-      if (event.key !== 'wence_session_change') {
-        return;
-      }
-      try {
-        const data = JSON.parse(event.newValue);
-        if (data) {
-          console.log('[跨窗口会话切换] storage 事件, data:', data);
-          this.onSessionChanged({ detail: data });
-        }
-      } catch (e) {
-        console.error('[跨窗口会话切换] 解析失败:', e);
-      }
-    },
-
-    /**
-     * 监听 SessionPane 切换会话的事件
-     */
-    async onSessionChanged(event) {
-      const { sessionId, title } = event.detail || {};
-      console.log('[会话切换] 收到事件, sessionId:', sessionId, 'title:', title);
+    async onSelectSession(session) {
+      const sessionId = session.id;
+      const title = session.title;
+      console.log('[会话切换] sessionId:', sessionId, 'title:', title);
 
       if (!sessionId) {
-        // 会话被清空（如删除了当前会话）
         this.currentSessionId = null;
         this.currentSessionTitle = null;
         this.messages = [];
@@ -297,27 +319,22 @@ export default {
         return;
       }
 
-      // 如果已经是当前会话且已加载，不重复加载
       if (this.currentSessionId === sessionId && this.historyLoaded) {
-        console.log('[会话切换] 已是当前会话，跳过');
         return;
       }
 
-      // 如果当前 session 正在流式生成，缓存消息以便切回时恢复
+      // 缓存正在流式生成的会话消息
       if (this.isLoading && this._streamingSessionId === this.currentSessionId) {
-        console.log('[会话切换] 缓存正在流式生成的会话消息:', this.currentSessionId);
         this._streamingCache[this.currentSessionId] = this.messages;
       }
 
-      // 切换到的目标 session 有缓存（正在流式生成中），直接恢复
+      // 从缓存恢复
       if (this._streamingCache[sessionId]) {
-        console.log('[会话切换] 从缓存恢复流式会话:', sessionId);
         this.messages = this._streamingCache[sessionId];
         this.currentSessionId = sessionId;
         this.currentSessionTitle = title || null;
         this.hasHistory = this.messages.length > 0;
         this.historyLoaded = true;
-
         if (window.Application && window.Application.PluginStorage) {
           window.Application.PluginStorage.setItem('current_session_id', String(sessionId));
         }
@@ -325,20 +342,31 @@ export default {
         return;
       }
 
-      // 正常流程：清空旧消息，加载新会话
       this.messages = [];
       this.hasHistory = false;
       this.historyLoaded = false;
       this.currentSessionId = sessionId;
       this.currentSessionTitle = title || null;
 
-      // 同步到 PluginStorage
       if (window.Application && window.Application.PluginStorage) {
         window.Application.PluginStorage.setItem('current_session_id', String(sessionId));
       }
 
-      // 加载该会话的消息
       await this.loadSessionMessages();
+    },
+
+    /**
+     * SessionPane 创建会话事件
+     */
+    onCreateSession(session) {
+      this.currentSessionId = session.id;
+      this.currentSessionTitle = session.title;
+      this.messages = [];
+      this.historyLoaded = false;
+      this.hasHistory = false;
+      if (window.Application && window.Application.PluginStorage) {
+        window.Application.PluginStorage.setItem('current_session_id', String(session.id));
+      }
     },
 
     /**
@@ -371,7 +399,9 @@ export default {
           this.messages = result.data.messages.map((msg) => ({
             role: msg.role,
             content: msg.content,
-            contentParts: msg.contentParts || [],
+            contentParts: (msg.contentParts && msg.contentParts.length > 0)
+              ? msg.contentParts
+              : (msg.content ? [{ type: 'text', content: msg.content }] : []),
             documentJson: msg.documentJson || null,
             selectionContext: msg.selectionContext || null
           }));
@@ -523,32 +553,9 @@ export default {
         if (role === 'user' && (!this.currentSessionTitle || this.currentSessionTitle === '新对话')) {
           const newTitle = content.length > 30 ? content.substring(0, 30) + '...' : content;
           this.currentSessionTitle = newTitle;
-
-          // 通过 localStorage 通知 SessionPane 更新标题和预览（跨 TaskPane 窗口通信）
-          try {
-            localStorage.setItem('wence_session_title_update', JSON.stringify({
-              sessionId: this.currentSessionId,
-              title: newTitle,
-              preview: content.length > 50 ? content.substring(0, 50) + '...' : content,
-              timestamp: Date.now()
-            }));
-          } catch (e) {
-            console.warn('localStorage 写入标题更新失败:', e);
-          }
-        } else {
-          // 非首条消息也同步预览
-          try {
-            localStorage.setItem('wence_session_title_update', JSON.stringify({
-              sessionId: this.currentSessionId,
-              preview: content.length > 50 ? content.substring(0, 50) + '...' : content,
-              timestamp: Date.now()
-            }));
-          } catch (e) {
-            console.warn('localStorage 写入预览更新失败:', e);
-          }
         }
 
-        // 通知 SessionPane 更新列表（预览和标题可能变了）
+        // 通知同页面的 SessionPane 更新列表
         window.dispatchEvent(new CustomEvent('session-updated'));
       } catch (e) {
         console.warn('保存消息失败:', e);
@@ -1232,15 +1239,32 @@ export default {
 </script>
 
 <style scoped>
+.chat-root {
+  display: flex;
+  height: 100%;
+  min-height: 100vh;
+  min-width: 100%;
+}
+
 .ai-chat-container {
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
   height: 100%;
   min-height: 100vh;
-  width: 100%;
   background: #f7f8fa;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   box-sizing: border-box;
+}
+
+.session-panel {
+  width: 300px;
+  flex-shrink: 0;
+  border-left: 1px solid #e8e8e8;
+  height: 100%;
+  min-height: 100vh;
+  overflow: hidden;
 }
 
 .session-header {
@@ -1258,5 +1282,17 @@ export default {
   text-overflow: ellipsis;
   white-space: nowrap;
   display: block;
+}
+
+/* Session slide transition */
+.slide-session-enter-active,
+.slide-session-leave-active {
+  transition: width 0.25s ease, opacity 0.25s ease;
+  overflow: hidden;
+}
+.slide-session-enter-from,
+.slide-session-leave-to {
+  width: 0;
+  opacity: 0;
 }
 </style>

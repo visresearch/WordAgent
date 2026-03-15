@@ -57,8 +57,8 @@
       </div>
 
       <!-- 底部保存按钮 -->
-      <div v-if="currentTab !== 'data'" class="setting-footer">
-        <button class="btn btn-save" :disabled="saving" @click="saveSettings">
+      <div class="setting-footer">
+        <button v-if="currentTab !== 'data'" class="btn btn-save" :disabled="saving" @click="saveSettings">
           <span v-if="saving" class="loading-spinner"></span>
           {{ saving ? '保存中...' : '保存设置' }}
         </button>
@@ -73,7 +73,8 @@
 </template>
 
 <script>
-import { ref, reactive, computed } from 'vue';
+import { ref, reactive, computed, onMounted } from 'vue';
+import api from '../js/api.js';
 import GeneralSetting from './GeneralSetting.vue';
 import ModelSetting from './ModelSetting.vue';
 import PersonalizationSetting from './PersonalizationSetting.vue';
@@ -119,23 +120,12 @@ export default {
     const settings = reactive({
       showPanelOnStart: true,
       proofreadMode: 'redblue',
-      proxy: { enabled: false, host: '', port: 0 },
-      providers: [
-        // 模拟数据
-        {
-          name: 'OpenAI',
-          apiKey: '',
-          baseUrl: 'https://api.openai.com/v1',
-          models: [
-            { id: 'gpt-4', name: 'GPT-4', enabled: true },
-            { id: 'gpt-3.5-turbo', name: 'GPT-3.5 Turbo', enabled: true }
-          ],
-          expanded: false,
-          showKey: false,
-          fetchingModels: false,
-          availableModels: []
-        }
-      ],
+      proxy: {
+        enabled: false,
+        host: '',
+        port: 0
+      },
+      providers: [],
       customPrompt: '',
       temperature: 0.7
     });
@@ -151,14 +141,60 @@ export default {
       temperature: settings.temperature
     }));
 
+    const loadSettings = async () => {
+      try {
+        const data = await api.getSettings();
+        if (data) {
+          if (data.showPanelOnStart !== undefined) {
+            settings.showPanelOnStart = data.showPanelOnStart;
+          }
+          if (data.proofreadMode !== undefined) {
+            settings.proofreadMode = data.proofreadMode;
+          }
+          if (data.providers) {
+            settings.providers = data.providers.map(p => ({
+              ...p,
+              enabled: p.enabled !== false,
+              expanded: false,
+              showKey: false,
+              fetchingModels: false
+            }));
+          }
+          if (data.proxy) {
+            settings.proxy.enabled = data.proxy.enabled ?? false;
+            settings.proxy.host = data.proxy.host ?? '';
+            settings.proxy.port = data.proxy.port ?? 0;
+          }
+          if (data.customPrompt !== undefined) {
+            settings.customPrompt = data.customPrompt;
+          }
+          if (data.temperature !== undefined) {
+            settings.temperature = data.temperature;
+          }
+        }
+      } catch (error) {
+        console.error('加载设置失败:', error);
+      }
+    };
+
     const onGeneralSettingsChange = (newSettings) => {
       settings.showPanelOnStart = newSettings.showPanelOnStart;
       settings.proofreadMode = newSettings.proofreadMode;
-      settings.proxy = { ...newSettings.proxy };
+      if (newSettings.proxy) {
+        settings.proxy.enabled = newSettings.proxy.enabled;
+        settings.proxy.host = newSettings.proxy.host;
+        settings.proxy.port = newSettings.proxy.port;
+      }
     };
 
     const onProvidersChange = (newProviders) => {
-      settings.providers = newProviders;
+      settings.providers = newProviders.map(p => ({
+        ...p,
+        enabled: p.enabled !== false,
+        expanded: p.expanded ?? false,
+        showKey: p.showKey ?? false,
+        fetchingModels: p.fetchingModels ?? false
+      }));
     };
 
     const onPersonalizationChange = (newSettings) => {
@@ -166,18 +202,43 @@ export default {
       settings.temperature = newSettings.temperature;
     };
 
-    const saveSettings = () => {
+    const saveSettings = async () => {
       saving.value = true;
-      // TODO: 后端集成后保存设置
-      setTimeout(() => {
-        saving.value = false;
+      saveMessage.value = '';
+
+      try {
+        const settingsToSave = {
+          showPanelOnStart: settings.showPanelOnStart,
+          proofreadMode: settings.proofreadMode,
+          proxy: { ...settings.proxy },
+          providers: settings.providers.map(p => ({
+            name: p.name,
+            baseUrl: p.baseUrl,
+            apiKey: p.apiKey,
+            models: p.models,
+            enabled: p.enabled
+          })),
+          customPrompt: settings.customPrompt,
+          temperature: settings.temperature
+        };
+
+        await api.saveSettings(settingsToSave);
+
+        saveMessage.value = '设置已保存！';
         saveSuccess.value = true;
-        saveMessage.value = '设置已保存';
-        setTimeout(() => {
-          saveMessage.value = '';
-        }, 2000);
-      }, 500);
+        setTimeout(() => { saveMessage.value = ''; }, 2000);
+      } catch (error) {
+        console.error('保存设置失败:', error);
+        saveMessage.value = '保存失败，请重试';
+        saveSuccess.value = false;
+      } finally {
+        saving.value = false;
+      }
     };
+
+    onMounted(() => {
+      loadSettings();
+    });
 
     return {
       currentTab,
@@ -188,10 +249,10 @@ export default {
       saving,
       saveMessage,
       saveSuccess,
+      saveSettings,
       onGeneralSettingsChange,
       onProvidersChange,
-      onPersonalizationChange,
-      saveSettings
+      onPersonalizationChange
     };
   }
 };
@@ -200,7 +261,7 @@ export default {
 <style scoped>
 .setting-container {
   display: flex;
-  height: 100vh;
+  height: 100%;
   background: #f7f8fa;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }

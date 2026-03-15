@@ -42,23 +42,6 @@ async function checkAutoShowPanel() {
         let tskpane = window.Application.GetTaskPane(tsId);
         tskpane.Visible = true;
       }
-
-      // 自动创建并显示 Session TaskPane
-      let sessionTsId = window.Application.PluginStorage.getItem('session_taskpane_id');
-      if (!sessionTsId) {
-        let sessionPane = window.Application.CreateTaskPane(
-          Util.GetUrlPath() + Util.GetRouterHash() + '/session',
-          '历史会话'
-        );
-        let sessionId = sessionPane.ID;
-        window.Application.PluginStorage.setItem('session_taskpane_id', sessionId);
-        sessionPane.DockPosition = window.Application.Enum.msoCTPDockPositionRight;
-        sessionPane.Width = window.devicePixelRatio * 500;
-        sessionPane.Visible = true;
-      } else {
-        let sessionPane = window.Application.GetTaskPane(sessionTsId);
-        sessionPane.Visible = true;
-      }
     }
   } catch (e) {
     console.warn('自动打开面板失败:', e);
@@ -90,20 +73,30 @@ function OnAction(control) {
       break;
     case 'btnShowSession':
       {
-        let tsId = window.Application.PluginStorage.getItem('session_taskpane_id');
+        // Session 已嵌入 AIChatPane，确保 AI Chat TaskPane 可见，然后发送切换信号
+        let tsId = window.Application.PluginStorage.getItem('ai_taskpane_id');
+        let tskpane = null;
         if (!tsId) {
-          let tskpane = window.Application.CreateTaskPane(
-            Util.GetUrlPath() + Util.GetRouterHash() + '/session',
-            '历史会话'
+          tskpane = window.Application.CreateTaskPane(
+            Util.GetUrlPath() + Util.GetRouterHash() + '/aichat',
+            '文策AI助手'
           );
           let id = tskpane.ID;
-          window.Application.PluginStorage.setItem('session_taskpane_id', id);
+          window.Application.PluginStorage.setItem('ai_taskpane_id', id);
           tskpane.DockPosition = window.Application.Enum.msoCTPDockPositionRight;
           tskpane.Width = window.devicePixelRatio * 500;
           tskpane.Visible = true;
         } else {
-          let tskpane = window.Application.GetTaskPane(tsId);
-          tskpane.Visible = !tskpane.Visible;
+          tskpane = window.Application.GetTaskPane(tsId);
+          if (!tskpane.Visible) {
+            tskpane.Visible = true;
+          }
+        }
+        // 通过 localStorage 发送切换信号（storage 事件会在其他窗口/TaskPane 触发）
+        try {
+          localStorage.setItem('wence_session_toggle', String(Date.now()));
+        } catch (e) {
+          console.warn('session toggle 信号发送失败:', e);
         }
       }
       break;
