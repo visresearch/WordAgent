@@ -39,7 +39,7 @@
 - [x] 支持Windows、Linux
 - [x] 支持单智能体模式
 - [x] 支持Token消耗优化
-- [ ] 支持MS Office Word
+- [x] 支持MS Office Word
 - [ ] 支持多智能体模式
 - [ ] 支持表格、插图等复杂样式编辑
 
@@ -75,83 +75,7 @@
 - **writer agent**: 负责根据资料信息和用户需求生成文章内容
 - **reviewer agent**: 负责根据资料信息和用户需求对生成的文章进行审阅和修改建议
 
-## 五、项目结构
-
-```
-WordAgent/
-├── backend/                        # FastAPI后端 + 智能体核心
-│   ├── main.py
-│   ├── pyproject.toml
-│   ├── README.md
-│   ├── app/
-│   │   ├── main.py
-│   │   ├── utils.py
-│   │   ├── publish.html            # WPS加载项安装界面
-│   │   ├── api/
-│   │   │   ├── deps.py
-│   │   │   └── routes/
-│   │   │       ├── chat.py
-│   │   │       ├── sessions.py
-│   │   │       ├── settings.py
-│   │   │       └── models.py
-│   │   ├── core/
-│   │   │   ├── config.py
-│   │   │   └── db.py
-│   │   ├── models/
-│   │   │   ├── chat.py
-│   │   │   ├── doc.py
-│   │   │   └── db_models.py
-│   │   └── services/
-│   │       ├── llm_client.py
-│   │       ├── session_service.py
-│   │       ├── agent/              # Single Agent实现
-│   │       │   ├── agent.py
-│   │       │   ├── prompts.py
-│   │       │   ├── tools.py
-│   │       │   └── skills/
-│   │       └── multi_agent/        # Multi Agent实现
-│   │           ├── agent.py
-│   │           ├── prompts.py
-│   │           ├── tools.py
-│   │           └── skills/
-│   │               ├── common/
-│   │               ├── planner_agent/
-│   │               ├── research_agent/
-│   │               ├── outline_agent/
-│   │               ├── writer_agent/
-│   │               └── reviewer_agent/
-│   ├── gui/                        # PySide6桌面端界面
-│   │   ├── main.py
-│   │   ├── common/
-│   │   ├── resources/
-│   │   └── views/
-│   ├── deploy/
-│   │   └── wence.spec              # PyInstaller打包配置文件
-│   └── wence_data/                 # 本地配置与数据库
-├── frontend/
-│   └── wps_word_plugin/            # Vue3 + WPS加载项前端
-│       ├── package.json
-│       ├── vite.config.js
-│       ├── manifest.xml
-│       ├── src/
-│       │   ├── App.vue
-│       │   ├── main.js
-│       │   ├── router/
-│       │   ├── assets/
-│       │   └── components/
-│       │       ├── chat/
-│       │       ├── about/
-│       │       ├── debug/
-│       │       ├── session/
-│       │       ├── setting/
-│       │       └── js/
-│       └── public/
-└── .github/
-    └── workflows/
-        └── build.yml
-```
-
-## 六、快速开始
+## 五、快速开始
 
 ### 环境配置
 
@@ -189,6 +113,10 @@ uv run pyinstaller wence.spec
 
 如果你不想自己打包，可以直接下载release中的打包好的exe文件。
 
+### 软件下载
+
+打包后的发行版exe文件详见[Release](https://github.com/visresearch/WordAgent/releases).
+
 ### 软件运行
 
 下载后双击exe文件，启动后端服务（wence_word_plugin->安装），打开Word软件，信任加载项，即可体验服务。
@@ -199,19 +127,19 @@ uv run pyinstaller wence.spec
 本项目对部分国内LLM API进行了测试，后续陆续适配中，具体情况如下：
 - [x] Qwen 3.5 Plus运行稳定
 - [x] Qwen3 Max运行稳定
-- [x] Qwen Max工具调用不稳定（没有生成文档）
 - [x] MiniMax M2.5运行稳定
 - [x] Kimi K2.5容易出现工具调用死循环
+- [x] Qwen Max工具调用不稳定（没有生成文档）
 - [x] DeepSeek v3.2 工具调用不稳定（文档生成卡死）
 - [x] ChatGLM工具调用不稳定（文档生成卡死）
 - [ ] Step 3.5
 
 注：本项目开发使用了部分[阿里云百炼](https://bailian.console.aliyun.com/)免费额度，模型支持比较多
 
-## 七、关于作者
+## 六、关于作者
 
 与我交流：https://cmcblog.netlify.app/about/
 
-## 八、开源协议
+## 七、开源协议
 
 本项目采用Apache License 2.0开源协议
