@@ -33,6 +33,25 @@
       </div>
     </div>
 
+    <!-- 删除段落 -->
+    <div class="divItem">
+      <h3>🗑️ 按 Position 删除段落</h3>
+      <textarea
+        v-model="deletePositionsInput"
+        class="json-input"
+        placeholder="输入要删除的 position 列表，如: 100, 250, 480"
+        rows="3"
+      ></textarea>
+      <div class="button-group" style="margin-top: 8px">
+        <button class="btn btn-danger" @click="deleteParagraphs">
+          删除段落
+        </button>
+        <button class="btn btn-warning" @click="deletePositionsInput = ''">
+          清空
+        </button>
+      </div>
+    </div>
+
     <!-- JSON 转文档 -->
     <div class="divItem">
       <h3>📥 JSON 转文档</h3>
@@ -89,7 +108,7 @@
 </template>
 
 <script>
-import { parseDocxToJSON, generateDocxFromJSON } from '../js/docxJsonConverter.js';
+import { parseDocxToJSON, generateDocxFromJSON, deleteParagraphsByPositions } from '../js/docxJsonConverter.js';
 
 export default {
   name: 'TaskPane',
@@ -99,7 +118,8 @@ export default {
       openDocuments: [],
       statusMessage: '',
       statusType: 'info',
-      jsonInput: ''
+      jsonInput: '',
+      deletePositionsInput: ''
     };
   },
   computed: {
@@ -115,6 +135,46 @@ export default {
       setTimeout(() => {
         this.statusMessage = '';
       }, 3000);
+    },
+
+    // 按 position 删除段落
+    deleteParagraphs() {
+      if (!this.deletePositionsInput.trim()) {
+        this.showStatus('请输入要删除的 position 列表', 'error');
+        return;
+      }
+
+      let positions;
+      try {
+        positions = this.deletePositionsInput
+          .split(/[,，\s]+/)
+          .filter(s => s.trim() !== '')
+          .map(s => {
+            const n = Number(s.trim());
+            if (isNaN(n)) throw new Error(`"${s.trim()}" 不是有效数字`);
+            return n;
+          });
+      } catch (e) {
+        this.showStatus('输入格式错误: ' + e.message, 'error');
+        return;
+      }
+
+      if (positions.length === 0) {
+        this.showStatus('未解析到有效的 position', 'error');
+        return;
+      }
+
+      try {
+        const result = deleteParagraphsByPositions(positions);
+        if (result.success) {
+          this.showStatus(result.message, 'success');
+        } else {
+          this.showStatus(result.message, 'error');
+        }
+      } catch (e) {
+        console.error('删除段落出错:', e);
+        this.showStatus('删除失败: ' + e.message, 'error');
+      }
     },
 
     // 解析选中内容
@@ -304,8 +364,10 @@ export default {
 <style scoped>
 .global {
   font-size: 14px;
-  min-height: 95%;
+  height: 100%;
   padding: 10px;
+  overflow-y: auto;
+  box-sizing: border-box;
   font-family:
     -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 }
@@ -390,6 +452,11 @@ hr {
 
 .btn-apply {
   background-color: #e91e63;
+  color: white;
+}
+
+.btn-danger {
+  background-color: #f44336;
   color: white;
 }
 

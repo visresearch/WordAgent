@@ -811,11 +811,84 @@ function parseDocxToJSON(rangeOrStart, end) {
     // 解析段落（排除表格内的）
     const paragraphs = range.Paragraphs;
     if (paragraphs && paragraphs.Count > 0) {
+      // 获取文档对象，用于计算全文段落索引
+      const doc = window.Application?.ActiveDocument;
+
       for (let i = 1; i <= paragraphs.Count; i++) {
         const para = paragraphs.Item(i);
         const paraRange = para.Range;
         const paraStart = paraRange.Start;
         const paraEnd = paraRange.End;
+
+        // ====== DEBUG: 输出段落的各种属性 ======
+        try {
+          const paraFormat = para.Format;
+          let styleName = '', styleNameLocal = '', styleType = '';
+          try {
+            styleName = para.Style?.Name || '';
+            styleNameLocal = para.Style?.NameLocal || '';
+            styleType = para.Style?.Type;
+          } catch (e) {}
+
+          // 尝试计算该段落在全文中的索引（不需要解析全文内容，只利用 API 计数）
+          let globalParagraphIndex = '无法获取';
+          try {
+            if (doc) {
+              const rangeBeforePara = doc.Range(0, paraStart);
+              globalParagraphIndex = rangeBeforePara.Paragraphs.Count;
+            }
+          } catch (e) {
+            globalParagraphIndex = '计算出错: ' + e.message;
+          }
+
+          console.log(`===== 段落 [范围内第${i}个] =====`);
+          console.log(`  全文段落索引: ${globalParagraphIndex}`);
+          console.log(`  Range.Start: ${paraStart}, Range.End: ${paraEnd}, 长度: ${paraEnd - paraStart}`);
+          console.log(`  文本预览: "${(para.Range.Text || '').substring(0, 80).replace(/[\r\n]/g, '\\n')}"`);
+          console.log(`  Style.Name: "${styleName}", Style.NameLocal: "${styleNameLocal}", Style.Type: ${styleType}`);
+          console.log(`  Format.Alignment: ${paraFormat.Alignment}`);
+          console.log(`  Format.LineSpacing: ${paraFormat.LineSpacing}, LineSpacingRule: ${paraFormat.LineSpacingRule}`);
+          console.log(`  Format.LeftIndent: ${paraFormat.LeftIndent}, RightIndent: ${paraFormat.RightIndent}, FirstLineIndent: ${paraFormat.FirstLineIndent}`);
+          console.log(`  Format.SpaceBefore: ${paraFormat.SpaceBefore}, SpaceAfter: ${paraFormat.SpaceAfter}`);
+          console.log(`  Format.OutlineLevel: ${paraFormat.OutlineLevel}`);
+
+          // 尝试探测更多属性
+          try { console.log(`  Format.KeepTogether: ${paraFormat.KeepTogether}`); } catch (e) {}
+          try { console.log(`  Format.KeepWithNext: ${paraFormat.KeepWithNext}`); } catch (e) {}
+          try { console.log(`  Format.PageBreakBefore: ${paraFormat.PageBreakBefore}`); } catch (e) {}
+          try { console.log(`  Format.WidowControl: ${paraFormat.WidowControl}`); } catch (e) {}
+          try { console.log(`  Format.CharacterUnitFirstLineIndent: ${paraFormat.CharacterUnitFirstLineIndent}`); } catch (e) {}
+          try { console.log(`  Format.CharacterUnitLeftIndent: ${paraFormat.CharacterUnitLeftIndent}`); } catch (e) {}
+          try { console.log(`  Format.CharacterUnitRightIndent: ${paraFormat.CharacterUnitRightIndent}`); } catch (e) {}
+          try { console.log(`  Format.LineUnitBefore: ${paraFormat.LineUnitBefore}`); } catch (e) {}
+          try { console.log(`  Format.LineUnitAfter: ${paraFormat.LineUnitAfter}`); } catch (e) {}
+          try { console.log(`  Format.Borders: ${paraFormat.Borders}`); } catch (e) {}
+          try { console.log(`  Format.Shading.BackgroundPatternColor: ${paraFormat.Shading?.BackgroundPatternColor}`); } catch (e) {}
+          try { console.log(`  Format.TabStops.Count: ${paraFormat.TabStops?.Count}`); } catch (e) {}
+
+          // 段落级别额外属性
+          try { console.log(`  para.ID: ${para.ID}`); } catch (e) {}
+          try { console.log(`  para.ParaID: ${para.ParaID}`); } catch (e) {}
+
+          // Range 上的额外属性
+          try { console.log(`  Range.ListFormat.ListType: ${paraRange.ListFormat?.ListType}`); } catch (e) {}
+          try { console.log(`  Range.ListFormat.ListLevelNumber: ${paraRange.ListFormat?.ListLevelNumber}`); } catch (e) {}
+          try { console.log(`  Range.ListFormat.ListString: "${paraRange.ListFormat?.ListString}"`); } catch (e) {}
+          try { console.log(`  Range.ListFormat.ListValue: ${paraRange.ListFormat?.ListValue}`); } catch (e) {}
+          try { console.log(`  Range.LanguageID: ${paraRange.LanguageID}`); } catch (e) {}
+          try { console.log(`  Range.Characters.Count: ${paraRange.Characters?.Count}`); } catch (e) {}
+          try { console.log(`  Range.Words.Count: ${paraRange.Words?.Count}`); } catch (e) {}
+          try { console.log(`  Range.Sentences.Count: ${paraRange.Sentences?.Count}`); } catch (e) {}
+          try { console.log(`  Range.BookmarkID: ${paraRange.BookmarkID}`); } catch (e) {}
+          try { console.log(`  Range.SectionNumber: ${paraRange.Information(10)}`); } catch (e) {} // wdActiveEndSectionNumber
+          try { console.log(`  Range.PageNumber: ${paraRange.Information(3)}`); } catch (e) {}  // wdActiveEndPageNumber
+          try { console.log(`  Range.LineNumber: ${paraRange.Information(5)}`); } catch (e) {}  // wdFirstCharacterLineNumber
+
+          console.log(`  ---- END 段落 ${i} ----`);
+        } catch (debugErr) {
+          console.log(`  [DEBUG ERROR] 段落 ${i}: ${debugErr.message}`);
+        }
+        // ====== END DEBUG ======
 
         // 跳过表格内段落
         let inTable = false;
@@ -1548,12 +1621,66 @@ function generateDocxFromJSON(jsonData, doc, startPosition = null) {
   }
 }
 
+// ============== 段落删除 ==============
+
+/**
+ * 根据 position 列表批量删除文档中的段落
+ * position 对应 parseDocxToJSON 返回的段落 position 字段（即 Range.Start）
+ * 
+ * @param {number[]} positions - 要删除的段落 position 数组
+ * @returns {{ success: boolean, deletedCount: number, message: string }}
+ */
+function deleteParagraphsByPositions(positions) {
+  if (!Array.isArray(positions) || positions.length === 0) {
+    return { success: false, deletedCount: 0, message: '未提供有效的 position 列表' };
+  }
+
+  const doc = window.Application?.ActiveDocument;
+  if (!doc) {
+    return { success: false, deletedCount: 0, message: '没有打开的文档' };
+  }
+
+  const paragraphs = doc.Paragraphs;
+  if (!paragraphs || paragraphs.Count === 0) {
+    return { success: false, deletedCount: 0, message: '文档中没有段落' };
+  }
+
+  const posSet = new Set(positions);
+
+  // 收集匹配的段落范围（Start, End），从后往前删以保持前面段落的 position 不变
+  const rangesToDelete = [];
+  for (let i = 1; i <= paragraphs.Count; i++) {
+    const para = paragraphs.Item(i);
+    const paraStart = para.Range.Start;
+    if (posSet.has(paraStart)) {
+      rangesToDelete.push({ start: para.Range.Start, end: para.Range.End });
+    }
+  }
+
+  if (rangesToDelete.length === 0) {
+    return { success: false, deletedCount: 0, message: '未找到匹配 position 的段落' };
+  }
+
+  // 按 start 降序排列，从文档末尾往前删除，这样不会影响前面段落的位置
+  rangesToDelete.sort((a, b) => b.start - a.start);
+
+  let deletedCount = 0;
+  for (const r of rangesToDelete) {
+    const range = doc.Range(r.start, r.end);
+    range.Delete();
+    deletedCount++;
+  }
+
+  return { success: true, deletedCount, message: `成功删除 ${deletedCount} 个段落` };
+}
+
 // ============== 导出 ==============
 
 export default {
   // 主要函数
   parseDocxToJSON,
   generateDocxFromJSON,
+  deleteParagraphsByPositions,
 
   // 辅助函数（供外部使用）
   cleanText,
@@ -1593,6 +1720,7 @@ export default {
 export {
   parseDocxToJSON,
   generateDocxFromJSON,
+  deleteParagraphsByPositions,
   cleanText,
   cleanCellText,
   exportImageToTemp,

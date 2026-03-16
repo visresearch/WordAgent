@@ -39,8 +39,8 @@
 - [x] 支持Windows、Linux
 - [x] 支持单智能体模式
 - [x] 支持Token消耗优化
-- [x] 支持MS Office Word
-- [ ] 支持多智能体模式
+- [x] 支持多智能体模式
+- [ ] 支持MS Office Word
 - [ ] 支持表格、插图等复杂样式编辑
 
 ## 四、系统架构
