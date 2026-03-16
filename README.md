@@ -123,23 +123,25 @@ uv run pyinstaller wence.spec
 
 需要配置LLM API，本项目目前使用的是阿里云百炼平台的qwen3.5-plus系列API服务。
 
-### LLM API适配情况
+## 六、LLM API适配情况
 本项目对部分国内LLM API进行了测试，后续陆续适配中，具体情况如下：
 - [x] Qwen 3.5 Plus运行稳定
 - [x] Qwen3 Max运行稳定
 - [x] MiniMax M2.5运行稳定
+- [x] Step 3.5 Flash运行稳定
 - [x] Kimi K2.5容易出现工具调用死循环
 - [x] Qwen Max工具调用不稳定（没有生成文档）
 - [x] DeepSeek v3.2 工具调用不稳定（文档生成卡死）
 - [x] ChatGLM工具调用不稳定（文档生成卡死）
-- [ ] Step 3.5
+- [ ] Gemini 3.1 Pro
+- [ ] GPT 5.4
 
-注：本项目开发使用了部分[阿里云百炼](https://bailian.console.aliyun.com/)免费额度，模型支持比较多
+注：本项目开发使用了部分[阿里云百炼](https://bailian.console.aliyun.com/)、[Openrouter](https://openrouter.ai/models?q=free)免费额度
 
-## 六、关于作者
+## 七、关于作者
 
 与我交流：https://cmcblog.netlify.app/about/
 
-## 七、开源协议
+## 八、开源协议
 
 本项目采用Apache License 2.0开源协议
