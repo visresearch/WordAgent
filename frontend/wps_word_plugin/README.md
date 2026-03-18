@@ -31,8 +31,7 @@ wpsjs debug
 wpsjs publish
 ```
 
-生成一个html文件后，上传到fastapi后端上
-
+生成一个html文件后，上传到fastapi后端上，让后端QT界面加载这个html安装页面
 
 ## 注意事项
 

@@ -35,15 +35,15 @@
 
     <!-- 删除段落 -->
     <div class="divItem">
-      <h3>🗑️ 按 Position 删除段落</h3>
+      <h3>🗑️ 按索引删除段落</h3>
       <textarea
         v-model="deletePositionsInput"
         class="json-input"
-        placeholder="输入要删除的 position 列表，如: 100, 250, 480"
+        placeholder="输入起始和结束段落索引（0-based），如: 3, 7"
         rows="3"
       ></textarea>
       <div class="button-group" style="margin-top: 8px">
-        <button class="btn btn-danger" @click="deleteParagraphs">
+        <button class="btn btn-danger" @click="deleteDocxPara">
           删除段落
         </button>
         <button class="btn btn-warning" @click="deletePositionsInput = ''">
@@ -108,7 +108,7 @@
 </template>
 
 <script>
-import { parseDocxToJSON, generateDocxFromJSON, deleteParagraphsByPositions } from '../js/docxJsonConverter.js';
+import { parseDocxToJSON, generateDocxFromJSON, deleteDocxPara as deleteDocxParaFn } from '../js/docxJsonConverter.js';
 
 export default {
   name: 'TaskPane',
@@ -137,21 +137,23 @@ export default {
       }, 3000);
     },
 
-    // 按 position 删除段落
-    deleteParagraphs() {
+    // 按索引删除段落
+    deleteDocxPara() {
       if (!this.deletePositionsInput.trim()) {
-        this.showStatus('请输入要删除的 position 列表', 'error');
+        this.showStatus('请输入起始和结束段落索引', 'error');
         return;
       }
 
-      let positions;
+      let indices;
       try {
-        positions = this.deletePositionsInput
+        indices = this.deletePositionsInput
           .split(/[,，\s]+/)
           .filter(s => s.trim() !== '')
           .map(s => {
             const n = Number(s.trim());
-            if (isNaN(n)) throw new Error(`"${s.trim()}" 不是有效数字`);
+            if (isNaN(n)) {
+              throw new Error(`"${s.trim()}" 不是有效数字`);
+            }
             return n;
           });
       } catch (e) {
@@ -159,13 +161,16 @@ export default {
         return;
       }
 
-      if (positions.length === 0) {
-        this.showStatus('未解析到有效的 position', 'error');
+      if (indices.length === 0) {
+        this.showStatus('未解析到有效的索引', 'error');
         return;
       }
 
+      const startParaIndex = indices[0];
+      const endParaIndex = indices.length > 1 ? indices[1] : startParaIndex;
+
       try {
-        const result = deleteParagraphsByPositions(positions);
+        const result = deleteDocxParaFn(startParaIndex, endParaIndex);
         if (result.success) {
           this.showStatus(result.message, 'success');
         } else {
@@ -272,8 +277,8 @@ export default {
           return;
         }
 
-        const startPos = jsonData.position ?? null;
-        const result = generateDocxFromJSON(jsonData, doc, startPos);
+        const insertParaIndex = jsonData.insertParaIndex ?? null;
+        const result = generateDocxFromJSON(jsonData, doc, insertParaIndex);
         if (result && result.error) {
           this.showStatus('转换失败: ' + result.error, 'error');
           return;
@@ -368,6 +373,7 @@ export default {
   padding: 10px;
   overflow-y: auto;
   box-sizing: border-box;
+  background-color: #f7f8fa;
   font-family:
     -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 }

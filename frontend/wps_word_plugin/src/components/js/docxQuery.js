@@ -174,8 +174,8 @@ function executeRangeQuery(paragraphs, range) {
     
     if (field === 'index') {
       value = index;
-    } else if (field === 'position') {
-      value = para.position || 0;
+    } else if (field === 'paraIndex') {
+      value = para.paraIndex ?? 0;
     } else {
       return;
     }
@@ -494,7 +494,7 @@ function matchRunFilters(run, filters) {
 
 /**
  * 检查 paragraph 是否匹配 filters
- * @param {Object} para - 段落对象 {pStyle, runs, position, ...}
+ * @param {Object} para - 段落对象 {pStyle, runs, paraIndex, ...}
  * @param {Object} filters - 筛选条件
  * @returns {boolean}
  */
@@ -554,13 +554,13 @@ function matchParagraphFilters(para, filters) {
 }
 
 /**
- * 计算段落中 run 的文档位置（基于段落 position + 文本偏移）
+ * 计算段落中 run 的位置（基于段落 paraIndex + 文本偏移）
  * @param {Object} para - 段落对象
  * @param {number} runIndex - run 在段落 runs 数组中的索引
- * @returns {{start: number, end: number}}
+ * @returns {{paraIndex: number, start: number, end: number}}
  */
 function getRunPosition(para, runIndex) {
-  const paraStart = para.position || 0;
+  const paraIndex = para.paraIndex ?? 0;
   const runs = para.runs || [];
   let offset = 0;
   for (let i = 0; i < runIndex; i++) {
@@ -568,26 +568,28 @@ function getRunPosition(para, runIndex) {
   }
   const runText = runs[runIndex]?.text || '';
   return {
-    start: paraStart + offset,
-    end: paraStart + offset + runText.length
+    paraIndex,
+    start: offset,
+    end: offset + runText.length
   };
 }
 
 /**
- * 计算段落的文档结束位置
+ * 计算段落的文本范围
  * @param {Object} para - 段落对象
- * @returns {{start: number, end: number}}
+ * @returns {{paraIndex: number, start: number, end: number}}
  */
 function getParagraphPosition(para) {
-  const start = para.position || 0;
+  const paraIndex = para.paraIndex ?? 0;
   const runs = para.runs || [];
   let totalLen = 0;
   for (const run of runs) {
     totalLen += (run.text || '').length;
   }
   return {
-    start,
-    end: start + totalLen + 1  // +1 for paragraph mark
+    paraIndex,
+    start: 0,
+    end: totalLen
   };
 }
 

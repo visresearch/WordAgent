@@ -66,7 +66,7 @@
           </div>
           <div v-for="(ctx, ctxIdx) in msg.selectionContext" :key="ctxIdx" class="context-item">
             <span class="context-text">{{ ctx.startText }} → {{ ctx.endText }}</span>
-            <span class="context-pos">({{ ctx.startPos }} - {{ ctx.endPos }})</span>
+            <span class="context-pos">(段落 {{ ctx.startParaIndex }} - {{ ctx.endParaIndex }})</span>
           </div>
         </div>
         <div class="message-content">

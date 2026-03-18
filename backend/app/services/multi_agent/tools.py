@@ -162,11 +162,11 @@ class DocumentOutput(BaseModel):
         "rowSpan/colSpan: 合并行/列数; alignment: 同pStyle; verticalAlignment: 0=顶端,1=居中,2=底端。\n"
         "tStyle 数组格式: [tableAlignment]。tableAlignment: 0=左对齐,1=居中,2=右对齐。"
     )
-    position: int = Field(
-        default=0,
-        description="插入位置（字符偏移），前端会在文档的该位置处插入生成的内容。"
-        "如果用户选中了文档范围，应设为该范围的 startPos；"
-        "如果是新建内容无特定位置，设为 0（文档开头）或 -1（文档末尾）。",
+    insertParaIndex: int = Field(
+        default=-1,
+        description="插入位置（段落索引，0-based），前端会在该段落之前插入生成的内容。"
+        "如果用户选中了文档范围，应设为该范围的 startParaIndex；"
+        "如果是新建内容无特定位置，设为 -1（文档末尾）或 0（文档开头）。",
     )
 
     @model_validator(mode="before")
@@ -273,16 +273,16 @@ class DocumentQuery(BaseModel):
 
 
 @tool
-def read_document(startPos: int = -1, endPos: int = -1) -> str:
+def read_document(startParaIndex: int = 0, endParaIndex: int = -1) -> str:
     """
     读取文档内容。通过 WebSocket 请求前端解析指定范围的文档并返回。
 
     Args:
-        startPos: 文档读取起始位置（字符位置）。0 表示从文档开头开始。
-        endPos: 文档读取结束位置（字符位置）。-1 表示到文档结尾。
+        startParaIndex: 起始段落索引（0-based）。0 表示从文档开头开始。
+        endParaIndex: 结束段落索引（0-based）。-1 表示到文档结尾。
 
     【调用场景】
-    1. 读取全文（startPos=0, endPos=-1）：
+    1. 读取全文（startParaIndex=0, endParaIndex=-1）：
        - 用户说"润色全文"但没有提供文档内容
        - 用户说"看看这篇文档"但没有文档内容
        - 用户说"分析一下文档"但文档为空
@@ -290,7 +290,7 @@ def read_document(startPos: int = -1, endPos: int = -1) -> str:
 
     2. 读取指定范围：
        - 当用户选中了部分内容并要求操作时
-       - 当需要读取文档特定位置的内容时
+       - 当需要读取文档特定段落范围的内容时
 
     3. 任何需要文档内容但 documentJson 为空或没有 paragraphs 的情况
 
@@ -301,12 +301,12 @@ def read_document(startPos: int = -1, endPos: int = -1) -> str:
     writer(
         {
             "type": "read_document",
-            "content": f"📑 正在读取文档({startPos} - {endPos})",
-            "startPos": startPos,
-            "endPos": endPos,
+            "content": f"📑 正在读取文档(段落 {startParaIndex} - {endParaIndex})",
+            "startParaIndex": startParaIndex,
+            "endParaIndex": endParaIndex,
         }
     )
-    print(f"[read_document] 请求前端发送文档 (startPos={startPos}, endPos={endPos})")
+    print(f"[read_document] 请求前端发送文档 (startParaIndex={startParaIndex}, endParaIndex={endParaIndex})")
 
     # 检查是否在 WebSocket 会话中（有 chat_id）
     chat_id = _current_chat_id.get(None)
@@ -338,7 +338,7 @@ def read_document(startPos: int = -1, endPos: int = -1) -> str:
                     doc_json = result.get("documentJson", {})
                     if doc_json and doc_json.get("paragraphs"):
                         print(f"[read_document] ✅ 收到文档，段落数: {len(doc_json['paragraphs'])}")
-                        writer({"type": "read_complete", "content": f"✅ 文档读取完成({startPos} - {endPos})"})
+                        writer({"type": "read_complete", "content": f"✅ 文档读取完成(段落 {startParaIndex} - {endParaIndex})"})
                         return json.dumps(doc_json, ensure_ascii=False)
                     else:
                         print("[read_document] ⚠️ 收到空文档")
@@ -360,24 +360,36 @@ def read_document(startPos: int = -1, endPos: int = -1) -> str:
 @tool
 def generate_document(document: DocumentOutput) -> dict:
     """
-    生成带格式的文档 JSON，用于输出到 Word 文档。
+    生成带格式的文档 JSON，用于插入到 Word 文档。
+
+    【最小改动原则 - 最高优先级】
+    输出内容会被**插入**到文档的 insertParaIndex 位置，不会替换整个文档。
+    因此必须**只输出需要变动的段落**，不要输出原文中未改动的部分，否则会导致内容重复！
+    - 增加内容：只输出新增的段落
+    - 修改/润色某个范围：先调用 delete_document 删除旧段落，再调用本工具插入新段落
+    - 创建全新文档：输出完整文档内容
+
+    【重要】修改已有内容时必须配合 delete_document！
+    流程：delete_document(删旧段落) -> generate_document(插新段落)
+    否则旧内容会残留在文档中。
 
     【重要】格式属性必须100%原样复制！
     除非用户明确要求修改格式，否则所有格式属性（fontName, fontSize, alignment 等）必须与原文档完全一致。
 
     【结构要求】document 包含以下字段：
-    - paragraphs: Paragraph 对象的数组
+    - paragraphs: Paragraph 对象的数组（只包含新增或被修改的段落）
     - tables: Table 对象的数组（可选）
     - styles: 样式字典（必填，且必须覆盖所有样式引用）
-    - position: 插入位置（字符偏移），前端在文档该位置插入内容
+    - insertParaIndex: 插入位置（段落索引，0-based），前端在该段落之前插入内容
     不要把 "tables" 字符串放进 paragraphs 数组里！
 
-    【position 规则】
-    - 修改/润色用户选中内容时：position = 用户选区的 startPos
-    - 新建内容无特定位置时：position = 0（文档开头）或 -1（文档末尾）
+    【insertParaIndex 规则】
+    - 增加内容时：insertParaIndex = 要插入到的段落索引位置（在该段落之前插入）
+    - 修改/润色用户选中内容时：insertParaIndex = 用户选区的 startParaIndex
+    - 新建内容无特定位置时：insertParaIndex = -1（文档末尾）或 0（文档开头）
 
     Args:
-        document: 文档结构，包含 paragraphs、tables 和 position
+        document: 文档结构，包含 paragraphs、tables 和 insertParaIndex
 
     Returns:
         文档 JSON 对象
@@ -424,10 +436,10 @@ def query_document(query: DocumentQuery) -> str:
     【返回值说明】
     返回 JSON 字符串，包含 matches 列表，每项含：
     - text: 匹配的文本内容
-    - matchPosition: {start, end} 匹配位置
-    - paragraphPosition: {start, end} 所在段落位置
+    - matchPosition: {paraIndex, start, end} 匹配位置（段落索引 + 段落内文本偏移）
+    - paragraphPosition: {paraIndex, start, end} 所在段落位置
     - paragraphIndex: 段落索引
-    根据 position 可进一步调用 read_document 读取完整段落。
+    根据 paragraphIndex 可进一步调用 read_document 读取完整段落。
 
     Args:
         query: 查询条件，包含搜索粒度 type 和筛选条件 filters
@@ -833,9 +845,49 @@ def review_document(review: ReviewResult) -> str:
     return json.dumps(review_dict, ensure_ascii=False)
 
 
+@tool
+def delete_document(startParaIndex: int = 0, endParaIndex: int = -1) -> str:
+    """
+    删除文档中指定范围的段落。通过 WebSocket 通知前端标记并等待用户确认删除。
+
+    本工具为非阻塞调用：发送删除请求后立即返回，不等待用户确认。
+    前端会用蓝色批注高亮要删除的段落，用户可在 agent 执行完毕后再确认。
+
+    Args:
+        startParaIndex: 要删除的起始段落索引（0-based）。0 表示从文档开头开始。
+        endParaIndex: 要删除的结束段落索引（0-based，含）。-1 表示到文档结尾。
+
+    【调用场景】
+    - 用户要求删除某些段落、章节或内容
+    - 用户说"删掉第X段"、"把这部分去掉"、"移除这段内容"
+    - 配合 query_document 定位后，删除匹配的段落
+
+    【注意】
+    - 删除操作需要用户在前端确认后才会执行
+    - 删除是不可逆的，请确保范围正确
+    - 本工具不会阻塞，可以继续调用其他工具（如 generate_document）
+
+    Returns:
+        删除请求已发送的描述字符串
+    """
+    writer = get_stream_writer()
+    writer(
+        {
+            "type": "delete_document",
+            "content": f"🗑️ 准备删除文档段落(段落 {startParaIndex} - {endParaIndex})",
+            "startParaIndex": startParaIndex,
+            "endParaIndex": endParaIndex,
+        }
+    )
+    print(f"[delete_document] 请求前端删除文档段落 (startParaIndex={startParaIndex}, endParaIndex={endParaIndex})")
+
+    # 非阻塞：立即返回，前端自行处理用户确认
+    return f"已通知前端标记删除段落 {startParaIndex} - {endParaIndex}，等待用户确认"
+
+
 # region Tools 注册
 
-ALL_TOOLS = [read_document, generate_document, query_document, web_search, web_fetch]
+ALL_TOOLS = [read_document, generate_document, delete_document, query_document, web_search, web_fetch]
 TOOL_MAP = {t.name: t for t in ALL_TOOLS}
 
 # 按 agent 角色分组的工具集

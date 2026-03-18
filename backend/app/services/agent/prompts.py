@@ -13,6 +13,7 @@ _COMMON_SKILL_FILES = [
     "no_tool_scenario.md",
     "execution_rules.md",
     "generate_document.md",
+    "delete_document.md",
     "web_tools.md",
 ]
 

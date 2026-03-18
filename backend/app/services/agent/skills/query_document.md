@@ -33,7 +33,7 @@ assistant: [调用 query_document({"type": "run", "filters": {"fontSize": {"gt":
 
 <example>
 user: 帮我润色"实习目的"那部分
-assistant: [先 query_document 定位 -> 拿到 position -> 再 read_document(startPos, endPos) 读取匹配段落 -> generate_document 输出]
+assistant: [先 query_document 定位 -> 拿到 paragraphIndex -> 再 read_document(startParaIndex, endParaIndex) 读取匹配段落 -> generate_document 输出]
 </example>
 
 <example>

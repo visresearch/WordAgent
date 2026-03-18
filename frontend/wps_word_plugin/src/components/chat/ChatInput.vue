@@ -17,7 +17,7 @@
           </svg>
         </div>
         <div class="selection-bar-info">
-          <span class="selection-bar-preview">{{ sel.startText }} → {{ sel.endText }} ({{ sel.startPos }} - {{ sel.endPos }})</span>
+          <span class="selection-bar-preview">{{ sel.startText }} → {{ sel.endText }} (段落 {{ sel.startParaIndex }} - {{ sel.endParaIndex }})</span>
         </div>
         <button class="selection-bar-clear" title="清除选区" @click="$emit('remove-selection', index)">
           <svg
@@ -32,10 +32,10 @@
       </div>
     </div>
 
-    <!-- 修改预览条 -->
-    <div v-if="pendingDocument" class="current-selection-bar pending-document-bar">
+    <!-- 统一的 AI 操作确认条（删除+生成合并显示） -->
+    <div v-if="pendingDeletes.length > 0 || pendingDocument" class="current-selection-bar pending-document-bar" :class="{ 'pending-delete-bar': pendingDeletes.length > 0 && !pendingDocument }">
       <div class="selection-bar-content">
-        <div class="selection-bar-icon pending-icon">
+        <div class="selection-bar-icon pending-icon" :class="{ 'pending-delete-icon': pendingDeletes.length > 0 && !pendingDocument }">
           <svg
             width="14"
             height="14"
@@ -49,13 +49,13 @@
           </svg>
         </div>
         <div class="selection-bar-info">
-          <span class="selection-bar-preview">{{ pendingDocument.preview }}</span>
+          <span class="selection-bar-preview">{{ pendingSummary }}</span>
         </div>
         <div class="pending-actions">
-          <button class="pending-btn confirm-btn" @click="$emit('confirm-document')">
+          <button class="pending-btn confirm-btn" :class="{ 'delete-confirm-btn': pendingDeletes.length > 0 && !pendingDocument }" @click="$emit('confirm-pending')">
             确定
           </button>
-          <button class="pending-btn cancel-btn" @click="$emit('cancel-document')">
+          <button class="pending-btn cancel-btn" @click="$emit('cancel-pending')">
             取消
           </button>
         </div>
@@ -259,9 +259,13 @@ export default {
     pendingDocument: {
       type: Object,
       default: null
+    },
+    pendingDeletes: {
+      type: Array,
+      default: () => []
     }
   },
-  emits: ['send', 'stop', 'add-selection', 'remove-selection', 'update:mode', 'update:selectedModel', 'refresh-models', 'confirm-document', 'cancel-document'],
+  emits: ['send', 'stop', 'add-selection', 'remove-selection', 'update:mode', 'update:selectedModel', 'refresh-models', 'confirm-pending', 'cancel-pending'],
   data() {
     return {
       inputText: '',
@@ -273,6 +277,17 @@ export default {
     selectedModelName() {
       const model = this.availableModels.find((m) => m.id === this.selectedModel);
       return model ? model.name : '选择模型';
+    },
+    pendingSummary() {
+      const parts = [];
+      if (this.pendingDeletes.length > 0) {
+        const totalDeleteParas = this.pendingDeletes.reduce((sum, d) => sum + (d.endParaIndex - d.startParaIndex + 1), 0);
+        parts.push(`删除 ${totalDeleteParas} 个段落`);
+      }
+      if (this.pendingDocument) {
+        parts.push(this.pendingDocument.preview);
+      }
+      return 'AI 操作：' + parts.join('，');
     }
   },
   mounted() {
@@ -416,8 +431,19 @@ export default {
   background: #f0f0f0;
 }
 
+/* 删除预览条 */
+.pending-delete-bar {
+  background: #fff5f5;
+  border-top-color: #ffcccc;
+  border-bottom-color: #ffcccc;
+}
+
 .pending-icon {
   color: #e74c3c !important;
+}
+
+.pending-delete-icon {
+  color: #dc3545 !important;
 }
 
 .pending-actions {
@@ -445,6 +471,16 @@ export default {
 .confirm-btn:hover {
   background: #5a6fd6;
   border-color: #5a6fd6;
+}
+
+.delete-confirm-btn {
+  background: #dc3545;
+  border-color: #dc3545;
+}
+
+.delete-confirm-btn:hover {
+  background: #c82333;
+  border-color: #c82333;
 }
 
 .cancel-btn {

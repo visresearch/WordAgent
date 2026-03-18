@@ -328,7 +328,7 @@ async def process_writing_request_stream(
 
     Args:
         message: 用户消息
-        document_range: 文档范围列表 [{startPos: int, endPos: int}, ...]
+        document_range: 文档范围列表 [{startParaIndex: int, endParaIndex: int}, ...]
         history: 历史消息
         model: 用户选择的模型
         mode: 对话模式（agent/plan）
@@ -406,7 +406,7 @@ async def process_writing_request_stream(
         if document_range:
             # 有文档范围时，指示 agent 调用 read_document 读取这些范围
             range_instructions = "\n".join(
-                f"  - read_document(startPos={r.get('startPos', -1)}, endPos={r.get('endPos', -1)})"
+                f"  - read_document(startParaIndex={r.get('startParaIndex', 0)}, endParaIndex={r.get('endParaIndex', -1)})"
                 for r in document_range
             )
             user_content = (
@@ -509,6 +509,11 @@ async def process_writing_request_stream(
                                 continue
                         except json.JSONDecodeError:
                             pass
+
+                    if tool_name == "delete_document":
+                        # delete_document 结果是确认/取消信息，不需要转发（stream_writer 已经处理了状态）
+                        print(f"[Agent] ⏭️ 跳过 delete_document 工具返回值: {content}")
+                        continue
 
                     # 其他工具的结果，跳过
                     continue

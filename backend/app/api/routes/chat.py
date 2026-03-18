@@ -47,13 +47,15 @@ async def chat_websocket(websocket: WebSocket):
     前端 → 后端:
       - {"type": "chat", "message": "...", "mode": "agent", "model": "auto", "documentJson": {...}, "history": [...]}
       - {"type": "document_response", "documentJson": {...}}
+      - {"type": "delete_response", "deletedCount": 3} 或 {"type": "delete_response", "cancelled": true}
       - {"type": "stop"}
 
     后端 → 前端:
       - {"type": "text", "content": "..."}
       - {"type": "json", "content": {...}}
       - {"type": "status", "content": "..."}
-      - {"type": "read_document", "content": "...", "startPos": -1, "endPos": -1}
+      - {"type": "read_document", "content": "...", "startParaIndex": 0, "endParaIndex": -1}
+      - {"type": "delete_document", "content": "...", "startParaIndex": 0, "endParaIndex": -1}
       - {"type": "done"}
       - {"type": "error", "content": "..."}
     """
@@ -139,6 +141,9 @@ async def chat_websocket(websocket: WebSocket):
                             print(f"[WebSocket] 收到前端回传查询结果")
                             await submit_tool_response(chat_id, incoming)
                             await ma_submit_tool_response(chat_id, incoming)
+                        elif incoming_type == "delete_response":
+                            # delete_document 为非阻塞工具，不再等待前端回传，仅记录日志
+                            print(f"[WebSocket] 收到前端删除结果（仅记录）: {incoming}")
                         elif incoming_type == "stop":
                             print(f"[WebSocket] 收到停止请求")
                             request_stop(chat_id)

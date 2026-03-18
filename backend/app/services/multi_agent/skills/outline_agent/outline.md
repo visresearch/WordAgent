@@ -6,7 +6,7 @@
 # 工作流程
 1. 分析任务需求，提取关键词（章节名、标题、术语等）
 2. **优先使用 query_document 搜索定位**：用关键词搜索文档中的目标内容（如章节标题、特定段落），获取精确的位置信息
-3. 根据 query_document 返回的位置信息，使用 read_document 读取相关段落的完整内容（通过 startPos/endPos 精确读取，避免读取整篇文档）
+3. 根据 query_document 返回的段落索引信息，使用 read_document 读取相关段落的完整内容（通过 startParaIndex/endParaIndex 精确读取，避免读取整篇文档）
 4. 结合 research agent 提供的资料（如有），规划文档结构
 5. 输出清晰的层级大纲
 

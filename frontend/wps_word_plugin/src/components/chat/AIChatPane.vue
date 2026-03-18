@@ -25,6 +25,7 @@
         :is-loading="isLoading"
         :selections="selections"
         :pending-document="pendingDocument"
+        :pending-deletes="pendingDeletes"
         @update:mode="mode = $event"
         @update:selected-model="selectedModel = $event"
         @send="handleSend"
@@ -32,8 +33,8 @@
         @add-selection="addSelectionManually"
         @remove-selection="removeSelection"
         @refresh-models="loadModels"
-        @confirm-document="confirmDocument"
-        @cancel-document="cancelDocument"
+        @confirm-pending="confirmPending"
+        @cancel-pending="cancelPending"
       />
     </div>
     <transition name="slide-session">
@@ -49,7 +50,7 @@
 </template>
 
 <script>
-import { generateDocxFromJSON } from '../js/docxJsonConverter.js';
+import { generateDocxFromJSON, deleteDocxPara } from '../js/docxJsonConverter.js';
 import api from '../js/api.js';
 import ChatMessages from './ChatMessages.vue';
 import ChatInput from './ChatInput.vue';
@@ -72,12 +73,13 @@ export default {
       messages: [],
       isLoading: false,
       lastReadJSON: null,
-      selections: [],  // 多选区数组 [{preview, startText, endText, startPos, endPos, charCount, hasMore}]
+      selections: [],  // 多选区数组 [{preview, startText, endText, startParaIndex, endParaIndex, charCount, hasMore}]
       currentStreamCtrl: null,
       currentSessionId: null,
       currentSessionTitle: null,
       pendingDocument: null,
       pendingDocumentMsg: null,
+      pendingDeletes: [],  // [{startParaIndex, endParaIndex, commentStartPos, commentEndPos, preview, msg}] 待确认删除列表
       historyLoading: false,
       hasHistory: false,
       historyLoaded: false,
@@ -117,7 +119,9 @@ export default {
     // 监听 Ribbon 按钮通过 localStorage 发送的 session 切换信号
     // storage 事件可能不在同一窗口触发，用轮询兜底
     this._lastToggleVal = '';
-    try { this._lastToggleVal = localStorage.getItem('wence_session_toggle') || ''; } catch(e) {}
+    try {
+      this._lastToggleVal = localStorage.getItem('wence_session_toggle') || ''; 
+    } catch (e) {}
     this._togglePoll = setInterval(() => {
       try {
         const val = localStorage.getItem('wence_session_toggle') || '';
@@ -125,7 +129,7 @@ export default {
           this._lastToggleVal = val;
           sessionState.manualValue = !sessionState.visible;
         }
-      } catch(e) {}
+      } catch (e) {}
     }, 200);
   },
   beforeUnmount() {
@@ -654,6 +658,23 @@ export default {
 
         console.log('[Selection] 选中内容长度:', cleanedText.length);
 
+        // 计算选区对应的段落索引
+        const doc = window.Application.ActiveDocument;
+        const totalParas = doc.Paragraphs.Count;
+        let startParaIndex = 0;
+        let endParaIndex = 0;
+
+        for (let i = 1; i <= totalParas; i++) {
+          const paraRange = doc.Paragraphs.Item(i).Range;
+          if (range.Start >= paraRange.Start && range.Start < paraRange.End) {
+            startParaIndex = i - 1;
+          }
+          if (range.End >= paraRange.Start && range.End <= paraRange.End) {
+            endParaIndex = i - 1;
+            break;
+          }
+        }
+
         const maxPreviewLen = 50;
         let preview = cleanedText;
         let hasMore = false;
@@ -673,7 +694,7 @@ export default {
           endText: (cleanedText.length > 20 ? '...' : '') + endText,
           charCount: cleanedText.length,
           hasMore,
-          range: { startPos: range.Start, endPos: range.End }
+          range: { startParaIndex, endParaIndex }
         };
 
         console.log('[Selection] 选区信息已生成:', {
@@ -696,7 +717,7 @@ export default {
 
       // 检查是否已存在相同范围的选区，避免重复
       const exists = this.selections.some(
-        s => s.startPos === selectionInfo.range.startPos && s.endPos === selectionInfo.range.endPos
+        s => s.startParaIndex === selectionInfo.range.startParaIndex && s.endParaIndex === selectionInfo.range.endParaIndex
       );
       if (exists) {
         console.log('[AIChatPane] 该选区已存在，跳过');
@@ -707,8 +728,8 @@ export default {
         preview: selectionInfo.preview,
         startText: selectionInfo.startText,
         endText: selectionInfo.endText,
-        startPos: selectionInfo.range.startPos,
-        endPos: selectionInfo.range.endPos,
+        startParaIndex: selectionInfo.range.startParaIndex,
+        endParaIndex: selectionInfo.range.endParaIndex,
         charCount: selectionInfo.charCount,
         hasMore: selectionInfo.hasMore
       });
@@ -765,7 +786,7 @@ export default {
       this.messages.splice(aiMessageIndex, 1);
 
       const retryRanges = this.selections.length > 0
-        ? this.selections.map(s => ({ startPos: s.startPos, endPos: s.endPos }))
+        ? this.selections.map(s => ({ startParaIndex: s.startParaIndex, endParaIndex: s.endParaIndex }))
         : null;
       this._sendStreamRequest(userMessage, retryRanges);
     },
@@ -787,11 +808,11 @@ export default {
           preview: s.preview,
           startText: s.startText,
           endText: s.endText,
-          startPos: s.startPos,
-          endPos: s.endPos,
+          startParaIndex: s.startParaIndex,
+          endParaIndex: s.endParaIndex,
           charCount: s.charCount
         }));
-        documentRange = this.selections.map(s => ({ startPos: s.startPos, endPos: s.endPos }));
+        documentRange = this.selections.map(s => ({ startParaIndex: s.startParaIndex, endParaIndex: s.endParaIndex }));
         userMsgObj.selectionContext = selectionContext;
       }
 
@@ -889,14 +910,14 @@ export default {
 
       // 后端请求读取文档：委托 api.js 解析文档并回传
       if (data.type === 'read_document') {
-        console.log('[AIChatPane] 后端请求读取文档, startPos:', data.startPos, 'endPos:', data.endPos);
+        console.log('[AIChatPane] 后端请求读取文档, startParaIndex:', data.startParaIndex, 'endParaIndex:', data.endParaIndex);
         msg.contentParts.push({
           type: 'status',
-          content: data.content || `📑 正在读取文档(${data.startPos} - ${data.endPos})`,
+          content: data.content || `📑 正在读取文档(段落 ${data.startParaIndex} - ${data.endParaIndex})`,
           loading: true
         });
         this.scrollToBottom();
-        api.wsManager._handleDocumentRequest(data.startPos, data.endPos);
+        api.wsManager._handleDocumentRequest(data.startParaIndex, data.endParaIndex);
         return;
       }
 
@@ -963,6 +984,78 @@ export default {
           parts.push({
             type: 'status',
             content: data.content || '✅ 文档读取完成',
+            loading: false
+          });
+        }
+        this.scrollToBottom();
+        return;
+      }
+
+      // 后端请求删除文档段落：用蓝色批注标记，加入待删除列表（非阻塞，不影响 agent 继续运行）
+      if (data.type === 'delete_document') {
+        console.log('[AIChatPane] 后端请求删除文档段落, startParaIndex:', data.startParaIndex, 'endParaIndex:', data.endParaIndex);
+        msg.contentParts.push({
+          type: 'status',
+          content: data.content || `🗑️ 准备删除段落(${data.startParaIndex} - ${data.endParaIndex})`,
+          loading: false
+        });
+        this.scrollToBottom();
+
+        // 在文档中用蓝色批注标记要删除的段落
+        try {
+          const doc = window.Application.ActiveDocument;
+          if (doc) {
+            let startIdx = data.startParaIndex;
+            let endIdx = data.endParaIndex;
+            const totalParas = doc.Paragraphs.Count;
+            if (endIdx === -1) endIdx = totalParas - 1;
+
+            const startPara = doc.Paragraphs.Item(startIdx + 1); // WPS 1-based
+            const endPara = doc.Paragraphs.Item(endIdx + 1);
+            const rangeStart = startPara.Range.Start;
+            const rangeEnd = endPara.Range.End;
+            const deleteRange = doc.Range(rangeStart, rangeEnd);
+
+            const comment = doc.Comments.Add(deleteRange, '待删除内容');
+            comment.Author = '文策AI-删除';
+            console.log('[AIChatPane] 已添加删除标记批注');
+
+            const deleteCount = endIdx - startIdx + 1;
+            this.pendingDeletes.push({
+              startParaIndex: startIdx,
+              endParaIndex: endIdx,
+              commentStartPos: rangeStart,
+              commentEndPos: rangeEnd,
+              preview: `AI 准备删除 ${deleteCount} 个段落（段落 ${startIdx} - ${endIdx}）`,
+              msg: msg
+            });
+          }
+        } catch (e) {
+          console.error('[AIChatPane] 标记删除段落失败:', e);
+        }
+        return;
+      }
+
+      // 删除完成：替换 loading 状态
+      if (data.type === 'delete_complete') {
+        console.log('[AIChatPane] 文档删除完成');
+        const parts = msg.contentParts;
+        let found = false;
+        for (let i = parts.length - 1; i >= 0; i--) {
+          if (parts[i].type === 'status' && parts[i].loading) {
+            parts.splice(i, 1, {
+              type: 'status',
+              content: data.content || '✅ 删除完成',
+              loading: false
+            });
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          parts.push({
+            type: 'status',
+            content: data.content || '✅ 删除完成',
             loading: false
           });
         }
@@ -1065,26 +1158,64 @@ export default {
     },
 
     /**
-     * 确认文档修改 —— 去掉文策AI批注
+     * 一键确认所有待处理操作（删除 + 生成）
      */
-    confirmDocument() {
-      if (this.pendingDocumentMsg) {
+    confirmPending() {
+      const doc = window.Application.ActiveDocument;
+
+      // 1. 通过"文策AI-删除"批注定位并删除段落（不依赖存储的索引，避免偏移问题）
+      if (this.pendingDeletes.length > 0 && doc) {
         try {
-          const doc = window.Application.ActiveDocument;
-          const msg = this.pendingDocumentMsg;
-          if (doc && msg.insertStartPos !== undefined && msg.insertEndPos !== undefined) {
-            // 遍历批注，删除文策AI的批注
-            const comments = doc.Comments;
-            for (let i = comments.Count; i >= 1; i--) {
-              const comment = comments.Item(i);
-              if (comment.Author === '文策AI') {
-                const commentRange = comment.Scope;
-                // 只删除当前插入范围内的批注
-                if (commentRange.Start >= msg.insertStartPos && commentRange.End <= msg.insertEndPos) {
-                  comment.Delete();
-                  console.log('已删除文策AI批注');
-                }
+          // 收集所有"文策AI-删除"批注及其当前 Scope
+          const deleteRanges = [];
+          const comments = doc.Comments;
+          for (let i = comments.Count; i >= 1; i--) {
+            const comment = comments.Item(i);
+            if (comment.Author === '文策AI-删除') {
+              const scope = comment.Scope;
+              deleteRanges.push({ start: scope.Start, end: scope.End, commentIndex: i });
+            }
+          }
+
+          // 先删除批注（从后往前，索引不偏移）
+          for (const dr of deleteRanges) {
+            try { comments.Item(dr.commentIndex).Delete(); } catch (e) {}
+          }
+
+          // 再按 start 从大到小排序，从后往前删除段落范围（避免删除导致前面的范围偏移）
+          deleteRanges.sort((a, b) => b.start - a.start);
+          const docEnd = doc.Content.End;
+          for (const dr of deleteRanges) {
+            try {
+              let delStart = dr.start;
+              let delEnd = dr.end;
+              // 确保删除不留空白行：
+              // 如果范围后面还有内容，范围已包含段尾 \r，直接删即可
+              // 如果是文档末尾的范围，向前扩展 1 字符吃掉前段的 \r
+              if (delEnd >= docEnd && delStart > 0) {
+                delStart -= 1;
               }
+              const range = doc.Range(delStart, delEnd);
+              range.Delete();
+              console.log('[AIChatPane] 已删除范围:', delStart, '-', delEnd);
+            } catch (e) {
+              console.error('删除段落范围失败:', e);
+            }
+          }
+        } catch (e) {
+          console.error('确认删除失败:', e);
+        }
+        this.pendingDeletes = [];
+      }
+
+      // 2. 确认生成文档（去掉文策AI批注）
+      if (this.pendingDocumentMsg && doc) {
+        try {
+          const comments = doc.Comments;
+          for (let i = comments.Count; i >= 1; i--) {
+            const comment = comments.Item(i);
+            if (comment.Author === '文策AI') {
+              comment.Delete();
             }
           }
         } catch (e) {
@@ -1096,9 +1227,28 @@ export default {
     },
 
     /**
-     * 取消文档修改 —— 撤销插入
+     * 一键取消所有待处理操作（移除删除标记 + 撤销生成）
      */
-    cancelDocument() {
+    cancelPending() {
+      const doc = window.Application.ActiveDocument;
+
+      // 1. 移除所有"文策AI-删除"批注
+      if (this.pendingDeletes.length > 0 && doc) {
+        try {
+          const comments = doc.Comments;
+          for (let i = comments.Count; i >= 1; i--) {
+            const comment = comments.Item(i);
+            if (comment.Author === '文策AI-删除') {
+              comment.Delete();
+            }
+          }
+        } catch (e) {
+          console.error('移除删除标记批注失败:', e);
+        }
+        this.pendingDeletes = [];
+      }
+
+      // 2. 撤销生成文档
       if (this.pendingDocumentMsg) {
         const msgIndex = this.messages.indexOf(this.pendingDocumentMsg);
         if (msgIndex !== -1) {
@@ -1107,7 +1257,7 @@ export default {
       }
       this.pendingDocument = null;
       this.pendingDocumentMsg = null;
-      console.log('用户取消了文档插入，已撤销');
+      console.log('用户取消了所有待处理操作');
     },
 
     /**
@@ -1146,28 +1296,24 @@ export default {
         if (jsonData && (jsonData.paragraphs || jsonData.tables)) {
           console.log('检测到文档 JSON，使用格式化输出');
 
-          // 统一使用 JSON 中 AI 指定的 position 作为插入位置
-          let insertPos = 0;
-          if (jsonData.position !== null && jsonData.position !== undefined) {
-            if (jsonData.position === -1) {
-              // -1 表示文档末尾
-              insertPos = doc.Content.End - 1;
-              console.log('插入到文档末尾:', insertPos);
+          // 统一使用 JSON 中 AI 指定的 insertParaIndex 作为插入位置
+          let insertParaIndex = null;
+          if (jsonData.insertParaIndex !== null && jsonData.insertParaIndex !== undefined) {
+            insertParaIndex = jsonData.insertParaIndex;
+            if (insertParaIndex === -1) {
+              console.log('插入到文档末尾');
             } else {
-              insertPos = jsonData.position;
-              console.log('插入到 AI 指定位置:', insertPos);
+              console.log('插入到 AI 指定段落索引:', insertParaIndex);
             }
           } else {
-            // 兼容旧数据：没有 position 时用光标位置
-            const selection = window.Application.Selection;
-            insertPos = selection ? selection.Range.Start : 0;
-            console.log('无 position，回退到光标位置:', insertPos);
+            // 兼容旧数据：没有 insertParaIndex 时用光标位置
+            console.log('无 insertParaIndex，回退到光标位置');
           }
 
           msg.docLengthBefore = doc.Content.End;
           console.log('记录插入前文档长度:', msg.docLengthBefore);
 
-          const result = generateDocxFromJSON(jsonData, doc, insertPos);
+          const result = generateDocxFromJSON(jsonData, doc, insertParaIndex);
 
           if (result.success) {
             console.log('带格式的文档内容已成功插入');
@@ -1179,7 +1325,7 @@ export default {
 
             try {
               const insertedRange = doc.Range(result.startPos, result.endPos);
-              const comment = doc.Comments.Add(insertedRange, '');
+              const comment = doc.Comments.Add(insertedRange, '待添加内容');
               comment.Author = '文策AI';
               console.log('批注添加成功');
             } catch (e) {

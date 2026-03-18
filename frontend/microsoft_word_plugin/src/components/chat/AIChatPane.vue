@@ -45,7 +45,7 @@
 
 <script>
 /* global Word */
-import { generateDocxFromJSON } from '../js/docxJsonConverter.js';
+import { generateDocxFromJSON, deleteDocxPara, addCommentToParas } from '../js/docxJsonConverter.js';
 import api from '../js/api.js';
 import ChatMessages from './ChatMessages.vue';
 import ChatInput from './ChatInput.vue';
@@ -560,7 +560,7 @@ export default {
         return;
       }
 
-      if (data.type === 'query_complete' || data.type === 'read_complete' || data.type === 'generate_complete') {
+      if (data.type === 'query_complete' || data.type === 'read_complete' || data.type === 'generate_complete' || data.type === 'delete_complete') {
         const parts = msg.contentParts;
         let found = false;
         for (let i = parts.length - 1; i >= 0; i--) {
@@ -581,6 +581,41 @@ export default {
           this.lastReadJSON = data.documentJson;
         }
         this.scrollToBottom();
+        return;
+      }
+
+      // 后端请求删除文档段落：添加批注标记后自动执行删除（非阻塞，不回传结果）
+      if (data.type === 'delete_document') {
+        console.log('[AIChatPane] 后端请求删除文档段落, startParaIndex:', data.startParaIndex, 'endParaIndex:', data.endParaIndex);
+        msg.contentParts.push({
+          type: 'status',
+          content: data.content || `🗑️ 准备删除段落(${data.startParaIndex} - ${data.endParaIndex})`,
+          loading: true
+        });
+        this.scrollToBottom();
+
+        // 添加批注标记后执行删除
+        (async () => {
+          try {
+            await addCommentToParas(data.startParaIndex, data.endParaIndex, '待删除内容');
+            const result = await deleteDocxPara(data.startParaIndex, data.endParaIndex);
+            console.log('[AIChatPane] 删除结果:', result);
+            // 更新消息状态
+            const parts = msg.contentParts;
+            for (let i = parts.length - 1; i >= 0; i--) {
+              if (parts[i].type === 'status' && parts[i].loading) {
+                parts.splice(i, 1, {
+                  type: 'status',
+                  content: `✅ 已删除 ${result.deletedCount || 0} 个段落`,
+                  loading: false
+                });
+                break;
+              }
+            }
+          } catch (e) {
+            console.error('[AIChatPane] 删除失败:', e);
+          }
+        })();
         return;
       }
 

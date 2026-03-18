@@ -293,17 +293,554 @@ function cleanText(text) {
   return text.replace(/\u0007/g, '').replace(/\f/g, '').replace(/\r$/, '');
 }
 
+// ============== OOXML 解析辅助函数 ==============
+
+const NS_W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+
+/**
+ * 判断字符是否为 CJK（中日韩）字符
+ */
+function isCJK(ch) {
+  const code = ch.codePointAt(0);
+  return (
+    (code >= 0x4E00 && code <= 0x9FFF) ||    // CJK 统一汉字
+    (code >= 0x3400 && code <= 0x4DBF) ||    // CJK 扩展A
+    (code >= 0x20000 && code <= 0x2A6DF) ||  // CJK 扩展B
+    (code >= 0x2A700 && code <= 0x2B73F) ||  // CJK 扩展C
+    (code >= 0x2B740 && code <= 0x2B81F) ||  // CJK 扩展D
+    (code >= 0xF900 && code <= 0xFAFF) ||    // CJK 兼容汉字
+    (code >= 0x3000 && code <= 0x303F) ||    // CJK 符号和标点
+    (code >= 0xFF00 && code <= 0xFFEF) ||    // 全角字符
+    (code >= 0x3040 && code <= 0x309F) ||    // 平假名
+    (code >= 0x30A0 && code <= 0x30FF) ||    // 片假名
+    (code >= 0xAC00 && code <= 0xD7AF)       // 韩文音节
+  );
+}
+
+/**
+ * 将混合脚本文本按 CJK / Latin 拆分为多个段，每段使用对应字体
+ * 空格和标点跟随相邻的主要脚本
+ *
+ * @param {string} text - 文本
+ * @param {string} fontAscii - 拉丁字符字体
+ * @param {string} fontEastAsia - CJK 字符字体
+ * @returns {Array<{text: string, font: string}>}
+ */
+function splitByScript(text, fontAscii, fontEastAsia) {
+  if (!text) return [];
+
+  const segments = [];
+  let currentText = '';
+  let currentIsCJK = null; // null = undetermined (for leading spaces/punctuation)
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+
+    if (isCJK(ch)) {
+      // CJK character
+      if (currentIsCJK === false && currentText) {
+        segments.push({ text: currentText, font: fontAscii });
+        currentText = '';
+      }
+      currentIsCJK = true;
+      currentText += ch;
+    } else if (/[a-zA-Z0-9]/.test(ch)) {
+      // Latin alphanumeric
+      if (currentIsCJK === true && currentText) {
+        segments.push({ text: currentText, font: fontEastAsia });
+        currentText = '';
+      }
+      currentIsCJK = false;
+      currentText += ch;
+    } else {
+      // Space, punctuation, etc. - attach to current segment
+      currentText += ch;
+    }
+  }
+
+  if (currentText) {
+    const font = currentIsCJK === false ? fontAscii : (currentIsCJK === true ? fontEastAsia : fontAscii);
+    segments.push({ text: currentText, font });
+  }
+
+  return segments;
+}
+
+/**
+ * 从 OOXML 元素上获取 w: 命名空间属性值
+ */
+function getWAttr(element, attrName) {
+  return element.getAttributeNS(NS_W, attrName) || element.getAttribute('w:' + attrName) || '';
+}
+
+/**
+ * 从段落 OOXML 中解析 runs（精确获取 Word 内部的格式化文本块边界）
+ * 用于解决 getTextRanges 无法按格式拆分文本的问题
+ *
+ * @param {string} ooxmlString - paragraph.getOoxml() 返回的 OOXML 字符串
+ * @returns {Array|null} - runs 数组（含 text 和 rStyle），解析失败时返回 null
+ */
+function parseRunsFromOoxml(ooxmlString) {
+  try {
+    const parser = new DOMParser();
+    const xmlDoc = parser.parseFromString(ooxmlString, 'application/xml');
+
+    // DEBUG: 输出原始 OOXML 便于排查
+    console.log('  OOXML 原始内容（前2000字符）:', ooxmlString.substring(0, 2000));
+
+    // 找到 <w:p> 段落元素
+    const pElements = xmlDoc.getElementsByTagNameNS(NS_W, 'p');
+    if (pElements.length === 0) return null;
+    const paragraphEl = pElements[0];
+
+    // === 解析主题字体映射 ===
+    const NS_A = 'http://schemas.openxmlformats.org/drawingml/2006/main';
+    const themeFonts = { majorLatin: '', majorEastAsia: '', minorLatin: '', minorEastAsia: '' };
+    try {
+      const themeElements = xmlDoc.getElementsByTagNameNS(NS_A, 'theme');
+      if (themeElements.length > 0) {
+        const fontScheme = themeElements[0].getElementsByTagNameNS(NS_A, 'fontScheme')[0];
+        if (fontScheme) {
+          const majorFont = fontScheme.getElementsByTagNameNS(NS_A, 'majorFont')[0];
+          if (majorFont) {
+            const latin = majorFont.getElementsByTagNameNS(NS_A, 'latin')[0];
+            if (latin) themeFonts.majorLatin = latin.getAttribute('typeface') || '';
+            const ea = majorFont.getElementsByTagNameNS(NS_A, 'ea')[0];
+            if (ea) themeFonts.majorEastAsia = ea.getAttribute('typeface') || '';
+          }
+          const minorFont = fontScheme.getElementsByTagNameNS(NS_A, 'minorFont')[0];
+          if (minorFont) {
+            const latin = minorFont.getElementsByTagNameNS(NS_A, 'latin')[0];
+            if (latin) themeFonts.minorLatin = latin.getAttribute('typeface') || '';
+            const ea = minorFont.getElementsByTagNameNS(NS_A, 'ea')[0];
+            if (ea) themeFonts.minorEastAsia = ea.getAttribute('typeface') || '';
+          }
+        }
+      }
+    } catch (e) {}
+    console.log('  主题字体:', JSON.stringify(themeFonts));
+
+    /**
+     * 解析主题字体引用为具体字体名
+     */
+    function resolveThemeFont(themeRef) {
+      if (!themeRef) return '';
+      const map = {
+        'majorHAnsi': themeFonts.majorLatin,
+        'majorAscii': themeFonts.majorLatin,
+        'majorEastAsia': themeFonts.majorEastAsia,
+        'minorHAnsi': themeFonts.minorLatin,
+        'minorAscii': themeFonts.minorLatin,
+        'minorEastAsia': themeFonts.minorEastAsia
+      };
+      return map[themeRef] || '';
+    }
+
+    // === 构建样式继承链：docDefaults → 段落样式的 rPr → run 自身 rPr ===
+
+    /**
+     * 从 rPr 元素提取格式属性为对象
+     * 同时处理直接字体名和主题字体引用
+     */
+    function extractRprProps(rPr) {
+      if (!rPr) return {};
+      const props = {};
+
+      const rFonts = rPr.getElementsByTagNameNS(NS_W, 'rFonts')[0];
+      if (rFonts) {
+        // 直接字体名
+        const directAscii = getWAttr(rFonts, 'ascii');
+        const directEastAsia = getWAttr(rFonts, 'eastAsia');
+        const directHAnsi = getWAttr(rFonts, 'hAnsi');
+
+        // 主题字体引用
+        const themeAscii = getWAttr(rFonts, 'asciiTheme');
+        const themeEastAsia = getWAttr(rFonts, 'eastAsiaTheme');
+        const themeHAnsi = getWAttr(rFonts, 'hAnsiTheme');
+
+        // 直接字体名优先，否则从主题解析
+        props.fontAscii = directAscii || resolveThemeFont(themeAscii) || '';
+        props.fontEastAsia = directEastAsia || resolveThemeFont(themeEastAsia) || '';
+        props.fontHAnsi = directHAnsi || resolveThemeFont(themeHAnsi) || '';
+      }
+
+      const sz = rPr.getElementsByTagNameNS(NS_W, 'sz')[0];
+      if (sz) {
+        const val = getWAttr(sz, 'val');
+        if (val) props.fontSize = parseInt(val, 10) / 2;
+      }
+      if (!props.fontSize) {
+        const szCs = rPr.getElementsByTagNameNS(NS_W, 'szCs')[0];
+        if (szCs) {
+          const val = getWAttr(szCs, 'val');
+          if (val) props.fontSize = parseInt(val, 10) / 2;
+        }
+      }
+
+      const bEl = rPr.getElementsByTagNameNS(NS_W, 'b')[0];
+      if (bEl) {
+        const val = getWAttr(bEl, 'val');
+        props.bold = val !== '0' && val !== 'false';
+      }
+
+      const iEl = rPr.getElementsByTagNameNS(NS_W, 'i')[0];
+      if (iEl) {
+        const val = getWAttr(iEl, 'val');
+        props.italic = val !== '0' && val !== 'false';
+      }
+
+      const uEl = rPr.getElementsByTagNameNS(NS_W, 'u')[0];
+      if (uEl) {
+        const uVal = getWAttr(uEl, 'val');
+        const uMap = { 'single': 1, 'double': 3, 'dotted': 4, 'thick': 6, 'dottedHeavy': 7, 'wave': 11, 'wavyHeavy': 27 };
+        props.underline = uMap[uVal] || (uVal && uVal !== 'none' ? 1 : 0);
+        const uColor = getWAttr(uEl, 'color');
+        if (uColor && uColor !== 'auto') props.underlineColor = '#' + uColor;
+      }
+
+      const colorEl = rPr.getElementsByTagNameNS(NS_W, 'color')[0];
+      if (colorEl) {
+        const colorVal = getWAttr(colorEl, 'val');
+        if (colorVal && colorVal !== 'auto') props.color = '#' + colorVal;
+      }
+
+      const hlEl = rPr.getElementsByTagNameNS(NS_W, 'highlight')[0];
+      if (hlEl) {
+        const hlVal = getWAttr(hlEl, 'val');
+        const hlMap = {
+          'black': 1, 'blue': 2, 'cyan': 3, 'green': 4, 'magenta': 5,
+          'red': 6, 'yellow': 7, 'darkBlue': 9, 'teal': 10,
+          'darkGreen': 11, 'darkMagenta': 12, 'darkRed': 13,
+          'darkYellow': 14, 'darkGray': 15, 'lightGray': 16
+        };
+        props.highlight = hlMap[hlVal] || 0;
+      }
+
+      const strikeEl = rPr.getElementsByTagNameNS(NS_W, 'strike')[0];
+      if (strikeEl) {
+        const val = getWAttr(strikeEl, 'val');
+        props.strikethrough = val !== '0' && val !== 'false';
+      }
+
+      const vertAlignEl = rPr.getElementsByTagNameNS(NS_W, 'vertAlign')[0];
+      if (vertAlignEl) {
+        const val = getWAttr(vertAlignEl, 'val');
+        if (val === 'superscript') props.superscript = true;
+        if (val === 'subscript') props.subscript = true;
+      }
+
+      return props;
+    }
+
+    // 1. 从 <w:docDefaults> 提取默认 run 属性
+    let defaultProps = {};
+    try {
+      const docDefaults = xmlDoc.getElementsByTagNameNS(NS_W, 'docDefaults')[0];
+      if (docDefaults) {
+        const rPrDefault = docDefaults.getElementsByTagNameNS(NS_W, 'rPrDefault')[0];
+        if (rPrDefault) {
+          const rPr = rPrDefault.getElementsByTagNameNS(NS_W, 'rPr')[0];
+          defaultProps = extractRprProps(rPr);
+        }
+      }
+    } catch (e) {}
+
+    // 2. 获取段落应用的样式名，从 <w:styles> 中找到该样式的 rPr
+    let styleProps = {};
+    try {
+      const pPr = paragraphEl.getElementsByTagNameNS(NS_W, 'pPr')[0];
+      if (pPr) {
+        // 段落样式名
+        const pStyleEl = pPr.getElementsByTagNameNS(NS_W, 'pStyle')[0];
+        const paraStyleId = pStyleEl ? getWAttr(pStyleEl, 'val') : '';
+
+        // 段落自身 pPr 里的 rPr（段落级默认 run 格式）
+        const pPrRpr = pPr.getElementsByTagNameNS(NS_W, 'rPr')[0];
+        if (pPrRpr) {
+          styleProps = { ...styleProps, ...extractRprProps(pPrRpr) };
+        }
+
+        // 从 <w:styles> 中查找样式定义
+        if (paraStyleId) {
+          const stylesEl = xmlDoc.getElementsByTagNameNS(NS_W, 'styles')[0];
+          if (stylesEl) {
+            const styleEls = stylesEl.getElementsByTagNameNS(NS_W, 'style');
+            for (let s = 0; s < styleEls.length; s++) {
+              const sId = getWAttr(styleEls[s], 'styleId');
+              if (sId === paraStyleId) {
+                // 样式中的 rPr
+                const sRpr = styleEls[s].getElementsByTagNameNS(NS_W, 'rPr')[0];
+                if (sRpr) {
+                  // 样式定义的优先级低于段落 pPr 中的 rPr，先设置样式，再覆盖
+                  const sProps = extractRprProps(sRpr);
+                  styleProps = { ...sProps, ...styleProps };
+                }
+
+                // 如果样式有 basedOn，递归查找父样式
+                const basedOnEl = styleEls[s].getElementsByTagNameNS(NS_W, 'basedOn')[0];
+                if (basedOnEl) {
+                  const baseId = getWAttr(basedOnEl, 'val');
+                  if (baseId) {
+                    for (let b = 0; b < styleEls.length; b++) {
+                      if (getWAttr(styleEls[b], 'styleId') === baseId) {
+                        const baseRpr = styleEls[b].getElementsByTagNameNS(NS_W, 'rPr')[0];
+                        if (baseRpr) {
+                          const baseProps = extractRprProps(baseRpr);
+                          // 父样式优先级最低
+                          styleProps = { ...baseProps, ...styleProps };
+                        }
+                        break;
+                      }
+                    }
+                  }
+                }
+                break;
+              }
+            }
+          }
+        }
+      }
+    } catch (e) {}
+
+    // 3. 合并继承链：docDefaults → 样式 → (run自身在processRunElement中覆盖)
+    const inheritedProps = { ...defaultProps, ...styleProps };
+    console.log('  OOXML 继承属性:', JSON.stringify(inheritedProps));
+
+    const runs = [];
+
+    // 遍历段落的子节点，处理 w:r 和 w:hyperlink 中的 w:r
+    function processRunElement(wRun) {
+      let text = '';
+      // 收集 <w:t> 文本
+      const tElements = wRun.getElementsByTagNameNS(NS_W, 't');
+      for (let j = 0; j < tElements.length; j++) {
+        text += tElements[j].textContent || '';
+      }
+      // 收集 <w:tab> 制表符
+      const tabElements = wRun.getElementsByTagNameNS(NS_W, 'tab');
+      if (tabElements.length > 0) {
+        text += '\t';
+      }
+
+      // 清理文本
+      text = text.replace(/[\r\n\f\u0007]+$/g, '');
+      if (!text) return;
+
+      // 读取 run 自身格式属性
+      const rPr = wRun.getElementsByTagNameNS(NS_W, 'rPr')[0];
+      const runProps = extractRprProps(rPr);
+
+      // 合并：继承属性 → run 自身属性（run 自身优先）
+      const merged = { ...inheritedProps, ...runProps };
+
+      // 获取不同脚本的字体
+      const fontAscii = merged.fontAscii || merged.fontHAnsi || '';
+      const fontEastAsia = merged.fontEastAsia || '';
+      const baseFontProps = {
+        fontSize: merged.fontSize || 12,
+        bold: !!merged.bold,
+        italic: !!merged.italic,
+        underline: merged.underline || 0,
+        underlineColor: merged.underlineColor || '#000000',
+        color: merged.color || '#000000',
+        highlight: merged.highlight || 0,
+        strikethrough: !!merged.strikethrough,
+        superscript: !!merged.superscript,
+        subscript: !!merged.subscript
+      };
+
+      // 如果中英文字体不同且文本包含混合脚本，按脚本拆分 run
+      if (fontAscii && fontEastAsia && fontAscii !== fontEastAsia) {
+        const segments = splitByScript(text, fontAscii, fontEastAsia);
+        for (const seg of segments) {
+          runs.push({
+            text: seg.text,
+            rStyle: makeRStyle(
+              seg.font, baseFontProps.fontSize, baseFontProps.bold, baseFontProps.italic,
+              baseFontProps.underline, baseFontProps.underlineColor, baseFontProps.color,
+              baseFontProps.highlight, baseFontProps.strikethrough, baseFontProps.superscript, baseFontProps.subscript
+            )
+          });
+        }
+      } else {
+        // 字体相同或只有一种，直接使用
+        const fontName = fontAscii || fontEastAsia || '';
+        runs.push({
+          text,
+          rStyle: makeRStyle(
+            fontName, baseFontProps.fontSize, baseFontProps.bold, baseFontProps.italic,
+            baseFontProps.underline, baseFontProps.underlineColor, baseFontProps.color,
+            baseFontProps.highlight, baseFontProps.strikethrough, baseFontProps.superscript, baseFontProps.subscript
+          )
+        });
+      }
+    }
+
+    // 遍历段落子节点
+    for (let i = 0; i < paragraphEl.childNodes.length; i++) {
+      const child = paragraphEl.childNodes[i];
+      if (!child.localName) continue;
+
+      if (child.localName === 'r' && child.namespaceURI === NS_W) {
+        processRunElement(child);
+      } else if (child.localName === 'hyperlink') {
+        // 超链接内也包含 w:r
+        const innerRuns = child.getElementsByTagNameNS(NS_W, 'r');
+        for (let j = 0; j < innerRuns.length; j++) {
+          processRunElement(innerRuns[j]);
+        }
+      }
+    }
+
+    // 合并相邻相同格式的 runs
+    if (runs.length > 1) {
+      const merged = [runs[0]];
+      for (let i = 1; i < runs.length; i++) {
+        const prev = merged[merged.length - 1];
+        const curr = runs[i];
+        if (JSON.stringify(prev.rStyle) === JSON.stringify(curr.rStyle)) {
+          prev.text += curr.text;
+        } else {
+          merged.push(curr);
+        }
+      }
+      return merged.length > 0 ? merged : null;
+    }
+
+    return runs.length > 0 ? runs : null;
+  } catch (e) {
+    console.log('OOXML runs 解析失败:', e);
+    return null;
+  }
+}
+
 // ============== 解析函数 ==============
 
 /**
  * 解析 Word 文档内容为 JSON（异步，基于 Office.js API）
  *
  * @param {string} scope - 'selection' 解析选区, 'body' 解析全文
+ * @param {number} [startParaIndex] - 可选，起始全文段落索引（0-based），
+ *   传入后走快速路径：O(1) 定位仅解析指定范围段落，忽略 scope 参数
+ * @param {number} [endParaIndex] - 可选，结束全文段落索引（0-based，含），
+ *   省略时默认等于 startParaIndex（即只解析单段）；-1 表示解析到文档末尾
  * @returns {Promise<Object>} - JSON 数据或错误对象
  */
-async function parseDocxToJSON(scope = 'selection') {
+async function parseDocxToJSON(scope = 'selection', startParaIndex, endParaIndex) {
   try {
     return await Word.run(async (context) => {
+
+      // ========== 快速路径：按 paraIndex 范围解析 ==========
+      if (startParaIndex !== undefined && startParaIndex !== null) {
+        // endParaIndex 省略时默认等于 startParaIndex（单段）
+        if (endParaIndex === undefined || endParaIndex === null) {
+          endParaIndex = startParaIndex;
+        }
+
+        const allParas = context.document.body.paragraphs;
+        allParas.load('items');
+        await context.sync();
+
+        // endParaIndex === -1 表示解析到文档末尾
+        if (endParaIndex === -1) {
+          endParaIndex = allParas.items.length - 1;
+        }
+
+        if (startParaIndex < 0 || startParaIndex >= allParas.items.length) {
+          return { error: `startParaIndex ${startParaIndex} 超出范围，文档共 ${allParas.items.length} 段` };
+        }
+        if (endParaIndex < startParaIndex || endParaIndex >= allParas.items.length) {
+          return { error: `endParaIndex ${endParaIndex} 无效（startParaIndex=${startParaIndex}，文档共 ${allParas.items.length} 段）` };
+        }
+
+        // 批量 load 范围内所有段落
+        for (let idx = startParaIndex; idx <= endParaIndex; idx++) {
+          allParas.items[idx].load('text,alignment,lineSpacing,firstLineIndent,leftIndent,rightIndent,spaceBefore,spaceAfter,style,isListItem,tableNestingLevel,lineUnitBefore,lineUnitAfter,outlineLevel');
+        }
+        await context.sync();
+
+        const rangeResult = { paragraphs: [], tables: [], images: [], fields: [] };
+
+        for (let idx = startParaIndex; idx <= endParaIndex; idx++) {
+          const para = allParas.items[idx];
+
+          // 表格内段落
+          if (para.tableNestingLevel > 0) {
+            rangeResult.paragraphs.push({ pStyle: '', runs: [], paraIndex: idx, inTable: true });
+            continue;
+          }
+
+          const paraText = cleanText(para.text || '');
+
+          // 空段落
+          if (!paraText || paraText.match(/^[\r\n\f\u0007]*$/)) {
+            rangeResult.paragraphs.push({ pStyle: '', runs: [], paraIndex: idx });
+            continue;
+          }
+
+          let styleName = '';
+          try { styleName = para.style || ''; } catch (e) {}
+
+          // 解析 runs（OOXML 优先）
+          let runs = null;
+          try {
+            const ooxmlResult = para.getOoxml();
+            await context.sync();
+            runs = parseRunsFromOoxml(ooxmlResult.value);
+          } catch (e) {}
+
+          if (!runs) {
+            runs = [];
+            const inlineRanges = para.getTextRanges(['\t', '\n'], true);
+            inlineRanges.load('items');
+            await context.sync();
+            for (const ir of inlineRanges.items) {
+              ir.load('text');
+              ir.font.load('name,size,bold,italic,underline,underlineColor,color,highlightColor,strikeThrough,superscript,subscript');
+            }
+            await context.sync();
+            let lastFormatKey = null;
+            let currentRun = null;
+            for (const ir of inlineRanges.items) {
+              const t = ir.text || '';
+              if (!t || t.match(/^[\r\n\f\u0007]+$/)) continue;
+              const font = ir.font;
+              const formatKey = [font.name, font.size, font.bold, font.italic, font.underline, font.color, font.highlightColor, font.strikeThrough, font.superscript, font.subscript].join('|');
+              if (formatKey === lastFormatKey && currentRun) {
+                currentRun.text += t;
+              } else {
+                if (currentRun && currentRun.text) runs.push(currentRun);
+                currentRun = {
+                  text: t,
+                  rStyle: makeRStyle(font.name || '', font.size || 12, font.bold === true, font.italic === true,
+                    getUnderlineValue(font.underline), font.underlineColor || '#000000', font.color || '#000000',
+                    getHighlightValue(font.highlightColor), font.strikeThrough === true, font.superscript === true, font.subscript === true)
+                };
+                lastFormatKey = formatKey;
+              }
+            }
+            if (currentRun && currentRun.text) runs.push(currentRun);
+          }
+
+          if (!runs || runs.length === 0) {
+            runs = [];
+          }
+
+          rangeResult.paragraphs.push({
+            pStyle: makePStyle(
+              getAlignmentName(para.alignment), para.lineSpacing || 0,
+              para.leftIndent || 0, para.rightIndent || 0, para.firstLineIndent || 0,
+              para.spaceBefore || 0, para.spaceAfter || 0, styleName
+            ),
+            runs: runs,
+            paraIndex: idx
+          });
+        }
+
+        return deduplicateStyles(rangeResult);
+      }
+
+      // ========== 常规路径：解析选区或全文 ==========
       const range = scope === 'body'
         ? context.document.body
         : context.document.getSelection();
@@ -523,13 +1060,95 @@ async function parseDocxToJSON(scope = 'selection') {
       }
 
       // === 解析段落 ===
-      if (paragraphs.items && paragraphs.items.length > 0) {
-        for (const para of paragraphs.items) {
-          para.load('text,alignment,lineSpacing,firstLineIndent,leftIndent,rightIndent,spaceBefore,spaceAfter,style,isListItem,tableNestingLevel,lineUnitBefore,lineUnitAfter');
+      // 始终从 body.paragraphs 获取段落，数组下标即全文索引
+      const bodyParas = context.document.body.paragraphs;
+      bodyParas.load('items');
+      await context.sync();
+
+      if (bodyParas.items && bodyParas.items.length > 0) {
+        // 选区模式：确定哪些 body 段落在选区内
+        let inSelectionSet = null; // null 表示全选（body 模式）
+        if (scope !== 'body') {
+          const selRange = context.document.getSelection();
+          const comparisons = bodyParas.items.map(bp =>
+            bp.getRange('Whole').compareLocationWith(selRange)
+          );
+          await context.sync();
+          inSelectionSet = new Set();
+          for (let i = 0; i < comparisons.length; i++) {
+            const v = comparisons[i].value;
+            // Inside / Equal / InsideStart / InsideEnd = 段落落在选区内
+            if (v === 'Inside' || v === 'Equal' || v === 'InsideStart' || v === 'InsideEnd') {
+              inSelectionSet.add(i);
+            }
+          }
+        }
+
+        for (const para of bodyParas.items) {
+          para.load('text,alignment,lineSpacing,firstLineIndent,leftIndent,rightIndent,spaceBefore,spaceAfter,style,isListItem,tableNestingLevel,lineUnitBefore,lineUnitAfter,outlineLevel');
         }
         await context.sync();
 
-        for (const para of paragraphs.items) {
+        // 额外加载 listItem、font、range 等调试属性
+        for (const para of bodyParas.items) {
+          try {
+            if (para.isListItem) {
+              para.listItem.load('level,listString,siblingIndex');
+            }
+          } catch (e) {}
+          try {
+            para.font.load('name,size,bold,italic,underline,color,highlightColor');
+          } catch (e) {}
+        }
+        try { await context.sync(); } catch (e) {}
+
+        for (let _paraIdx = 0; _paraIdx < bodyParas.items.length; _paraIdx++) {
+          // 选区模式：跳过不在选区内的段落
+          if (inSelectionSet && !inSelectionSet.has(_paraIdx)) continue;
+
+          const para = bodyParas.items[_paraIdx];
+
+          // ====== DEBUG: 输出段落的各种 Office.js API 属性 ======
+          try {
+            console.log(`===== 段落 [第${_paraIdx + 1}个] =====`);
+            console.log(`  文本预览: "${(para.text || '').substring(0, 80).replace(/[\r\n]/g, '\\n')}"`);
+            console.log(`  Style: "${para.style || ''}"`);
+            console.log(`  Alignment: ${para.alignment}`);
+            console.log(`  LineSpacing: ${para.lineSpacing}`);
+            console.log(`  LeftIndent: ${para.leftIndent}, RightIndent: ${para.rightIndent}, FirstLineIndent: ${para.firstLineIndent}`);
+            console.log(`  SpaceBefore: ${para.spaceBefore}, SpaceAfter: ${para.spaceAfter}`);
+            console.log(`  LineUnitBefore: ${para.lineUnitBefore}, LineUnitAfter: ${para.lineUnitAfter}`);
+            try { console.log(`  OutlineLevel: ${para.outlineLevel}`); } catch (e) {}
+            console.log(`  IsListItem: ${para.isListItem}, TableNestingLevel: ${para.tableNestingLevel}`);
+
+            // 列表项属性
+            try {
+              if (para.isListItem) {
+                console.log(`  ListItem.Level: ${para.listItem.level}`);
+                console.log(`  ListItem.ListString: "${para.listItem.listString}"`);
+                console.log(`  ListItem.SiblingIndex: ${para.listItem.siblingIndex}`);
+              }
+            } catch (e) {
+              console.log(`  [ListItem 属性获取失败]: ${e.message}`);
+            }
+
+            // 段落级字体属性
+            try {
+              const pFont = para.font;
+              console.log(`  Font.Name: "${pFont.name}", Font.Size: ${pFont.size}`);
+              console.log(`  Font.Bold: ${pFont.bold}, Font.Italic: ${pFont.italic}`);
+              console.log(`  Font.Underline: ${pFont.underline}, Font.Color: ${pFont.color}`);
+              console.log(`  Font.HighlightColor: ${pFont.highlightColor}`);
+            } catch (e) {
+              console.log(`  [Font 属性获取失败]: ${e.message}`);
+            }
+
+            console.log(`  ---- END 段落 ${_paraIdx + 1} ----`);
+          } catch (debugErr) {
+            console.log(`  [DEBUG ERROR] 段落 ${_paraIdx + 1}: ${debugErr.message}`);
+          }
+          // ====== END DEBUG ======
+
           // 跳过表格内段落
           if (para.tableNestingLevel > 0) continue;
 
@@ -537,7 +1156,7 @@ async function parseDocxToJSON(scope = 'selection') {
 
           // 空段落
           if (!paraText || paraText.match(/^[\r\n\f\u0007]*$/)) {
-            result.paragraphs.push({ pStyle: '', runs: [] });
+            result.paragraphs.push({ pStyle: '', runs: [], paraIndex: _paraIdx });
             continue;
           }
 
@@ -546,38 +1165,130 @@ async function parseDocxToJSON(scope = 'selection') {
             styleName = para.style || '';
           } catch (e) {}
 
-          // 加载 runs（使用分隔符拆分文本范围）
-          const inlineRanges = para.getTextRanges(['\t', '\n'], true);
-          inlineRanges.load('items');
-          await context.sync();
+          // === 优先使用 OOXML 解析 runs（精确获取 Word 内部 run 边界）===
+          let runs = null;
+          try {
+            const ooxmlResult = para.getOoxml();
+            await context.sync();
+            const ooxmlRuns = parseRunsFromOoxml(ooxmlResult.value);
+            if (ooxmlRuns && ooxmlRuns.length > 0) {
+              runs = ooxmlRuns;
+              console.log(`  段落 ${_paraIdx + 1}: OOXML 解析成功，获取 ${runs.length} 个 runs`);
 
-          for (const ir of inlineRanges.items) {
-            ir.load('text');
-            ir.font.load('name,size,bold,italic,underline,underlineColor,color,highlightColor,strikeThrough,superscript,subscript');
+              // 如果仍有 run 字体为空，用 Office.js API 按字符偏移获取实际字体
+              const hasEmptyFont = runs.some(r => !r.rStyle[RSTYLE.FONT_NAME]);
+              if (hasEmptyFont) {
+                console.log(`  段落 ${_paraIdx + 1}: 部分 run 字体为空，使用 Office.js API 补充`);
+                try {
+                  // 获取段落中每个 run 对应的文本范围及其字体
+                  const paraRange = para.getRange('Whole');
+                  // 用每个 run 的文本去 search 定位
+                  let charOffset = 0;
+                  for (const run of runs) {
+                    if (run.rStyle[RSTYLE.FONT_NAME]) {
+                      charOffset += run.text.length;
+                      continue;
+                    }
+                    // 尝试通过 search 找到文本并读取字体
+                    try {
+                      const searchResults = para.search(run.text, { matchCase: true, matchWholeWord: false });
+                      searchResults.load('items');
+                      await context.sync();
+                      if (searchResults.items.length > 0) {
+                        const matchItem = searchResults.items[0];
+                        matchItem.font.load('name');
+                        await context.sync();
+                        if (matchItem.font.name) {
+                          run.rStyle[RSTYLE.FONT_NAME] = matchItem.font.name;
+                          console.log(`    补充字体: "${run.text.substring(0, 20)}..." → "${matchItem.font.name}"`);
+                        }
+                      }
+                    } catch (searchErr) {
+                      // search 失败，尝试用段落级字体
+                    }
+                    charOffset += run.text.length;
+                  }
+
+                  // 仍然有空字体的 run，最后用段落级字体兜底
+                  const stillEmpty = runs.filter(r => !r.rStyle[RSTYLE.FONT_NAME]);
+                  if (stillEmpty.length > 0) {
+                    const paraFont = para.font;
+                    paraFont.load('name');
+                    await context.sync();
+                    if (paraFont.name) {
+                      for (const run of stillEmpty) {
+                        run.rStyle[RSTYLE.FONT_NAME] = paraFont.name;
+                        console.log(`    段落级字体兜底: "${run.text.substring(0, 20)}..." → "${paraFont.name}"`);
+                      }
+                    }
+                  }
+                } catch (fontFallbackErr) {
+                  console.log(`    字体补充失败:`, fontFallbackErr.message);
+                }
+              }
+            }
+          } catch (e) {
+            console.log(`  段落 ${_paraIdx + 1}: OOXML 解析失败，降级到 getTextRanges:`, e.message);
           }
-          await context.sync();
 
-          const runs = [];
-          let lastFormatKey = null;
-          let currentRun = null;
+          // === 降级方案：使用 getTextRanges 拆分 ===
+          if (!runs) {
+            runs = [];
+            const inlineRanges = para.getTextRanges(['\t', '\n'], true);
+            inlineRanges.load('items');
+            await context.sync();
 
-          for (const ir of inlineRanges.items) {
-            const t = ir.text || '';
-            if (!t || t.match(/^[\r\n\f\u0007]+$/)) continue;
+            for (const ir of inlineRanges.items) {
+              ir.load('text');
+              ir.font.load('name,size,bold,italic,underline,underlineColor,color,highlightColor,strikeThrough,superscript,subscript');
+            }
+            await context.sync();
 
-            const font = ir.font;
-            const formatKey = [
-              font.name, font.size, font.bold, font.italic,
-              font.underline, font.color, font.highlightColor,
-              font.strikeThrough, font.superscript, font.subscript
-            ].join('|');
+            let lastFormatKey = null;
+            let currentRun = null;
 
-            if (formatKey === lastFormatKey && currentRun) {
-              currentRun.text += t;
-            } else {
-              if (currentRun && currentRun.text) runs.push(currentRun);
-              currentRun = {
-                text: t,
+            for (const ir of inlineRanges.items) {
+              const t = ir.text || '';
+              if (!t || t.match(/^[\r\n\f\u0007]+$/)) continue;
+
+              const font = ir.font;
+              const formatKey = [
+                font.name, font.size, font.bold, font.italic,
+                font.underline, font.color, font.highlightColor,
+                font.strikeThrough, font.superscript, font.subscript
+              ].join('|');
+
+              if (formatKey === lastFormatKey && currentRun) {
+                currentRun.text += t;
+              } else {
+                if (currentRun && currentRun.text) runs.push(currentRun);
+                currentRun = {
+                  text: t,
+                  rStyle: makeRStyle(
+                    font.name || '', font.size || 12,
+                    font.bold === true, font.italic === true,
+                    getUnderlineValue(font.underline),
+                    font.underlineColor || '#000000',
+                    font.color || '#000000',
+                    getHighlightValue(font.highlightColor),
+                    font.strikeThrough === true,
+                    font.superscript === true,
+                    font.subscript === true
+                  )
+                };
+                lastFormatKey = formatKey;
+              }
+            }
+            if (currentRun && currentRun.text) runs.push(currentRun);
+
+            // 最终降级：整段作为一个 run
+            if (runs.length === 0 && paraText) {
+              const font = para.getRange().font;
+              font.load('name,size,bold,italic,underline,underlineColor,color,highlightColor,strikeThrough,superscript,subscript');
+              await context.sync();
+
+              runs.push({
+                text: paraText,
                 rStyle: makeRStyle(
                   font.name || '', font.size || 12,
                   font.bold === true, font.italic === true,
@@ -589,32 +1300,8 @@ async function parseDocxToJSON(scope = 'selection') {
                   font.superscript === true,
                   font.subscript === true
                 )
-              };
-              lastFormatKey = formatKey;
+              });
             }
-          }
-          if (currentRun && currentRun.text) runs.push(currentRun);
-
-          // 如果无法通过 getTextRanges 获取 runs，降级为整段
-          if (runs.length === 0 && paraText) {
-            const font = para.getRange().font;
-            font.load('name,size,bold,italic,underline,underlineColor,color,highlightColor,strikeThrough,superscript,subscript');
-            await context.sync();
-
-            runs.push({
-              text: paraText,
-              rStyle: makeRStyle(
-                font.name || '', font.size || 12,
-                font.bold === true, font.italic === true,
-                getUnderlineValue(font.underline),
-                font.underlineColor || '#000000',
-                font.color || '#000000',
-                getHighlightValue(font.highlightColor),
-                font.strikeThrough === true,
-                font.superscript === true,
-                font.subscript === true
-              )
-            });
           }
 
           const paragraphData = {
@@ -628,7 +1315,8 @@ async function parseDocxToJSON(scope = 'selection') {
               para.spaceAfter || 0,
               styleName
             ),
-            runs: runs
+            runs: runs,
+            paraIndex: _paraIdx
           };
 
           if (paragraphData.runs.length > 0) {
@@ -650,7 +1338,11 @@ async function parseDocxToJSON(scope = 'selection') {
  * 从 JSON 数据生成 Word 文档（异步，基于 Office.js API）
  *
  * @param {Object} jsonData - JSON 数据
- * @param {string} insertLocation - 插入位置: 'end'(末尾), 'selection'(当前选区), 'replace'(替换选区)
+ * @param {string} insertLocation - 插入位置:
+ *   'end'       - 文档末尾追加
+ *   'selection' - 当前选区之后
+ *   'replace'   - 替换当前选区
+ *   'before'    - 在 jsonData.paraIndex 指定的段落之前插入（O(1) 定位）
  * @returns {Promise<Object>} - 成功返回 {success: true}，失败返回 {error: string}
  */
 async function generateDocxFromJSON(jsonData, insertLocation = 'selection') {
@@ -663,7 +1355,23 @@ async function generateDocxFromJSON(jsonData, insertLocation = 'selection') {
 
     return await Word.run(async (context) => {
       let targetRange;
-      if (insertLocation === 'end') {
+      let insertBeforeMode = false;
+
+      if (insertLocation === 'before') {
+        // 'before' 模式：通过 paraIndex 直接 O(1) 定位到目标段落
+        const paraIndex = jsonData.paraIndex;
+        if (paraIndex === undefined || paraIndex === null || paraIndex < 0) {
+          return { error: 'before 模式需要 jsonData.paraIndex（0-based 段落索引）' };
+        }
+        const allParagraphs = context.document.body.paragraphs;
+        allParagraphs.load('items');
+        await context.sync();
+        if (paraIndex >= allParagraphs.items.length) {
+          return { error: `paraIndex ${paraIndex} 超出范围，文档共 ${allParagraphs.items.length} 段` };
+        }
+        targetRange = allParagraphs.items[paraIndex];
+        insertBeforeMode = true;
+      } else if (insertLocation === 'end') {
         targetRange = context.document.body;
       } else {
         targetRange = context.document.getSelection();
@@ -700,7 +1408,9 @@ async function generateDocxFromJSON(jsonData, insertLocation = 'selection') {
       }
 
       // 插入内容
-      const insertLoc = insertLocation === 'end' ? Word.InsertLocation.end : Word.InsertLocation.after;
+      const insertLoc = insertBeforeMode
+        ? Word.InsertLocation.before
+        : (insertLocation === 'end' ? Word.InsertLocation.end : Word.InsertLocation.after);
 
       for (let i = 0; i < processedElements.length; i++) {
         const element = processedElements[i];
@@ -719,7 +1429,9 @@ async function generateDocxFromJSON(jsonData, insertLocation = 'selection') {
 
           // 空段落
           if (isEmptyParagraph(para)) {
-            if (insertLocation === 'end') {
+            if (insertBeforeMode) {
+              targetRange.insertParagraph('', Word.InsertLocation.before);
+            } else if (insertLocation === 'end') {
               targetRange.insertParagraph('', Word.InsertLocation.end);
             } else {
               targetRange.insertParagraph('', insertLoc);
@@ -733,7 +1445,9 @@ async function generateDocxFromJSON(jsonData, insertLocation = 'selection') {
 
           // 插入段落
           let newParagraph;
-          if (insertLocation === 'end') {
+          if (insertBeforeMode) {
+            newParagraph = targetRange.insertParagraph(fullText, Word.InsertLocation.before);
+          } else if (insertLocation === 'end') {
             newParagraph = targetRange.insertParagraph(fullText, Word.InsertLocation.end);
           } else {
             newParagraph = targetRange.insertParagraph(fullText, insertLoc);
@@ -792,8 +1506,8 @@ async function generateDocxFromJSON(jsonData, insertLocation = 'selection') {
             }
           }
 
-          // 更新 targetRange 引用
-          if (insertLocation !== 'end') {
+          // 更新 targetRange 引用（before 模式不需要更新，始终在同一段落前插入）
+          if (!insertBeforeMode && insertLocation !== 'end') {
             targetRange = newParagraph;
           }
 
@@ -897,7 +1611,7 @@ async function generateDocxFromJSON(jsonData, insertLocation = 'selection') {
             }
           }
 
-          if (insertLocation !== 'end') {
+          if (!insertBeforeMode && insertLocation !== 'end') {
             targetRange = newTable.getRange('After');
           }
         }
@@ -948,11 +1662,102 @@ function findClosestMatch(items, offset) {
   return 0; // 简化实现，返回第一个匹配
 }
 
+/**
+ * 删除指定范围的段落（Office.js 版本）
+ * @param {number} startParaIndex - 起始段落索引（0-based）
+ * @param {number} [endParaIndex] - 结束段落索引（0-based，含），-1 表示删除到文档末尾
+ * @returns {Promise<{ success: boolean, deletedCount: number, message: string }>}
+ */
+async function deleteDocxPara(startParaIndex, endParaIndex) {
+  if (startParaIndex === undefined || startParaIndex === null) {
+    return { success: false, deletedCount: 0, message: '未提供有效的 startParaIndex' };
+  }
+  if (endParaIndex === undefined || endParaIndex === null) {
+    endParaIndex = startParaIndex;
+  }
+
+  try {
+    return await Word.run(async (context) => {
+      const allParas = context.document.body.paragraphs;
+      allParas.load('items');
+      await context.sync();
+
+      const totalParas = allParas.items.length;
+      if (totalParas === 0) {
+        return { success: false, deletedCount: 0, message: '文档中没有段落' };
+      }
+
+      if (endParaIndex === -1) {
+        endParaIndex = totalParas - 1;
+      }
+
+      if (startParaIndex < 0 || startParaIndex >= totalParas) {
+        return { success: false, deletedCount: 0, message: `startParaIndex ${startParaIndex} 超出范围，文档共 ${totalParas} 段` };
+      }
+      if (endParaIndex < startParaIndex || endParaIndex >= totalParas) {
+        return { success: false, deletedCount: 0, message: `endParaIndex ${endParaIndex} 无效` };
+      }
+
+      // 从后往前删除，避免索引偏移
+      let deletedCount = 0;
+      for (let idx = endParaIndex; idx >= startParaIndex; idx--) {
+        const para = allParas.items[idx];
+        para.delete();
+        deletedCount++;
+      }
+      await context.sync();
+
+      return { success: true, deletedCount, message: `成功删除 ${deletedCount} 个段落` };
+    });
+  } catch (e) {
+    return { success: false, deletedCount: 0, message: `删除失败: ${e.message}` };
+  }
+}
+
+/**
+ * 为指定范围的段落添加批注（Office.js 版本）
+ * @param {number} startParaIndex - 起始段落索引（0-based）
+ * @param {number} endParaIndex - 结束段落索引（0-based，含），-1 表示到文档末尾
+ * @param {string} text - 批注文本
+ * @returns {Promise<{ success: boolean, rangeStart: number, rangeEnd: number }>}
+ */
+async function addCommentToParas(startParaIndex, endParaIndex, text) {
+  try {
+    return await Word.run(async (context) => {
+      const allParas = context.document.body.paragraphs;
+      allParas.load('items');
+      await context.sync();
+
+      const totalParas = allParas.items.length;
+      if (endParaIndex === -1) endParaIndex = totalParas - 1;
+
+      const startPara = allParas.items[startParaIndex];
+      const endPara = allParas.items[endParaIndex];
+
+      // 获取起止段落的 range 然后合并
+      const startRange = startPara.getRange('Start');
+      const endRange = endPara.getRange('End');
+      const fullRange = startRange.expandTo(endRange);
+
+      // 插入批注
+      fullRange.insertComment(text);
+      await context.sync();
+
+      return { success: true };
+    });
+  } catch (e) {
+    console.error('添加批注失败:', e);
+    return { success: false, error: e.message };
+  }
+}
+
 // ============== 导出 ==============
 
 export default {
   parseDocxToJSON,
   generateDocxFromJSON,
+  deleteDocxPara,
+  addCommentToParas,
   cleanText,
   deduplicateStyles,
   resolveStyle,
@@ -975,6 +1780,8 @@ export default {
 export {
   parseDocxToJSON,
   generateDocxFromJSON,
+  deleteDocxPara,
+  addCommentToParas,
   cleanText,
   deduplicateStyles,
   resolveStyle,
