@@ -338,7 +338,12 @@ def read_document(startParaIndex: int = 0, endParaIndex: int = -1) -> str:
                     doc_json = result.get("documentJson", {})
                     if doc_json and doc_json.get("paragraphs"):
                         print(f"[read_document] ✅ 收到文档，段落数: {len(doc_json['paragraphs'])}")
-                        writer({"type": "read_complete", "content": f"✅ 文档读取完成(段落 {startParaIndex} - {endParaIndex})"})
+                        writer(
+                            {
+                                "type": "read_complete",
+                                "content": f"✅ 文档读取完成(段落 {startParaIndex} - {endParaIndex})",
+                            }
+                        )
                         return json.dumps(doc_json, ensure_ascii=False)
                     else:
                         print("[read_document] ⚠️ 收到空文档")
@@ -894,7 +899,7 @@ TOOL_MAP = {t.name: t for t in ALL_TOOLS}
 PLANNER_TOOLS = [create_workflow]
 RESEARCH_TOOLS = [web_search, web_fetch]
 OUTLINE_TOOLS = [read_document, query_document]
-WRITER_TOOLS = [generate_document, read_document, query_document]
+WRITER_TOOLS = [generate_document, delete_document, read_document, query_document]
 REVIEWER_TOOLS = [review_document]
 
 AGENT_TOOLS = {

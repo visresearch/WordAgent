@@ -219,8 +219,9 @@ const wsManager = {
   /**
    * 处理后端的文档读取请求：使用 Office.js 解析文档并通过 WebSocket 回传
    */
-  async _handleDocumentRequest() {
+  async _handleDocumentRequest(startParaIndex = 0, endParaIndex = -1) {
     try {
+      // Office.js 版暂不支持按段落范围解析，始终返回全文
       const docData = await parseDocumentRange();
 
       if (docData.error) {

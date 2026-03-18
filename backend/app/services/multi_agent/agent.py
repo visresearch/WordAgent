@@ -33,6 +33,7 @@ from app.services.multi_agent.tools import (
     review_document,
     read_document,
     generate_document,
+    delete_document,
     web_search,
     web_fetch,
     query_document,

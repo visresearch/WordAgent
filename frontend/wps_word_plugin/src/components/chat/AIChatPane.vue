@@ -1008,7 +1008,9 @@ export default {
             let startIdx = data.startParaIndex;
             let endIdx = data.endParaIndex;
             const totalParas = doc.Paragraphs.Count;
-            if (endIdx === -1) endIdx = totalParas - 1;
+            if (endIdx === -1) {
+              endIdx = totalParas - 1;
+            }
 
             const startPara = doc.Paragraphs.Item(startIdx + 1); // WPS 1-based
             const endPara = doc.Paragraphs.Item(endIdx + 1);
@@ -1179,7 +1181,9 @@ export default {
 
           // 先删除批注（从后往前，索引不偏移）
           for (const dr of deleteRanges) {
-            try { comments.Item(dr.commentIndex).Delete(); } catch (e) {}
+            try {
+              comments.Item(dr.commentIndex).Delete(); 
+            } catch (e) {}
           }
 
           // 再按 start 从大到小排序，从后往前删除段落范围（避免删除导致前面的范围偏移）

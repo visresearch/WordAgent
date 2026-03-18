@@ -20,6 +20,36 @@
       </div>
     </div>
 
+    <!-- 统一的 AI 操作确认条（删除+生成合并显示） -->
+    <div v-if="pendingDeletes.length > 0 || pendingDocument" class="current-selection-bar pending-document-bar" :class="{ 'pending-delete-bar': pendingDeletes.length > 0 && !pendingDocument }">
+      <div class="selection-bar-content">
+        <div class="selection-bar-icon pending-icon" :class="{ 'pending-delete-icon': pendingDeletes.length > 0 && !pendingDocument }">
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 16 16"
+            fill="currentColor"
+          >
+            <path
+              d="M14 1H2a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1zM2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2H2z"
+            />
+            <path d="M3 4h10v1H3V4zm0 3h10v1H3V7zm0 3h6v1H3v-1z" />
+          </svg>
+        </div>
+        <div class="selection-bar-info">
+          <span class="selection-bar-preview">{{ pendingSummary }}</span>
+        </div>
+        <div class="pending-actions">
+          <button class="pending-btn confirm-btn" :class="{ 'delete-confirm-btn': pendingDeletes.length > 0 && !pendingDocument }" @click="$emit('confirm-pending')">
+            确定
+          </button>
+          <button class="pending-btn cancel-btn" @click="$emit('cancel-pending')">
+            取消
+          </button>
+        </div>
+      </div>
+    </div>
+
     <div class="chat-input-area">
       <div class="input-container">
         <textarea
@@ -109,9 +139,11 @@ export default {
     availableModels: { type: Array, default: () => [] },
     modelsLoading: { type: Boolean, default: false },
     isLoading: { type: Boolean, default: false },
-    selections: { type: Array, default: () => [] }
+    selections: { type: Array, default: () => [] },
+    pendingDocument: { type: Object, default: null },
+    pendingDeletes: { type: Array, default: () => [] }
   },
-  emits: ['send', 'stop', 'add-selection', 'remove-selection', 'update:mode', 'update:selectedModel'],
+  emits: ['send', 'stop', 'add-selection', 'remove-selection', 'update:mode', 'update:selectedModel', 'confirm-pending', 'cancel-pending'],
   data() {
     return {
       inputText: '',
@@ -123,6 +155,17 @@ export default {
     selectedModelName() {
       const model = this.availableModels.find((m) => m.id === this.selectedModel);
       return model ? model.name : '选择模型';
+    },
+    pendingSummary() {
+      const parts = [];
+      if (this.pendingDeletes.length > 0) {
+        const totalDeleteParas = this.pendingDeletes.reduce((sum, d) => sum + (d.endParaIndex - d.startParaIndex + 1), 0);
+        parts.push(`删除 ${totalDeleteParas} 个段落`);
+      }
+      if (this.pendingDocument) {
+        parts.push(this.pendingDocument.preview);
+      }
+      return 'AI 操作：' + parts.join('，');
     }
   },
   mounted() {
@@ -219,6 +262,77 @@ export default {
 .selection-bar-clear:hover {
   background: #f5f5f5;
   color: #000;
+}
+
+/* 修改预览条 */
+.pending-document-bar {
+  border-top: 1px solid #d8d8d8;
+  border-bottom: 1px solid #d8d8d8;
+  background: #f0f0f0;
+}
+
+/* 删除预览条 */
+.pending-delete-bar {
+  background: #fff5f5;
+  border-top-color: #ffcccc;
+  border-bottom-color: #ffcccc;
+}
+
+.pending-icon {
+  color: #e74c3c !important;
+}
+
+.pending-delete-icon {
+  color: #dc3545 !important;
+}
+
+.pending-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.pending-btn {
+  padding: 2px 10px;
+  font-size: 11px;
+  border-radius: 4px;
+  border: 1px solid #ddd;
+  cursor: pointer;
+  transition: all 0.2s;
+  line-height: 1.4;
+}
+
+.confirm-btn {
+  background: #667eea;
+  color: white;
+  border-color: #667eea;
+}
+
+.confirm-btn:hover {
+  background: #5a6fd6;
+  border-color: #5a6fd6;
+}
+
+.delete-confirm-btn {
+  background: #dc3545;
+  border-color: #dc3545;
+}
+
+.delete-confirm-btn:hover {
+  background: #c82333;
+  border-color: #c82333;
+}
+
+.cancel-btn {
+  background: white;
+  color: #666;
+  border-color: #ddd;
+}
+
+.cancel-btn:hover {
+  background: #f5f5f5;
+  color: #333;
+  border-color: #ccc;
 }
 
 .chat-input-area {

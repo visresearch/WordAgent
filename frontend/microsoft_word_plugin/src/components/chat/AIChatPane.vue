@@ -14,6 +14,7 @@
         @insert-to-word="insertToWord"
         @copy="copyToClipboard"
         @retry="retryMessage"
+        @revert="revertToMessage"
         @toggle-thinking="toggleThinking"
       />
       <ChatInput
@@ -23,12 +24,16 @@
         :models-loading="modelsLoading"
         :is-loading="isLoading"
         :selections="selections"
+        :pending-document="pendingDocument"
+        :pending-deletes="pendingDeletes"
         @update:mode="mode = $event"
         @update:selected-model="selectedModel = $event"
         @send="handleSend"
         @stop="stopGeneration"
         @add-selection="addSelectionFromWord"
         @remove-selection="removeSelection"
+        @confirm-pending="confirmPending"
+        @cancel-pending="cancelPending"
       />
     </div>
     <transition name="slide-session">
@@ -67,10 +72,14 @@ export default {
       modelsLoading: false,
       messages: [],
       isLoading: false,
+      lastReadJSON: null,
       selections: [],
       currentStreamCtrl: null,
       currentSessionId: null,
       currentSessionTitle: null,
+      pendingDocument: null,
+      pendingDocumentMsg: null,
+      pendingDeletes: [],  // [{startParaIndex, endParaIndex, preview, msg}] 待确认删除列表
       hasHistory: false,
       historyLoaded: false,
       historyLoading: false,
@@ -538,17 +547,19 @@ export default {
     _handleStreamMessage(data, aiMsg) {
       const msg = aiMsg;
 
+      // 后端请求读取文档
       if (data.type === 'read_document') {
         msg.contentParts.push({
           type: 'status',
-          content: data.content || '📑 正在读取文档...',
+          content: data.content || `📑 正在读取文档(段落 ${data.startParaIndex} - ${data.endParaIndex})`,
           loading: true
         });
         this.scrollToBottom();
-        api.wsManager._handleDocumentRequest();
+        api.wsManager._handleDocumentRequest(data.startParaIndex, data.endParaIndex);
         return;
       }
 
+      // 后端请求查询文档
       if (data.type === 'query_document') {
         msg.contentParts.push({
           type: 'status',
@@ -560,14 +571,15 @@ export default {
         return;
       }
 
-      if (data.type === 'query_complete' || data.type === 'read_complete' || data.type === 'generate_complete' || data.type === 'delete_complete') {
+      // 查询完成
+      if (data.type === 'query_complete') {
         const parts = msg.contentParts;
         let found = false;
         for (let i = parts.length - 1; i >= 0; i--) {
           if (parts[i].type === 'status' && parts[i].loading) {
             parts.splice(i, 1, {
               type: 'status',
-              content: data.content || '✅ 完成',
+              content: data.content || '✅ 搜索完成',
               loading: false
             });
             found = true;
@@ -575,50 +587,105 @@ export default {
           }
         }
         if (!found) {
-          parts.push({ type: 'status', content: data.content || '✅ 完成', loading: false });
-        }
-        if (data.type === 'read_complete' && data.documentJson) {
-          this.lastReadJSON = data.documentJson;
+          parts.push({ type: 'status', content: data.content || '✅ 搜索完成', loading: false });
         }
         this.scrollToBottom();
         return;
       }
 
-      // 后端请求删除文档段落：添加批注标记后自动执行删除（非阻塞，不回传结果）
+      // 读取完成
+      if (data.type === 'read_complete') {
+        this.lastReadJSON = data.documentJson || null;
+        const parts = msg.contentParts;
+        let found = false;
+        for (let i = parts.length - 1; i >= 0; i--) {
+          if (parts[i].type === 'status' && parts[i].loading) {
+            parts.splice(i, 1, {
+              type: 'status',
+              content: data.content || '✅ 文档读取完成',
+              loading: false
+            });
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          parts.push({ type: 'status', content: data.content || '✅ 文档读取完成', loading: false });
+        }
+        this.scrollToBottom();
+        return;
+      }
+
+      // 后端请求删除文档段落：用批注标记，加入待删除列表（非阻塞）
       if (data.type === 'delete_document') {
         console.log('[AIChatPane] 后端请求删除文档段落, startParaIndex:', data.startParaIndex, 'endParaIndex:', data.endParaIndex);
         msg.contentParts.push({
           type: 'status',
           content: data.content || `🗑️ 准备删除段落(${data.startParaIndex} - ${data.endParaIndex})`,
-          loading: true
+          loading: false
         });
         this.scrollToBottom();
 
-        // 添加批注标记后执行删除
+        // 在文档中用批注标记要删除的段落
         (async () => {
           try {
-            await addCommentToParas(data.startParaIndex, data.endParaIndex, '待删除内容');
-            const result = await deleteDocxPara(data.startParaIndex, data.endParaIndex);
-            console.log('[AIChatPane] 删除结果:', result);
-            // 更新消息状态
-            const parts = msg.contentParts;
-            for (let i = parts.length - 1; i >= 0; i--) {
-              if (parts[i].type === 'status' && parts[i].loading) {
-                parts.splice(i, 1, {
-                  type: 'status',
-                  content: `✅ 已删除 ${result.deletedCount || 0} 个段落`,
-                  loading: false
-                });
-                break;
-              }
-            }
+            await Word.run(async (context) => {
+              const allParas = context.document.body.paragraphs;
+              allParas.load('items');
+              await context.sync();
+
+              let startIdx = data.startParaIndex;
+              let endIdx = data.endParaIndex;
+              const totalParas = allParas.items.length;
+              if (endIdx === -1) endIdx = totalParas - 1;
+
+              const startPara = allParas.items[startIdx];
+              const endPara = allParas.items[endIdx];
+              const startRange = startPara.getRange('Start');
+              const endRange = endPara.getRange('End');
+              const fullRange = startRange.expandTo(endRange);
+              fullRange.insertComment('[文策AI-删除] 待删除内容');
+              await context.sync();
+
+              const deleteCount = endIdx - startIdx + 1;
+              this.pendingDeletes.push({
+                startParaIndex: startIdx,
+                endParaIndex: endIdx,
+                preview: `AI 准备删除 ${deleteCount} 个段落（段落 ${startIdx} - ${endIdx}）`,
+                msg: msg
+              });
+              console.log('[AIChatPane] 已添加删除标记批注');
+            });
           } catch (e) {
-            console.error('[AIChatPane] 删除失败:', e);
+            console.error('[AIChatPane] 标记删除段落失败:', e);
           }
         })();
         return;
       }
 
+      // 删除完成
+      if (data.type === 'delete_complete') {
+        const parts = msg.contentParts;
+        let found = false;
+        for (let i = parts.length - 1; i >= 0; i--) {
+          if (parts[i].type === 'status' && parts[i].loading) {
+            parts.splice(i, 1, {
+              type: 'status',
+              content: data.content || '✅ 删除完成',
+              loading: false
+            });
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          parts.push({ type: 'status', content: data.content || '✅ 删除完成', loading: false });
+        }
+        this.scrollToBottom();
+        return;
+      }
+
+      // 生成文档中
       if (data.type === 'generate_document') {
         msg.contentParts.push({
           type: 'status',
@@ -629,6 +696,29 @@ export default {
         return;
       }
 
+      // 生成完成
+      if (data.type === 'generate_complete') {
+        const parts = msg.contentParts;
+        let found = false;
+        for (let i = parts.length - 1; i >= 0; i--) {
+          if (parts[i].type === 'status' && parts[i].loading) {
+            parts.splice(i, 1, {
+              type: 'status',
+              content: data.content || '✅ 文档已生成',
+              loading: false
+            });
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          parts.push({ type: 'status', content: data.content || '✅ 文档已生成', loading: false });
+        }
+        this.scrollToBottom();
+        return;
+      }
+
+      // 其他状态消息
       if (data.type === 'status' && data.content) {
         msg.contentParts.push({ type: 'status', content: data.content, loading: !!data.loading });
         this.scrollToBottom();
@@ -655,12 +745,188 @@ export default {
         this.scrollToBottom();
       } else if (data.type === 'json' && data.content) {
         msg.documentJson = data.content;
+
+        console.log('收到完整JSON，自动输出到文档');
         this.$nextTick(() => {
           this.insertToWord(msg);
+
+          // 插入后显示预览条，等待用户确认或取消
+          const paragraphs = data.content.paragraphs || [];
+          const paraCount = paragraphs.length;
+          const tableCount = (data.content.tables || []).length;
+          let summary = `${paraCount} 个段落`;
+          if (tableCount > 0) {
+            summary += `，${tableCount} 个表格`;
+          }
+
+          this.pendingDocument = {
+            preview: `AI 已生成（${summary}）`
+          };
+          this.pendingDocumentMsg = msg;
         });
+
         this.scrollToBottom();
       } else if (data.error) {
         msg.content += `\n\n错误: ${data.error}`;
+      }
+    },
+
+    // ============== 待处理操作确认/取消 ==============
+
+    /**
+     * 一键确认所有待处理操作（删除 + 生成）
+     */
+    async confirmPending() {
+      try {
+        await Word.run(async (context) => {
+          // 1. 通过"[文策AI-删除]"批注定位并删除段落
+          if (this.pendingDeletes.length > 0) {
+            const comments = context.document.body.getComments();
+            comments.load('items');
+            await context.sync();
+
+            for (const comment of comments.items) {
+              comment.load('content');
+            }
+            await context.sync();
+
+            // 收集所有删除批注及其范围
+            const deleteItems = [];
+            for (const comment of comments.items) {
+              if (comment.content && comment.content.startsWith('[文策AI-删除]')) {
+                deleteItems.push(comment);
+              }
+            }
+
+            // 从后往前删除（避免前面的删除影响后面的位置）
+            for (let i = deleteItems.length - 1; i >= 0; i--) {
+              const range = deleteItems[i].getRange();
+              deleteItems[i].delete();
+              range.delete();
+            }
+            await context.sync();
+          }
+
+          // 2. 确认生成文档（去掉"[文策AI]"批注）
+          if (this.pendingDocumentMsg) {
+            const comments = context.document.body.getComments();
+            comments.load('items');
+            await context.sync();
+
+            for (const comment of comments.items) {
+              comment.load('content');
+            }
+            await context.sync();
+
+            for (const comment of comments.items) {
+              if (comment.content && comment.content.startsWith('[文策AI]') && !comment.content.startsWith('[文策AI-删除]')) {
+                comment.delete();
+              }
+            }
+            await context.sync();
+          }
+        });
+      } catch (e) {
+        console.error('确认操作失败:', e);
+      }
+      this.pendingDeletes = [];
+      this.pendingDocument = null;
+      this.pendingDocumentMsg = null;
+    },
+
+    /**
+     * 一键取消所有待处理操作（移除删除标记 + 撤销生成）
+     */
+    async cancelPending() {
+      // 1. 移除所有"[文策AI-删除]"批注
+      if (this.pendingDeletes.length > 0) {
+        try {
+          await Word.run(async (context) => {
+            const comments = context.document.body.getComments();
+            comments.load('items');
+            await context.sync();
+
+            for (const comment of comments.items) {
+              comment.load('content');
+            }
+            await context.sync();
+
+            for (const comment of comments.items) {
+              if (comment.content && comment.content.startsWith('[文策AI-删除]')) {
+                comment.delete();
+              }
+            }
+            await context.sync();
+          });
+        } catch (e) {
+          console.error('移除删除标记批注失败:', e);
+        }
+        this.pendingDeletes = [];
+      }
+
+      // 2. 撤销生成文档（通过批注定位并删除内容）
+      if (this.pendingDocumentMsg) {
+        try {
+          await Word.run(async (context) => {
+            const comments = context.document.body.getComments();
+            comments.load('items');
+            await context.sync();
+
+            for (const comment of comments.items) {
+              comment.load('content');
+            }
+            await context.sync();
+
+            for (const comment of comments.items) {
+              if (comment.content && comment.content.startsWith('[文策AI]') && !comment.content.startsWith('[文策AI-删除]')) {
+                const range = comment.getRange();
+                comment.delete();
+                range.delete();
+              }
+            }
+            await context.sync();
+          });
+        } catch (e) {
+          console.error('撤销生成文档失败:', e);
+        }
+        this.pendingDocumentMsg.documentReverted = true;
+      }
+      this.pendingDocument = null;
+      this.pendingDocumentMsg = null;
+      console.log('用户取消了所有待处理操作');
+    },
+
+    /**
+     * 还原到某条消息 - 通过批注定位删除插入的内容
+     */
+    async revertToMessage(messageIndex) {
+      if (this.isLoading) return;
+      const msg = this.messages[messageIndex];
+      if (!msg) return;
+
+      try {
+        await Word.run(async (context) => {
+          const comments = context.document.body.getComments();
+          comments.load('items');
+          await context.sync();
+
+          for (const comment of comments.items) {
+            comment.load('content');
+          }
+          await context.sync();
+
+          for (const comment of comments.items) {
+            if (comment.content && comment.content.startsWith('[文策AI]') && !comment.content.startsWith('[文策AI-删除]')) {
+              const range = comment.getRange();
+              comment.delete();
+              range.delete();
+            }
+          }
+          await context.sync();
+        });
+        msg.documentReverted = true;
+      } catch (e) {
+        console.error('撤销失败:', e);
       }
     },
 
@@ -683,11 +949,56 @@ export default {
         }
 
         if (jsonData && (jsonData.paragraphs || jsonData.tables)) {
-          const insertLocation = (jsonData.position === -1) ? 'end' : 'selection';
+          // 统一使用 JSON 中 AI 指定的 insertParaIndex 作为插入位置
+          let insertLocation = 'end';
+          if (jsonData.insertParaIndex !== null && jsonData.insertParaIndex !== undefined) {
+            if (jsonData.insertParaIndex === -1) {
+              insertLocation = 'end';
+            } else {
+              insertLocation = 'before';
+              jsonData.paraIndex = jsonData.insertParaIndex;
+            }
+          }
+
           const result = await generateDocxFromJSON(jsonData, insertLocation);
           if (result?.error) {
             console.error('生成文档失败:', result.error);
             await this._insertPlainText(content);
+          } else {
+            // 添加"[文策AI]"批注标记新生成的内容
+            try {
+              await Word.run(async (context) => {
+                const paras = context.document.body.paragraphs;
+                paras.load('items');
+                await context.sync();
+
+                // 简单方式：对最后插入的段落范围添加批注
+                // 由于无法精确获取插入范围，通过 insertParaIndex 推算
+                const totalParas = paras.items.length;
+                const newParaCount = jsonData.paragraphs?.length || 0;
+                if (newParaCount > 0 && totalParas > 0) {
+                  let startIdx, endIdx;
+                  if (insertLocation === 'end') {
+                    endIdx = totalParas - 1;
+                    startIdx = totalParas - newParaCount;
+                  } else {
+                    startIdx = jsonData.insertParaIndex;
+                    endIdx = startIdx + newParaCount - 1;
+                  }
+                  if (startIdx >= 0 && endIdx < totalParas) {
+                    const startPara = paras.items[startIdx];
+                    const endPara = paras.items[endIdx];
+                    const startRange = startPara.getRange('Start');
+                    const endRange = endPara.getRange('End');
+                    const fullRange = startRange.expandTo(endRange);
+                    fullRange.insertComment('[文策AI] 待添加内容');
+                    await context.sync();
+                  }
+                }
+              });
+            } catch (e) {
+              console.error('添加批注失败:', e);
+            }
           }
         } else {
           await this._insertPlainText(content);
