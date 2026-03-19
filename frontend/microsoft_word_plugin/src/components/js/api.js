@@ -16,16 +16,16 @@
 
 /* global Word */
 
-import { parseDocxToJSON } from './docxJsonConverter.js';
+import { parseDocxToJSON } from "./docxJsonConverter.js";
 
 // ============== 配置 ==============
 
 const CONFIG = {
-  baseURL: 'http://localhost:3880',
+  baseURL: "http://localhost:3880",
   timeout: 30000,
   headers: {
-    'Content-Type': 'application/json'
-  }
+    "Content-Type": "application/json",
+  },
 };
 
 // ============== 工具函数 ==============
@@ -40,15 +40,15 @@ async function request(url, options = {}) {
   const fullURL = `${CONFIG.baseURL}${url}`;
 
   const fetchOptions = {
-    method: options.method || 'GET',
+    method: options.method || "GET",
     headers: {
       ...CONFIG.headers,
-      ...options.headers
+      ...options.headers,
     },
-    ...options
+    ...options,
   };
 
-  if (options.body && typeof options.body === 'object') {
+  if (options.body && typeof options.body === "object") {
     fetchOptions.body = JSON.stringify(options.body);
   }
 
@@ -61,10 +61,10 @@ async function request(url, options = {}) {
     const response = await fetch(fullURL, fetchOptions);
     clearTimeout(timeoutId);
 
-    const contentType = response.headers.get('content-type');
+    const contentType = response.headers.get("content-type");
     let data;
 
-    if (contentType && contentType.includes('application/json')) {
+    if (contentType && contentType.includes("application/json")) {
       data = await response.json();
     } else {
       data = await response.text();
@@ -75,28 +75,28 @@ async function request(url, options = {}) {
         success: false,
         error: data.message || data.error || `HTTP ${response.status}: ${response.statusText}`,
         status: response.status,
-        data
+        data,
       };
     }
 
     return {
       success: true,
       data,
-      status: response.status
+      status: response.status,
     };
   } catch (error) {
-    if (error.name === 'AbortError') {
+    if (error.name === "AbortError") {
       return {
         success: false,
-        error: '请求超时，请稍后重试',
-        code: 'TIMEOUT'
+        error: "请求超时，请稍后重试",
+        code: "TIMEOUT",
       };
     }
 
     return {
       success: false,
-      error: error.message || '网络请求失败',
-      code: 'NETWORK_ERROR'
+      error: error.message || "网络请求失败",
+      code: "NETWORK_ERROR",
     };
   }
 }
@@ -120,7 +120,7 @@ const wsManager = {
   _connectPromise: null,
 
   getWsURL() {
-    const wsBase = CONFIG.baseURL.replace(/^http/, 'ws');
+    const wsBase = CONFIG.baseURL.replace(/^http/, "ws");
     return `${wsBase}/api/chat/ws`;
   },
 
@@ -135,12 +135,12 @@ const wsManager = {
 
     this._connectPromise = new Promise((resolve, reject) => {
       const url = this.getWsURL();
-      console.log('[WebSocket] 正在连接:', url);
+      console.log("[WebSocket] 正在连接:", url);
 
       const ws = new WebSocket(url);
 
       ws.onopen = () => {
-        console.log('[WebSocket] 连接成功');
+        console.log("[WebSocket] 连接成功");
         this.ws = ws;
         this.connected = true;
         this._reconnectAttempts = 0;
@@ -152,16 +152,16 @@ const wsManager = {
         try {
           const data = JSON.parse(event.data);
 
-          if (data.type === 'done') {
+          if (data.type === "done") {
             if (this.onComplete) {
               this.onComplete();
             }
             return;
           }
 
-          if (data.type === 'error') {
+          if (data.type === "error") {
             if (this.onError) {
-              this.onError(new Error(data.content || '未知错误'));
+              this.onError(new Error(data.content || "未知错误"));
             }
             return;
           }
@@ -170,20 +170,20 @@ const wsManager = {
             this.onMessage(data);
           }
         } catch (e) {
-          console.error('[WebSocket] 解析消息失败:', e, event.data);
+          console.error("[WebSocket] 解析消息失败:", e, event.data);
         }
       };
 
       ws.onerror = (event) => {
-        console.error('[WebSocket] 连接错误:', event);
+        console.error("[WebSocket] 连接错误:", event);
         this._connectPromise = null;
         if (!this.connected) {
-          reject(new Error('WebSocket 连接失败'));
+          reject(new Error("WebSocket 连接失败"));
         }
       };
 
       ws.onclose = (event) => {
-        console.log('[WebSocket] 连接关闭:', event.code, event.reason);
+        console.log("[WebSocket] 连接关闭:", event.code, event.reason);
         this.connected = false;
         this.ws = null;
         this._connectPromise = null;
@@ -210,7 +210,7 @@ const wsManager = {
       this._reconnectTimer = null;
     }
     if (this.ws) {
-      this.ws.close(1000, '主动关闭');
+      this.ws.close(1000, "主动关闭");
       this.ws = null;
       this.connected = false;
     }
@@ -229,17 +229,17 @@ const wsManager = {
       }
 
       await this.send({
-        type: 'document_response',
-        documentJson: docData
+        type: "document_response",
+        documentJson: docData,
       });
 
-      console.log('[WebSocket] 已回传文档，段落数:', docData.paragraphs?.length || 0);
+      console.log("[WebSocket] 已回传文档，段落数:", docData.paragraphs?.length || 0);
     } catch (err) {
-      console.error('[WebSocket] 解析/回传文档失败:', err);
+      console.error("[WebSocket] 解析/回传文档失败:", err);
       await this.send({
-        type: 'document_response',
+        type: "document_response",
         documentJson: {},
-        error: err?.message || String(err)
+        error: err?.message || String(err),
       });
     }
   },
@@ -259,26 +259,28 @@ const wsManager = {
 
       // Office.js 版暂无 docxQuery，返回全文段落供后端处理
       const paragraphs = docData.paragraphs || [];
-      const matches = paragraphs.map((p, index) => ({
-        index,
-        text: (p.runs || []).map(r => r.text || '').join(''),
-        pStyle: p.pStyle
-      })).filter(m => m.text);
+      const matches = paragraphs
+        .map((p, index) => ({
+          index,
+          text: (p.runs || []).map((r) => r.text || "").join(""),
+          pStyle: p.pStyle,
+        }))
+        .filter((m) => m.text);
 
       await this.send({
-        type: 'query_response',
+        type: "query_response",
         matches: matches,
-        matchCount: matches.length
+        matchCount: matches.length,
       });
 
-      console.log('[WebSocket] 已回传查询结果，段落数:', matches.length);
+      console.log("[WebSocket] 已回传查询结果，段落数:", matches.length);
     } catch (err) {
-      console.error('[WebSocket] 查询文档失败:', err);
+      console.error("[WebSocket] 查询文档失败:", err);
       await this.send({
-        type: 'query_response',
+        type: "query_response",
         matches: [],
         matchCount: 0,
-        error: err.message
+        error: err.message,
       });
     }
   },
@@ -290,15 +292,17 @@ const wsManager = {
 
     this._reconnectAttempts++;
     const delay = Math.min(1000 * Math.pow(2, this._reconnectAttempts - 1), 10000);
-    console.log(`[WebSocket] ${delay}ms 后重连 (${this._reconnectAttempts}/${this._maxReconnectAttempts})`);
+    console.log(
+      `[WebSocket] ${delay}ms 后重连 (${this._reconnectAttempts}/${this._maxReconnectAttempts})`
+    );
 
     this._reconnectTimer = setTimeout(() => {
       this._reconnectTimer = null;
       this.connect().catch(() => {
-        console.log('[WebSocket] 重连失败');
+        console.log("[WebSocket] 重连失败");
       });
     }, delay);
-  }
+  },
 };
 
 /**
@@ -313,10 +317,10 @@ function chatStream(message, options = {}) {
     onMessage,
     onError,
     onComplete,
-    mode = 'agent',
-    model = 'auto',
+    mode = "agent",
+    model = "auto",
     documentRange = null,
-    history = []
+    history = [],
   } = options;
 
   wsManager.onMessage = onMessage;
@@ -328,13 +332,13 @@ function chatStream(message, options = {}) {
       await wsManager.connect();
 
       await wsManager.send({
-        type: 'chat',
+        type: "chat",
         message: message.trim(),
         mode,
         model,
         documentRange,
         history,
-        timestamp: Date.now()
+        timestamp: Date.now(),
       });
     } catch (error) {
       if (onError) {
@@ -347,8 +351,8 @@ function chatStream(message, options = {}) {
 
   return {
     abort: () => {
-      wsManager.send({ type: 'stop' }).catch(() => {});
-    }
+      wsManager.send({ type: "stop" }).catch(() => {});
+    },
   };
 }
 
@@ -361,20 +365,20 @@ function chatStream(message, options = {}) {
  * @param {string} [scope='body'] - 'body' 解析全文, 'selection' 解析选区
  * @returns {Promise<Object>} - 解析结果
  */
-async function parseDocumentRange(scope = 'body') {
+async function parseDocumentRange(scope = "body") {
   try {
     const result = await parseDocxToJSON(scope);
 
     if (!result.error) {
       result._meta = {
-        isFullDocument: scope === 'body',
-        parsedAt: new Date().toISOString()
+        isFullDocument: scope === "body",
+        parsedAt: new Date().toISOString(),
       };
     }
 
     return result;
   } catch (error) {
-    return { error: '解析文档失败: ' + error.message };
+    return { error: "解析文档失败: " + error.message };
   }
 }
 
@@ -384,8 +388,8 @@ async function parseDocumentRange(scope = 'body') {
  * @returns {Promise<Object>} - 模型列表
  */
 async function getModels() {
-  return await request('/api/chat/models', {
-    method: 'GET'
+  return await request("/api/chat/models", {
+    method: "GET",
   });
 }
 
@@ -397,16 +401,16 @@ async function getModels() {
 async function getSessions(options = {}) {
   const { limit = 50 } = options;
   const params = new URLSearchParams({ limit: String(limit) });
-  return await request(`/api/sessions?${params}`, { method: 'GET' });
+  return await request(`/api/sessions?${params}`, { method: "GET" });
 }
 
 /**
  * 创建新会话
  */
 async function createSession(data = {}) {
-  return await request('/api/sessions', {
-    method: 'POST',
-    body: data
+  return await request("/api/sessions", {
+    method: "POST",
+    body: data,
   });
 }
 
@@ -414,14 +418,14 @@ async function createSession(data = {}) {
  * 获取最新会话（含消息）
  */
 async function getLatestSession() {
-  return await request('/api/sessions/latest', { method: 'GET' });
+  return await request("/api/sessions/latest", { method: "GET" });
 }
 
 /**
  * 获取会话详情（含消息）
  */
 async function getSession(sessionId) {
-  return await request(`/api/sessions/${sessionId}`, { method: 'GET' });
+  return await request(`/api/sessions/${sessionId}`, { method: "GET" });
 }
 
 /**
@@ -429,8 +433,8 @@ async function getSession(sessionId) {
  */
 async function renameSessionApi(sessionId, title) {
   return await request(`/api/sessions/${sessionId}`, {
-    method: 'PATCH',
-    body: { title }
+    method: "PATCH",
+    body: { title },
   });
 }
 
@@ -438,7 +442,7 @@ async function renameSessionApi(sessionId, title) {
  * 删除会话
  */
 async function deleteSessionApi(sessionId) {
-  return await request(`/api/sessions/${sessionId}`, { method: 'DELETE' });
+  return await request(`/api/sessions/${sessionId}`, { method: "DELETE" });
 }
 
 /**
@@ -447,7 +451,7 @@ async function deleteSessionApi(sessionId) {
 async function getSessionMessages(sessionId, options = {}) {
   const { limit = 200, offset = 0 } = options;
   const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
-  return await request(`/api/sessions/${sessionId}/messages?${params}`, { method: 'GET' });
+  return await request(`/api/sessions/${sessionId}/messages?${params}`, { method: "GET" });
 }
 
 /**
@@ -455,8 +459,8 @@ async function getSessionMessages(sessionId, options = {}) {
  */
 async function addSessionMessage(sessionId, messageData) {
   return await request(`/api/sessions/${sessionId}/messages`, {
-    method: 'POST',
-    body: messageData
+    method: "POST",
+    body: messageData,
   });
 }
 
@@ -464,8 +468,8 @@ async function addSessionMessage(sessionId, messageData) {
  * 清空所有会话及消息
  */
 async function clearAllSessions() {
-  return await request('/api/sessions', {
-    method: 'DELETE'
+  return await request("/api/sessions", {
+    method: "DELETE",
   });
 }
 
@@ -476,18 +480,18 @@ async function clearAllSessions() {
  */
 async function getSettings() {
   try {
-    const response = await request('/api/settings', {
-      method: 'GET'
+    const response = await request("/api/settings", {
+      method: "GET",
     });
 
     if (!response.success) {
-      console.error('获取设置失败:', response.error);
+      console.error("获取设置失败:", response.error);
       return { providers: [] };
     }
 
     return response.data;
   } catch (error) {
-    console.error('获取设置异常:', error);
+    console.error("获取设置异常:", error);
     return { providers: [] };
   }
 }
@@ -497,18 +501,18 @@ async function getSettings() {
  */
 async function saveSettings(settings) {
   try {
-    const response = await request('/api/settings', {
-      method: 'POST',
-      body: settings
+    const response = await request("/api/settings", {
+      method: "POST",
+      body: settings,
     });
 
     if (!response.success) {
-      throw new Error(response.error || '保存设置失败');
+      throw new Error(response.error || "保存设置失败");
     }
 
     return response;
   } catch (error) {
-    console.error('保存设置异常:', error);
+    console.error("保存设置异常:", error);
     throw error;
   }
 }
@@ -518,25 +522,25 @@ async function saveSettings(settings) {
  */
 async function fetchAvailableModels({ baseUrl, apiKey }) {
   try {
-    const result = await request('/api/chat/providers/models', {
-      method: 'POST',
+    const result = await request("/api/chat/providers/models", {
+      method: "POST",
       body: {
         base_url: baseUrl,
-        api_key: apiKey
-      }
+        api_key: apiKey,
+      },
     });
 
     if (result.success && result.data?.success && result.data?.models) {
       return {
         success: true,
-        models: result.data.models
+        models: result.data.models,
       };
     }
 
-    throw new Error(result.data?.error || result.error || '获取模型列表失败');
+    throw new Error(result.data?.error || result.error || "获取模型列表失败");
   } catch (error) {
-    console.error('获取模型列表失败:', error);
-    throw new Error(error.message || '获取模型列表失败');
+    console.error("获取模型列表失败:", error);
+    throw new Error(error.message || "获取模型列表失败");
   }
 }
 
@@ -546,9 +550,9 @@ async function fetchAvailableModels({ baseUrl, apiKey }) {
  * 扫描缓存
  */
 async function scanCache() {
-  const response = await request('/api/cache/scan', { method: 'GET' });
+  const response = await request("/api/cache/scan", { method: "GET" });
   if (!response.success) {
-    throw new Error(response.error || '扫描缓存失败');
+    throw new Error(response.error || "扫描缓存失败");
   }
   return response.data;
 }
@@ -557,9 +561,9 @@ async function scanCache() {
  * 清除缓存
  */
 async function clearCache() {
-  const response = await request('/api/cache/clear', { method: 'DELETE' });
+  const response = await request("/api/cache/clear", { method: "DELETE" });
   if (!response.success) {
-    throw new Error(response.error || '清除缓存失败');
+    throw new Error(response.error || "清除缓存失败");
   }
   return response.data;
 }
@@ -616,7 +620,7 @@ export default {
   updateConfig,
   getConfig,
 
-  request
+  request,
 };
 
 export {
@@ -624,9 +628,7 @@ export {
   getModels,
   fetchAvailableModels,
   parseDocumentRange,
-
   wsManager,
-
   getSessions,
   createSession,
   getLatestSession,
@@ -636,12 +638,11 @@ export {
   getSessionMessages,
   addSessionMessage,
   clearAllSessions,
-
   getSettings,
   saveSettings,
   scanCache,
   clearCache,
   updateConfig,
   getConfig,
-  request
+  request,
 };

@@ -74,7 +74,7 @@ const PSTYLE = {
   SPACE_BEFORE: 5,
   SPACE_AFTER: 6,
   STYLE_NAME: 7,
-  LINE_SPACING_RULE: 8
+  LINE_SPACING_RULE: 8,
 };
 
 const RSTYLE = {
@@ -88,20 +88,20 @@ const RSTYLE = {
   HIGHLIGHT: 7,
   STRIKETHROUGH: 8,
   SUPERSCRIPT: 9,
-  SUBSCRIPT: 10
+  SUBSCRIPT: 10,
 };
 
 const CSTYLE = {
   ROW_SPAN: 0,
   COL_SPAN: 1,
   ALIGNMENT: 2,
-  VERTICAL_ALIGNMENT: 3
+  VERTICAL_ALIGNMENT: 3,
 };
 
 // 默认样式值
-const DEFAULT_PSTYLE = ['left', 0, 0, 0, 0, 0, 0, '', 0];
-const DEFAULT_RSTYLE = ['', 12, false, false, 0, '#000000', '#000000', 0, false, false, false];
-const DEFAULT_CSTYLE = [1, 1, 'left', 'center'];
+const DEFAULT_PSTYLE = ["left", 0, 0, 0, 0, 0, 0, "", 0];
+const DEFAULT_RSTYLE = ["", 12, false, false, 0, "#000000", "#000000", 0, false, false, false];
+const DEFAULT_CSTYLE = [1, 1, "left", "center"];
 
 // ============== 样式去重与解析 ==============
 
@@ -109,8 +109,8 @@ function createStyleRegistry() {
   return {
     _maps: { p: new Map(), r: new Map(), c: new Map(), t: new Map() },
     _counts: { p: 0, r: 0, c: 0, t: 0 },
-    _prefixes: { p: 'pS_', r: 'rS_', c: 'cS_', t: 'tS_' },
-    styles: {}
+    _prefixes: { p: "pS_", r: "rS_", c: "cS_", t: "tS_" },
+    styles: {},
   };
 }
 
@@ -130,7 +130,7 @@ function registerStyle(registry, type, styleArray) {
 function resolveStyle(styles, ref, defaultStyle) {
   if (!ref) return defaultStyle;
   if (Array.isArray(ref)) return ref;
-  if (typeof ref === 'string' && styles && styles[ref]) return styles[ref];
+  if (typeof ref === "string" && styles && styles[ref]) return styles[ref];
   return defaultStyle;
 }
 
@@ -140,12 +140,12 @@ function deduplicateStyles(result) {
   if (result.paragraphs) {
     for (const para of result.paragraphs) {
       if (para.pStyle && Array.isArray(para.pStyle)) {
-        para.pStyle = registerStyle(registry, 'p', para.pStyle);
+        para.pStyle = registerStyle(registry, "p", para.pStyle);
       }
       if (para.runs) {
         for (const run of para.runs) {
           if (run.rStyle && Array.isArray(run.rStyle)) {
-            run.rStyle = registerStyle(registry, 'r', run.rStyle);
+            run.rStyle = registerStyle(registry, "r", run.rStyle);
           }
         }
       }
@@ -155,26 +155,26 @@ function deduplicateStyles(result) {
   if (result.tables) {
     for (const table of result.tables) {
       if (table.tStyle && Array.isArray(table.tStyle)) {
-        table.tStyle = registerStyle(registry, 't', table.tStyle);
+        table.tStyle = registerStyle(registry, "t", table.tStyle);
       }
       if (table.cells) {
         for (const row of table.cells) {
           for (const cell of row) {
             if (cell.cStyle && Array.isArray(cell.cStyle)) {
-              cell.cStyle = registerStyle(registry, 'c', cell.cStyle);
+              cell.cStyle = registerStyle(registry, "c", cell.cStyle);
             }
             if (cell.rStyle && Array.isArray(cell.rStyle)) {
-              cell.rStyle = registerStyle(registry, 'r', cell.rStyle);
+              cell.rStyle = registerStyle(registry, "r", cell.rStyle);
             }
             if (cell.paragraphs) {
               for (const para of cell.paragraphs) {
                 if (para.pStyle && Array.isArray(para.pStyle)) {
-                  para.pStyle = registerStyle(registry, 'p', para.pStyle);
+                  para.pStyle = registerStyle(registry, "p", para.pStyle);
                 }
                 if (para.runs) {
                   for (const run of para.runs) {
                     if (run.rStyle && Array.isArray(run.rStyle)) {
-                      run.rStyle = registerStyle(registry, 'r', run.rStyle);
+                      run.rStyle = registerStyle(registry, "r", run.rStyle);
                     }
                   }
                 }
@@ -192,12 +192,54 @@ function deduplicateStyles(result) {
 
 // ============== 格式转换辅助函数 ==============
 
-function makePStyle(alignment, lineSpacing, indentLeft, indentRight, indentFirstLine, spaceBefore, spaceAfter, styleName) {
-  return [alignment, lineSpacing, indentLeft, indentRight, indentFirstLine, spaceBefore, spaceAfter, styleName];
+function makePStyle(
+  alignment,
+  lineSpacing,
+  indentLeft,
+  indentRight,
+  indentFirstLine,
+  spaceBefore,
+  spaceAfter,
+  styleName
+) {
+  return [
+    alignment,
+    lineSpacing,
+    indentLeft,
+    indentRight,
+    indentFirstLine,
+    spaceBefore,
+    spaceAfter,
+    styleName,
+  ];
 }
 
-function makeRStyle(fontName, fontSize, bold, italic, underline, underlineColor, color, highlight, strikethrough, superscript, subscript) {
-  return [fontName, fontSize, bold, italic, underline, underlineColor, color, highlight, strikethrough, superscript, subscript];
+function makeRStyle(
+  fontName,
+  fontSize,
+  bold,
+  italic,
+  underline,
+  underlineColor,
+  color,
+  highlight,
+  strikethrough,
+  superscript,
+  subscript
+) {
+  return [
+    fontName,
+    fontSize,
+    bold,
+    italic,
+    underline,
+    underlineColor,
+    color,
+    highlight,
+    strikethrough,
+    superscript,
+    subscript,
+  ];
 }
 
 function makeCStyle(rowSpan, colSpan, alignment, verticalAlignment) {
@@ -208,78 +250,130 @@ function makeCStyle(rowSpan, colSpan, alignment, verticalAlignment) {
  * Office.js 对齐枚举 -> 名称
  */
 function getAlignmentName(alignment) {
-  if (typeof alignment === 'string') {
+  if (typeof alignment === "string") {
     const lower = alignment.toLowerCase();
-    if (['left', 'center', 'right', 'justify', 'distributed'].includes(lower)) {
-      return lower === 'distributed' ? 'distribute' : lower;
+    if (["left", "center", "right", "justify", "distributed"].includes(lower)) {
+      return lower === "distributed" ? "distribute" : lower;
     }
   }
   const map = {
-    'Left': 'left', 'Center': 'center', 'Right': 'right',
-    'Justified': 'justify', 'Distributed': 'distribute',
-    0: 'left', 1: 'center', 2: 'right', 3: 'justify', 4: 'distribute'
+    Left: "left",
+    Center: "center",
+    Right: "right",
+    Justified: "justify",
+    Distributed: "distribute",
+    0: "left",
+    1: "center",
+    2: "right",
+    3: "justify",
+    4: "distribute",
   };
-  return map[alignment] || 'left';
+  return map[alignment] || "left";
 }
 
 function getAlignmentValue(alignment) {
-  const map = { left: 'Left', center: 'Center', right: 'Right', justify: 'Justified', distribute: 'Distributed' };
-  return map[alignment] || 'Left';
+  const map = {
+    left: "Left",
+    center: "Center",
+    right: "Right",
+    justify: "Justified",
+    distribute: "Distributed",
+  };
+  return map[alignment] || "Left";
 }
 
 function getVerticalAlignmentName(alignment) {
-  if (typeof alignment === 'string') {
+  if (typeof alignment === "string") {
     const lower = alignment.toLowerCase();
-    if (['top', 'center', 'bottom'].includes(lower)) return lower;
+    if (["top", "center", "bottom"].includes(lower)) return lower;
   }
-  const map = { 'Top': 'top', 'Center': 'center', 'Bottom': 'bottom' };
-  return map[alignment] || 'center';
+  const map = { Top: "top", Center: "center", Bottom: "bottom" };
+  return map[alignment] || "center";
 }
 
 function getVerticalAlignmentValue(alignment) {
-  const map = { top: 'Top', center: 'Center', bottom: 'Bottom' };
-  return map[alignment] || 'Center';
+  const map = { top: "Top", center: "Center", bottom: "Bottom" };
+  return map[alignment] || "Center";
 }
 
 /**
  * Office.js 下划线枚举 -> 数值
  */
 function getUnderlineValue(underlineType) {
-  if (typeof underlineType === 'number') return underlineType;
+  if (typeof underlineType === "number") return underlineType;
   const map = {
-    'None': 0, 'Single': 1, 'Double': 3, 'Dotted': 4,
-    'Thick': 6, 'DottedHeavy': 7, 'Wave': 11, 'WavyHeavy': 27
+    None: 0,
+    Single: 1,
+    Double: 3,
+    Dotted: 4,
+    Thick: 6,
+    DottedHeavy: 7,
+    Wave: 11,
+    WavyHeavy: 27,
   };
   return map[underlineType] || 0;
 }
 
 function getUnderlineType(value) {
-  if (typeof value === 'string') return value;
-  const map = { 0: 'None', 1: 'Single', 3: 'Double', 4: 'Dotted', 6: 'Thick', 7: 'DottedHeavy', 11: 'Wave', 27: 'WavyHeavy' };
-  return map[value] || 'None';
+  if (typeof value === "string") return value;
+  const map = {
+    0: "None",
+    1: "Single",
+    3: "Double",
+    4: "Dotted",
+    6: "Thick",
+    7: "DottedHeavy",
+    11: "Wave",
+    27: "WavyHeavy",
+  };
+  return map[value] || "None";
 }
 
 /**
  * Office.js 高亮颜色枚举 -> 数值
  */
 function getHighlightValue(highlightColor) {
-  if (typeof highlightColor === 'number') return highlightColor;
+  if (typeof highlightColor === "number") return highlightColor;
   const map = {
-    'NoHighlight': 0, 'Black': 1, 'Blue': 2, 'Turquoise': 3,
-    'BrightGreen': 4, 'Pink': 5, 'Red': 6, 'Yellow': 7,
-    'DarkBlue': 9, 'Teal': 10, 'Green': 11, 'Violet': 12,
-    'DarkRed': 13, 'DarkYellow': 14, 'Gray50': 15, 'Gray25': 16
+    NoHighlight: 0,
+    Black: 1,
+    Blue: 2,
+    Turquoise: 3,
+    BrightGreen: 4,
+    Pink: 5,
+    Red: 6,
+    Yellow: 7,
+    DarkBlue: 9,
+    Teal: 10,
+    Green: 11,
+    Violet: 12,
+    DarkRed: 13,
+    DarkYellow: 14,
+    Gray50: 15,
+    Gray25: 16,
   };
   return map[highlightColor] || 0;
 }
 
 function getHighlightColor(value) {
-  if (typeof value === 'string') return value;
+  if (typeof value === "string") return value;
   const map = {
-    0: null, 1: 'Black', 2: 'Blue', 3: 'Turquoise',
-    4: 'BrightGreen', 5: 'Pink', 6: 'Red', 7: 'Yellow',
-    9: 'DarkBlue', 10: 'Teal', 11: 'Green', 12: 'Violet',
-    13: 'DarkRed', 14: 'DarkYellow', 15: 'Gray50', 16: 'Gray25'
+    0: null,
+    1: "Black",
+    2: "Blue",
+    3: "Turquoise",
+    4: "BrightGreen",
+    5: "Pink",
+    6: "Red",
+    7: "Yellow",
+    9: "DarkBlue",
+    10: "Teal",
+    11: "Green",
+    12: "Violet",
+    13: "DarkRed",
+    14: "DarkYellow",
+    15: "Gray50",
+    16: "Gray25",
   };
   return map[value] || null;
 }
@@ -289,13 +383,16 @@ function isEmptyParagraph(para) {
 }
 
 function cleanText(text) {
-  if (!text) return '';
-  return text.replace(/\u0007/g, '').replace(/\f/g, '').replace(/\r$/, '');
+  if (!text) return "";
+  return text
+    .replace(/\u0007/g, "")
+    .replace(/\f/g, "")
+    .replace(/\r$/, "");
 }
 
 // ============== OOXML 解析辅助函数 ==============
 
-const NS_W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+const NS_W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 
 /**
  * 判断字符是否为 CJK（中日韩）字符
@@ -303,17 +400,17 @@ const NS_W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 function isCJK(ch) {
   const code = ch.codePointAt(0);
   return (
-    (code >= 0x4E00 && code <= 0x9FFF) ||    // CJK 统一汉字
-    (code >= 0x3400 && code <= 0x4DBF) ||    // CJK 扩展A
-    (code >= 0x20000 && code <= 0x2A6DF) ||  // CJK 扩展B
-    (code >= 0x2A700 && code <= 0x2B73F) ||  // CJK 扩展C
-    (code >= 0x2B740 && code <= 0x2B81F) ||  // CJK 扩展D
-    (code >= 0xF900 && code <= 0xFAFF) ||    // CJK 兼容汉字
-    (code >= 0x3000 && code <= 0x303F) ||    // CJK 符号和标点
-    (code >= 0xFF00 && code <= 0xFFEF) ||    // 全角字符
-    (code >= 0x3040 && code <= 0x309F) ||    // 平假名
-    (code >= 0x30A0 && code <= 0x30FF) ||    // 片假名
-    (code >= 0xAC00 && code <= 0xD7AF)       // 韩文音节
+    (code >= 0x4e00 && code <= 0x9fff) || // CJK 统一汉字
+    (code >= 0x3400 && code <= 0x4dbf) || // CJK 扩展A
+    (code >= 0x20000 && code <= 0x2a6df) || // CJK 扩展B
+    (code >= 0x2a700 && code <= 0x2b73f) || // CJK 扩展C
+    (code >= 0x2b740 && code <= 0x2b81f) || // CJK 扩展D
+    (code >= 0xf900 && code <= 0xfaff) || // CJK 兼容汉字
+    (code >= 0x3000 && code <= 0x303f) || // CJK 符号和标点
+    (code >= 0xff00 && code <= 0xffef) || // 全角字符
+    (code >= 0x3040 && code <= 0x309f) || // 平假名
+    (code >= 0x30a0 && code <= 0x30ff) || // 片假名
+    (code >= 0xac00 && code <= 0xd7af) // 韩文音节
   );
 }
 
@@ -330,7 +427,7 @@ function splitByScript(text, fontAscii, fontEastAsia) {
   if (!text) return [];
 
   const segments = [];
-  let currentText = '';
+  let currentText = "";
   let currentIsCJK = null; // null = undetermined (for leading spaces/punctuation)
 
   for (let i = 0; i < text.length; i++) {
@@ -340,7 +437,7 @@ function splitByScript(text, fontAscii, fontEastAsia) {
       // CJK character
       if (currentIsCJK === false && currentText) {
         segments.push({ text: currentText, font: fontAscii });
-        currentText = '';
+        currentText = "";
       }
       currentIsCJK = true;
       currentText += ch;
@@ -348,7 +445,7 @@ function splitByScript(text, fontAscii, fontEastAsia) {
       // Latin alphanumeric
       if (currentIsCJK === true && currentText) {
         segments.push({ text: currentText, font: fontEastAsia });
-        currentText = '';
+        currentText = "";
       }
       currentIsCJK = false;
       currentText += ch;
@@ -359,7 +456,8 @@ function splitByScript(text, fontAscii, fontEastAsia) {
   }
 
   if (currentText) {
-    const font = currentIsCJK === false ? fontAscii : (currentIsCJK === true ? fontEastAsia : fontAscii);
+    const font =
+      currentIsCJK === false ? fontAscii : currentIsCJK === true ? fontEastAsia : fontAscii;
     segments.push({ text: currentText, font });
   }
 
@@ -370,7 +468,7 @@ function splitByScript(text, fontAscii, fontEastAsia) {
  * 从 OOXML 元素上获取 w: 命名空间属性值
  */
 function getWAttr(element, attrName) {
-  return element.getAttributeNS(NS_W, attrName) || element.getAttribute('w:' + attrName) || '';
+  return element.getAttributeNS(NS_W, attrName) || element.getAttribute("w:" + attrName) || "";
 }
 
 /**
@@ -383,57 +481,57 @@ function getWAttr(element, attrName) {
 function parseRunsFromOoxml(ooxmlString) {
   try {
     const parser = new DOMParser();
-    const xmlDoc = parser.parseFromString(ooxmlString, 'application/xml');
+    const xmlDoc = parser.parseFromString(ooxmlString, "application/xml");
 
     // DEBUG: 输出原始 OOXML 便于排查
-    console.log('  OOXML 原始内容（前2000字符）:', ooxmlString.substring(0, 2000));
+    console.log("  OOXML 原始内容（前2000字符）:", ooxmlString.substring(0, 2000));
 
     // 找到 <w:p> 段落元素
-    const pElements = xmlDoc.getElementsByTagNameNS(NS_W, 'p');
+    const pElements = xmlDoc.getElementsByTagNameNS(NS_W, "p");
     if (pElements.length === 0) return null;
     const paragraphEl = pElements[0];
 
     // === 解析主题字体映射 ===
-    const NS_A = 'http://schemas.openxmlformats.org/drawingml/2006/main';
-    const themeFonts = { majorLatin: '', majorEastAsia: '', minorLatin: '', minorEastAsia: '' };
+    const NS_A = "http://schemas.openxmlformats.org/drawingml/2006/main";
+    const themeFonts = { majorLatin: "", majorEastAsia: "", minorLatin: "", minorEastAsia: "" };
     try {
-      const themeElements = xmlDoc.getElementsByTagNameNS(NS_A, 'theme');
+      const themeElements = xmlDoc.getElementsByTagNameNS(NS_A, "theme");
       if (themeElements.length > 0) {
-        const fontScheme = themeElements[0].getElementsByTagNameNS(NS_A, 'fontScheme')[0];
+        const fontScheme = themeElements[0].getElementsByTagNameNS(NS_A, "fontScheme")[0];
         if (fontScheme) {
-          const majorFont = fontScheme.getElementsByTagNameNS(NS_A, 'majorFont')[0];
+          const majorFont = fontScheme.getElementsByTagNameNS(NS_A, "majorFont")[0];
           if (majorFont) {
-            const latin = majorFont.getElementsByTagNameNS(NS_A, 'latin')[0];
-            if (latin) themeFonts.majorLatin = latin.getAttribute('typeface') || '';
-            const ea = majorFont.getElementsByTagNameNS(NS_A, 'ea')[0];
-            if (ea) themeFonts.majorEastAsia = ea.getAttribute('typeface') || '';
+            const latin = majorFont.getElementsByTagNameNS(NS_A, "latin")[0];
+            if (latin) themeFonts.majorLatin = latin.getAttribute("typeface") || "";
+            const ea = majorFont.getElementsByTagNameNS(NS_A, "ea")[0];
+            if (ea) themeFonts.majorEastAsia = ea.getAttribute("typeface") || "";
           }
-          const minorFont = fontScheme.getElementsByTagNameNS(NS_A, 'minorFont')[0];
+          const minorFont = fontScheme.getElementsByTagNameNS(NS_A, "minorFont")[0];
           if (minorFont) {
-            const latin = minorFont.getElementsByTagNameNS(NS_A, 'latin')[0];
-            if (latin) themeFonts.minorLatin = latin.getAttribute('typeface') || '';
-            const ea = minorFont.getElementsByTagNameNS(NS_A, 'ea')[0];
-            if (ea) themeFonts.minorEastAsia = ea.getAttribute('typeface') || '';
+            const latin = minorFont.getElementsByTagNameNS(NS_A, "latin")[0];
+            if (latin) themeFonts.minorLatin = latin.getAttribute("typeface") || "";
+            const ea = minorFont.getElementsByTagNameNS(NS_A, "ea")[0];
+            if (ea) themeFonts.minorEastAsia = ea.getAttribute("typeface") || "";
           }
         }
       }
     } catch (e) {}
-    console.log('  主题字体:', JSON.stringify(themeFonts));
+    console.log("  主题字体:", JSON.stringify(themeFonts));
 
     /**
      * 解析主题字体引用为具体字体名
      */
     function resolveThemeFont(themeRef) {
-      if (!themeRef) return '';
+      if (!themeRef) return "";
       const map = {
-        'majorHAnsi': themeFonts.majorLatin,
-        'majorAscii': themeFonts.majorLatin,
-        'majorEastAsia': themeFonts.majorEastAsia,
-        'minorHAnsi': themeFonts.minorLatin,
-        'minorAscii': themeFonts.minorLatin,
-        'minorEastAsia': themeFonts.minorEastAsia
+        majorHAnsi: themeFonts.majorLatin,
+        majorAscii: themeFonts.majorLatin,
+        majorEastAsia: themeFonts.majorEastAsia,
+        minorHAnsi: themeFonts.minorLatin,
+        minorAscii: themeFonts.minorLatin,
+        minorEastAsia: themeFonts.minorEastAsia,
       };
-      return map[themeRef] || '';
+      return map[themeRef] || "";
     }
 
     // === 构建样式继承链：docDefaults → 段落样式的 rPr → run 自身 rPr ===
@@ -446,87 +544,106 @@ function parseRunsFromOoxml(ooxmlString) {
       if (!rPr) return {};
       const props = {};
 
-      const rFonts = rPr.getElementsByTagNameNS(NS_W, 'rFonts')[0];
+      const rFonts = rPr.getElementsByTagNameNS(NS_W, "rFonts")[0];
       if (rFonts) {
         // 直接字体名
-        const directAscii = getWAttr(rFonts, 'ascii');
-        const directEastAsia = getWAttr(rFonts, 'eastAsia');
-        const directHAnsi = getWAttr(rFonts, 'hAnsi');
+        const directAscii = getWAttr(rFonts, "ascii");
+        const directEastAsia = getWAttr(rFonts, "eastAsia");
+        const directHAnsi = getWAttr(rFonts, "hAnsi");
 
         // 主题字体引用
-        const themeAscii = getWAttr(rFonts, 'asciiTheme');
-        const themeEastAsia = getWAttr(rFonts, 'eastAsiaTheme');
-        const themeHAnsi = getWAttr(rFonts, 'hAnsiTheme');
+        const themeAscii = getWAttr(rFonts, "asciiTheme");
+        const themeEastAsia = getWAttr(rFonts, "eastAsiaTheme");
+        const themeHAnsi = getWAttr(rFonts, "hAnsiTheme");
 
         // 直接字体名优先，否则从主题解析
-        props.fontAscii = directAscii || resolveThemeFont(themeAscii) || '';
-        props.fontEastAsia = directEastAsia || resolveThemeFont(themeEastAsia) || '';
-        props.fontHAnsi = directHAnsi || resolveThemeFont(themeHAnsi) || '';
+        props.fontAscii = directAscii || resolveThemeFont(themeAscii) || "";
+        props.fontEastAsia = directEastAsia || resolveThemeFont(themeEastAsia) || "";
+        props.fontHAnsi = directHAnsi || resolveThemeFont(themeHAnsi) || "";
       }
 
-      const sz = rPr.getElementsByTagNameNS(NS_W, 'sz')[0];
+      const sz = rPr.getElementsByTagNameNS(NS_W, "sz")[0];
       if (sz) {
-        const val = getWAttr(sz, 'val');
+        const val = getWAttr(sz, "val");
         if (val) props.fontSize = parseInt(val, 10) / 2;
       }
       if (!props.fontSize) {
-        const szCs = rPr.getElementsByTagNameNS(NS_W, 'szCs')[0];
+        const szCs = rPr.getElementsByTagNameNS(NS_W, "szCs")[0];
         if (szCs) {
-          const val = getWAttr(szCs, 'val');
+          const val = getWAttr(szCs, "val");
           if (val) props.fontSize = parseInt(val, 10) / 2;
         }
       }
 
-      const bEl = rPr.getElementsByTagNameNS(NS_W, 'b')[0];
+      const bEl = rPr.getElementsByTagNameNS(NS_W, "b")[0];
       if (bEl) {
-        const val = getWAttr(bEl, 'val');
-        props.bold = val !== '0' && val !== 'false';
+        const val = getWAttr(bEl, "val");
+        props.bold = val !== "0" && val !== "false";
       }
 
-      const iEl = rPr.getElementsByTagNameNS(NS_W, 'i')[0];
+      const iEl = rPr.getElementsByTagNameNS(NS_W, "i")[0];
       if (iEl) {
-        const val = getWAttr(iEl, 'val');
-        props.italic = val !== '0' && val !== 'false';
+        const val = getWAttr(iEl, "val");
+        props.italic = val !== "0" && val !== "false";
       }
 
-      const uEl = rPr.getElementsByTagNameNS(NS_W, 'u')[0];
+      const uEl = rPr.getElementsByTagNameNS(NS_W, "u")[0];
       if (uEl) {
-        const uVal = getWAttr(uEl, 'val');
-        const uMap = { 'single': 1, 'double': 3, 'dotted': 4, 'thick': 6, 'dottedHeavy': 7, 'wave': 11, 'wavyHeavy': 27 };
-        props.underline = uMap[uVal] || (uVal && uVal !== 'none' ? 1 : 0);
-        const uColor = getWAttr(uEl, 'color');
-        if (uColor && uColor !== 'auto') props.underlineColor = '#' + uColor;
+        const uVal = getWAttr(uEl, "val");
+        const uMap = {
+          single: 1,
+          double: 3,
+          dotted: 4,
+          thick: 6,
+          dottedHeavy: 7,
+          wave: 11,
+          wavyHeavy: 27,
+        };
+        props.underline = uMap[uVal] || (uVal && uVal !== "none" ? 1 : 0);
+        const uColor = getWAttr(uEl, "color");
+        if (uColor && uColor !== "auto") props.underlineColor = "#" + uColor;
       }
 
-      const colorEl = rPr.getElementsByTagNameNS(NS_W, 'color')[0];
+      const colorEl = rPr.getElementsByTagNameNS(NS_W, "color")[0];
       if (colorEl) {
-        const colorVal = getWAttr(colorEl, 'val');
-        if (colorVal && colorVal !== 'auto') props.color = '#' + colorVal;
+        const colorVal = getWAttr(colorEl, "val");
+        if (colorVal && colorVal !== "auto") props.color = "#" + colorVal;
       }
 
-      const hlEl = rPr.getElementsByTagNameNS(NS_W, 'highlight')[0];
+      const hlEl = rPr.getElementsByTagNameNS(NS_W, "highlight")[0];
       if (hlEl) {
-        const hlVal = getWAttr(hlEl, 'val');
+        const hlVal = getWAttr(hlEl, "val");
         const hlMap = {
-          'black': 1, 'blue': 2, 'cyan': 3, 'green': 4, 'magenta': 5,
-          'red': 6, 'yellow': 7, 'darkBlue': 9, 'teal': 10,
-          'darkGreen': 11, 'darkMagenta': 12, 'darkRed': 13,
-          'darkYellow': 14, 'darkGray': 15, 'lightGray': 16
+          black: 1,
+          blue: 2,
+          cyan: 3,
+          green: 4,
+          magenta: 5,
+          red: 6,
+          yellow: 7,
+          darkBlue: 9,
+          teal: 10,
+          darkGreen: 11,
+          darkMagenta: 12,
+          darkRed: 13,
+          darkYellow: 14,
+          darkGray: 15,
+          lightGray: 16,
         };
         props.highlight = hlMap[hlVal] || 0;
       }
 
-      const strikeEl = rPr.getElementsByTagNameNS(NS_W, 'strike')[0];
+      const strikeEl = rPr.getElementsByTagNameNS(NS_W, "strike")[0];
       if (strikeEl) {
-        const val = getWAttr(strikeEl, 'val');
-        props.strikethrough = val !== '0' && val !== 'false';
+        const val = getWAttr(strikeEl, "val");
+        props.strikethrough = val !== "0" && val !== "false";
       }
 
-      const vertAlignEl = rPr.getElementsByTagNameNS(NS_W, 'vertAlign')[0];
+      const vertAlignEl = rPr.getElementsByTagNameNS(NS_W, "vertAlign")[0];
       if (vertAlignEl) {
-        const val = getWAttr(vertAlignEl, 'val');
-        if (val === 'superscript') props.superscript = true;
-        if (val === 'subscript') props.subscript = true;
+        const val = getWAttr(vertAlignEl, "val");
+        if (val === "superscript") props.superscript = true;
+        if (val === "subscript") props.subscript = true;
       }
 
       return props;
@@ -535,11 +652,11 @@ function parseRunsFromOoxml(ooxmlString) {
     // 1. 从 <w:docDefaults> 提取默认 run 属性
     let defaultProps = {};
     try {
-      const docDefaults = xmlDoc.getElementsByTagNameNS(NS_W, 'docDefaults')[0];
+      const docDefaults = xmlDoc.getElementsByTagNameNS(NS_W, "docDefaults")[0];
       if (docDefaults) {
-        const rPrDefault = docDefaults.getElementsByTagNameNS(NS_W, 'rPrDefault')[0];
+        const rPrDefault = docDefaults.getElementsByTagNameNS(NS_W, "rPrDefault")[0];
         if (rPrDefault) {
-          const rPr = rPrDefault.getElementsByTagNameNS(NS_W, 'rPr')[0];
+          const rPr = rPrDefault.getElementsByTagNameNS(NS_W, "rPr")[0];
           defaultProps = extractRprProps(rPr);
         }
       }
@@ -548,28 +665,28 @@ function parseRunsFromOoxml(ooxmlString) {
     // 2. 获取段落应用的样式名，从 <w:styles> 中找到该样式的 rPr
     let styleProps = {};
     try {
-      const pPr = paragraphEl.getElementsByTagNameNS(NS_W, 'pPr')[0];
+      const pPr = paragraphEl.getElementsByTagNameNS(NS_W, "pPr")[0];
       if (pPr) {
         // 段落样式名
-        const pStyleEl = pPr.getElementsByTagNameNS(NS_W, 'pStyle')[0];
-        const paraStyleId = pStyleEl ? getWAttr(pStyleEl, 'val') : '';
+        const pStyleEl = pPr.getElementsByTagNameNS(NS_W, "pStyle")[0];
+        const paraStyleId = pStyleEl ? getWAttr(pStyleEl, "val") : "";
 
         // 段落自身 pPr 里的 rPr（段落级默认 run 格式）
-        const pPrRpr = pPr.getElementsByTagNameNS(NS_W, 'rPr')[0];
+        const pPrRpr = pPr.getElementsByTagNameNS(NS_W, "rPr")[0];
         if (pPrRpr) {
           styleProps = { ...styleProps, ...extractRprProps(pPrRpr) };
         }
 
         // 从 <w:styles> 中查找样式定义
         if (paraStyleId) {
-          const stylesEl = xmlDoc.getElementsByTagNameNS(NS_W, 'styles')[0];
+          const stylesEl = xmlDoc.getElementsByTagNameNS(NS_W, "styles")[0];
           if (stylesEl) {
-            const styleEls = stylesEl.getElementsByTagNameNS(NS_W, 'style');
+            const styleEls = stylesEl.getElementsByTagNameNS(NS_W, "style");
             for (let s = 0; s < styleEls.length; s++) {
-              const sId = getWAttr(styleEls[s], 'styleId');
+              const sId = getWAttr(styleEls[s], "styleId");
               if (sId === paraStyleId) {
                 // 样式中的 rPr
-                const sRpr = styleEls[s].getElementsByTagNameNS(NS_W, 'rPr')[0];
+                const sRpr = styleEls[s].getElementsByTagNameNS(NS_W, "rPr")[0];
                 if (sRpr) {
                   // 样式定义的优先级低于段落 pPr 中的 rPr，先设置样式，再覆盖
                   const sProps = extractRprProps(sRpr);
@@ -577,13 +694,13 @@ function parseRunsFromOoxml(ooxmlString) {
                 }
 
                 // 如果样式有 basedOn，递归查找父样式
-                const basedOnEl = styleEls[s].getElementsByTagNameNS(NS_W, 'basedOn')[0];
+                const basedOnEl = styleEls[s].getElementsByTagNameNS(NS_W, "basedOn")[0];
                 if (basedOnEl) {
-                  const baseId = getWAttr(basedOnEl, 'val');
+                  const baseId = getWAttr(basedOnEl, "val");
                   if (baseId) {
                     for (let b = 0; b < styleEls.length; b++) {
-                      if (getWAttr(styleEls[b], 'styleId') === baseId) {
-                        const baseRpr = styleEls[b].getElementsByTagNameNS(NS_W, 'rPr')[0];
+                      if (getWAttr(styleEls[b], "styleId") === baseId) {
+                        const baseRpr = styleEls[b].getElementsByTagNameNS(NS_W, "rPr")[0];
                         if (baseRpr) {
                           const baseProps = extractRprProps(baseRpr);
                           // 父样式优先级最低
@@ -604,49 +721,49 @@ function parseRunsFromOoxml(ooxmlString) {
 
     // 3. 合并继承链：docDefaults → 样式 → (run自身在processRunElement中覆盖)
     const inheritedProps = { ...defaultProps, ...styleProps };
-    console.log('  OOXML 继承属性:', JSON.stringify(inheritedProps));
+    console.log("  OOXML 继承属性:", JSON.stringify(inheritedProps));
 
     const runs = [];
 
     // 遍历段落的子节点，处理 w:r 和 w:hyperlink 中的 w:r
     function processRunElement(wRun) {
-      let text = '';
+      let text = "";
       // 收集 <w:t> 文本
-      const tElements = wRun.getElementsByTagNameNS(NS_W, 't');
+      const tElements = wRun.getElementsByTagNameNS(NS_W, "t");
       for (let j = 0; j < tElements.length; j++) {
-        text += tElements[j].textContent || '';
+        text += tElements[j].textContent || "";
       }
       // 收集 <w:tab> 制表符
-      const tabElements = wRun.getElementsByTagNameNS(NS_W, 'tab');
+      const tabElements = wRun.getElementsByTagNameNS(NS_W, "tab");
       if (tabElements.length > 0) {
-        text += '\t';
+        text += "\t";
       }
 
       // 清理文本
-      text = text.replace(/[\r\n\f\u0007]+$/g, '');
+      text = text.replace(/[\r\n\f\u0007]+$/g, "");
       if (!text) return;
 
       // 读取 run 自身格式属性
-      const rPr = wRun.getElementsByTagNameNS(NS_W, 'rPr')[0];
+      const rPr = wRun.getElementsByTagNameNS(NS_W, "rPr")[0];
       const runProps = extractRprProps(rPr);
 
       // 合并：继承属性 → run 自身属性（run 自身优先）
       const merged = { ...inheritedProps, ...runProps };
 
       // 获取不同脚本的字体
-      const fontAscii = merged.fontAscii || merged.fontHAnsi || '';
-      const fontEastAsia = merged.fontEastAsia || '';
+      const fontAscii = merged.fontAscii || merged.fontHAnsi || "";
+      const fontEastAsia = merged.fontEastAsia || "";
       const baseFontProps = {
         fontSize: merged.fontSize || 12,
         bold: !!merged.bold,
         italic: !!merged.italic,
         underline: merged.underline || 0,
-        underlineColor: merged.underlineColor || '#000000',
-        color: merged.color || '#000000',
+        underlineColor: merged.underlineColor || "#000000",
+        color: merged.color || "#000000",
         highlight: merged.highlight || 0,
         strikethrough: !!merged.strikethrough,
         superscript: !!merged.superscript,
-        subscript: !!merged.subscript
+        subscript: !!merged.subscript,
       };
 
       // 如果中英文字体不同且文本包含混合脚本，按脚本拆分 run
@@ -656,22 +773,38 @@ function parseRunsFromOoxml(ooxmlString) {
           runs.push({
             text: seg.text,
             rStyle: makeRStyle(
-              seg.font, baseFontProps.fontSize, baseFontProps.bold, baseFontProps.italic,
-              baseFontProps.underline, baseFontProps.underlineColor, baseFontProps.color,
-              baseFontProps.highlight, baseFontProps.strikethrough, baseFontProps.superscript, baseFontProps.subscript
-            )
+              seg.font,
+              baseFontProps.fontSize,
+              baseFontProps.bold,
+              baseFontProps.italic,
+              baseFontProps.underline,
+              baseFontProps.underlineColor,
+              baseFontProps.color,
+              baseFontProps.highlight,
+              baseFontProps.strikethrough,
+              baseFontProps.superscript,
+              baseFontProps.subscript
+            ),
           });
         }
       } else {
         // 字体相同或只有一种，直接使用
-        const fontName = fontAscii || fontEastAsia || '';
+        const fontName = fontAscii || fontEastAsia || "";
         runs.push({
           text,
           rStyle: makeRStyle(
-            fontName, baseFontProps.fontSize, baseFontProps.bold, baseFontProps.italic,
-            baseFontProps.underline, baseFontProps.underlineColor, baseFontProps.color,
-            baseFontProps.highlight, baseFontProps.strikethrough, baseFontProps.superscript, baseFontProps.subscript
-          )
+            fontName,
+            baseFontProps.fontSize,
+            baseFontProps.bold,
+            baseFontProps.italic,
+            baseFontProps.underline,
+            baseFontProps.underlineColor,
+            baseFontProps.color,
+            baseFontProps.highlight,
+            baseFontProps.strikethrough,
+            baseFontProps.superscript,
+            baseFontProps.subscript
+          ),
         });
       }
     }
@@ -681,11 +814,11 @@ function parseRunsFromOoxml(ooxmlString) {
       const child = paragraphEl.childNodes[i];
       if (!child.localName) continue;
 
-      if (child.localName === 'r' && child.namespaceURI === NS_W) {
+      if (child.localName === "r" && child.namespaceURI === NS_W) {
         processRunElement(child);
-      } else if (child.localName === 'hyperlink') {
+      } else if (child.localName === "hyperlink") {
         // 超链接内也包含 w:r
-        const innerRuns = child.getElementsByTagNameNS(NS_W, 'r');
+        const innerRuns = child.getElementsByTagNameNS(NS_W, "r");
         for (let j = 0; j < innerRuns.length; j++) {
           processRunElement(innerRuns[j]);
         }
@@ -709,7 +842,7 @@ function parseRunsFromOoxml(ooxmlString) {
 
     return runs.length > 0 ? runs : null;
   } catch (e) {
-    console.log('OOXML runs 解析失败:', e);
+    console.log("OOXML runs 解析失败:", e);
     return null;
   }
 }
@@ -726,10 +859,9 @@ function parseRunsFromOoxml(ooxmlString) {
  *   省略时默认等于 startParaIndex（即只解析单段）；-1 表示解析到文档末尾
  * @returns {Promise<Object>} - JSON 数据或错误对象
  */
-async function parseDocxToJSON(scope = 'selection', startParaIndex, endParaIndex) {
+async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex) {
   try {
     return await Word.run(async (context) => {
-
       // ========== 快速路径：按 paraIndex 范围解析 ==========
       if (startParaIndex !== undefined && startParaIndex !== null) {
         // endParaIndex 省略时默认等于 startParaIndex（单段）
@@ -738,7 +870,7 @@ async function parseDocxToJSON(scope = 'selection', startParaIndex, endParaIndex
         }
 
         const allParas = context.document.body.paragraphs;
-        allParas.load('items');
+        allParas.load("items");
         await context.sync();
 
         // endParaIndex === -1 表示解析到文档末尾
@@ -747,15 +879,21 @@ async function parseDocxToJSON(scope = 'selection', startParaIndex, endParaIndex
         }
 
         if (startParaIndex < 0 || startParaIndex >= allParas.items.length) {
-          return { error: `startParaIndex ${startParaIndex} 超出范围，文档共 ${allParas.items.length} 段` };
+          return {
+            error: `startParaIndex ${startParaIndex} 超出范围，文档共 ${allParas.items.length} 段`,
+          };
         }
         if (endParaIndex < startParaIndex || endParaIndex >= allParas.items.length) {
-          return { error: `endParaIndex ${endParaIndex} 无效（startParaIndex=${startParaIndex}，文档共 ${allParas.items.length} 段）` };
+          return {
+            error: `endParaIndex ${endParaIndex} 无效（startParaIndex=${startParaIndex}，文档共 ${allParas.items.length} 段）`,
+          };
         }
 
         // 批量 load 范围内所有段落
         for (let idx = startParaIndex; idx <= endParaIndex; idx++) {
-          allParas.items[idx].load('text,alignment,lineSpacing,firstLineIndent,leftIndent,rightIndent,spaceBefore,spaceAfter,style,isListItem,tableNestingLevel,lineUnitBefore,lineUnitAfter,outlineLevel');
+          allParas.items[idx].load(
+            "text,alignment,lineSpacing,firstLineIndent,leftIndent,rightIndent,spaceBefore,spaceAfter,style,isListItem,tableNestingLevel,lineUnitBefore,lineUnitAfter,outlineLevel"
+          );
         }
         await context.sync();
 
@@ -766,20 +904,22 @@ async function parseDocxToJSON(scope = 'selection', startParaIndex, endParaIndex
 
           // 表格内段落
           if (para.tableNestingLevel > 0) {
-            rangeResult.paragraphs.push({ pStyle: '', runs: [], paraIndex: idx, inTable: true });
+            rangeResult.paragraphs.push({ pStyle: "", runs: [], paraIndex: idx, inTable: true });
             continue;
           }
 
-          const paraText = cleanText(para.text || '');
+          const paraText = cleanText(para.text || "");
 
           // 空段落
           if (!paraText || paraText.match(/^[\r\n\f\u0007]*$/)) {
-            rangeResult.paragraphs.push({ pStyle: '', runs: [], paraIndex: idx });
+            rangeResult.paragraphs.push({ pStyle: "", runs: [], paraIndex: idx });
             continue;
           }
 
-          let styleName = '';
-          try { styleName = para.style || ''; } catch (e) {}
+          let styleName = "";
+          try {
+            styleName = para.style || "";
+          } catch (e) {}
 
           // 解析 runs（OOXML 优先）
           let runs = null;
@@ -791,30 +931,53 @@ async function parseDocxToJSON(scope = 'selection', startParaIndex, endParaIndex
 
           if (!runs) {
             runs = [];
-            const inlineRanges = para.getTextRanges(['\t', '\n'], true);
-            inlineRanges.load('items');
+            const inlineRanges = para.getTextRanges(["\t", "\n"], true);
+            inlineRanges.load("items");
             await context.sync();
             for (const ir of inlineRanges.items) {
-              ir.load('text');
-              ir.font.load('name,size,bold,italic,underline,underlineColor,color,highlightColor,strikeThrough,superscript,subscript');
+              ir.load("text");
+              ir.font.load(
+                "name,size,bold,italic,underline,underlineColor,color,highlightColor,strikeThrough,superscript,subscript"
+              );
             }
             await context.sync();
             let lastFormatKey = null;
             let currentRun = null;
             for (const ir of inlineRanges.items) {
-              const t = ir.text || '';
+              const t = ir.text || "";
               if (!t || t.match(/^[\r\n\f\u0007]+$/)) continue;
               const font = ir.font;
-              const formatKey = [font.name, font.size, font.bold, font.italic, font.underline, font.color, font.highlightColor, font.strikeThrough, font.superscript, font.subscript].join('|');
+              const formatKey = [
+                font.name,
+                font.size,
+                font.bold,
+                font.italic,
+                font.underline,
+                font.color,
+                font.highlightColor,
+                font.strikeThrough,
+                font.superscript,
+                font.subscript,
+              ].join("|");
               if (formatKey === lastFormatKey && currentRun) {
                 currentRun.text += t;
               } else {
                 if (currentRun && currentRun.text) runs.push(currentRun);
                 currentRun = {
                   text: t,
-                  rStyle: makeRStyle(font.name || '', font.size || 12, font.bold === true, font.italic === true,
-                    getUnderlineValue(font.underline), font.underlineColor || '#000000', font.color || '#000000',
-                    getHighlightValue(font.highlightColor), font.strikeThrough === true, font.superscript === true, font.subscript === true)
+                  rStyle: makeRStyle(
+                    font.name || "",
+                    font.size || 12,
+                    font.bold === true,
+                    font.italic === true,
+                    getUnderlineValue(font.underline),
+                    font.underlineColor || "#000000",
+                    font.color || "#000000",
+                    getHighlightValue(font.highlightColor),
+                    font.strikeThrough === true,
+                    font.superscript === true,
+                    font.subscript === true
+                  ),
                 };
                 lastFormatKey = formatKey;
               }
@@ -828,12 +991,17 @@ async function parseDocxToJSON(scope = 'selection', startParaIndex, endParaIndex
 
           rangeResult.paragraphs.push({
             pStyle: makePStyle(
-              getAlignmentName(para.alignment), para.lineSpacing || 0,
-              para.leftIndent || 0, para.rightIndent || 0, para.firstLineIndent || 0,
-              para.spaceBefore || 0, para.spaceAfter || 0, styleName
+              getAlignmentName(para.alignment),
+              para.lineSpacing || 0,
+              para.leftIndent || 0,
+              para.rightIndent || 0,
+              para.firstLineIndent || 0,
+              para.spaceBefore || 0,
+              para.spaceAfter || 0,
+              styleName
             ),
             runs: runs,
-            paraIndex: idx
+            paraIndex: idx,
           });
         }
 
@@ -841,19 +1009,17 @@ async function parseDocxToJSON(scope = 'selection', startParaIndex, endParaIndex
       }
 
       // ========== 常规路径：解析选区或全文 ==========
-      const range = scope === 'body'
-        ? context.document.body
-        : context.document.getSelection();
+      const range = scope === "body" ? context.document.body : context.document.getSelection();
 
       // 加载段落和表格
       const paragraphs = range.paragraphs;
-      paragraphs.load('items');
+      paragraphs.load("items");
       const tables = range.tables;
-      tables.load('items');
+      tables.load("items");
       const inlinePictures = range.inlinePictures;
-      inlinePictures.load('items');
+      inlinePictures.load("items");
       const fields = range.fields;
-      fields.load('items');
+      fields.load("items");
 
       await context.sync();
 
@@ -861,25 +1027,25 @@ async function parseDocxToJSON(scope = 'selection', startParaIndex, endParaIndex
         paragraphs: [],
         tables: [],
         images: [],
-        fields: []
+        fields: [],
       };
 
       // === 解析域代码 ===
       try {
         if (fields.items && fields.items.length > 0) {
           for (const field of fields.items) {
-            field.load('type,code');
-            field.result.load('text');
+            field.load("type,code");
+            field.result.load("text");
           }
           await context.sync();
 
           for (const field of fields.items) {
-            const fieldCode = field.code || '';
+            const fieldCode = field.code || "";
             result.fields.push({
               type: field.type,
-              code: fieldCode.trim()
+              code: fieldCode.trim(),
             });
-            if (fieldCode.toUpperCase().includes('TOC')) {
+            if (fieldCode.toUpperCase().includes("TOC")) {
               result.hasTOC = true;
               result.tocFieldCode = fieldCode.trim();
             }
@@ -893,16 +1059,16 @@ async function parseDocxToJSON(scope = 'selection', startParaIndex, endParaIndex
       const tableRangesInfo = [];
       if (tables.items && tables.items.length > 0) {
         for (const table of tables.items) {
-          table.load('rowCount,values,alignment');
-          table.rows.load('items');
+          table.load("rowCount,values,alignment");
+          table.rows.load("items");
         }
         await context.sync();
 
         for (const table of tables.items) {
           const tableRows = table.rows;
           for (const row of tableRows.items) {
-            row.load('cellCount,preferredHeight');
-            row.cells.load('items');
+            row.load("cellCount,preferredHeight");
+            row.cells.load("items");
           }
         }
         await context.sync();
@@ -913,16 +1079,16 @@ async function parseDocxToJSON(scope = 'selection', startParaIndex, endParaIndex
             rows: table.rowCount,
             columns: 0,
             cells: [],
-            tStyle: [getAlignmentName(table.alignment)]
+            tStyle: [getAlignmentName(table.alignment)],
           };
 
           const tableRows = table.rows;
           for (const row of tableRows.items) {
             for (const cell of row.cells.items) {
-              cell.load('columnWidth,rowIndex,cellIndex,verticalAlignment,width');
-              cell.body.load('text');
+              cell.load("columnWidth,rowIndex,cellIndex,verticalAlignment,width");
+              cell.body.load("text");
               const cellParas = cell.body.paragraphs;
-              cellParas.load('items');
+              cellParas.load("items");
             }
           }
           await context.sync();
@@ -932,9 +1098,11 @@ async function parseDocxToJSON(scope = 'selection', startParaIndex, endParaIndex
             for (const cell of row.cells.items) {
               const cellParas = cell.body.paragraphs;
               for (const para of cellParas.items) {
-                para.load('text,alignment,lineSpacing,firstLineIndent,leftIndent,rightIndent,spaceBefore,spaceAfter,style,lineUnitBefore,lineUnitAfter');
-                const runs = para.getTextRanges([' '], false);
-                runs.load('items');
+                para.load(
+                  "text,alignment,lineSpacing,firstLineIndent,leftIndent,rightIndent,spaceBefore,spaceAfter,style,lineUnitBefore,lineUnitAfter"
+                );
+                const runs = para.getTextRanges([" "], false);
+                runs.load("items");
               }
             }
           }
@@ -947,23 +1115,25 @@ async function parseDocxToJSON(scope = 'selection', startParaIndex, endParaIndex
             }
 
             for (const cell of row.cells.items) {
-              const cellText = cleanText(cell.body.text || '');
+              const cellText = cleanText(cell.body.text || "");
               const cellParas = cell.body.paragraphs;
 
               // 解析单元格段落和 runs
               const paragraphsData = [];
               for (const para of cellParas.items) {
-                const paraText = cleanText(para.text || '');
+                const paraText = cleanText(para.text || "");
                 if (!paraText) continue;
 
                 // 加载 runs
-                const inlineRanges = para.getTextRanges(['\t', '\n'], true);
-                inlineRanges.load('items');
+                const inlineRanges = para.getTextRanges(["\t", "\n"], true);
+                inlineRanges.load("items");
                 await context.sync();
 
                 for (const ir of inlineRanges.items) {
-                  ir.load('text');
-                  ir.font.load('name,size,bold,italic,underline,color,highlightColor,strikeThrough,superscript,subscript');
+                  ir.load("text");
+                  ir.font.load(
+                    "name,size,bold,italic,underline,color,highlightColor,strikeThrough,superscript,subscript"
+                  );
                 }
                 await context.sync();
 
@@ -972,7 +1142,7 @@ async function parseDocxToJSON(scope = 'selection', startParaIndex, endParaIndex
                 let currentRun = null;
 
                 for (const ir of inlineRanges.items) {
-                  const t = ir.text || '';
+                  const t = ir.text || "";
                   if (!t || t.match(/^[\r\n\u0007]$/)) continue;
 
                   const font = ir.font;
@@ -985,16 +1155,18 @@ async function parseDocxToJSON(scope = 'selection', startParaIndex, endParaIndex
                     currentRun = {
                       text: t,
                       rStyle: makeRStyle(
-                        font.name || '', font.size || 12,
-                        font.bold === true, font.italic === true,
+                        font.name || "",
+                        font.size || 12,
+                        font.bold === true,
+                        font.italic === true,
                         getUnderlineValue(font.underline),
-                        '#000000',
-                        font.color || '#000000',
+                        "#000000",
+                        font.color || "#000000",
                         getHighlightValue(font.highlightColor),
                         font.strikeThrough === true,
                         font.superscript === true,
                         font.subscript === true
-                      )
+                      ),
                     };
                     lastFormatKey = formatKey;
                   }
@@ -1012,9 +1184,9 @@ async function parseDocxToJSON(scope = 'selection', startParaIndex, endParaIndex
                       para.firstLineIndent || 0,
                       para.spaceBefore || 0,
                       para.spaceAfter || 0,
-                      ''
+                      ""
                     ),
-                    runs: runs
+                    runs: runs,
                   });
                 }
               }
@@ -1023,10 +1195,13 @@ async function parseDocxToJSON(scope = 'selection', startParaIndex, endParaIndex
                 text: cellText,
                 paragraphs: paragraphsData.length > 0 ? paragraphsData : undefined,
                 cStyle: makeCStyle(
-                  1, 1,
-                  getAlignmentName(cellParas.items.length > 0 ? cellParas.items[0].alignment : 'Left'),
+                  1,
+                  1,
+                  getAlignmentName(
+                    cellParas.items.length > 0 ? cellParas.items[0].alignment : "Left"
+                  ),
                   getVerticalAlignmentName(cell.verticalAlignment)
-                )
+                ),
               });
             }
             tableData.cells.push(rowData);
@@ -1041,17 +1216,17 @@ async function parseDocxToJSON(scope = 'selection', startParaIndex, endParaIndex
       try {
         if (inlinePictures.items && inlinePictures.items.length > 0) {
           for (const pic of inlinePictures.items) {
-            pic.load('width,height,altTextTitle,altTextDescription');
+            pic.load("width,height,altTextTitle,altTextDescription");
           }
           await context.sync();
 
           for (const pic of inlinePictures.items) {
             result.images.push({
-              type: 'inline',
+              type: "inline",
               width: pic.width || 100,
               height: pic.height || 100,
-              altText: pic.altTextTitle || pic.altTextDescription || '',
-              placeholder: '[图片]'
+              altText: pic.altTextTitle || pic.altTextDescription || "",
+              placeholder: "[图片]",
             });
           }
         }
@@ -1062,30 +1237,32 @@ async function parseDocxToJSON(scope = 'selection', startParaIndex, endParaIndex
       // === 解析段落 ===
       // 始终从 body.paragraphs 获取段落，数组下标即全文索引
       const bodyParas = context.document.body.paragraphs;
-      bodyParas.load('items');
+      bodyParas.load("items");
       await context.sync();
 
       if (bodyParas.items && bodyParas.items.length > 0) {
         // 选区模式：确定哪些 body 段落在选区内
         let inSelectionSet = null; // null 表示全选（body 模式）
-        if (scope !== 'body') {
+        if (scope !== "body") {
           const selRange = context.document.getSelection();
-          const comparisons = bodyParas.items.map(bp =>
-            bp.getRange('Whole').compareLocationWith(selRange)
+          const comparisons = bodyParas.items.map((bp) =>
+            bp.getRange("Whole").compareLocationWith(selRange)
           );
           await context.sync();
           inSelectionSet = new Set();
           for (let i = 0; i < comparisons.length; i++) {
             const v = comparisons[i].value;
             // Inside / Equal / InsideStart / InsideEnd = 段落落在选区内
-            if (v === 'Inside' || v === 'Equal' || v === 'InsideStart' || v === 'InsideEnd') {
+            if (v === "Inside" || v === "Equal" || v === "InsideStart" || v === "InsideEnd") {
               inSelectionSet.add(i);
             }
           }
         }
 
         for (const para of bodyParas.items) {
-          para.load('text,alignment,lineSpacing,firstLineIndent,leftIndent,rightIndent,spaceBefore,spaceAfter,style,isListItem,tableNestingLevel,lineUnitBefore,lineUnitAfter,outlineLevel');
+          para.load(
+            "text,alignment,lineSpacing,firstLineIndent,leftIndent,rightIndent,spaceBefore,spaceAfter,style,isListItem,tableNestingLevel,lineUnitBefore,lineUnitAfter,outlineLevel"
+          );
         }
         await context.sync();
 
@@ -1093,14 +1270,16 @@ async function parseDocxToJSON(scope = 'selection', startParaIndex, endParaIndex
         for (const para of bodyParas.items) {
           try {
             if (para.isListItem) {
-              para.listItem.load('level,listString,siblingIndex');
+              para.listItem.load("level,listString,siblingIndex");
             }
           } catch (e) {}
           try {
-            para.font.load('name,size,bold,italic,underline,color,highlightColor');
+            para.font.load("name,size,bold,italic,underline,color,highlightColor");
           } catch (e) {}
         }
-        try { await context.sync(); } catch (e) {}
+        try {
+          await context.sync();
+        } catch (e) {}
 
         for (let _paraIdx = 0; _paraIdx < bodyParas.items.length; _paraIdx++) {
           // 选区模式：跳过不在选区内的段落
@@ -1111,15 +1290,25 @@ async function parseDocxToJSON(scope = 'selection', startParaIndex, endParaIndex
           // ====== DEBUG: 输出段落的各种 Office.js API 属性 ======
           try {
             console.log(`===== 段落 [第${_paraIdx + 1}个] =====`);
-            console.log(`  文本预览: "${(para.text || '').substring(0, 80).replace(/[\r\n]/g, '\\n')}"`);
-            console.log(`  Style: "${para.style || ''}"`);
+            console.log(
+              `  文本预览: "${(para.text || "").substring(0, 80).replace(/[\r\n]/g, "\\n")}"`
+            );
+            console.log(`  Style: "${para.style || ""}"`);
             console.log(`  Alignment: ${para.alignment}`);
             console.log(`  LineSpacing: ${para.lineSpacing}`);
-            console.log(`  LeftIndent: ${para.leftIndent}, RightIndent: ${para.rightIndent}, FirstLineIndent: ${para.firstLineIndent}`);
+            console.log(
+              `  LeftIndent: ${para.leftIndent}, RightIndent: ${para.rightIndent}, FirstLineIndent: ${para.firstLineIndent}`
+            );
             console.log(`  SpaceBefore: ${para.spaceBefore}, SpaceAfter: ${para.spaceAfter}`);
-            console.log(`  LineUnitBefore: ${para.lineUnitBefore}, LineUnitAfter: ${para.lineUnitAfter}`);
-            try { console.log(`  OutlineLevel: ${para.outlineLevel}`); } catch (e) {}
-            console.log(`  IsListItem: ${para.isListItem}, TableNestingLevel: ${para.tableNestingLevel}`);
+            console.log(
+              `  LineUnitBefore: ${para.lineUnitBefore}, LineUnitAfter: ${para.lineUnitAfter}`
+            );
+            try {
+              console.log(`  OutlineLevel: ${para.outlineLevel}`);
+            } catch (e) {}
+            console.log(
+              `  IsListItem: ${para.isListItem}, TableNestingLevel: ${para.tableNestingLevel}`
+            );
 
             // 列表项属性
             try {
@@ -1152,17 +1341,17 @@ async function parseDocxToJSON(scope = 'selection', startParaIndex, endParaIndex
           // 跳过表格内段落
           if (para.tableNestingLevel > 0) continue;
 
-          const paraText = cleanText(para.text || '');
+          const paraText = cleanText(para.text || "");
 
           // 空段落
           if (!paraText || paraText.match(/^[\r\n\f\u0007]*$/)) {
-            result.paragraphs.push({ pStyle: '', runs: [], paraIndex: _paraIdx });
+            result.paragraphs.push({ pStyle: "", runs: [], paraIndex: _paraIdx });
             continue;
           }
 
-          let styleName = '';
+          let styleName = "";
           try {
-            styleName = para.style || '';
+            styleName = para.style || "";
           } catch (e) {}
 
           // === 优先使用 OOXML 解析 runs（精确获取 Word 内部 run 边界）===
@@ -1176,12 +1365,12 @@ async function parseDocxToJSON(scope = 'selection', startParaIndex, endParaIndex
               console.log(`  段落 ${_paraIdx + 1}: OOXML 解析成功，获取 ${runs.length} 个 runs`);
 
               // 如果仍有 run 字体为空，用 Office.js API 按字符偏移获取实际字体
-              const hasEmptyFont = runs.some(r => !r.rStyle[RSTYLE.FONT_NAME]);
+              const hasEmptyFont = runs.some((r) => !r.rStyle[RSTYLE.FONT_NAME]);
               if (hasEmptyFont) {
                 console.log(`  段落 ${_paraIdx + 1}: 部分 run 字体为空，使用 Office.js API 补充`);
                 try {
                   // 获取段落中每个 run 对应的文本范围及其字体
-                  const paraRange = para.getRange('Whole');
+                  const paraRange = para.getRange("Whole");
                   // 用每个 run 的文本去 search 定位
                   let charOffset = 0;
                   for (const run of runs) {
@@ -1191,16 +1380,21 @@ async function parseDocxToJSON(scope = 'selection', startParaIndex, endParaIndex
                     }
                     // 尝试通过 search 找到文本并读取字体
                     try {
-                      const searchResults = para.search(run.text, { matchCase: true, matchWholeWord: false });
-                      searchResults.load('items');
+                      const searchResults = para.search(run.text, {
+                        matchCase: true,
+                        matchWholeWord: false,
+                      });
+                      searchResults.load("items");
                       await context.sync();
                       if (searchResults.items.length > 0) {
                         const matchItem = searchResults.items[0];
-                        matchItem.font.load('name');
+                        matchItem.font.load("name");
                         await context.sync();
                         if (matchItem.font.name) {
                           run.rStyle[RSTYLE.FONT_NAME] = matchItem.font.name;
-                          console.log(`    补充字体: "${run.text.substring(0, 20)}..." → "${matchItem.font.name}"`);
+                          console.log(
+                            `    补充字体: "${run.text.substring(0, 20)}..." → "${matchItem.font.name}"`
+                          );
                         }
                       }
                     } catch (searchErr) {
@@ -1210,15 +1404,17 @@ async function parseDocxToJSON(scope = 'selection', startParaIndex, endParaIndex
                   }
 
                   // 仍然有空字体的 run，最后用段落级字体兜底
-                  const stillEmpty = runs.filter(r => !r.rStyle[RSTYLE.FONT_NAME]);
+                  const stillEmpty = runs.filter((r) => !r.rStyle[RSTYLE.FONT_NAME]);
                   if (stillEmpty.length > 0) {
                     const paraFont = para.font;
-                    paraFont.load('name');
+                    paraFont.load("name");
                     await context.sync();
                     if (paraFont.name) {
                       for (const run of stillEmpty) {
                         run.rStyle[RSTYLE.FONT_NAME] = paraFont.name;
-                        console.log(`    段落级字体兜底: "${run.text.substring(0, 20)}..." → "${paraFont.name}"`);
+                        console.log(
+                          `    段落级字体兜底: "${run.text.substring(0, 20)}..." → "${paraFont.name}"`
+                        );
                       }
                     }
                   }
@@ -1234,13 +1430,15 @@ async function parseDocxToJSON(scope = 'selection', startParaIndex, endParaIndex
           // === 降级方案：使用 getTextRanges 拆分 ===
           if (!runs) {
             runs = [];
-            const inlineRanges = para.getTextRanges(['\t', '\n'], true);
-            inlineRanges.load('items');
+            const inlineRanges = para.getTextRanges(["\t", "\n"], true);
+            inlineRanges.load("items");
             await context.sync();
 
             for (const ir of inlineRanges.items) {
-              ir.load('text');
-              ir.font.load('name,size,bold,italic,underline,underlineColor,color,highlightColor,strikeThrough,superscript,subscript');
+              ir.load("text");
+              ir.font.load(
+                "name,size,bold,italic,underline,underlineColor,color,highlightColor,strikeThrough,superscript,subscript"
+              );
             }
             await context.sync();
 
@@ -1248,15 +1446,22 @@ async function parseDocxToJSON(scope = 'selection', startParaIndex, endParaIndex
             let currentRun = null;
 
             for (const ir of inlineRanges.items) {
-              const t = ir.text || '';
+              const t = ir.text || "";
               if (!t || t.match(/^[\r\n\f\u0007]+$/)) continue;
 
               const font = ir.font;
               const formatKey = [
-                font.name, font.size, font.bold, font.italic,
-                font.underline, font.color, font.highlightColor,
-                font.strikeThrough, font.superscript, font.subscript
-              ].join('|');
+                font.name,
+                font.size,
+                font.bold,
+                font.italic,
+                font.underline,
+                font.color,
+                font.highlightColor,
+                font.strikeThrough,
+                font.superscript,
+                font.subscript,
+              ].join("|");
 
               if (formatKey === lastFormatKey && currentRun) {
                 currentRun.text += t;
@@ -1265,16 +1470,18 @@ async function parseDocxToJSON(scope = 'selection', startParaIndex, endParaIndex
                 currentRun = {
                   text: t,
                   rStyle: makeRStyle(
-                    font.name || '', font.size || 12,
-                    font.bold === true, font.italic === true,
+                    font.name || "",
+                    font.size || 12,
+                    font.bold === true,
+                    font.italic === true,
                     getUnderlineValue(font.underline),
-                    font.underlineColor || '#000000',
-                    font.color || '#000000',
+                    font.underlineColor || "#000000",
+                    font.color || "#000000",
                     getHighlightValue(font.highlightColor),
                     font.strikeThrough === true,
                     font.superscript === true,
                     font.subscript === true
-                  )
+                  ),
                 };
                 lastFormatKey = formatKey;
               }
@@ -1284,22 +1491,26 @@ async function parseDocxToJSON(scope = 'selection', startParaIndex, endParaIndex
             // 最终降级：整段作为一个 run
             if (runs.length === 0 && paraText) {
               const font = para.getRange().font;
-              font.load('name,size,bold,italic,underline,underlineColor,color,highlightColor,strikeThrough,superscript,subscript');
+              font.load(
+                "name,size,bold,italic,underline,underlineColor,color,highlightColor,strikeThrough,superscript,subscript"
+              );
               await context.sync();
 
               runs.push({
                 text: paraText,
                 rStyle: makeRStyle(
-                  font.name || '', font.size || 12,
-                  font.bold === true, font.italic === true,
+                  font.name || "",
+                  font.size || 12,
+                  font.bold === true,
+                  font.italic === true,
                   getUnderlineValue(font.underline),
-                  font.underlineColor || '#000000',
-                  font.color || '#000000',
+                  font.underlineColor || "#000000",
+                  font.color || "#000000",
                   getHighlightValue(font.highlightColor),
                   font.strikeThrough === true,
                   font.superscript === true,
                   font.subscript === true
-                )
+                ),
               });
             }
           }
@@ -1316,7 +1527,7 @@ async function parseDocxToJSON(scope = 'selection', startParaIndex, endParaIndex
               styleName
             ),
             runs: runs,
-            paraIndex: _paraIdx
+            paraIndex: _paraIdx,
           };
 
           if (paragraphData.runs.length > 0) {
@@ -1328,7 +1539,7 @@ async function parseDocxToJSON(scope = 'selection', startParaIndex, endParaIndex
       return deduplicateStyles(result);
     });
   } catch (error) {
-    return { error: '解析失败: ' + error.message };
+    return { error: "解析失败: " + error.message };
   }
 }
 
@@ -1345,10 +1556,10 @@ async function parseDocxToJSON(scope = 'selection', startParaIndex, endParaIndex
  *   'before'    - 在 jsonData.paraIndex 指定的段落之前插入（O(1) 定位）
  * @returns {Promise<Object>} - 成功返回 {success: true}，失败返回 {error: string}
  */
-async function generateDocxFromJSON(jsonData, insertLocation = 'selection') {
+async function generateDocxFromJSON(jsonData, insertLocation = "selection") {
   try {
     if (!jsonData || (!jsonData.paragraphs && !jsonData.tables)) {
-      return { error: 'JSON数据格式不正确' };
+      return { error: "JSON数据格式不正确" };
     }
 
     const styles = jsonData.styles || {};
@@ -1357,21 +1568,23 @@ async function generateDocxFromJSON(jsonData, insertLocation = 'selection') {
       let targetRange;
       let insertBeforeMode = false;
 
-      if (insertLocation === 'before') {
+      if (insertLocation === "before") {
         // 'before' 模式：通过 paraIndex 直接 O(1) 定位到目标段落
         const paraIndex = jsonData.paraIndex;
         if (paraIndex === undefined || paraIndex === null || paraIndex < 0) {
-          return { error: 'before 模式需要 jsonData.paraIndex（0-based 段落索引）' };
+          return { error: "before 模式需要 jsonData.paraIndex（0-based 段落索引）" };
         }
         const allParagraphs = context.document.body.paragraphs;
-        allParagraphs.load('items');
+        allParagraphs.load("items");
         await context.sync();
         if (paraIndex >= allParagraphs.items.length) {
-          return { error: `paraIndex ${paraIndex} 超出范围，文档共 ${allParagraphs.items.length} 段` };
+          return {
+            error: `paraIndex ${paraIndex} 超出范围，文档共 ${allParagraphs.items.length} 段`,
+          };
         }
         targetRange = allParagraphs.items[paraIndex];
         insertBeforeMode = true;
-      } else if (insertLocation === 'end') {
+      } else if (insertLocation === "end") {
         targetRange = context.document.body;
       } else {
         targetRange = context.document.getSelection();
@@ -1382,13 +1595,17 @@ async function generateDocxFromJSON(jsonData, insertLocation = 'selection') {
 
       if (jsonData.paragraphs) {
         jsonData.paragraphs.forEach((para, index) => {
-          elements.push({ type: 'paragraph', data: para, position: para.position || index * 1000 });
+          elements.push({ type: "paragraph", data: para, position: para.position || index * 1000 });
         });
       }
 
       if (jsonData.tables) {
         jsonData.tables.forEach((table, index) => {
-          elements.push({ type: 'table', data: table, position: table.position || (index + 0.5) * 10000 });
+          elements.push({
+            type: "table",
+            data: table,
+            position: table.position || (index + 0.5) * 10000,
+          });
         });
       }
 
@@ -1398,7 +1615,7 @@ async function generateDocxFromJSON(jsonData, insertLocation = 'selection') {
       const processedElements = [];
       let consecutiveEmptyCount = 0;
       for (const element of elements) {
-        if (element.type === 'paragraph' && isEmptyParagraph(element.data)) {
+        if (element.type === "paragraph" && isEmptyParagraph(element.data)) {
           consecutiveEmptyCount++;
           if (consecutiveEmptyCount <= 2) processedElements.push(element);
         } else {
@@ -1410,44 +1627,46 @@ async function generateDocxFromJSON(jsonData, insertLocation = 'selection') {
       // 插入内容
       const insertLoc = insertBeforeMode
         ? Word.InsertLocation.before
-        : (insertLocation === 'end' ? Word.InsertLocation.end : Word.InsertLocation.after);
+        : insertLocation === "end"
+          ? Word.InsertLocation.end
+          : Word.InsertLocation.after;
 
       for (let i = 0; i < processedElements.length; i++) {
         const element = processedElements[i];
 
-        if (element.type === 'paragraph') {
+        if (element.type === "paragraph") {
           const para = element.data;
           const pStyle = resolveStyle(styles, para.pStyle, DEFAULT_PSTYLE);
-          const alignment = pStyle[PSTYLE.ALIGNMENT] || 'left';
+          const alignment = pStyle[PSTYLE.ALIGNMENT] || "left";
           const lineSpacing = pStyle[PSTYLE.LINE_SPACING] || 0;
           const indentLeft = pStyle[PSTYLE.INDENT_LEFT] || 0;
           const indentRight = pStyle[PSTYLE.INDENT_RIGHT] || 0;
           const indentFirstLine = pStyle[PSTYLE.INDENT_FIRST_LINE] || 0;
           const spaceBefore = pStyle[PSTYLE.SPACE_BEFORE] || 0;
           const spaceAfter = pStyle[PSTYLE.SPACE_AFTER] || 0;
-          const styleName = pStyle[PSTYLE.STYLE_NAME] || '';
+          const styleName = pStyle[PSTYLE.STYLE_NAME] || "";
 
           // 空段落
           if (isEmptyParagraph(para)) {
             if (insertBeforeMode) {
-              targetRange.insertParagraph('', Word.InsertLocation.before);
-            } else if (insertLocation === 'end') {
-              targetRange.insertParagraph('', Word.InsertLocation.end);
+              targetRange.insertParagraph("", Word.InsertLocation.before);
+            } else if (insertLocation === "end") {
+              targetRange.insertParagraph("", Word.InsertLocation.end);
             } else {
-              targetRange.insertParagraph('', insertLoc);
+              targetRange.insertParagraph("", insertLoc);
             }
             continue;
           }
 
           // 拼接段落文本
-          const fullText = (para.runs || []).map(r => r.text || '').join('');
+          const fullText = (para.runs || []).map((r) => r.text || "").join("");
           if (!fullText) continue;
 
           // 插入段落
           let newParagraph;
           if (insertBeforeMode) {
             newParagraph = targetRange.insertParagraph(fullText, Word.InsertLocation.before);
-          } else if (insertLocation === 'end') {
+          } else if (insertLocation === "end") {
             newParagraph = targetRange.insertParagraph(fullText, Word.InsertLocation.end);
           } else {
             newParagraph = targetRange.insertParagraph(fullText, insertLoc);
@@ -1473,23 +1692,31 @@ async function generateDocxFromJSON(jsonData, insertLocation = 'selection') {
           if (para.runs && para.runs.length > 0) {
             let charOffset = 0;
             for (const run of para.runs) {
-              const runText = run.text || '';
+              const runText = run.text || "";
               if (!runText) continue;
 
               const rStyle = resolveStyle(styles, run.rStyle, DEFAULT_RSTYLE);
 
               try {
                 // 使用 getRange 获取段落中的子范围
-                const runRange = newParagraph.getRange().getRange('Whole');
+                const runRange = newParagraph.getRange().getRange("Whole");
                 // Office.js 不支持直接按字符偏移设置格式，
                 // 使用 search 方式定位文本
-                const searchResults = newParagraph.search(runText, { matchCase: true, matchWholeWord: false });
-                searchResults.load('items');
+                const searchResults = newParagraph.search(runText, {
+                  matchCase: true,
+                  matchWholeWord: false,
+                });
+                searchResults.load("items");
                 await context.sync();
 
                 // 取匹配结果，应用字符格式
                 if (searchResults.items.length > 0) {
-                  const targetItem = searchResults.items[searchResults.items.length > 1 ? findClosestMatch(searchResults.items, charOffset) : 0];
+                  const targetItem =
+                    searchResults.items[
+                      searchResults.items.length > 1
+                        ? findClosestMatch(searchResults.items, charOffset)
+                        : 0
+                    ];
                   applyRunStyle(targetItem.font, rStyle);
                 }
               } catch (e) {
@@ -1507,13 +1734,12 @@ async function generateDocxFromJSON(jsonData, insertLocation = 'selection') {
           }
 
           // 更新 targetRange 引用（before 模式不需要更新，始终在同一段落前插入）
-          if (!insertBeforeMode && insertLocation !== 'end') {
+          if (!insertBeforeMode && insertLocation !== "end") {
             targetRange = newParagraph;
           }
-
-        } else if (element.type === 'table') {
+        } else if (element.type === "table") {
           const tableData = element.data;
-          const tStyle = resolveStyle(styles, tableData.tStyle, ['center']);
+          const tStyle = resolveStyle(styles, tableData.tStyle, ["center"]);
 
           // 构建表格数据值数组
           const values = [];
@@ -1523,42 +1749,54 @@ async function generateDocxFromJSON(jsonData, insertLocation = 'selection') {
               for (let col = 0; col < tableData.columns; col++) {
                 const cellData = tableData.cells[row][col];
                 if (cellData) {
-                  let cellText = cellData.text || '';
+                  let cellText = cellData.text || "";
                   if (!cellText && cellData.paragraphs) {
-                    cellText = cellData.paragraphs.map(p => {
-                      if (p.runs) return p.runs.map(r => r.text || '').join('');
-                      return p.text || '';
-                    }).join('\n');
+                    cellText = cellData.paragraphs
+                      .map((p) => {
+                        if (p.runs) return p.runs.map((r) => r.text || "").join("");
+                        return p.text || "";
+                      })
+                      .join("\n");
                   }
                   rowValues.push(cleanText(cellText));
                 } else {
-                  rowValues.push('');
+                  rowValues.push("");
                 }
               }
             }
             // 补齐列数
             while (rowValues.length < tableData.columns) {
-              rowValues.push('');
+              rowValues.push("");
             }
             values.push(rowValues);
           }
 
           // 插入表格
           let newTable;
-          if (insertLocation === 'end') {
-            newTable = targetRange.insertTable(tableData.rows, tableData.columns, Word.InsertLocation.end, values);
+          if (insertLocation === "end") {
+            newTable = targetRange.insertTable(
+              tableData.rows,
+              tableData.columns,
+              Word.InsertLocation.end,
+              values
+            );
           } else {
             // 在选区后插入一个段落，再在该段落后插入表格
-            const tempPara = targetRange.insertParagraph('', Word.InsertLocation.after);
-            newTable = tempPara.insertTable(tableData.rows, tableData.columns, Word.InsertLocation.after, values);
+            const tempPara = targetRange.insertParagraph("", Word.InsertLocation.after);
+            newTable = tempPara.insertTable(
+              tableData.rows,
+              tableData.columns,
+              Word.InsertLocation.after,
+              values
+            );
             tempPara.delete();
           }
 
           // 设置表格对齐
-          newTable.alignment = getAlignmentValue(tStyle[0] || 'center');
+          newTable.alignment = getAlignmentValue(tStyle[0] || "center");
 
           // 应用单元格格式
-          newTable.load('rows');
+          newTable.load("rows");
           await context.sync();
 
           for (let row = 0; row < tableData.cells.length; row++) {
@@ -1570,15 +1808,17 @@ async function generateDocxFromJSON(jsonData, insertLocation = 'selection') {
 
               try {
                 const cell = newTable.getCell(row, col);
-                cell.verticalAlignment = getVerticalAlignmentValue(cStyle[CSTYLE.VERTICAL_ALIGNMENT] || 'center');
+                cell.verticalAlignment = getVerticalAlignmentValue(
+                  cStyle[CSTYLE.VERTICAL_ALIGNMENT] || "center"
+                );
 
                 // 设置单元格段落对齐
                 const cellBody = cell.body;
-                cellBody.paragraphs.load('items');
+                cellBody.paragraphs.load("items");
                 await context.sync();
 
                 for (const cellPara of cellBody.paragraphs.items) {
-                  cellPara.alignment = getAlignmentValue(cStyle[CSTYLE.ALIGNMENT] || 'left');
+                  cellPara.alignment = getAlignmentValue(cStyle[CSTYLE.ALIGNMENT] || "left");
 
                   // 如果有 runs 格式，应用字体
                   if (cellData.rStyle) {
@@ -1611,8 +1851,8 @@ async function generateDocxFromJSON(jsonData, insertLocation = 'selection') {
             }
           }
 
-          if (!insertBeforeMode && insertLocation !== 'end') {
-            targetRange = newTable.getRange('After');
+          if (!insertBeforeMode && insertLocation !== "end") {
+            targetRange = newTable.getRange("After");
           }
         }
       }
@@ -1624,7 +1864,7 @@ async function generateDocxFromJSON(jsonData, insertLocation = 'selection') {
       return { success: true, message: `文档生成成功！${paraCount} 段落 / ${tableCount} 表格` };
     });
   } catch (error) {
-    return { error: '生成文档失败: ' + error.message };
+    return { error: "生成文档失败: " + error.message };
   }
 }
 
@@ -1645,10 +1885,10 @@ function applyRunStyle(font, rStyle) {
   font.underline = underlineType;
 
   // 颜色
-  if (rStyle[RSTYLE.COLOR] && rStyle[RSTYLE.COLOR] !== '#000000') {
+  if (rStyle[RSTYLE.COLOR] && rStyle[RSTYLE.COLOR] !== "#000000") {
     font.color = rStyle[RSTYLE.COLOR];
   } else {
-    font.color = '#000000';
+    font.color = "#000000";
   }
 
   // 高亮
@@ -1670,7 +1910,7 @@ function findClosestMatch(items, offset) {
  */
 async function deleteDocxPara(startParaIndex, endParaIndex) {
   if (startParaIndex === undefined || startParaIndex === null) {
-    return { success: false, deletedCount: 0, message: '未提供有效的 startParaIndex' };
+    return { success: false, deletedCount: 0, message: "未提供有效的 startParaIndex" };
   }
   if (endParaIndex === undefined || endParaIndex === null) {
     endParaIndex = startParaIndex;
@@ -1679,12 +1919,12 @@ async function deleteDocxPara(startParaIndex, endParaIndex) {
   try {
     return await Word.run(async (context) => {
       const allParas = context.document.body.paragraphs;
-      allParas.load('items');
+      allParas.load("items");
       await context.sync();
 
       const totalParas = allParas.items.length;
       if (totalParas === 0) {
-        return { success: false, deletedCount: 0, message: '文档中没有段落' };
+        return { success: false, deletedCount: 0, message: "文档中没有段落" };
       }
 
       if (endParaIndex === -1) {
@@ -1692,7 +1932,11 @@ async function deleteDocxPara(startParaIndex, endParaIndex) {
       }
 
       if (startParaIndex < 0 || startParaIndex >= totalParas) {
-        return { success: false, deletedCount: 0, message: `startParaIndex ${startParaIndex} 超出范围，文档共 ${totalParas} 段` };
+        return {
+          success: false,
+          deletedCount: 0,
+          message: `startParaIndex ${startParaIndex} 超出范围，文档共 ${totalParas} 段`,
+        };
       }
       if (endParaIndex < startParaIndex || endParaIndex >= totalParas) {
         return { success: false, deletedCount: 0, message: `endParaIndex ${endParaIndex} 无效` };
@@ -1725,7 +1969,7 @@ async function addCommentToParas(startParaIndex, endParaIndex, text) {
   try {
     return await Word.run(async (context) => {
       const allParas = context.document.body.paragraphs;
-      allParas.load('items');
+      allParas.load("items");
       await context.sync();
 
       const totalParas = allParas.items.length;
@@ -1735,8 +1979,8 @@ async function addCommentToParas(startParaIndex, endParaIndex, text) {
       const endPara = allParas.items[endParaIndex];
 
       // 获取起止段落的 range 然后合并
-      const startRange = startPara.getRange('Start');
-      const endRange = endPara.getRange('End');
+      const startRange = startPara.getRange("Start");
+      const endRange = endPara.getRange("End");
       const fullRange = startRange.expandTo(endRange);
 
       // 插入批注
@@ -1746,7 +1990,7 @@ async function addCommentToParas(startParaIndex, endParaIndex, text) {
       return { success: true };
     });
   } catch (e) {
-    console.error('添加批注失败:', e);
+    console.error("添加批注失败:", e);
     return { success: false, error: e.message };
   }
 }
@@ -1774,7 +2018,7 @@ export default {
   getUnderlineValue,
   getUnderlineType,
   getHighlightValue,
-  getHighlightColor
+  getHighlightColor,
 };
 
 export {
@@ -1798,5 +2042,5 @@ export {
   getUnderlineValue,
   getUnderlineType,
   getHighlightValue,
-  getHighlightColor
+  getHighlightColor,
 };

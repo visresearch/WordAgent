@@ -22,7 +22,10 @@ function action(event) {
 
   // Show a notification message.
   try {
-    Office.context.mailbox.item.notificationMessages.replaceAsync("ActionPerformanceNotification", message);
+    Office.context.mailbox.item.notificationMessages.replaceAsync(
+      "ActionPerformanceNotification",
+      message
+    );
   } catch (e) {
     // Not in mailbox context, ignore
   }

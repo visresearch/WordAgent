@@ -802,4 +802,5 @@ def delete_document(startParaIndex: int = 0, endParaIndex: int = -1) -> str:
 # region Tools 注册
 
 ALL_TOOLS = [read_document, generate_document, delete_document, query_document, web_search, web_fetch]
+# ALL_TOOLS = [read_document,  delete_document,  web_search, web_fetch]
 TOOL_MAP = {t.name: t for t in ALL_TOOLS}

@@ -43,6 +43,7 @@ dist/
 *.spec.backup
 *.manifest
 *.exe.config
+test/
 
 # Packaging
 package/

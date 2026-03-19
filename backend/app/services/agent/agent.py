@@ -5,8 +5,33 @@
 import asyncio
 import concurrent.futures
 import json
+import os
 import traceback
 from collections.abc import AsyncGenerator
+
+
+# region LangSmith（可选，不影响正常运行）
+
+
+def _try_init_langsmith():
+    """尝试加载 .env 并初始化 LangSmith 环境变量，失败时静默跳过。"""
+    try:
+        from pathlib import Path
+        from dotenv import load_dotenv
+
+        env_path = Path(__file__).resolve().parent.parent.parent.parent / ".env"
+        if env_path.exists():
+            load_dotenv(env_path, override=False)
+        # 只有同时存在 key 和 tracing=true 时才视为可用
+        if os.environ.get("LANGSMITH_TRACING", "").lower() == "true" and os.environ.get("LANGSMITH_API_KEY"):
+            print("[LangSmith] ✅ 已启用 tracing，project =", os.environ.get("LANGSMITH_PROJECT", "default"))
+            return True
+    except Exception:
+        pass
+    return False
+
+
+_langsmith_enabled = _try_init_langsmith()
 
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, RemoveMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, START, MessagesState, StateGraph
@@ -431,16 +456,38 @@ async def process_writing_request_stream(
         generate_tool_result = False
         generating_notified = False  # 是否已通知前端"正在生成文档"
 
+        # 构建 LangSmith tracing config（可选）
+        langsmith_config = None
+        if _langsmith_enabled:
+            try:
+                run_name = f"agent:{model_name}"
+                langsmith_config = {
+                    "run_name": run_name,
+                    "tags": ["agent", model_name, mode or "agent"],
+                    "metadata": {
+                        "model": model_name,
+                        "mode": mode or "agent",
+                        "has_document_range": bool(document_range),
+                        "chat_id": chat_id or "",
+                    },
+                }
+            except Exception:
+                langsmith_config = None
+
         def run_stream():
             """在独立线程中运行同步的 LangGraph stream"""
             try:
                 if chat_id:
                     _current_chat_id.set(chat_id)
 
-                response = app.stream(
-                    {"messages": messages},
-                    stream_mode=["messages", "custom"],
-                )
+                stream_kwargs = {
+                    "input": {"messages": messages},
+                    "stream_mode": ["messages", "custom"],
+                }
+                if langsmith_config:
+                    stream_kwargs["config"] = langsmith_config
+
+                response = app.stream(**stream_kwargs)
 
                 for stream_item in response:
                     if chat_id and is_stop_requested(chat_id):

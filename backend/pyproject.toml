@@ -1,10 +1,10 @@
 [project]
-name = "wence-ai"
+name = "WordAgent"
 version = "0.1.0"
 description = "WenCe AI Writing Assistant - 智能写作助手"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = { text = "Apache2.0" }
 authors = [{ name = "WenCe AI Team" }]
 
 dependencies = [
@@ -25,6 +25,9 @@ dependencies = [
     "pyside6>=6.10.0",
     "curl-cffi>=0.14.0",
     "pyside6-fluent-widgets>=1.11.1",
+    "python-dotenv>=1.0.0",
+    "langsmith>=0.1.0",
+    "cryptography>=41.0.0",
 ]
 
 [project.optional-dependencies]

@@ -6,6 +6,7 @@
 
 ```bash
 uv sync
+$env:PYTHONUTF8="1" # Windows PowerShell 设置环境变量，解决中文路径编码问题
 uv run python main.py
 ```
 
