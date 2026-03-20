@@ -19,7 +19,7 @@ class InstallInterface(QWidget):
         layout.setSpacing(12)
 
         # --- 标题栏 ---
-        title = SubtitleLabel("安装管理", self)
+        title = SubtitleLabel("WPS Word加载项", self)
         layout.addWidget(title)
 
         subtitle = CaptionLabel("管理 WPS Office 加载项的安装与卸载", self)

@@ -33,6 +33,12 @@ jobs:
         run: |
           pnpm install
           pnpm build
+
+      - name: Build MS Office Frontend
+        working-directory: frontend/microsoft_word_plugin
+        run: |
+          pnpm install
+          pnpm build
       
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -99,6 +105,12 @@ jobs:
       
       - name: Build Frontend
         working-directory: frontend/wps_word_plugin
+        run: |
+          pnpm install
+          pnpm build
+
+      - name: Build MS Office Frontend
+        working-directory: frontend/microsoft_word_plugin
         run: |
           pnpm install
           pnpm build

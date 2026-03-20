@@ -6,6 +6,7 @@ import platform
 import ctypes
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QMainWindow,
     QWidget,
@@ -21,8 +22,16 @@ from qfluentwidgets import (
 )
 
 from .home_interface import HomeInterface
-from .install_interface import InstallInterface
+from .wps_install_interface import InstallInterface
+from .office_install_interface import OfficeInstallInterface
 from .console_interface import ConsoleInterface
+
+
+def _icon_path(name: str) -> str:
+    """获取图标文件路径"""
+    from pathlib import Path
+
+    return str(Path(__file__).parent.parent / "resources" / "icon" / name)
 
 
 class MainWindow(QMainWindow):
@@ -97,10 +106,12 @@ class MainWindow(QMainWindow):
 
         self._homeInterface = HomeInterface(self)
         self._installInterface = InstallInterface(self)
+        self._officeInstallInterface = OfficeInstallInterface(self)
         self._consoleInterface = ConsoleInterface(self)
 
         self._stack.addWidget(self._homeInterface)
         self._stack.addWidget(self._installInterface)
+        self._stack.addWidget(self._officeInstallInterface)
         self._stack.addWidget(self._consoleInterface)
 
         # 注册导航项
@@ -113,9 +124,16 @@ class MainWindow(QMainWindow):
         )
         self._nav.addItem(
             routeKey="installInterface",
-            icon=FluentIcon.APPLICATION,
-            text="安装管理",
+            icon=QIcon(_icon_path("WPS.svg")),
+            text="WPS 加载项",
             onClick=lambda: self._switchPage(self._installInterface),
+            position=NavigationItemPosition.TOP,
+        )
+        self._nav.addItem(
+            routeKey="officeInstallInterface",
+            icon=QIcon(_icon_path("Office.svg")),
+            text="Office 加载项",
+            onClick=lambda: self._switchPage(self._officeInstallInterface),
             position=NavigationItemPosition.TOP,
         )
         self._nav.addItem(

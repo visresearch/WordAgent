@@ -20,12 +20,12 @@ datas = [
     ('../app', 'app'),
     # 打包前端构建目录（pnpm build 输出到 dist）
     ('../../frontend/wps_word_plugin/dist', 'frontend'),
+    ('../../frontend/microsoft_word_plugin/dist', 'msoffice'),
 ]
 
 # 可选数据文件（不一定存在于 CI 环境）
 optional_dirs = [
     ('../gui/resources', 'gui/resources'),
-    ('../config', 'config'),
 ]
 for src, dst in optional_dirs:
     src_path = os.path.abspath(os.path.join(os.path.dirname(SPEC), src))
