@@ -94,10 +94,18 @@
 - python 3.10.12
 - Win10/11、Ubuntu22.04
 
-### 构建前端WPS加载项
+### 构建前端WPS Word加载项
 
 ```bash
 cd frontend/wps_word_plugin
+pnpm intsall
+pnpm build
+```
+
+### 构建前端Microsoft Word加载项
+
+```bash
+cd frontend/microsoft_word_plugin
 pnpm intsall
 pnpm build
 ```
@@ -121,11 +129,11 @@ uv run pyinstaller wence.spec
 ```
 打包生成的可执行文件在`backend/deploy/dist`目录下
 
-如果你不想自己打包，可以直接下载release中的打包好的exe文件。
+如果你不想自己打包，可以直接下载release中的打包压缩包，解压后点击exe文件即可使用。
 
 ### 软件下载
 
-打包后的发行版exe文件详见[Release](https://github.com/visresearch/WordAgent/releases).
+打包后的发行版文件详见[Release](https://github.com/visresearch/WordAgent/releases).
 
 ### 软件运行
 

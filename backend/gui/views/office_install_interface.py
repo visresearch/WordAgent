@@ -1,9 +1,9 @@
 """MS Office 加载项安装界面"""
 
 import ssl
-import subprocess
 import sys
 import threading
+import webbrowser
 from datetime import datetime, timedelta
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -148,22 +148,6 @@ def _get_cert_paths() -> tuple[Path, Path]:
         ) from e
 
 
-def _format_process_output(result: subprocess.CompletedProcess) -> str:
-    """合并并截断命令输出，避免提示过长。"""
-    stdout = (result.stdout or "").strip()
-    stderr = (result.stderr or "").strip()
-    content = "\n".join([x for x in [stdout, stderr] if x]).strip()
-    if not content:
-        return "无详细输出"
-    return content[-500:]
-
-
-def _looks_like_already_trusted(output: str) -> bool:
-    """判断证书是否已存在于证书库。"""
-    text = output.lower()
-    return "already" in text or "exists" in text or "已在" in output or "已经在" in output
-
-
 class OfficeInstallInterface(QWidget):
     """MS Office 加载项安装管理界面"""
 
@@ -183,7 +167,7 @@ class OfficeInstallInterface(QWidget):
         title = SubtitleLabel("Microsoft Word 加载项", self)
         layout.addWidget(title)
 
-        subtitle = CaptionLabel("仅支持 Office 网页版：下载 manifest 并启动本地 HTTPS 服务", self)
+        subtitle = CaptionLabel("仅支持 Office 网页版：下载 manifest、启动服务并用浏览器打开接受证书", self)
         subtitle.setTextColor(QColor("#888888"), QColor("#aaaaaa"))
         layout.addWidget(subtitle)
 
@@ -194,10 +178,10 @@ class OfficeInstallInterface(QWidget):
 
         self._usage_label = BodyLabel(
             "使用方法：\n"
-            "1. 打开 https://word.cloud.microsoft/ 并进入 Word 网页版。\n"
-            "2. 先点击“安装/信任证书”，再点击“启动 MS Office HTTPS 服务”。\n"
-            "3. 在 Word 网页版中进入：开始->加载项->更多加载项->我的加载项->管理我的加载项->上传我的加载项\n"
-            "4. 上传下载好的 manifest.xml，完成加载。",
+            "1. 点击“启动 HTTPS 服务”，然后点击“用浏览器打开”在浏览器中接受证书（仅首次需要）。\n"
+            "2. 打开 https://word.cloud.microsoft/ 并进入 Word 网页版。\n"
+            "3. 进入：开始->加载项->更多加载项->我的加载项->管理我的加载项->上传我的加载项\n"
+            "4. 上传下载好的 manifest.xml，完成加载。如果加载项界面未显示，请刷新页面。",
             card,
         )
         self._usage_label.setWordWrap(True)
@@ -213,13 +197,13 @@ class OfficeInstallInterface(QWidget):
         self._download_btn.clicked.connect(self._on_download_manifest)
         btn_layout.addWidget(self._download_btn)
 
-        self._trust_cert_btn = PushButton("安装/信任证书", card)
-        self._trust_cert_btn.clicked.connect(self._on_trust_cert)
-        btn_layout.addWidget(self._trust_cert_btn)
-
-        self._start_btn = PushButton("启动 MS Office HTTPS 服务", card)
+        self._start_btn = PushButton("启动 HTTPS 服务", card)
         self._start_btn.clicked.connect(self._on_start_service)
         btn_layout.addWidget(self._start_btn)
+
+        self._open_browser_btn = PushButton("用浏览器打开", card)
+        self._open_browser_btn.clicked.connect(self._on_open_browser)
+        btn_layout.addWidget(self._open_browser_btn)
 
         self._stop_btn = PushButton("关闭服务", card)
         self._stop_btn.clicked.connect(self._on_stop_service)
@@ -231,10 +215,6 @@ class OfficeInstallInterface(QWidget):
         layout.addWidget(card)
         layout.addStretch()
 
-        if not sys.platform.startswith("win"):
-            self._trust_cert_btn.setEnabled(False)
-            self._trust_cert_btn.setToolTip("非 Windows 请手动信任 localhost 证书")
-
         self._update_service_status()
 
     def _update_service_status(self):
@@ -243,11 +223,13 @@ class OfficeInstallInterface(QWidget):
             self._service_status_label.setText(f"服务状态：运行中（https://{self._host}:{self._port}）")
             self._service_status_label.setStyleSheet("color: #16a34a;")
             self._start_btn.setEnabled(False)
+            self._open_browser_btn.setEnabled(True)
             self._stop_btn.setEnabled(True)
         else:
             self._service_status_label.setText("服务状态：未启动")
             self._service_status_label.setStyleSheet("color: #d97706;")
             self._start_btn.setEnabled(True)
+            self._open_browser_btn.setEnabled(False)
             self._stop_btn.setEnabled(False)
 
     def _on_download_manifest(self):
@@ -290,100 +272,25 @@ class OfficeInstallInterface(QWidget):
                 duration=5000,
             )
 
-    def _on_trust_cert(self):
-        if not sys.platform.startswith("win"):
-            InfoBar.error(
-                title="证书安装失败",
-                content="当前仅支持 Windows 自动安装证书。",
+    def _on_open_browser(self):
+        """用系统浏览器打开服务地址，让用户接受自签名证书。"""
+        url = f"https://{self._host}:{self._port}/taskpane.html"
+        try:
+            webbrowser.open(url)
+            InfoBar.info(
+                title="已在浏览器中打开",
+                content="请在浏览器中接受证书后，回到 Word 网页版刷新加载项。",
                 parent=self,
                 position=InfoBarPosition.TOP,
                 duration=4000,
             )
-            return
-
-        cert_file = None
-        try:
-            cert_file, _ = _get_cert_paths()
-        except FileNotFoundError as e:
-            InfoBar.error(
-                title="证书安装失败",
-                content=str(e),
-                parent=self,
-                position=InfoBarPosition.TOP,
-                duration=5000,
-            )
-            return
-
-        try:
-            certutil_result = subprocess.run(
-                ["certutil", "-user", "-addstore", "Root", str(cert_file)],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="ignore",
-                check=False,
-            )
-            certutil_output = _format_process_output(certutil_result)
-
-            if certutil_result.returncode == 0 or _looks_like_already_trusted(certutil_output):
-                InfoBar.success(
-                    title="证书安装成功",
-                    content="已导入到当前用户受信任根证书，请刷新浏览器中的 Word 网页版后再加载加载项。",
-                    parent=self,
-                    position=InfoBarPosition.TOP,
-                    duration=4500,
-                )
-                return
-
-            ps_cert_path = str(cert_file).replace("'", "''")
-            ps_cmd = (
-                f"Import-Certificate -FilePath '{ps_cert_path}' -CertStoreLocation Cert:\\CurrentUser\\Root | Out-Null"
-            )
-            ps_result = subprocess.run(
-                [
-                    "powershell",
-                    "-NoProfile",
-                    "-ExecutionPolicy",
-                    "Bypass",
-                    "-Command",
-                    ps_cmd,
-                ],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="ignore",
-                check=False,
-            )
-            ps_output = _format_process_output(ps_result)
-
-            if ps_result.returncode == 0 or _looks_like_already_trusted(ps_output):
-                InfoBar.success(
-                    title="证书安装成功",
-                    content="已导入到当前用户受信任根证书，请刷新浏览器中的 Word 网页版后再加载加载项。",
-                    parent=self,
-                    position=InfoBarPosition.TOP,
-                    duration=4500,
-                )
-                return
-
-            raise RuntimeError(
-                f"certutil 与 PowerShell 导入都失败。\ncertutil: {certutil_output}\npowershell: {ps_output}"
-            )
-        except FileNotFoundError:
-            InfoBar.error(
-                title="证书安装失败",
-                content="未找到 certutil 或 powershell，请在 Windows 系统下运行。",
-                parent=self,
-                position=InfoBarPosition.TOP,
-                duration=5000,
-            )
         except Exception as e:
             InfoBar.error(
-                title="证书安装失败",
+                title="打开浏览器失败",
                 content=str(e),
                 parent=self,
                 position=InfoBarPosition.TOP,
-                duration=5000,
+                duration=4000,
             )
 
     def _on_start_service(self):
@@ -422,6 +329,13 @@ class OfficeInstallInterface(QWidget):
                     ".png": "image/png",
                     ".svg": "image/svg+xml",
                 }
+
+                def end_headers(self):
+                    self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+                    self.send_header("Pragma", "no-cache")
+                    self.send_header("Expires", "0")
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    super().end_headers()
 
             handler = partial(LocalStaticHandler, directory=str(dist_dir))
 

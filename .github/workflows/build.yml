@@ -68,14 +68,14 @@ jobs:
         working-directory: backend
         run: |
           mkdir -p package
-          cp dist/wence_ai package/wence_ai-linux-x86_64
-          chmod +x package/wence_ai-linux-x86_64
+          chmod +x dist/wence_ai/wence_ai
+          tar -czf package/wence_ai-linux-x86_64.tar.gz -C dist wence_ai
       
       - name: Upload to Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
         with:
-          files: backend/package/wence_ai-linux-x86_64
+          files: backend/package/wence_ai-linux-x86_64.tar.gz
           draft: false
           prerelease: false
           generate_release_notes: true
@@ -143,13 +143,13 @@ jobs:
         working-directory: backend
         run: |
           New-Item -ItemType Directory -Force -Path package
-          Copy-Item dist/wence_ai.exe package/wence_ai-windows-x86_64.exe
+          Compress-Archive -Path dist/wence_ai -DestinationPath package/wence_ai-windows-x86_64.zip
       
       - name: Upload to Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
         with:
-          files: backend/package/wence_ai-windows-x86_64.exe
+          files: backend/package/wence_ai-windows-x86_64.zip
           draft: false
           prerelease: false
           generate_release_notes: true

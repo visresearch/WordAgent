@@ -157,55 +157,35 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
-# 单文件模式（onefile=True）
+# 图标路径
+icon_path = os.path.join(os.path.dirname(SPEC), 'robot.ico')
+
+# 目录模式（更快启动）
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
     [],
+    exclude_binaries=True,
     name='wence_ai',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    upx_exclude=[],
-    runtime_tmpdir=None,
-    console=True,  # 保留控制台输出（方便查看日志）
+    console=False,  # 不显示控制台窗口
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,  # 可以添加图标文件路径
+    icon=icon_path if os.path.exists(icon_path) else None,
 )
-
-# 如果需要目录模式（更快启动，体积更大），使用以下配置：
-# exe = EXE(
-#     pyz,
-#     a.scripts,
-#     [],
-#     exclude_binaries=True,
-#     name='wence-ai',
-#     debug=False,
-#     bootloader_ignore_signals=False,
-#     strip=False,
-#     upx=True,
-#     console=True,
-#     disable_windowed_traceback=False,
-#     argv_emulation=False,
-#     target_arch=None,
-#     codesign_identity=None,
-#     entitlements_file=None,
-# )
-# coll = COLLECT(
-#     exe,
-#     a.binaries,
-#     a.zipfiles,
-#     a.datas,
-#     strip=False,
-#     upx=True,
-#     upx_exclude=[],
-#     name='wence-ai',
-# )
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name='wence_ai',
+)
