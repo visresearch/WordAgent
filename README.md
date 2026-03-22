@@ -129,7 +129,7 @@ uv run pyinstaller wence.spec
 ```
 打包生成的可执行文件在`backend/deploy/dist`目录下
 
-如果你不想自己打包，可以直接下载release中的打包压缩包，解压后点击exe文件即可使用。
+如果你不想自己打包，可以直接下载release中打包的压缩包，解压后点击exe文件即可使用。
 
 ### 软件下载
 
