@@ -22,5 +22,5 @@ pnpm docs:build
 
 本项目已配置 GitHub Actions 自动部署。将代码推送到 `master` 分支后，会自动构建并部署到 GitHub Pages。
 
-访问地址：https://visresearch.github.io/WordAgent/
+官网访问地址：https://visresearch.github.io/WordAgent/
 
