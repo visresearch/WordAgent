@@ -3,27 +3,46 @@ import { defineConfig } from 'vitepress'
 // https://vitepress.dev/reference/site-config
 export default defineConfig({
   base: '/WordAgent/',
-  title: "WordAgent",
+  title: "WordAgent | 文策AI",
   description: "文策AI——基于WPS/Microsoft Word加载项的AI辅助写作系统",
+  head: [
+    ['link', { rel: 'icon', href: '/WordAgent/robot.ico' }],
+  ],
   themeConfig: {
     // https://vitepress.dev/reference/default-theme-config
-    logo: '/WenceAI_small.png',
+    logo: '/WenceAI.png',
 
     nav: [
       { text: '首页', link: '/' },
-      { text: '指南', link: '/guide/quick-start' },
+      { text: '快速开始', link: '/guide/introduction' },
       { text: '下载', link: 'https://github.com/visresearch/WordAgent/releases' }
     ],
 
     sidebar: {
       '/guide/': [
         {
-          text: '指南',
+          text: '快速开始',
           items: [
-            { text: '项目介绍', link: '/guide/introduction' },
-            { text: '快速开始', link: '/guide/quick-start' },
-            { text: '使用说明', link: '/guide/usage' },
-            { text: '系统架构', link: '/guide/architecture' }
+            { text: '项目简介', link: '/guide/introduction' },
+            { text: '项目架构', link: '/guide/architecture' },
+            { text: '安装方式', link: '/guide/installation' },
+          ]
+        },
+        {
+          text: '使用说明',
+          items: [
+            { text: '安装 WPS 加载项', link: '/guide/wps-plugin' },
+            { text: '启动 Microsoft Word 加载项', link: '/guide/msword-plugin' },
+            { text: '配置 API Key', link: '/guide/api-config' },
+            { text: '如何提问', link: '/guide/how-to-ask' },
+            { text: '功能按钮说明', link: '/guide/features' },
+            { text: '常见问题', link: '/guide/faq' },
+          ]
+        },
+        {
+          text: '关于',
+          items: [
+            { text: '关于作者', link: '/guide/about' },
           ]
         }
       ]

@@ -1,0 +1,34 @@
+/* ===== 首页炫彩动态背景（纯 CSS） ===== */
+.VPHome .VPHero::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(ellipse 600px 600px at 15% 20%, rgba(102, 126, 234, 0.25), transparent 70%),
+    radial-gradient(ellipse 500px 500px at 80% 25%, rgba(240, 147, 251, 0.2), transparent 70%),
+    radial-gradient(ellipse 450px 450px at 40% 85%, rgba(79, 172, 254, 0.2), transparent 70%),
+    radial-gradient(ellipse 350px 350px at 75% 75%, rgba(67, 233, 123, 0.15), transparent 70%);
+  animation: bg-shift 10s ease-in-out infinite alternate;
+  pointer-events: none;
+}
+
+@keyframes bg-shift {
+  0%   { filter: hue-rotate(0deg); transform: scale(1); }
+  100% { filter: hue-rotate(30deg); transform: scale(1.08); }
+}
+
+/* 暗色模式降低饱和度 */
+.dark .VPHome .VPHero::before {
+  opacity: 0.35;
+}
+
+/* feature 卡片 hover 上浮 */
+.VPHome .VPFeature {
+  transition: transform 0.3s, box-shadow 0.3s;
+}
+
+.VPHome .VPFeature:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 24px rgba(102, 126, 234, 0.12);
+}

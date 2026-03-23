@@ -405,17 +405,17 @@ def generate_document(document: DocumentOutput) -> dict:
     writer({"type": "generate_complete", "content": f"✅ 文档已生成，共 {para_count} 个段落"})
 
     # 保存生成的文档 JSON 到 example 文件夹
-    try:
-        from datetime import datetime
-        from pathlib import Path
+    # try:
+    #     from datetime import datetime
+    #     from pathlib import Path
 
-        example_dir = Path(__file__).resolve().parent.parent.parent.parent / "example"
-        example_dir.mkdir(exist_ok=True)
-        filename = f"generated_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-        (example_dir / filename).write_text(json.dumps(doc_dict, ensure_ascii=False, indent=2), encoding="utf-8")
-        print(f"[generate_document] 已保存到 example/{filename}")
-    except Exception as e:
-        print(f"[generate_document] 保存 JSON 失败: {e}")
+    #     example_dir = Path(__file__).resolve().parent.parent.parent.parent / "example"
+    #     example_dir.mkdir(exist_ok=True)
+    #     filename = f"generated_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    #     (example_dir / filename).write_text(json.dumps(doc_dict, ensure_ascii=False, indent=2), encoding="utf-8")
+    #     print(f"[generate_document] 已保存到 example/{filename}")
+    # except Exception as e:
+    #     print(f"[generate_document] 保存 JSON 失败: {e}")
 
     return doc_dict
 
