@@ -72,9 +72,12 @@ async def submit_tool_response(chat_id: str, data: dict):
     """前端通过 WebSocket 回传工具结果时调用"""
     if is_stop_requested(chat_id):
         # 停止后忽略迟到的工具回包，避免再次唤醒 agent 流程
+        print(f"[ToolCallback] ⛔ 忽略回传（已停止）session={chat_id}")
         return
     q = _pending_tool_requests.get(chat_id)
     if q:
+        data_type = data.get("type", "?") if isinstance(data, dict) else type(data).__name__
+        print(f"[ToolCallback] ✅ 放入队列 session={chat_id}, type={data_type}, 队列大小={q.qsize() + 1}")
         await q.put(data)
     else:
         print(f"[ToolCallback] ⚠️ 找不到 session {chat_id} 的等待队列")
@@ -269,11 +272,48 @@ class DocumentQuery(BaseModel):
     filters: QueryFilter = Field(description="筛选条件，所有字段为 AND 关系，只填需要的字段")
 
 
+# ============== 文档大小限制 ==============
+# 返回给 LLM 的文档 JSON 最大字符数（超过则精简样式信息，仅保留文本）
+_MAX_DOC_JSON_CHARS = 80_000
+
+
+def _compact_doc_json(doc_json: dict) -> str:
+    """将文档 JSON 压缩到 LLM 可处理的大小。
+    如果完整 JSON 超出限制，去掉样式数组只保留文本内容和段落索引。"""
+    full = json.dumps(doc_json, ensure_ascii=False)
+    if len(full) <= _MAX_DOC_JSON_CHARS:
+        return full
+
+    # 精简模式：只保留段落文本和索引
+    compact = {"paragraphs": [], "_compacted": True}
+    for p in doc_json.get("paragraphs", []):
+        text = "".join(r.get("text", "") if isinstance(r, dict) else str(r) for r in p.get("runs", []))
+        compact["paragraphs"].append({"paraIndex": p.get("paraIndex"), "text": text})
+    # 保留表格的文本信息
+    if doc_json.get("tables"):
+        compact["tables"] = []
+        for t in doc_json["tables"]:
+            rows = []
+            for row in t.get("rows", []):
+                cells = []
+                for cell in row.get("cells", []):
+                    cell_text = "".join(
+                        "".join(r.get("text", "") if isinstance(r, dict) else str(r) for r in cp.get("runs", []))
+                        for cp in cell.get("paragraphs", [])
+                    )
+                    cells.append(cell_text)
+                rows.append(cells)
+            compact["tables"].append({"tableIndex": t.get("tableIndex"), "rows": rows})
+    result = json.dumps(compact, ensure_ascii=False)
+    print(f"[read_document] 📦 文档过大({len(full)} chars)，已精简为 {len(result)} chars（纯文本模式）")
+    return result
+
+
 # region Tools 定义
 
 
 @tool
-def read_document(startParaIndex: int = 0, endParaIndex: int = -1) -> str:
+def read_document(startParaIndex: int = 0, endParaIndex: int = 49) -> str:
     """
     读取文档内容。通过 WebSocket 请求前端解析指定范围的文档并返回。
 
@@ -281,12 +321,18 @@ def read_document(startParaIndex: int = 0, endParaIndex: int = -1) -> str:
         startParaIndex: 文档读取起始段落索引（0-based）。0 表示从文档开头开始。
         endParaIndex: 文档读取结束段落索引（0-based）。-1 表示到文档结尾。
 
+    ❗❗ 重要：禁止使用 endParaIndex=-1 一次性读取全文！文档可能有几百个段落，一次读取会超出上下文限制。
+    必须分段读取，每次最多 50 个段落：
+    - 第1次: read_document(0, 49)
+    - 第2次: read_document(50, 99)
+    - 第3次: read_document(100, 149)
+    - ...(直到返回的段落数 < 50 说明已读到末尾)
+
     【调用场景】
-    1. 读取全文（startParaIndex=0, endParaIndex=-1）：
-       - 用户说"润色全文"但没有提供文档内容
-       - 用户说"看看这篇文档"但没有文档内容
-       - 用户说"分析一下文档"但文档为空
-       - 用户说"总结文档内容"但没有收到文档
+    1. 读取全文（分段读取）：
+       - 用户说"润色全文" -> read_document(0,49), read_document(50,99), ...
+       - 用户说"看看这篇文档" -> 分段读取
+       - 用户说"总结文档内容" -> 分段读取
 
     2. 读取指定范围：
        - 当用户选中了部分内容并要求操作时
@@ -317,7 +363,7 @@ def read_document(startParaIndex: int = 0, endParaIndex: int = -1) -> str:
     if chat_id:
         q = _pending_tool_requests.get(chat_id)
         if q:
-            print(f"[read_document] WebSocket 模式，等待前端回传文档 (session={chat_id})")
+            print(f"[read_document] WebSocket 模式，等待前端回传文档 (session={chat_id}, 队列现有 {q.qsize()} 条)")
 
             loop = _pending_loops.get(chat_id)
             if loop:
@@ -327,7 +373,10 @@ def read_document(startParaIndex: int = 0, endParaIndex: int = -1) -> str:
                 )
                 try:
                     result = future.result(timeout=65)
-                    if result.get("type") == "stop" or result.get("error") == "stopped_by_user":
+                    result_type = result.get("type", "?")
+                    result_keys = list(result.keys())
+                    print(f"[read_document] 收到回传: type={result_type}, keys={result_keys}")
+                    if result_type == "stop" or result.get("error") == "stopped_by_user":
                         print("[read_document] ⛔ 用户已停止，终止读取")
                         return ""
                     if result.get("error"):
@@ -344,9 +393,11 @@ def read_document(startParaIndex: int = 0, endParaIndex: int = -1) -> str:
                                 "content": f"✅ 文档读取完成(段落 {startParaIndex} - {endParaIndex})",
                             }
                         )
-                        return json.dumps(doc_json, ensure_ascii=False)
+                        return _compact_doc_json(doc_json)
                     else:
-                        print("[read_document] ⚠️ 收到空文档")
+                        print(
+                            f"[read_document] ⚠️ 收到空文档 (documentJson keys={list(doc_json.keys()) if isinstance(doc_json, dict) else type(doc_json).__name__})"
+                        )
                         writer({"type": "status", "content": "⚠️ 文档为空"})
                         return ""
                 except (TimeoutError, concurrent.futures.TimeoutError):
@@ -356,9 +407,13 @@ def read_document(startParaIndex: int = 0, endParaIndex: int = -1) -> str:
                 except Exception as e:
                     print(f"[read_document] ❌ 等待文档出错: {repr(e)}")
                     return ""
+            else:
+                print(f"[read_document] ⚠️ 找不到事件循环 (session={chat_id})")
+        else:
+            print(f"[read_document] ⚠️ 找不到等待队列 (session={chat_id})")
 
     # 非 WebSocket 模式（无 chat_id），无法双向通信获取文档
-    print("[read_document] ⚠️ 非 WebSocket 模式，无法请求文档")
+    print(f"[read_document] ⚠️ 非 WebSocket 模式，无法请求文档 (chat_id={chat_id})")
     return ""
 
 
@@ -405,17 +460,17 @@ def generate_document(document: DocumentOutput) -> dict:
     writer({"type": "generate_complete", "content": f"✅ 文档已生成，共 {para_count} 个段落"})
 
     # 保存生成的文档 JSON 到 example 文件夹
-    # try:
-    #     from datetime import datetime
-    #     from pathlib import Path
+    try:
+        from datetime import datetime
+        from pathlib import Path
 
-    #     example_dir = Path(__file__).resolve().parent.parent.parent.parent / "example"
-    #     example_dir.mkdir(exist_ok=True)
-    #     filename = f"generated_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-    #     (example_dir / filename).write_text(json.dumps(doc_dict, ensure_ascii=False, indent=2), encoding="utf-8")
-    #     print(f"[generate_document] 已保存到 example/{filename}")
-    # except Exception as e:
-    #     print(f"[generate_document] 保存 JSON 失败: {e}")
+        example_dir = Path(__file__).resolve().parent.parent.parent.parent / "example"
+        example_dir.mkdir(exist_ok=True)
+        filename = f"generated_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        (example_dir / filename).write_text(json.dumps(doc_dict, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"[generate_document] 已保存到 example/{filename}")
+    except Exception as e:
+        print(f"[generate_document] 保存 JSON 失败: {e}")
 
     return doc_dict
 
@@ -441,13 +496,12 @@ def query_document(query: DocumentQuery) -> str:
     【返回值说明】
     返回 JSON 字符串，包含 matches 列表，每项含：
     - text: 匹配的文本内容
-    - matchPosition: {paraIndex, start, end} 匹配位置（段落索引 + 段落内文本偏移）
-    - paragraphPosition: {paraIndex, start, end} 所在段落位置
-    - paragraphIndex: 段落索引
+    - paragraphIndex: 段落索引（唯一定位字段）
     根据 paragraphIndex 可进一步调用 read_document 读取完整段落。
 
-    Args:
-        query: 查询条件，包含搜索粒度 type 和筛选条件 filters
+    【未命中重试】
+    若返回 matchCount=0，不应立即放弃。应更换关键词继续查询（同义词/近义词、缩短核心词、章节名词）至少 1-2 次，
+    仅在多次查询仍无结果时再告知用户未找到。
 
     Args:
         query: 查询条件，包含搜索粒度 type 和筛选条件 filters
@@ -495,14 +549,50 @@ def query_document(query: DocumentQuery) -> str:
                     matches = result.get("matches", [])
                     match_count = result.get("matchCount", 0)
 
+                    matched_para_indices: list[int] = []
+                    for m in matches:
+                        if not isinstance(m, dict):
+                            continue
+                        para_idx = m.get("paragraphIndex")
+                        if isinstance(para_idx, int):
+                            matched_para_indices.append(para_idx)
+                    matched_para_indices = sorted(set(matched_para_indices))
+                    suggested_read_ranges = [
+                        {"startParaIndex": idx, "endParaIndex": idx} for idx in matched_para_indices[:20]
+                    ]
+
                     if match_count > 0:
-                        print(f"[query_document] ✅ 查询完成，匹配 {match_count} 项")
-                        writer({"type": "query_complete", "content": f"✅ 搜索完成，找到 {match_count} 处匹配"})
-                        return json.dumps({"matches": matches, "matchCount": match_count}, ensure_ascii=False)
+                        print(f"[query_document] ✅ 查询完成，匹配 {match_count} 项，涉及段落 {matched_para_indices}")
+                        writer(
+                            {
+                                "type": "query_complete",
+                                "content": f"✅ 搜索完成，找到 {match_count} 处匹配（涉及 {len(matched_para_indices)} 个段落）",
+                            }
+                        )
+                        return json.dumps(
+                            {
+                                "matches": matches,
+                                "matchCount": match_count,
+                                "matchedParaIndices": matched_para_indices,
+                                "suggestedReadRanges": suggested_read_ranges,
+                                "coverageAdvice": "若命中多处候选，按段落索引顺序逐个读取候选段落附近内容；证据充分即可停止",
+                            },
+                            ensure_ascii=False,
+                        )
                     else:
                         print("[query_document] ⚠️ 未找到匹配项")
-                        writer({"type": "query_complete", "content": "⚠️ 未找到匹配内容"})
-                        return json.dumps({"matches": [], "matchCount": 0}, ensure_ascii=False)
+                        writer({"type": "query_complete", "content": "⚠️ 未找到匹配内容，建议更换关键词重试"})
+                        return json.dumps(
+                            {
+                                "matches": [],
+                                "matchCount": 0,
+                                "matchedParaIndices": [],
+                                "suggestedReadRanges": [],
+                                "triedQuery": query_dict,
+                                "retryAdvice": "请更换关键词重试（同义词/简称/章节名/核心词）",
+                            },
+                            ensure_ascii=False,
+                        )
                 except (TimeoutError, concurrent.futures.TimeoutError):
                     print("[query_document] ⏰ 等待查询结果超时")
                     writer({"type": "status", "content": "⏰ 搜索超时"})
@@ -558,6 +648,7 @@ def web_fetch(url: str) -> str:
         session = curl_requests.Session(impersonate="chrome131")
         if proxies:
             session.proxies = proxies
+        session.verify = False
 
         resp = session.get(url, headers=headers, timeout=20, allow_redirects=True)
 
@@ -695,6 +786,7 @@ def web_search(query: str, max_results: int = 5) -> str:
             timeout=15,
             allow_redirects=True,
             proxies=proxies,
+            verify=False,
         )
         resp.raise_for_status()
 

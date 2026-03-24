@@ -47,9 +47,26 @@ LANGSMITH_TRACING=true
 LANGSMITH_ENDPOINT=https://api.smith.langchain.com
 LANGSMITH_API_KEY=your_langsmith_api_key_here
 LANGSMITH_PROJECT="WordAgent"
+
+# LangGraph dev 入口配置
+# multi: 多智能体图（默认）
+# single: 单智能体图
+LANGGRAPH_DEV_MODE=single
 ```
 
 打开Langsmith官网面板：https://smith.langchain.com/
+
+## LangGraph Dev
+
+本项目还集成了langsmith studio的LangGraph Dev功能，可以可视化调试Agent的执行流程，查看每一步的输入输出和调用的工具。
+
+在.env文件中设置`LANGGRAPH_DEV_MODE=single`，然后运行后端服务，运行
+
+```bash
+uv run langgraph dev
+```
+
+打开Langsmith官网studio面板，可以可视化看到Agent的执行流程图。
 
 ## 提交代码
 

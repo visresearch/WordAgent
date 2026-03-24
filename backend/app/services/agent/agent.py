@@ -154,6 +154,7 @@ def build_graph(llm_with_tools):
                         content = result
                     else:
                         content = str(result)
+
                     results.append(ToolMessage(content=content, tool_call_id=tool_call["id"], name=tool_name))
                 except Exception as e:
                     err = f"错误: 工具 {tool_name} 调用失败: {e}。请按工具 schema 重新构造参数。"
@@ -262,6 +263,9 @@ def build_graph(llm_with_tools):
 
     # ---- 路由 ----
 
+    # 最大工具调用轮次（agent -> tools -> agent 算一轮），防止无限循环
+    MAX_TOOL_ROUNDS = 20
+
     def should_continue(state: MessagesState) -> str:
         """判断 Agent 是否还需要调用工具"""
         chat_id = _current_chat_id.get(None)
@@ -271,7 +275,12 @@ def build_graph(llm_with_tools):
 
         last_message = state["messages"][-1]
         if hasattr(last_message, "tool_calls") and last_message.tool_calls:
-            print("[Router] -> tools")
+            # 统计已完成的工具调用轮次（ToolMessage 的数量近似于轮次）
+            tool_rounds = sum(1 for m in state["messages"] if isinstance(m, ToolMessage))
+            if tool_rounds >= MAX_TOOL_ROUNDS:
+                print(f"[Router] -> END (已达到最大工具调用轮次 {MAX_TOOL_ROUNDS})")
+                return END
+            print(f"[Router] -> tools (第 {tool_rounds + 1} 轮)")
             return "tools"
 
         # 优先尝试修复 invalid_tool_calls（模型生成了非法 JSON 参数）
@@ -400,31 +409,18 @@ async def process_writing_request_stream(
         current_time = now.strftime("%Y年%m月%d日 %H:%M") + " " + weekdays[now.weekday()]
         messages.append(SystemMessage(content=f"当前时间: {current_time}"))  # 注入当前时间，帮助模型做出与时俱进的回复
 
-        # # 注入历史对话（最近 N 轮），让 Agent 了解上下文
-        # if history:
-        #     from langchain_core.messages import AIMessage
+        # 注入三层记忆（长期 RAG → 摘要 → 短期 k=5 轮）
+        from app.services.memory import build_memory_messages
 
-        #     MAX_HISTORY_PAIRS = 3  # 最多保留最近 3 轮对话
-        #     # history 来自前端，格式: [{role: "user", content: "..."}, {role: "assistant", content: "..."}, ...]
-        #     # 只取纯文本的 user/assistant 消息，跳过工具调用等
-        #     hist_msgs = []
-        #     for h in history:
-        #         role = h.get("role", "")
-        #         content = h.get("content", "")
-        #         if not content or not isinstance(content, str):
-        #             continue
-        #         if role == "user":
-        #             hist_msgs.append(HumanMessage(content=content))
-        #         elif role == "assistant":
-        #             hist_msgs.append(AIMessage(content=content))
-
-        #     # 只保留最近 MAX_HISTORY_PAIRS 轮（每轮 = 1 user + 1 assistant）
-        #     if len(hist_msgs) > MAX_HISTORY_PAIRS * 2:
-        #         hist_msgs = hist_msgs[-(MAX_HISTORY_PAIRS * 2) :]
-
-        #     if hist_msgs:
-        #         messages.extend(hist_msgs)
-        #         print(f"[Agent] 注入 {len(hist_msgs)} 条历史消息")
+        memory_msgs = build_memory_messages(
+            history=history,
+            current_message=message,
+            llm=llm,
+            session_id=chat_id,
+        )
+        if memory_msgs:
+            messages.extend(memory_msgs)
+            print(f"[Agent] 注入 {len(memory_msgs)} 条记忆消息")
 
         # 构建用户消息
         user_content = message
@@ -455,7 +451,7 @@ async def process_writing_request_stream(
         has_tool_result = False
         generate_tool_result = False
         generating_notified = False  # 是否已通知前端"正在生成文档"
-
+        _collected_text_parts: list[str] = []  # 收集 AI 回复文本，用于存入长期记忆
         # 构建 LangSmith tracing config（可选）
         langsmith_config = None
         if _langsmith_enabled:
@@ -567,6 +563,7 @@ async def process_writing_request_stream(
 
                 # 普通文本输出（Agent 的回复）
                 if content:
+                    _collected_text_parts.append(content)
                     yield f"data: {json.dumps({'type': 'text', 'content': content}, ensure_ascii=False)}\n\n"
 
             elif input_type == "custom":
@@ -586,6 +583,22 @@ async def process_writing_request_stream(
         if generating_notified and not generate_tool_result:
             print("[Agent] ❗ 模型取消了文档生成")
             yield f"data: {json.dumps({'type': 'status', 'content': '❗ 模型取消了文档生成，请重新尝试'}, ensure_ascii=False)}\n\n"
+
+        # 将本轮对话存入长期记忆
+        assistant_text = "".join(_collected_text_parts)
+        if assistant_text or generate_tool_result:
+            try:
+                from app.services.memory import store_conversation_to_long_term
+
+                store_conversation_to_long_term(
+                    session_id=chat_id or "",
+                    user_message=message,
+                    assistant_message=assistant_text or "[已生成文档]",
+                    model=model,
+                    mode=mode,
+                )
+            except Exception as mem_err:
+                print(f"[Agent] ⚠️ 存入长期记忆失败: {mem_err}")
 
         yield "data: [DONE]\n\n"
 

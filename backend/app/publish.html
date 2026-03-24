@@ -574,7 +574,7 @@
 
         function LoadPublishAddons() {
             var addonList = document.getElementById("addonList");
-            var curList = [{"name":"test123","addonType":"wps","online":"true","multiUser":"false","url":"http://www.test.a/"},{"name":"wence_word_plugin","addonType":"wps","online":"true","multiUser":"false","url":"http://127.0.0.1:3880/jsplugindir/"}];
+            var curList = [{"name":"wence_word_plugin","addonType":"wps","online":"true","multiUser":"false","url":"http://127.0.0.1:3880/jsplugindir/"}];
             curList.forEach(function (element) {
                 var param = JSON.stringify(element).replace("\"", "\'");
                 UpdateElement(element, 'enable')

@@ -10,6 +10,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from starlette.responses import Response
 from fastapi.staticfiles import StaticFiles
 
 from app.api import api_router
@@ -104,6 +105,17 @@ if STATIC_DIR.exists():
 # 挂载前端 dist 到 /jsplugindir/（WPS 在线插件加载路径）
 FRONTEND_DIST_DIR = get_frontend_dist_dir()
 if FRONTEND_DIST_DIR.exists():
+    # 为 index.html 单独添加禁缓存路由（WPS 内嵌浏览器缓存过于激进）
+    @app.get("/jsplugindir/")
+    @app.get("/jsplugindir/index.html")
+    async def serve_plugin_index():
+        index_file = FRONTEND_DIST_DIR / "index.html"
+        response = FileResponse(index_file, media_type="text/html")
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response
+
     app.mount("/jsplugindir", StaticFiles(directory=str(FRONTEND_DIST_DIR), html=True), name="jsplugindir")
     print(f"📂 前端插件已挂载: /jsplugindir/ -> {FRONTEND_DIST_DIR}")
 else:

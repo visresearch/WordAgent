@@ -633,14 +633,11 @@ export function executeStyleQuery(docJson, queryDSL) {
         }
         
         if (matchRunFilters(run, filters)) {
-          const runPos = getRunPosition(para, ri);
-          const paraPos = getParagraphPosition(para);
+          const paraIndex = Number.isInteger(para?.paraIndex) ? para.paraIndex : pi;
           
           matches.push({
             text: run.text,
-            matchPosition: runPos,
-            paragraphPosition: paraPos,
-            paragraphIndex: pi,
+            paragraphIndex: paraIndex,
             rStyle: run.rStyle || []
           });
         }
@@ -655,14 +652,12 @@ export function executeStyleQuery(docJson, queryDSL) {
       }
       
       if (matchParagraphFilters(para, filters)) {
-        const paraPos = getParagraphPosition(para);
+        const paraIndex = Number.isInteger(para?.paraIndex) ? para.paraIndex : pi;
         const paraText = getFieldValue(para, 'text');
         
         matches.push({
           text: paraText.substring(0, 200),  // 截断过长文本
-          matchPosition: paraPos,             // 段落级搜索时 matchPosition 等于 paragraphPosition
-          paragraphPosition: paraPos,
-          paragraphIndex: pi,
+          paragraphIndex: paraIndex,
           pStyle: para.pStyle || []
         });
       }

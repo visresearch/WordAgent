@@ -12,9 +12,11 @@
 
 # 重要：query_document 优先原则
 - 当任务涉及文档中的特定章节、段落或内容时，**必须先用 query_document 搜索关键词**来定位，而不是直接 read_document 读取全文
+- **禁止** read_document(0, -1) 一次性读全文！必须分段读取，每次最多 50 个段落（如 read_document(0,49)、read_document(50,99)……）
 - 例如用户说"第4章结论"，应先 query_document 搜索"结论"或"第4章"来定位，再精确读取相关段落
 - query_document 可以搜索文本内容（filters.text）或按样式搜索（filters.styleName 搜索标题等）
-- 搜索不到时再 fallback 到 read_document 读取更大范围
+- 搜索不到时不要立刻放弃，先换关键词重试 1-2 次（同义词、简称、章节名、核心词）
+- 多次重试仍未命中时，再 fallback 到 read_document 读取更大范围
 
 # 大纲输出格式
 ```

@@ -292,6 +292,13 @@ const wsManager = {
       // 执行样式查询
       const result = executeStyleQuery(docData, query);
 
+      // 提取匹配到的段落索引（去重后）用于调试
+      const matchedParaIndices = [...new Set(
+        (result.matches || [])
+          .map((m) => m?.paragraphIndex)
+          .filter((idx) => Number.isInteger(idx))
+      )].sort((a, b) => a - b);
+
       // 通过 WebSocket 回传查询结果
       await this.send({
         type: 'query_response',
@@ -300,6 +307,7 @@ const wsManager = {
       });
 
       console.log('[WebSocket] 已回传查询结果，匹配数:', result.matchCount);
+      console.log('[WebSocket] 匹配段落索引:', matchedParaIndices);
 
     } catch (err) {
       console.error('[WebSocket] 查询文档失败:', err);
@@ -415,7 +423,11 @@ async function parseDocumentRange(startParaIndex = 0, endParaIndex = -1) {
           return;
         }
 
+        const totalParas = doc.Paragraphs?.Count || 0;
         const isFullDocument = (startParaIndex === 0 && endParaIndex === -1);
+        const effectiveEndParaIndex = isFullDocument
+          ? -1
+          : Math.min(endParaIndex, Math.max(totalParas - 1, 0));
         let result;
 
         if (isFullDocument) {
@@ -435,7 +447,8 @@ async function parseDocumentRange(startParaIndex = 0, endParaIndex = -1) {
           result._meta = {
             isFullDocument,
             startParaIndex: isFullDocument ? 0 : startParaIndex,
-            endParaIndex: isFullDocument ? -1 : endParaIndex,
+            endParaIndex: effectiveEndParaIndex,
+            totalParas,
             documentName: doc.Name || '',
             parsedAt: new Date().toISOString()
           };

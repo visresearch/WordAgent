@@ -76,10 +76,15 @@ async def chat_websocket(websocket: WebSocket):
         try:
             while True:
                 raw = await websocket.receive_text()
-                await msg_queue.put(json.loads(raw))
+                try:
+                    await msg_queue.put(json.loads(raw))
+                except (json.JSONDecodeError, ValueError) as e:
+                    print(f"[WebSocket] ⚠️ JSON 解析失败，跳过此消息: {e}")
+                    continue
         except WebSocketDisconnect:
             await msg_queue.put(None)
-        except Exception:
+        except Exception as e:
+            print(f"[WebSocket] ⚠️ 接收协程异常: {e}")
             await msg_queue.put(None)
 
     recv_task = asyncio.create_task(_receiver())
@@ -95,9 +100,11 @@ async def chat_websocket(websocket: WebSocket):
             msg_type = data.get("type", "")
 
             if msg_type == "chat":
-                # 新请求开始前，清理上一次 stop 状态
+                # 新请求开始前，清理上一次 stop 状态并重建工具队列（丢弃残留消息）
                 clear_stop(chat_id)
                 ma_clear_stop(chat_id)
+                create_tool_request(chat_id)
+                ma_create_tool_request(chat_id)
 
                 # 聊天请求
                 message = data.get("message", "")

@@ -7,8 +7,32 @@
 import asyncio
 import concurrent.futures
 import json
+import os
 import traceback
 from collections.abc import AsyncGenerator
+
+
+# region LangSmith（可选，不影响正常运行）
+
+
+def _try_init_langsmith():
+    """尝试加载 .env 并初始化 LangSmith 环境变量，失败时静默跳过。"""
+    try:
+        from pathlib import Path
+        from dotenv import load_dotenv
+
+        env_path = Path(__file__).resolve().parent.parent.parent.parent / ".env"
+        if env_path.exists():
+            load_dotenv(env_path, override=False)
+        if os.environ.get("LANGSMITH_TRACING", "").lower() == "true" and os.environ.get("LANGSMITH_API_KEY"):
+            print("[LangSmith] ✅ 多智能体已启用 tracing，project =", os.environ.get("LANGSMITH_PROJECT", "default"))
+            return True
+    except Exception:
+        pass
+    return False
+
+
+_langsmith_enabled = _try_init_langsmith()
 
 from langchain_core.messages import (
     AIMessage,
@@ -59,6 +83,9 @@ class MultiAgentState(BaseModel):
     user_message: str = ""
     document_range: list[dict] = Field(default_factory=list)
 
+    # 记忆上下文（包含总结 + RAG 检索结果）
+    memory_context: str = ""
+
     # 各阶段产出
     workflow: dict = Field(default_factory=dict)  # planner 输出的工作流
     research_data: str = ""  # research 收集的资料
@@ -79,7 +106,6 @@ class MultiAgentState(BaseModel):
 
 def _create_llm(model_name: str):
     """创建 LLM 实例"""
-    import os
     from app.services.llm_client import get_temperature, get_https_proxy_url, get_http_proxy_url
     from langchain_openai import ChatOpenAI
 
@@ -480,7 +506,10 @@ def _build_multi_agent_graph(llm, model_name: str):
             range_info = json.dumps(state.document_range, ensure_ascii=False)
             task += f"\n\n用户选中了文档范围: {range_info}"
 
-        text, structured, _ = _run_sub_agent(llm, "planner", task, AGENT_TOOLS["planner"])
+        # 注入记忆上下文
+        context = state.memory_context if state.memory_context else ""
+
+        text, structured, _ = _run_sub_agent(llm, "planner", task, AGENT_TOOLS["planner"], context=context)
 
         workflow = {}
         if structured and "steps" in structured:
@@ -710,9 +739,39 @@ async def process_writing_request_stream(
         if chat_id:
             register_loop(chat_id, loop)
 
+        # 构建记忆上下文
+        memory_context = ""
+        if history:
+            try:
+                from app.services.memory import build_memory_messages
+
+                memory_msgs = build_memory_messages(
+                    history=history,
+                    current_message=message,
+                    llm=llm,
+                    session_id=chat_id,
+                    enable_long_term=True,
+                    enable_summary=True,
+                )
+                if memory_msgs:
+                    # 将记忆消息转为文本上下文，供 planner 使用
+                    parts = []
+                    for m in memory_msgs:
+                        if isinstance(m, SystemMessage):
+                            parts.append(m.content)
+                        elif isinstance(m, HumanMessage):
+                            parts.append(f"[用户] {m.content}")
+                        elif isinstance(m, AIMessage):
+                            parts.append(f"[助手] {m.content}")
+                    memory_context = "\n\n".join(parts)
+                    print(f"[MultiAgent] 构建记忆上下文: {len(memory_context)} 字")
+            except Exception as mem_err:
+                print(f"[MultiAgent] ⚠️ 构建记忆失败: {mem_err}")
+
         initial_state = MultiAgentState(
             user_message=message,
             document_range=document_range or [],
+            memory_context=memory_context,
         )
 
         queue: asyncio.Queue = asyncio.Queue()
@@ -720,6 +779,25 @@ async def process_writing_request_stream(
         # 只有 writer 的流式 token 不转发（直接 invoke 拿结果），其他 agent 全部流式输出
         _SUPPRESS_STREAM = {"writer"}
         current_agent = "planner"
+        _collected_text_parts: list[str] = []  # 收集 AI 回复文本，用于存入长期记忆
+
+        # 构建 LangSmith tracing config（可选）
+        langsmith_config = None
+        if _langsmith_enabled:
+            try:
+                run_name = f"multi_agent:{model_name}"
+                langsmith_config = {
+                    "run_name": run_name,
+                    "tags": ["multi_agent", model_name, mode or "plan"],
+                    "metadata": {
+                        "model": model_name,
+                        "mode": mode or "plan",
+                        "has_document_range": bool(document_range),
+                        "chat_id": chat_id or "",
+                    },
+                }
+            except Exception:
+                langsmith_config = None
 
         def run_stream():
             """在独立线程中运行同步的 LangGraph stream"""
@@ -727,10 +805,14 @@ async def process_writing_request_stream(
                 if chat_id:
                     _current_chat_id.set(chat_id)
 
-                response = app.stream(
-                    initial_state.model_dump(),
-                    stream_mode=["messages", "custom"],
-                )
+                stream_kwargs = {
+                    "input": initial_state.model_dump(),
+                    "stream_mode": ["messages", "custom"],
+                }
+                if langsmith_config:
+                    stream_kwargs["config"] = langsmith_config
+
+                response = app.stream(**stream_kwargs)
                 for stream_item in response:
                     if chat_id and is_stop_requested(chat_id):
                         print(f"[MultiAgent] ⛔ 检测到停止信号，结束流式处理 (session={chat_id})")
@@ -763,6 +845,7 @@ async def process_writing_request_stream(
                 msg = chunk[0]
                 # 只转发非 writer agent 的 AI 文字 token
                 if isinstance(msg, AIMessageChunk) and msg.content and current_agent not in _SUPPRESS_STREAM:
+                    _collected_text_parts.append(msg.content)
                     yield f"data: {json.dumps({'type': 'text', 'content': msg.content}, ensure_ascii=False)}\n\n"
 
             elif input_type == "custom" and chunk:
@@ -774,6 +857,22 @@ async def process_writing_request_stream(
                     yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
                 else:
                     yield f"data: {json.dumps({'type': 'status', 'content': str(chunk)}, ensure_ascii=False)}\n\n"
+
+        # 将本轮对话存入长期记忆
+        assistant_text = "".join(_collected_text_parts)
+        if assistant_text:
+            try:
+                from app.services.memory import store_conversation_to_long_term
+
+                store_conversation_to_long_term(
+                    session_id=chat_id or "",
+                    user_message=message,
+                    assistant_message=assistant_text or "[已执行多智能体工作流]",
+                    model=model,
+                    mode=mode,
+                )
+            except Exception as mem_err:
+                print(f"[MultiAgent] ⚠️ 存入长期记忆失败: {mem_err}")
 
         yield "data: [DONE]\n\n"
 

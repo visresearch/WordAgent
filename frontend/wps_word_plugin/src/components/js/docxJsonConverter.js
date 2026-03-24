@@ -707,10 +707,15 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex) {
         endParaIndex = totalParas - 1;
       }
 
+      // 超过文档总段落数时，自动截断到最后一个段落
+      if (endParaIndex >= totalParas) {
+        endParaIndex = totalParas - 1;
+      }
+
       if (startParaIndex < 0 || startParaIndex >= totalParas) {
         return { error: `startParaIndex ${startParaIndex} 超出范围，文档共 ${totalParas} 段` };
       }
-      if (endParaIndex < startParaIndex || endParaIndex >= totalParas) {
+      if (endParaIndex < startParaIndex) {
         return { error: `endParaIndex ${endParaIndex} 无效（startParaIndex=${startParaIndex}，文档共 ${totalParas} 段）` };
       }
 

@@ -36,7 +36,7 @@
 |---|---|
 | Node.js | v22.12.0 |
 | wpsjs | 2.2.3 |
-| Python | 3.10.12 |
+| Python | 3.11.14 |
 | 系统 | Windows 10/11 或 Ubuntu 22.04 |
 
 ### 1. 构建前端加载项
@@ -61,7 +61,7 @@ pnpm build
 
 ```bash
 cd backend
-uv venv --python 3.10.12
+uv venv --python 3.11.14
 # Linux
 source .venv/bin/activate
 # Windows

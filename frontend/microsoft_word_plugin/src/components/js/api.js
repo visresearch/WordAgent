@@ -368,10 +368,23 @@ function chatStream(message, options = {}) {
 async function parseDocumentRange(scope = "body") {
   try {
     const result = await parseDocxToJSON(scope);
+    let totalParas = 0;
+
+    try {
+      totalParas = await Word.run(async (context) => {
+        const paras = context.document.body.paragraphs;
+        paras.load("items");
+        await context.sync();
+        return paras.items.length;
+      });
+    } catch (e) {
+      totalParas = 0;
+    }
 
     if (!result.error) {
       result._meta = {
         isFullDocument: scope === "body",
+        totalParas,
         parsedAt: new Date().toISOString(),
       };
     }

@@ -878,12 +878,17 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
           endParaIndex = allParas.items.length - 1;
         }
 
+        // 超过文档总段落数时，自动截断到最后一个段落
+        if (endParaIndex >= allParas.items.length) {
+          endParaIndex = allParas.items.length - 1;
+        }
+
         if (startParaIndex < 0 || startParaIndex >= allParas.items.length) {
           return {
             error: `startParaIndex ${startParaIndex} 超出范围，文档共 ${allParas.items.length} 段`,
           };
         }
-        if (endParaIndex < startParaIndex || endParaIndex >= allParas.items.length) {
+        if (endParaIndex < startParaIndex) {
           return {
             error: `endParaIndex ${endParaIndex} 无效（startParaIndex=${startParaIndex}，文档共 ${allParas.items.length} 段）`,
           };

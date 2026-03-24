@@ -1,165 +1,189 @@
 # Word Agent
 
-本项目是一个基于(多)智能体的AI辅助写作系统：文策AI，用户在 **办公软件(如WPS、Microsoft Word)** 中安装 **加载项** 后，可以通过自然语言与AI智能体进行交互，获取**写作建议**、**内容生成**、**结构优化**等服务。
-
 ![](./docs/WenceAI_small.png)
 
-> 文策AI（Word Agent）：让写作有策略，让表达更智能
+<p align="center">
+  <a href="backend/pyproject.toml"><img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white" alt="Python" /></a>
+  <a href="backend/README.md"><img src="https://img.shields.io/badge/FastAPI-Backend-009688?logo=fastapi&logoColor=white" alt="FastAPI" /></a>
+  <a href="https://www.langchain.com/"><img src="https://img.shields.io/badge/LangChain-Used-1C3C3C?logo=chainlink&logoColor=white" alt="LangChain" /></a>
+  <a href="https://www.langchain.com/langgraph"><img src="https://img.shields.io/badge/LangGraph-Multi--Agent-0B3D91" alt="LangGraph" /></a>
+  <a href="frontend/microsoft_word_plugin/package.json"><img src="https://img.shields.io/badge/Node.js-v22%2B-339933?logo=node.js&logoColor=white" alt="Node.js" /></a>
+  <a href="README.md"><img src="https://img.shields.io/badge/Version-v1.0.0-orange.svg" alt="Version" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License" /></a>
+</p>
 
-## 一、项目概述
+<p align="center">
+  <a href="README.md">English</a> | <a href="README.zh-CN.md">中文文档</a>
+</p>
 
-本项目采用FastAPI构建后端API，前端WPS加载项与后端利用流式接口通信，使前端流式显示LLM输出的内容，实现无缝的写作辅助体验。
+## 1. Overview
 
-前端采用Vue3和JavaScript开发，前端主要设计了一个DocxJson双向转化器模块，能够将带格式的Word文档内容与JSON格式进行相互转换。
+Word Agent is an AI-assisted writing system (single-agent and multi-agent) for office suites such as WPS and Microsoft Word. After installing the add-in, users can interact with AI through natural language to get writing suggestions, content generation, and structure optimization.
 
-后端采用Python语言，利用langchain和langraph框架实现智能体的设计和协作，用chatOpenAI接口实现SSE流式输出和工具调用，利用pySide6设计了一个简单的后端服务界面，方便安装加载项和查看终端日志。
+> WenCe AI (Word Agent): strategy-driven writing, smarter expression.
 
-不难看出，**生成结构化Word文档**是本项目的核心。项目中定义json schema格式类似于web开发中的html和css格式，将word文章的段落和文本块的style属性都进行了抽象和结构化，方便智能体理解和生成。json主要的数据结构具体为：
+The backend is built with FastAPI. The frontend add-ins communicate with the backend through streaming interfaces so users can see LLM outputs in real time.
 
-- **paragraphs**: word文档段落数组，包含多个run文本块，paragraphs是agent主要修改的对象
-  - **pStyle**: 段落样式ID（如标题1、标题2、正文等）
-  - **runs**: 文本块数组，本项目中定义的文档的最小单位
-    - **text**: 文本内容
-    - **rStyle**: 字符样式ID（如加粗、红色等）
-  - **paraIndex**: 段落索引，智能体可以根据这个索引定位到文档中的具体段落进行修改
-- **styles**: 样式定义字典，包含所有段落样式和字符样式的定义，智能体生成文档时需要引用这些样式ID来保证文档格式正确
+The frontend is built with Vue 3 and JavaScript. A key module is the DocxJson bidirectional converter, which transforms formatted Word content to JSON and back.
 
-对比市面上已有的AI辅助写作工具，文策AI的优势在于：
+The backend is built with Python and uses LangChain + LangGraph for agent design and orchestration. ChatOpenAI-compatible APIs are used for streaming and tool calling. A lightweight PySide6 GUI is also provided for add-in installation and log monitoring.
 
-1. **支持多版本、跨平台适配**：以国民级办公软件为载体，让普通用户无门槛获得优质的AI写作辅助体验，并且同时支持Windows和Linux系统。
-2. **原生富文本，支持文档样式、段落编辑**：对比常见的在Word中的AI写作工具，本项目智能体能够理解Word文章结构，能够自主联网搜集资料信息，生成符合Word文档结构的内容，能够根据用户需求进行文章结构修改和内容修改。
-3. **高效编辑，支持多智能体协作架构**：多智能体扮演不同**专家角色**，以生成有深度的长文章为目标，协同完成写作任务。
-4. **自由开放，支持自定义API或本地服务**：本项目使用的大模型服务APIKey来自于用户自己，目前支持世界上大多数主流的LLM服务商，用户可以根据自己的需求选择不同的LLM服务商和不同的模型。
+The core of this project is **structured Word document generation**. The project defines a JSON schema (conceptually similar to HTML + CSS) to model Word paragraphs and text run styles so agents can understand and generate formatted documents reliably.
 
-## 二、项目预览
+Main data structures:
 
-|WPS加载项界面|后端服务QT界面|
-|--|--|
-|![](./docs/wps_addon.png)|![](./docs/pyQt.png)|
+- **paragraphs**: an array of Word paragraphs (the main editable unit)
+  - **pStyle**: paragraph style ID (for example, Heading 1, Heading 2, Body)
+  - **runs**: text run array (smallest text unit in this project)
+    - **text**: run text
+    - **rStyle**: character style ID (for example, bold, red)
+  - **paraIndex**: paragraph index used by agents for precise location and editing
+- **styles**: a style dictionary containing all paragraph/character style definitions referenced by style IDs
 
-举个例子，以WPS为例，使用单智能体agent模式，用户在WPS加载项界面中输入“上网搜索伊朗战争相关新闻和资料，写一篇详细的战况分析报道”。智能体会先调用web_search工具进行联网搜索，获取相关的新闻报道和资料信息，然后调用generate_document工具生成符合Word文档结构的内容返回给前端加载项，用户在加载项界面中就可以看到智能体生成的内容了。
+Compared with common AI writing tools, WenCe AI focuses on:
+
+1. **Cross-version and cross-platform compatibility**: built on mainstream office software, available on Windows and Linux.
+2. **Native rich-text document editing**: agents understand Word structure and can modify both content and structure with formatting awareness.
+3. **Efficient editing with multi-agent collaboration**: specialized agents cooperate to produce deeper long-form content.
+4. **Open model ecosystem**: users can configure their own API providers and models.
+
+## 2. Preview
+
+| WPS Add-in UI | Backend Qt UI |
+| -- | -- |
+| ![](./docs/wps_addon.png) | ![](./docs/pyQt.png) |
+
+Example (single-agent mode): in WPS, a user asks for a detailed report on the Iran war. The agent can call `web_search` to gather references and then call `generate_document` to produce Word-structured content for rendering in the add-in.
 
 ![](./docs/preview.png)
 
-注意这个生成的文章是符合Word文档结构与格式的，智能体在生成文字内容的同时还会生成内容对应的样式信息(如标题、正文、加粗、字体、缩进、行距等)，前端加载项会根据这些样式信息将内容渲染成对应格式的Word文档呈现给用户。
+Generated content includes both text and formatting metadata (title/body styles, bold, fonts, indentation, spacing, etc.), which allows rendering as a properly formatted Word document.
 
-## 三、开发计划
+## 3. Roadmap
 
-- [x] 支持WPS Word桌面客户端
-- [x] 支持Windows、Linux
-- [x] 支持单智能体模式
-- [x] 支持Token消耗优化
-- [x] 支持多智能体模式
-- [x] 支持Microsoft Word网页版
-- [ ] 支持表格、插图等复杂样式编辑
+- [x] WPS Word desktop support
+- [x] Windows and Linux support
+- [x] Single-agent mode
+- [x] Token usage optimization
+- [x] Multi-agent mode
+- [x] Microsoft Word web add-in support
+- [ ] Advanced styles (tables, figures, etc.)
 
-## 四、系统架构
+## 4. Architecture
 
-为了能够更好地满足用户需求，保证系统生成文章的稳定性和深度，本项目设计了两种智能体架构：
+The project provides two agent architectures for different task complexity.
 
-### Single Agent loop架构
-
-#### 整体架构图
+### 4.1 Single-agent loop
 
 ![](./docs/single_agent_loop.png)
 
-前端设计的WPS加载项将用户的提问和当前用户选择的文章段落转化成特定json格式发送给后端。
+The frontend sends user prompts and selected document ranges to the backend.
 
-在后端单智能体架构中，系统设计了一个标准的ReAct智能体循环架构，智能体在每个循环中根据用户输入和当前文档状态进行思考，选择调用哪种工具（如联网搜索工具）还是选择直接结束，选择调用了工具然后再思考，再选择调用哪种工具(如写作工具)或者选择结束，直到智能体选择结束循环。
+The backend runs a ReAct-style loop. In each loop, the agent decides whether to call a tool or finish. After tool results return, the agent reasons again and continues until completion.
 
-- **read_document tool**: 负责读取(startPosition, endPosition)范围内的文章内容并转化成特定json格式回传给智能体。
-- **generate_document tool**: 负责生成特定json格式的文章内容传给前端加载项。
-- **query_document tool**: 负责查询某种格式或文字信息的段落位置并返回给智能体。
-- **web_search tool**: 负责根据用户输入的关键词进行联网搜索并返回搜索结果给智能体。
+Core tools:
 
-### Multi Agent 架构
+- **read_document**: reads a paragraph range and returns structured JSON.
+- **generate_document**: generates structured document JSON for frontend rendering.
+- **query_document**: locates paragraphs by content/style criteria.
+- **web_search**: retrieves online references for grounded writing.
 
-#### 整体架构图
+### 4.2 Multi-agent workflow
 
 ![](./docs/multi_agent.png)
 
-前端部分和单智能体架构相同，后端多智能体协作框架中设计了一个 **planner agent** 负责编排和调度其他多个专家智能体的工作流。
+The frontend flow is the same, while the backend uses a planner-driven multi-agent workflow.
 
-- **research agent**: 负责联网搜集资料信息
-- **outline agent**: 负责根据资料信息和用户需求生成文章大纲
-- **writer agent**: 负责根据资料信息和用户需求生成文章内容
-- **reviewer agent**: 负责根据资料信息和用户需求对生成的文章进行审阅和修改建议
+- **planner agent**: decomposes and schedules workflow steps
+- **research agent**: gathers external references
+- **outline agent**: creates document outline
+- **writer agent**: generates document content
+- **reviewer agent**: reviews quality and provides rewrite feedback
 
-## 五、快速开始
+## 5. Quick Start
 
-### 环境配置
+### 5.1 Environment
 
-- node v22.12.0
+- Node v22.12.0
 - wpsjs 2.2.3
-- python 3.10.12
-- Win10/11、Ubuntu22.04
+- Python 3.11.14
+- Windows 10/11 or Ubuntu 22.04
 
-### 构建前端WPS Word加载项
+### 5.2 Build WPS add-in
 
 ```bash
 cd frontend/wps_word_plugin
-pnpm intsall
+pnpm install
 pnpm build
 ```
 
-### 构建前端Microsoft Word加载项
+### 5.3 Build Microsoft Word add-in
 
 ```bash
 cd frontend/microsoft_word_plugin
-pnpm intsall
+pnpm install
 pnpm build
 ```
 
-### 运行后端服务
+### 5.4 Run backend service
 
 ```bash
 cd backend
-uv venv --python 3.10.12
+uv venv --python 3.11.14
 source .venv/bin/activate  # Linux
 .venv\Scripts\activate     # Windows
 uv sync
 uv run python main.py
 ```
 
-### 项目软件打包
+### 5.5 LangSmith tracing
+
+The project supports LangSmith tracing for agent behavior analysis. See [backend/README.md](backend/README.md) for setup details.
+
+![](./docs/Langsmith.png)
+
+### 5.6 Packaging
 
 ```bash
 cd backend/deploy
 uv run pyinstaller wence.spec
 ```
-打包生成的可执行文件在`backend/deploy/dist`目录下
 
-如果你不想自己打包，可以直接下载release中打包的压缩包，解压后点击exe文件即可使用。
+Built binaries are located in `backend/deploy/dist`.
 
-### 软件下载
+You can also download packaged artifacts from Releases.
 
-打包后的发行版文件详见[Release](https://github.com/visresearch/WordAgent/releases).
+### 5.7 Download
 
-### 软件运行
+Release artifacts: [Release](https://github.com/visresearch/WordAgent/releases)
 
-下载后双击exe文件，启动后端服务（wence_word_plugin->安装），打开Word软件，信任加载项，即可体验服务。
+### 5.8 Run packaged app
 
-需要配置LLM API，本项目目前使用的是阿里云百炼平台的qwen3.5-plus系列API服务。
+Double-click the executable, start backend service, install add-in, open Word/WPS, trust the add-in, and start using the system.
 
-## 六、LLM API适配情况
-本项目对部分国内LLM API进行了测试，后续陆续适配中，具体情况如下：
-- [x] Qwen 3.5 Plus运行稳定
-- [x] Qwen3 Max运行稳定
-- [x] MiniMax M2.5运行稳定
-- [x] Step 3.5 Flash运行稳定
-- [x] Kimi K2.5容易出现工具调用死循环
-- [x] Qwen Max工具调用不稳定（没有生成文档）
-- [x] DeepSeek v3.2 工具调用不稳定（文档生成卡死）
-- [x] ChatGLM工具调用不稳定（文档生成卡死）
+You must configure an LLM API provider. The project has been tested with Alibaba Bailian Qwen models.
+
+## 6. LLM API Status
+
+Current compatibility status (ongoing):
+
+- [x] Qwen 3.5 Plus (stable)
+- [x] Qwen3 Max (stable)
+- [x] MiniMax M2.5 (stable)
+- [x] Step 3.5 Flash (stable)
+- [x] Kimi K2.5 (may enter tool-call loops)
+- [x] Qwen Max (unstable tool calls in some scenarios)
+- [x] DeepSeek v3.2 (possible generation hangs)
+- [x] ChatGLM (possible generation hangs)
 - [ ] Gemini 3.1 Pro
 - [ ] GPT 5.4
 
-注：本项目开发使用了部分[阿里云百炼](https://bailian.console.aliyun.com/)、[Openrouter](https://openrouter.ai/models?q=free)免费额度
+Note: part of development used free credits from [Alibaba Bailian](https://bailian.console.aliyun.com/) and [OpenRouter](https://openrouter.ai/models?q=free).
 
-## 七、关于作者
+## 7. Author
 
-与我交流：https://cmcblog.netlify.app/about/
+Contact: https://cmcblog.netlify.app/about/
 
-## 八、开源协议
+## 8. License
 
-本项目采用Apache License 2.0开源协议
+Apache License 2.0
