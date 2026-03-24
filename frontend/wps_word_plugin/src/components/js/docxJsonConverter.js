@@ -585,6 +585,37 @@ function parseTable(table) {
     tStyle: [getTableAlignmentName(table.Rows.Alignment)]  // 表格样式数组
   };
 
+  // 捕获列宽
+  try {
+    const columnWidths = [];
+    for (let c = 1; c <= table.Columns.Count; c++) {
+      try {
+        columnWidths.push(table.Columns.Item(c).Width);
+      } catch (e) {
+        columnWidths.push(0);
+      }
+    }
+    if (columnWidths.some(w => w > 0)) {
+      tableData.columnWidths = columnWidths;
+    }
+  } catch (e) {}
+
+  // 捕获行高
+  try {
+    const rowHeights = [];
+    for (let r = 1; r <= table.Rows.Count; r++) {
+      try {
+        const row = table.Rows.Item(r);
+        rowHeights.push([row.Height || 0, row.HeightRule || 0]);
+      } catch (e) {
+        rowHeights.push([0, 0]);
+      }
+    }
+    if (rowHeights.some(h => h[0] > 0 && h[1] > 0)) {
+      tableData.rowHeights = rowHeights;
+    }
+  } catch (e) {}
+
   // 第一阶段：收集原始单元格
   const rawCells = [];
   for (let row = 1; row <= table.Rows.Count; row++) {
@@ -679,6 +710,28 @@ function parseTable(table) {
 }
 
 /**
+ * 通过二分查找确定表格 endParaIndex：
+ * 在排序数组 paraStartsSorted 中，找到第一个 >= tableRangeEnd 的段落索引 - 1
+ * @param {number[]} paraStartsSorted - 所有段落 Range.Start 的排序数组
+ * @param {number} tableRangeEnd - 表格 Range.End
+ * @param {number} totalParaCount - 文档总段落数
+ * @returns {number} - 表格占用的最后一个段落索引（0-based）
+ */
+function _findEndParaIndex(paraStartsSorted, tableRangeEnd, totalParaCount) {
+  let lo = 0, hi = paraStartsSorted.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (paraStartsSorted[mid] < tableRangeEnd) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  // lo 是第一个 >= tableRangeEnd 的索引，表格最后一个段落是 lo - 1
+  return lo > 0 ? lo - 1 : 0;
+}
+
+/**
  * 解析 Word 文档内容为 JSON
  * @param {Object} [range] - WPS Range 对象，省略时使用当前选区
  * @param {number} [startParaIndex] - 可选，起始全文段落索引（0-based），
@@ -719,19 +772,51 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex) {
         return { error: `endParaIndex ${endParaIndex} 无效（startParaIndex=${startParaIndex}，文档共 ${totalParas} 段）` };
       }
 
-      // 收集表格范围用于排除表格内段落
+      // 收集表格范围用于排除表格内段落，并记录表格对象以便后续解析
       const tableRanges = [];
+      const tableObjects = [];  // 保存需要解析的表格对象
       try {
         const tables = doc.Content.Tables;
         if (tables && tables.Count > 0) {
           for (let t = 1; t <= tables.Count; t++) {
-            const tr = tables.Item(t).Range;
+            const tableObj = tables.Item(t);
+            const tr = tableObj.Range;
             tableRanges.push({ start: tr.Start, end: tr.End });
+            tableObjects.push({ table: tableObj, rangeStart: tr.Start, rangeEnd: tr.End });
           }
         }
       } catch (e) {}
 
+      // 构建 paraStart → 全文段落索引 的映射（用于表格 paraIndex / endParaIndex）
+      const paraStartToIndex = new Map();
+      const paraStartsSorted = []; // 排序数组用于二分查找 endParaIndex
+      const allParas = doc.Paragraphs;
+      for (let pi = 1; pi <= allParas.Count; pi++) {
+        const ps = allParas.Item(pi).Range.Start;
+        paraStartToIndex.set(ps, pi - 1);
+        paraStartsSorted.push(ps);
+      }
+
       const result = { paragraphs: [], tables: [], fields: [], images: [] };
+
+      // 解析范围内的段落起止位置
+      const rangeStart = doc.Paragraphs.Item(startParaIndex + 1).Range.Start;
+      const rangeEnd = doc.Paragraphs.Item(endParaIndex + 1).Range.End;
+
+      // 解析范围内的表格（表格起始位置落在请求范围内）
+      const parsedTableRanges = new Set();
+      for (const tObj of tableObjects) {
+        if (tObj.rangeStart >= rangeStart && tObj.rangeStart < rangeEnd) {
+          try {
+            const tableData = parseTable(tObj.table);
+            tableData.paraIndex = paraStartToIndex.get(tObj.rangeStart) ?? -1;
+            // 计算 endParaIndex：找到表格 Range.End 之后第一个段落的索引 - 1
+            tableData.endParaIndex = _findEndParaIndex(paraStartsSorted, tObj.rangeEnd, allParas.Count);
+            result.tables.push(tableData);
+            parsedTableRanges.add(tObj.rangeStart);
+          } catch (e) {}
+        }
+      }
 
       for (let idx = startParaIndex; idx <= endParaIndex; idx++) {
         const para = doc.Paragraphs.Item(idx + 1); // WPS 1-based
@@ -894,10 +979,15 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex) {
     // 构建 paraStart → 全文段落索引 的映射（O(n) 一次构建，后续 O(1) 查找）
     const doc = window.Application?.ActiveDocument;
     const paraStartToIndex = new Map();
+    const paraStartsSorted = []; // 排序数组用于二分查找 endParaIndex
+    let totalParaCount = 0;
     if (doc) {
       const allParas = doc.Paragraphs;
-      for (let pi = 1; pi <= allParas.Count; pi++) {
-        paraStartToIndex.set(allParas.Item(pi).Range.Start, pi - 1); // 0-based
+      totalParaCount = allParas.Count;
+      for (let pi = 1; pi <= totalParaCount; pi++) {
+        const ps = allParas.Item(pi).Range.Start;
+        paraStartToIndex.set(ps, pi - 1); // 0-based
+        paraStartsSorted.push(ps);
       }
     }
 
@@ -911,6 +1001,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex) {
         tableRanges.push({ start: tableRange.Start, end: tableRange.End });
         const tableData = parseTable(table);
         tableData.paraIndex = paraStartToIndex.get(tableRange.Start) ?? -1;
+        tableData.endParaIndex = _findEndParaIndex(paraStartsSorted, tableRange.End, totalParaCount);
         result.tables.push(tableData);
       }
     }
@@ -1266,28 +1357,54 @@ function generateTable(doc, tableData, currentPos, styles) {
       pageWidth = pageSetup.PageWidth - pageSetup.LeftMargin - pageSetup.RightMargin;
     } catch (e) {}
 
-    // 平均分配列宽
-    const avgWidth = pageWidth / tableData.columns;
-    
     table.AutoFitBehavior(0);
     try {
       table.PreferredWidthType = 3;
       table.PreferredWidth = pageWidth;
     } catch (e) {}
 
-    for (let c = 0; c < tableData.columns; c++) {
-      try {
-        const column = table.Columns.Item(c + 1);
-        column.PreferredWidthType = 3;
-        column.PreferredWidth = avgWidth;
-        column.Width = avgWidth;
-      } catch (e) {}
+    // 使用原始列宽（如果有），否则平均分配
+    if (tableData.columnWidths && tableData.columnWidths.length === tableData.columns) {
+      for (let c = 0; c < tableData.columns; c++) {
+        try {
+          if (tableData.columnWidths[c] > 0) {
+            const column = table.Columns.Item(c + 1);
+            column.PreferredWidthType = 3;
+            column.PreferredWidth = tableData.columnWidths[c];
+            column.Width = tableData.columnWidths[c];
+          }
+        } catch (e) {}
+      }
+    } else {
+      const avgWidth = pageWidth / tableData.columns;
+      for (let c = 0; c < tableData.columns; c++) {
+        try {
+          const column = table.Columns.Item(c + 1);
+          column.PreferredWidthType = 3;
+          column.PreferredWidth = avgWidth;
+          column.Width = avgWidth;
+        } catch (e) {}
+      }
     }
 
     // 表格对齐
     const tStyle = resolveStyle(styles, tableData.tStyle, ['center']);
     table.Rows.Alignment = getTableAlignmentValue(tStyle[0] || 'center');
   } catch (e) {}
+
+  // 还原行高
+  if (tableData.rowHeights && tableData.rowHeights.length === tableData.rows) {
+    for (let r = 0; r < tableData.rows; r++) {
+      try {
+        const [height, heightRule] = tableData.rowHeights[r];
+        if (height > 0 && heightRule > 0) {
+          const tableRow = table.Rows.Item(r + 1);
+          tableRow.HeightRule = heightRule;
+          tableRow.Height = height;
+        }
+      } catch (e) {}
+    }
+  }
 
   // 填充内容
   for (let row = 0; row < tableData.cells.length; row++) {
@@ -1306,35 +1423,43 @@ function generateTable(doc, tableData, currentPos, styles) {
         const cellRange = cell.Range;
 
         if (cellData.paragraphs && cellData.paragraphs.length > 0) {
-          let isFirstPara = true;
-          for (const para of cellData.paragraphs) {
-            if (!isFirstPara) {
-              const endPos = cellRange.End - 1;
-              doc.Range(endPos, endPos).InsertAfter('\r');
-            }
+          // 阶段1：构建完整文本并记录每个run的偏移量
+          let fullText = '';
+          const runMetadata = [];  // [{offset, length, rStyle}]
+          const paraMetadata = []; // [{pStyle}]
+
+          for (let pi = 0; pi < cellData.paragraphs.length; pi++) {
+            const para = cellData.paragraphs[pi];
+            if (pi > 0) fullText += '\r'; // 段落分隔符
+
+            paraMetadata.push({ pStyle: para.pStyle });
 
             for (const run of para.runs) {
               const runText = cleanCellText(run.text || '');
-              if (!runText) {
-                continue;
-              }
+              if (!runText) continue;
+              runMetadata.push({
+                offset: fullText.length,
+                length: runText.length,
+                rStyle: run.rStyle
+              });
+              fullText += runText;
+            }
+          }
 
-              const endPos = cellRange.End - 1;
-              const insertRange = doc.Range(endPos, endPos);
-              insertRange.InsertAfter(runText);
+          // 阶段2：一次性设置单元格文本（避免默认 \r\u0007 导致多余空段落）
+          if (fullText) {
+            cellRange.Text = fullText;
+            const basePos = cellRange.Start;
 
-              const formatRange = doc.Range(endPos, endPos + runText.length);
-              const font = formatRange.Font;
-              
+            // 阶段3：按偏移量逐个设置run字符格式
+            for (const rm of runMetadata) {
               try {
-                font.Reset();  // 重置格式避免继承
-                const rStyle = resolveStyle(styles, run.rStyle, DEFAULT_RSTYLE);
-                if (rStyle[RSTYLE.FONT_NAME]) {
-                  font.Name = rStyle[RSTYLE.FONT_NAME];
-                }
-                if (rStyle[RSTYLE.FONT_SIZE]) {
-                  font.Size = rStyle[RSTYLE.FONT_SIZE];
-                }
+                const formatRange = doc.Range(basePos + rm.offset, basePos + rm.offset + rm.length);
+                const font = formatRange.Font;
+                font.Reset();
+                const rStyle = resolveStyle(styles, rm.rStyle, DEFAULT_RSTYLE);
+                if (rStyle[RSTYLE.FONT_NAME]) font.Name = rStyle[RSTYLE.FONT_NAME];
+                if (rStyle[RSTYLE.FONT_SIZE]) font.Size = rStyle[RSTYLE.FONT_SIZE];
                 font.Bold = rStyle[RSTYLE.BOLD] ? -1 : 0;
                 font.Italic = rStyle[RSTYLE.ITALIC] ? -1 : 0;
                 if (rStyle[RSTYLE.UNDERLINE]) {
@@ -1342,29 +1467,50 @@ function generateTable(doc, tableData, currentPos, styles) {
                   if (rStyle[RSTYLE.UNDERLINE_COLOR] && rStyle[RSTYLE.UNDERLINE_COLOR] !== '#000000') {
                     font.UnderlineColor = parseRGBColor(rStyle[RSTYLE.UNDERLINE_COLOR]);
                   }
+                } else {
+                  font.Underline = 0;
                 }
                 if (rStyle[RSTYLE.COLOR] && rStyle[RSTYLE.COLOR] !== '#000000') {
                   font.Color = parseRGBColor(rStyle[RSTYLE.COLOR]);
+                } else {
+                  font.Color = 0;
                 }
                 if (rStyle[RSTYLE.HIGHLIGHT]) {
                   try {
                     formatRange.HighlightColorIndex = rStyle[RSTYLE.HIGHLIGHT];
                   } catch (e) {
-                    try {
-                      font.HighlightColorIndex = rStyle[RSTYLE.HIGHLIGHT];
-                    } catch (e2) {}
+                    try { font.HighlightColorIndex = rStyle[RSTYLE.HIGHLIGHT]; } catch (e2) {}
                   }
                 }
+                font.StrikeThrough = rStyle[RSTYLE.STRIKETHROUGH] ? -1 : 0;
+                font.Superscript = rStyle[RSTYLE.SUPERSCRIPT] ? -1 : 0;
+                font.Subscript = rStyle[RSTYLE.SUBSCRIPT] ? -1 : 0;
               } catch (e) {}
             }
 
-            // 设置段落对齐
-            const pStyle = resolveStyle(styles, para.pStyle, DEFAULT_PSTYLE);
+            // 阶段4：逐段设置段落格式（通过 Paragraphs 集合精确定位）
             try {
-              cellRange.ParagraphFormat.Alignment = getAlignmentValue(pStyle[PSTYLE.ALIGNMENT] || 'left');
-            } catch (e) {}
+              const cellParas = cellRange.Paragraphs;
+              for (let pi = 0; pi < paraMetadata.length && pi < cellParas.Count; pi++) {
+                const pStyle = resolveStyle(styles, paraMetadata[pi].pStyle, DEFAULT_PSTYLE);
+                const pf = cellParas.Item(pi + 1).Format;
+                pf.Alignment = getAlignmentValue(pStyle[PSTYLE.ALIGNMENT] || 'left');
+                pf.LeftIndent = pStyle[PSTYLE.INDENT_LEFT] || 0;
+                pf.RightIndent = pStyle[PSTYLE.INDENT_RIGHT] || 0;
+                pf.FirstLineIndent = pStyle[PSTYLE.INDENT_FIRST_LINE] || 0;
+                pf.SpaceBefore = pStyle[PSTYLE.SPACE_BEFORE] || 0;
+                pf.SpaceAfter = pStyle[PSTYLE.SPACE_AFTER] || 0;
 
-            isFirstPara = false;
+                const lineSpacing = pStyle[PSTYLE.LINE_SPACING] || 0;
+                const lineSpacingRule = pStyle[PSTYLE.LINE_SPACING_RULE] || 0;
+                if (lineSpacingRule >= 3 && lineSpacing > 0) {
+                  pf.LineSpacing = lineSpacing;
+                  pf.LineSpacingRule = lineSpacingRule;
+                } else if (lineSpacingRule > 0) {
+                  pf.LineSpacingRule = lineSpacingRule;
+                }
+              }
+            } catch (e) {}
           }
         } else {
           if (cellData.text) {
@@ -1377,18 +1523,22 @@ function generateTable(doc, tableData, currentPos, styles) {
           // 设置字体格式
           const rStyle = resolveStyle(styles, cellData.rStyle, DEFAULT_RSTYLE);
           const font = cellRange.Font;
-          font.Reset();  // 重置格式避免继承
-          if (rStyle[RSTYLE.FONT_NAME]) {
-            font.Name = rStyle[RSTYLE.FONT_NAME];
-          }
-          if (rStyle[RSTYLE.FONT_SIZE]) {
-            font.Size = rStyle[RSTYLE.FONT_SIZE];
-          }
+          font.Reset();
+          if (rStyle[RSTYLE.FONT_NAME]) font.Name = rStyle[RSTYLE.FONT_NAME];
+          if (rStyle[RSTYLE.FONT_SIZE]) font.Size = rStyle[RSTYLE.FONT_SIZE];
           font.Bold = rStyle[RSTYLE.BOLD] ? -1 : 0;
           font.Italic = rStyle[RSTYLE.ITALIC] ? -1 : 0;
 
-          // 设置对齐（使用循环开头的 cStyle）
-          cellRange.ParagraphFormat.Alignment = getAlignmentValue(cStyle[CSTYLE.ALIGNMENT] || 'center');
+          // 设置段落格式（对齐、行距、缩进、段间距）
+          try {
+            const pf = cellRange.ParagraphFormat;
+            pf.Alignment = getAlignmentValue(cStyle[CSTYLE.ALIGNMENT] || 'center');
+            pf.LeftIndent = 0;
+            pf.RightIndent = 0;
+            pf.FirstLineIndent = 0;
+            pf.SpaceBefore = 0;
+            pf.SpaceAfter = 0;
+          } catch (e) {}
         }
 
         cell.VerticalAlignment = getCellVerticalAlignmentValue(cStyle[CSTYLE.VERTICAL_ALIGNMENT] || 'center');
@@ -1428,7 +1578,9 @@ function generateTable(doc, tableData, currentPos, styles) {
     } catch (e) {}
   }
 
-  return doc.Content.End - 1;
+  // 返回表格末尾位置（而非 doc.Content.End），避免在文档中间插入表格时
+  // currentPos 跳到文档末尾，导致 endPos 覆盖原有内容、撤回时误删后续段落
+  return table.Range.End;
 }
 
 /**
@@ -1509,6 +1661,41 @@ function generateDocxFromJSON(jsonData, doc, insertParaIndex) {
       const selection = window.Application.Selection;
       currentPos = selection ? selection.Range.Start : 0;
     }
+
+    // 防御：如果插入位置在表格内部，跳转到该表格之后的首个段落
+    // 避免新内容（尤其是新表格）被嵌套到旧表格单元格内
+    // 注意：不能直接用 tblRange.End 作为插入点，WPS 中在该位置插入文本仍可能落入表格
+    try {
+      const docTables = doc.Content.Tables;
+      if (docTables && docTables.Count > 0) {
+        for (let ti = 1; ti <= docTables.Count; ti++) {
+          const tbl = docTables.Item(ti);
+          const tblRange = tbl.Range;
+          if (currentPos >= tblRange.Start && currentPos <= tblRange.End) {
+            console.log(`[generateDocxFromJSON] 插入位置(${currentPos})在表格内部(${tblRange.Start}-${tblRange.End})，寻找表格后安全位置`);
+            // 从 insertParaIndex 附近开始扫描，找到第一个在表格后面的段落
+            const totalP = doc.Paragraphs.Count;
+            let safePos = doc.Content.End - 1; // fallback: 文档末尾
+            const scanStart = (insertParaIndex != null && insertParaIndex >= 0)
+              ? insertParaIndex + 1  // WPS 1-based
+              : 1;
+            for (let pi = scanStart; pi <= totalP; pi++) {
+              const pStart = doc.Paragraphs.Item(pi).Range.Start;
+              if (pStart >= tblRange.End) {
+                safePos = pStart;
+                break;
+              }
+            }
+            console.log(`[generateDocxFromJSON] 调整到表格后方: ${safePos}`);
+            currentPos = safePos;
+            break;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[generateDocxFromJSON] 表格位置检测失败:', e);
+    }
+
     const insertStartPos = currentPos;  // 记录插入起始位置
     let paraIndex = 0;
 

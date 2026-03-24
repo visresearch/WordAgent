@@ -123,20 +123,57 @@ class Paragraph(BaseModel):
         return self
 
 
-class Cell(BaseModel):
-    """表格单元格"""
+class CellParagraph(BaseModel):
+    """单元格内段落 - 一个单元格可包含多个段落，每个段落有独立的样式和格式块"""
 
-    text: str = Field(description="单元格文本")
+    text: str = Field(description="段落文本（可选，所有 runs 的文本拼接）", default="")
+    pStyle: str = Field(
+        description='段落样式引用ID，如 "pS_1"。控制对齐、行距等段落格式', default=""
+    )
+    runs: list[Run] = Field(
+        description="格式块数组。单元格内一个段落可包含多个不同格式的 run",
+        default_factory=list,
+    )
+
+
+class Cell(BaseModel):
+    """表格单元格。支持两种模式：
+    1. 简单模式：只填 text + cStyle（单段落纯文本，字体由 rStyle 控制）
+    2. 多段落模式：填 paragraphs + cStyle（单元格内多段落，每段有独立格式）
+    优先使用 paragraphs 模式以获得精确的格式还原。"""
+
+    text: str = Field(description="单元格文本（简单模式必填；多段落模式下可为空字符串）", default="")
+    paragraphs: list[CellParagraph] | None = Field(
+        default=None,
+        description="单元格内段落数组（多段落模式）。每个段落有独立的 pStyle 和 runs。"
+        "填写此字段时，text 字段会被忽略，内容以 paragraphs 为准。",
+    )
+    rStyle: str | None = Field(
+        default=None,
+        description='单元格整体字符样式引用ID（简单模式使用），如 "rS_1"。'
+        "多段落模式下由各 run 的 rStyle 控制，此字段可省略。",
+    )
     cStyle: str = Field(description='单元格样式引用ID，如 "cS_1"，对应 document.styles["cS_1"]')
 
 
 class Table(BaseModel):
-    """表格"""
+    """表格。包含行列数、单元格内容、表格样式，以及可选的列宽和行高控制。"""
 
     rows: int = Field(description="行数")
     columns: int = Field(description="列数")
-    cells: list[list[Cell]] = Field(description="单元格二维数组")
+    cells: list[list[Cell]] = Field(description="单元格二维数组，cells[row][col]")
     tStyle: str = Field(description='表格样式引用ID，如 "tS_1"，对应 document.styles["tS_1"]')
+    columnWidths: list[float] | None = Field(
+        default=None,
+        description="每列宽度数组（磅值），长度必须等于 columns。"
+        "省略时前端自动等分页面宽度。如 [120, 280] 表示第1列120磅、第2列280磅。",
+    )
+    rowHeights: list[list[int | float]] | None = Field(
+        default=None,
+        description="每行高度数组，长度必须等于 rows。每项为 [height, heightRule]："
+        "height=高度（磅值）；heightRule: 0=自动（文字撑高）、1=最小值（至少这么高）、2=固定值。"
+        "省略时行高自动由内容决定。如 [[40, 1], [40, 1]] 表示2行各至少40磅高。",
+    )
 
 
 class DocumentOutput(BaseModel):
@@ -212,6 +249,15 @@ class DocumentOutput(BaseModel):
                 for cell in row:
                     if cell.cStyle not in style_keys:
                         missing.add(cell.cStyle)
+                    if cell.rStyle and cell.rStyle not in style_keys:
+                        missing.add(cell.rStyle)
+                    if cell.paragraphs:
+                        for cp in cell.paragraphs:
+                            if cp.pStyle and cp.pStyle not in style_keys:
+                                missing.add(cp.pStyle)
+                            for run in cp.runs:
+                                if run.rStyle not in style_keys:
+                                    missing.add(run.rStyle)
 
         if missing:
             refs = ", ".join(sorted(missing))
@@ -293,17 +339,27 @@ def _compact_doc_json(doc_json: dict) -> str:
     if doc_json.get("tables"):
         compact["tables"] = []
         for t in doc_json["tables"]:
+            table_compact = {
+                "paraIndex": t.get("paraIndex"),
+                "endParaIndex": t.get("endParaIndex"),
+            }
             rows = []
-            for row in t.get("rows", []):
+            for row in t.get("cells", []):
                 cells = []
-                for cell in row.get("cells", []):
-                    cell_text = "".join(
-                        "".join(r.get("text", "") if isinstance(r, dict) else str(r) for r in cp.get("runs", []))
-                        for cp in cell.get("paragraphs", [])
-                    )
-                    cells.append(cell_text)
+                for cell in row:
+                    if isinstance(cell, dict):
+                        cell_text = cell.get("text", "")
+                        if not cell_text and cell.get("paragraphs"):
+                            cell_text = "".join(
+                                "".join(r.get("text", "") if isinstance(r, dict) else str(r) for r in cp.get("runs", []))
+                                for cp in cell.get("paragraphs", [])
+                            )
+                        cells.append(cell_text)
+                    else:
+                        cells.append(str(cell))
                 rows.append(cells)
-            compact["tables"].append({"tableIndex": t.get("tableIndex"), "rows": rows})
+            table_compact["cellTexts"] = rows
+            compact["tables"].append(table_compact)
     result = json.dumps(compact, ensure_ascii=False)
     print(f"[read_document] 📦 文档过大({len(full)} chars)，已精简为 {len(result)} chars（纯文本模式）")
     return result
@@ -385,8 +441,11 @@ def read_document(startParaIndex: int = 0, endParaIndex: int = 49) -> str:
                         writer({"type": "status", "content": f"⚠️ 读取文档失败: {err_msg}"})
                         return ""
                     doc_json = result.get("documentJson", {})
-                    if doc_json and doc_json.get("paragraphs"):
-                        print(f"[read_document] ✅ 收到文档，段落数: {len(doc_json['paragraphs'])}")
+                    has_content = doc_json and (doc_json.get("paragraphs") or doc_json.get("tables"))
+                    if has_content:
+                        para_count = len(doc_json.get('paragraphs', []))
+                        table_count = len(doc_json.get('tables', []))
+                        print(f"[read_document] ✅ 收到文档，段落数: {para_count}，表格数: {table_count}")
                         writer(
                             {
                                 "type": "read_complete",
@@ -442,6 +501,24 @@ def generate_document(document: DocumentOutput) -> dict:
     - styles: 样式字典（必填，且必须覆盖所有样式引用）
     - insertParaIndex: 插入位置（段落索引，0-based），前端在该段落之前插入内容
     不要把 "tables" 字符串放进 paragraphs 数组里！
+
+    【表格生成说明】
+    表格通过 tables 数组生成，每个 Table 对象包含：
+    - rows/columns: 行列数
+    - cells: 二维数组 cells[row][col]，每个 Cell 支持两种模式：
+      · 简单模式: {text: "内容", cStyle: "cS_1", rStyle: "rS_1"} - 单段落纯文本
+      · 多段落模式: {paragraphs: [{text: "...", pStyle: "pS_1", runs: [{text: "...", rStyle: "rS_1"}]}], cStyle: "cS_1"} - 精确格式控制
+    - tStyle: 表格对齐样式
+    - columnWidths: 可选，各列宽度（磅值数组），省略则等分页面宽度
+    - rowHeights: 可选，各行高度（[[height, rule], ...]），rule: 0=自动,1=最小值,2=固定值
+    - cStyle 控制: rowSpan/colSpan（合并单元格）、对齐方式、垂直对齐
+
+    【修改已有表格 - 必须先删后插！】
+    CRITICAL: read_document 返回的表格数据包含 paraIndex 和 endParaIndex，标识表格占用的段落范围。
+    修改已有表格时，必须先 delete_document(paraIndex, endParaIndex) 删除整个表格段落范围，
+    再用 generate_document(insertParaIndex=paraIndex) 插入新表格。
+    如果不删除旧表格就直接插入，新表格会嵌套在旧表格的单元格内部，导致文档损坏！
+    读取文档返回的表格 JSON 中包含 columnWidths 和 rowHeights，修改时应原样保留以还原表格尺寸。
 
     【insertParaIndex 规则】
     - 增加内容时：insertParaIndex = 要插入到的段落索引位置（在该段落之前插入）

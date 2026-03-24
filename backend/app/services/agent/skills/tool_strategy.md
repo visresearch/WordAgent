@@ -9,13 +9,18 @@ IMPORTANT: 工具选择的核心原则 - **先 query 定位，再 read 读取，
 - 当 query_document 首次返回 0 条匹配时，不要立刻放弃：必须更换关键词再查（同义词、简称、章节名、核心词）至少 1-2 次；多次未命中后再告知用户未找到。
 - 当 query_document 返回多条匹配（matchCount>1）且问题是定位具体章节/小节内容时，应按候选段落索引顺序逐个读取“段落附近”内容（如 idx-1 到 idx+1）；若已获得充分证据可提前停止。
 ## 修改内容（delete + generate 组合）
-IMPORTANT: 当用户要求**修改、润色、重写、翻译、扩写、缩写**已有段落时，必须组合使用 delete_document + generate_document：
-1. 先 `delete_document(startParaIndex, endParaIndex)` 标记删除旧段落（非阻塞，立即返回）
-2. 紧接着 `generate_document(insertParaIndex=startParaIndex)` 在同一位置插入修改后的新段落
+IMPORTANT: 当用户要求**修改、润色、重写、翻译、扩写、缩写**已有段落或表格时，必须组合使用 delete_document + generate_document：
+1. 先 `delete_document(startParaIndex, endParaIndex)` 标记删除旧段落/表格（非阻塞，立即返回）
+2. 紧接着 `generate_document(insertParaIndex=startParaIndex)` 在同一位置插入修改后的新段落/表格
 - delete_document 是非阻塞的，调用后立即返回，可以马上调用 generate_document
 - 不需要等待用户确认删除，两个工具可以连续调用
 - 这是因为 generate_document 只能「插入」不能「替换」，如果只插入不删除，旧内容会残留
 - **严禁**修改内容时只调用 generate_document 而不调用 delete_document
+
+**表格修改同样适用此规则**：
+- 修改已有表格内容/格式时，必须先 `delete_document` 删除表格所在的段落范围，再用 `generate_document` 插入新表格
+- read_document 返回的表格数据包含 `paraIndex` 和 `endParaIndex`，用 `delete_document(paraIndex, endParaIndex)` 精确删除表格
+- 如果只插入新表格而不删除旧表格，新表格会嵌套在旧表格的单元格内部，导致文档损坏！
 
 ## 增加内容（仅 generate）
 - 用户要求"增加一段"、"在XX后面加内容"时，只需调用 generate_document，不需要 delete_document

@@ -894,15 +894,230 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
           };
         }
 
-        // 批量 load 范围内所有段落
+        // 批量 load 范围内所有段落（完整属性）
         for (let idx = startParaIndex; idx <= endParaIndex; idx++) {
           allParas.items[idx].load(
             "text,alignment,lineSpacing,firstLineIndent,leftIndent,rightIndent,spaceBefore,spaceAfter,style,isListItem,tableNestingLevel,lineUnitBefore,lineUnitAfter,outlineLevel"
           );
         }
+        // 范围外段落只需加载 tableNestingLevel（用于全文表格映射）
+        for (let idx = 0; idx < allParas.items.length; idx++) {
+          if (idx < startParaIndex || idx > endParaIndex) {
+            allParas.items[idx].load("tableNestingLevel");
+          }
+        }
         await context.sync();
 
         const rangeResult = { paragraphs: [], tables: [], images: [], fields: [] };
+
+        // 检测范围内的表格段落范围（连续 tableNestingLevel > 0 的段落组）
+        const tableParagraphRanges = [];
+        {
+          let currentTableRange = null;
+          for (let idx = startParaIndex; idx <= endParaIndex; idx++) {
+            if (allParas.items[idx].tableNestingLevel > 0) {
+              if (!currentTableRange) {
+                currentTableRange = { start: idx, end: idx };
+              } else {
+                currentTableRange.end = idx;
+              }
+            } else {
+              if (currentTableRange) {
+                tableParagraphRanges.push(currentTableRange);
+                currentTableRange = null;
+              }
+            }
+          }
+          if (currentTableRange) tableParagraphRanges.push(currentTableRange);
+        }
+
+        // 如果范围内包含表格，加载 body.tables 并解析
+        if (tableParagraphRanges.length > 0) {
+          // 确定全文所有表格段落范围，用于与 body.tables 建立顺序对应
+          const allTableParaRanges = [];
+          {
+            let cur = null;
+            for (let i = 0; i < allParas.items.length; i++) {
+              if (allParas.items[i].tableNestingLevel > 0) {
+                if (!cur) { cur = { start: i, end: i }; } else { cur.end = i; }
+              } else {
+                if (cur) { allTableParaRanges.push(cur); cur = null; }
+              }
+            }
+            if (cur) allTableParaRanges.push(cur);
+          }
+
+          const bodyTables = context.document.body.tables;
+          bodyTables.load("items");
+          await context.sync();
+
+          // 解析范围内命中的表格
+          for (const tpr of tableParagraphRanges) {
+            // 找到此表格段落范围对应的 body.tables 索引
+            const tableIdx = allTableParaRanges.findIndex(r => r.start === tpr.start && r.end === tpr.end);
+            if (tableIdx < 0 || tableIdx >= bodyTables.items.length) continue;
+
+            const table = bodyTables.items[tableIdx];
+            table.load("rowCount,values,alignment");
+            table.rows.load("items");
+            await context.sync();
+
+            const tableData = {
+              rows: table.rowCount,
+              columns: 0,
+              cells: [],
+              tStyle: [getAlignmentName(table.alignment)],
+              paraIndex: tpr.start,
+              endParaIndex: tpr.end,
+            };
+
+            const tableRows = table.rows;
+
+            // 捕获行高
+            const rowHeights = [];
+            for (const row of tableRows.items) {
+              row.load("cellCount,preferredHeight");
+              row.cells.load("items");
+              const h = row.preferredHeight || 0;
+              rowHeights.push([h, h > 0 ? 1 : 0]);
+            }
+            await context.sync();
+            if (rowHeights.some(h => h[0] > 0)) {
+              tableData.rowHeights = rowHeights;
+            }
+
+            // 加载单元格属性
+            for (const row of tableRows.items) {
+              for (const cell of row.cells.items) {
+                cell.load("columnWidth,rowIndex,cellIndex,verticalAlignment,width");
+                cell.body.load("text");
+                cell.body.paragraphs.load("items");
+              }
+            }
+            await context.sync();
+
+            // 捕获列宽
+            try {
+              const firstRow = tableRows.items[0];
+              if (firstRow && firstRow.cells.items.length > 0) {
+                const columnWidths = firstRow.cells.items.map(c => c.columnWidth || c.width || 0);
+                if (columnWidths.some(w => w > 0)) {
+                  tableData.columnWidths = columnWidths;
+                }
+              }
+            } catch (e) {}
+
+            // 加载段落详情
+            for (const row of tableRows.items) {
+              for (const cell of row.cells.items) {
+                for (const para of cell.body.paragraphs.items) {
+                  para.load("text,alignment,lineSpacing,firstLineIndent,leftIndent,rightIndent,spaceBefore,spaceAfter");
+                }
+              }
+            }
+            await context.sync();
+
+            // 解析单元格
+            for (const row of tableRows.items) {
+              const rowData = [];
+              if (row.cells.items.length > tableData.columns) {
+                tableData.columns = row.cells.items.length;
+              }
+
+              for (const cell of row.cells.items) {
+                const cellText = cleanText(cell.body.text || "");
+                const cellParas = cell.body.paragraphs;
+
+                const paragraphsData = [];
+                for (const para of cellParas.items) {
+                  const paraText = cleanText(para.text || "");
+                  if (!paraText) continue;
+
+                  const inlineRanges = para.getTextRanges(["\t", "\n"], true);
+                  inlineRanges.load("items");
+                  await context.sync();
+
+                  for (const ir of inlineRanges.items) {
+                    ir.load("text");
+                    ir.font.load("name,size,bold,italic,underline,color,highlightColor,strikeThrough,superscript,subscript");
+                  }
+                  await context.sync();
+
+                  const cellRuns = [];
+                  let lastFmtKey = null;
+                  let curRun = null;
+                  for (const ir of inlineRanges.items) {
+                    const t = ir.text || "";
+                    if (!t || t.match(/^[\r\n\u0007]$/)) continue;
+                    const font = ir.font;
+                    const fmtKey = `${font.name}_${font.size}_${font.bold}_${font.italic}_${font.color}_${font.highlightColor}`;
+                    if (fmtKey === lastFmtKey && curRun) {
+                      curRun.text += t;
+                    } else {
+                      if (curRun && curRun.text) cellRuns.push(curRun);
+                      curRun = {
+                        text: t,
+                        rStyle: makeRStyle(
+                          font.name || "", font.size || 12,
+                          font.bold === true, font.italic === true,
+                          getUnderlineValue(font.underline), "#000000",
+                          font.color || "#000000", getHighlightValue(font.highlightColor),
+                          font.strikeThrough === true, font.superscript === true, font.subscript === true
+                        ),
+                      };
+                      lastFmtKey = fmtKey;
+                    }
+                  }
+                  if (curRun && curRun.text) cellRuns.push(curRun);
+
+                  if (cellRuns.length > 0) {
+                    paragraphsData.push({
+                      text: paraText,
+                      pStyle: makePStyle(
+                        getAlignmentName(para.alignment), para.lineSpacing || 0,
+                        para.leftIndent || 0, para.rightIndent || 0,
+                        para.firstLineIndent || 0, para.spaceBefore || 0,
+                        para.spaceAfter || 0, ""
+                      ),
+                      runs: cellRuns,
+                    });
+                  }
+                }
+
+                // 获取 cell rStyle
+                let cellRStyle = undefined;
+                try {
+                  if (cellParas.items.length > 0) {
+                    const pFont = cellParas.items[0].font;
+                    pFont.load("name,size,bold,italic,underline,color,highlightColor,strikeThrough,superscript,subscript");
+                    await context.sync();
+                    cellRStyle = makeRStyle(
+                      pFont.name || "", pFont.size || 12,
+                      pFont.bold === true, pFont.italic === true,
+                      getUnderlineValue(pFont.underline), "#000000",
+                      pFont.color || "#000000", getHighlightValue(pFont.highlightColor),
+                      pFont.strikeThrough === true, pFont.superscript === true, pFont.subscript === true
+                    );
+                  }
+                } catch (e) {}
+
+                rowData.push({
+                  text: cellText,
+                  paragraphs: paragraphsData.length > 0 ? paragraphsData : undefined,
+                  rStyle: cellRStyle,
+                  cStyle: makeCStyle(
+                    1, 1,
+                    getAlignmentName(cellParas.items.length > 0 ? cellParas.items[0].alignment : "Left"),
+                    getVerticalAlignmentName(cell.verticalAlignment)
+                  ),
+                });
+              }
+              tableData.cells.push(rowData);
+            }
+
+            rangeResult.tables.push(tableData);
+          }
+        }
 
         for (let idx = startParaIndex; idx <= endParaIndex; idx++) {
           const para = allParas.items[idx];
@@ -1087,6 +1302,16 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
             tStyle: [getAlignmentName(table.alignment)],
           };
 
+          // 捕获行高
+          const rowHeights = [];
+          for (const row of table.rows.items) {
+            const h = row.preferredHeight || 0;
+            rowHeights.push([h, h > 0 ? 1 : 0]);
+          }
+          if (rowHeights.some(h => h[0] > 0)) {
+            tableData.rowHeights = rowHeights;
+          }
+
           const tableRows = table.rows;
           for (const row of tableRows.items) {
             for (const cell of row.cells.items) {
@@ -1112,6 +1337,17 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
             }
           }
           await context.sync();
+
+          // 捕获列宽（从第一行的单元格获取）
+          try {
+            const firstRow = tableRows.items[0];
+            if (firstRow && firstRow.cells.items.length > 0) {
+              const columnWidths = firstRow.cells.items.map(c => c.columnWidth || c.width || 0);
+              if (columnWidths.some(w => w > 0)) {
+                tableData.columnWidths = columnWidths;
+              }
+            }
+          } catch (e) {}
 
           for (const row of tableRows.items) {
             const rowData = [];
@@ -1196,9 +1432,34 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
                 }
               }
 
+              // 获取单元格级别字体信息作为 rStyle（取第一个段落的字体）
+              let cellRStyle = undefined;
+              try {
+                if (cellParas.items.length > 0) {
+                  const firstPara = cellParas.items[0];
+                  const pFont = firstPara.font;
+                  pFont.load("name,size,bold,italic,underline,color,highlightColor,strikeThrough,superscript,subscript");
+                  await context.sync();
+                  cellRStyle = makeRStyle(
+                    pFont.name || "",
+                    pFont.size || 12,
+                    pFont.bold === true,
+                    pFont.italic === true,
+                    getUnderlineValue(pFont.underline),
+                    "#000000",
+                    pFont.color || "#000000",
+                    getHighlightValue(pFont.highlightColor),
+                    pFont.strikeThrough === true,
+                    pFont.superscript === true,
+                    pFont.subscript === true
+                  );
+                }
+              } catch (e) {}
+
               rowData.push({
                 text: cellText,
                 paragraphs: paragraphsData.length > 0 ? paragraphsData : undefined,
+                rStyle: cellRStyle,
                 cStyle: makeCStyle(
                   1,
                   1,
@@ -1285,6 +1546,33 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
         try {
           await context.sync();
         } catch (e) {}
+
+        // === 计算表格 paraIndex / endParaIndex ===
+        // 通过 tableNestingLevel 找到连续的表格段落范围，按顺序映射到 result.tables
+        if (result.tables.length > 0) {
+          const tableParagraphRanges = [];
+          let currentTableRange = null;
+          for (let i = 0; i < bodyParas.items.length; i++) {
+            if (bodyParas.items[i].tableNestingLevel > 0) {
+              if (!currentTableRange) {
+                currentTableRange = { start: i, end: i };
+              } else {
+                currentTableRange.end = i;
+              }
+            } else {
+              if (currentTableRange) {
+                tableParagraphRanges.push(currentTableRange);
+                currentTableRange = null;
+              }
+            }
+          }
+          if (currentTableRange) tableParagraphRanges.push(currentTableRange);
+
+          for (let ti = 0; ti < result.tables.length && ti < tableParagraphRanges.length; ti++) {
+            result.tables[ti].paraIndex = tableParagraphRanges[ti].start;
+            result.tables[ti].endParaIndex = tableParagraphRanges[ti].end;
+          }
+        }
 
         for (let _paraIdx = 0; _paraIdx < bodyParas.items.length; _paraIdx++) {
           // 选区模式：跳过不在选区内的段落
@@ -1589,6 +1877,31 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection") {
         }
         targetRange = allParagraphs.items[paraIndex];
         insertBeforeMode = true;
+
+        // 防御：如果目标段落在表格内部，跳转到表格之后的首个段落
+        // 避免新内容（尤其是新表格）被嵌套到旧表格单元格内
+        try {
+          allParagraphs.items[paraIndex].load("tableNestingLevel");
+          await context.sync();
+          if (allParagraphs.items[paraIndex].tableNestingLevel > 0) {
+            console.log(`[generateDocxFromJSON] 插入位置(paraIndex=${paraIndex})在表格内部，寻找表格后安全位置`);
+            let safeIdx = -1;
+            for (let pi = paraIndex + 1; pi < allParagraphs.items.length; pi++) {
+              allParagraphs.items[pi].load("tableNestingLevel");
+              await context.sync();
+              if (allParagraphs.items[pi].tableNestingLevel === 0) {
+                safeIdx = pi;
+                break;
+              }
+            }
+            if (safeIdx >= 0) {
+              targetRange = allParagraphs.items[safeIdx];
+              console.log(`[generateDocxFromJSON] 调整到表格后方: paraIndex=${safeIdx}`);
+            }
+          }
+        } catch (e) {
+          console.warn('[generateDocxFromJSON] 表格位置检测失败:', e);
+        }
       } else if (insertLocation === "end") {
         targetRange = context.document.body;
       } else {
@@ -1804,6 +2117,37 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection") {
           newTable.load("rows");
           await context.sync();
 
+          // 设置列宽
+          if (tableData.columnWidths && tableData.columnWidths.length === tableData.columns) {
+            for (let row = 0; row < tableData.cells.length; row++) {
+              for (let col = 0; col < tableData.columns; col++) {
+                if (tableData.columnWidths[col] > 0) {
+                  try {
+                    const cell = newTable.getCell(row, col);
+                    cell.columnWidth = tableData.columnWidths[col];
+                  } catch (e) {}
+                }
+              }
+            }
+            await context.sync();
+          }
+
+          // 设置行高
+          if (tableData.rowHeights && tableData.rowHeights.length === tableData.rows) {
+            const rows = newTable.rows;
+            rows.load("items");
+            await context.sync();
+            for (let r = 0; r < tableData.rows; r++) {
+              try {
+                const [height] = tableData.rowHeights[r];
+                if (height > 0) {
+                  rows.items[r].preferredHeight = height;
+                }
+              } catch (e) {}
+            }
+            await context.sync();
+          }
+
           for (let row = 0; row < tableData.cells.length; row++) {
             for (let col = 0; col < tableData.cells[row].length; col++) {
               const cellData = tableData.cells[row][col];
@@ -1817,18 +2161,60 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection") {
                   cStyle[CSTYLE.VERTICAL_ALIGNMENT] || "center"
                 );
 
-                // 设置单元格段落对齐
+                // 设置单元格段落格式
                 const cellBody = cell.body;
                 cellBody.paragraphs.load("items");
                 await context.sync();
 
-                for (const cellPara of cellBody.paragraphs.items) {
-                  cellPara.alignment = getAlignmentValue(cStyle[CSTYLE.ALIGNMENT] || "left");
+                if (cellData.paragraphs && cellData.paragraphs.length > 0) {
+                  // 有多段落数据时，逐段设置段落格式和 run 字符格式
+                  for (let pi = 0; pi < cellData.paragraphs.length && pi < cellBody.paragraphs.items.length; pi++) {
+                    const paraData = cellData.paragraphs[pi];
+                    const cellPara = cellBody.paragraphs.items[pi];
+                    const pStyle = resolveStyle(styles, paraData.pStyle, DEFAULT_PSTYLE);
 
-                  // 如果有 runs 格式，应用字体
-                  if (cellData.rStyle) {
-                    const rStyle = resolveStyle(styles, cellData.rStyle, DEFAULT_RSTYLE);
-                    applyRunStyle(cellPara.font, rStyle);
+                    cellPara.alignment = getAlignmentValue(pStyle[PSTYLE.ALIGNMENT] || "center");
+                    if (pStyle[PSTYLE.INDENT_LEFT]) cellPara.leftIndent = pStyle[PSTYLE.INDENT_LEFT];
+                    if (pStyle[PSTYLE.INDENT_RIGHT]) cellPara.rightIndent = pStyle[PSTYLE.INDENT_RIGHT];
+                    cellPara.firstLineIndent = pStyle[PSTYLE.INDENT_FIRST_LINE] || 0;
+                    if (pStyle[PSTYLE.SPACE_BEFORE]) cellPara.spaceBefore = pStyle[PSTYLE.SPACE_BEFORE];
+                    if (pStyle[PSTYLE.SPACE_AFTER]) cellPara.spaceAfter = pStyle[PSTYLE.SPACE_AFTER];
+                    if (pStyle[PSTYLE.LINE_SPACING]) cellPara.lineSpacing = pStyle[PSTYLE.LINE_SPACING];
+
+                    // 应用 run 字符格式
+                    if (paraData.runs && paraData.runs.length > 0) {
+                      if (paraData.runs.length === 1) {
+                        // 单 run：直接设置段落字体
+                        const rStyle = resolveStyle(styles, paraData.runs[0].rStyle, DEFAULT_RSTYLE);
+                        applyRunStyle(cellPara.font, rStyle);
+                      } else {
+                        // 多 run：通过 search 定位设置
+                        for (const run of paraData.runs) {
+                          const runText = run.text || "";
+                          if (!runText) continue;
+                          const rStyle = resolveStyle(styles, run.rStyle, DEFAULT_RSTYLE);
+                          try {
+                            const searchResults = cellPara.search(runText, { matchCase: true, matchWholeWord: false });
+                            searchResults.load("items");
+                            await context.sync();
+                            if (searchResults.items.length > 0) {
+                              applyRunStyle(searchResults.items[0].font, rStyle);
+                            }
+                          } catch (e) {}
+                        }
+                      }
+                    }
+                  }
+                } else {
+                  // 无多段落数据时，使用 cStyle 对齐和 rStyle 字体
+                  for (const cellPara of cellBody.paragraphs.items) {
+                    cellPara.alignment = getAlignmentValue(cStyle[CSTYLE.ALIGNMENT] || "left");
+                    cellPara.firstLineIndent = 0;
+
+                    if (cellData.rStyle) {
+                      const rStyle = resolveStyle(styles, cellData.rStyle, DEFAULT_RSTYLE);
+                      applyRunStyle(cellPara.font, rStyle);
+                    }
                   }
                 }
               } catch (e) {
