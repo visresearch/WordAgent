@@ -127,9 +127,7 @@ class CellParagraph(BaseModel):
     """单元格内段落 - 一个单元格可包含多个段落，每个段落有独立的样式和格式块"""
 
     text: str = Field(description="段落文本（可选，所有 runs 的文本拼接）", default="")
-    pStyle: str = Field(
-        description='段落样式引用ID，如 "pS_1"。控制对齐、行距等段落格式', default=""
-    )
+    pStyle: str = Field(description='段落样式引用ID，如 "pS_1"。控制对齐、行距等段落格式', default="")
     runs: list[Run] = Field(
         description="格式块数组。单元格内一个段落可包含多个不同格式的 run",
         default_factory=list,
@@ -351,7 +349,9 @@ def _compact_doc_json(doc_json: dict) -> str:
                         cell_text = cell.get("text", "")
                         if not cell_text and cell.get("paragraphs"):
                             cell_text = "".join(
-                                "".join(r.get("text", "") if isinstance(r, dict) else str(r) for r in cp.get("runs", []))
+                                "".join(
+                                    r.get("text", "") if isinstance(r, dict) else str(r) for r in cp.get("runs", [])
+                                )
                                 for cp in cell.get("paragraphs", [])
                             )
                         cells.append(cell_text)
@@ -443,8 +443,8 @@ def read_document(startParaIndex: int = 0, endParaIndex: int = 49) -> str:
                     doc_json = result.get("documentJson", {})
                     has_content = doc_json and (doc_json.get("paragraphs") or doc_json.get("tables"))
                     if has_content:
-                        para_count = len(doc_json.get('paragraphs', []))
-                        table_count = len(doc_json.get('tables', []))
+                        para_count = len(doc_json.get("paragraphs", []))
+                        table_count = len(doc_json.get("tables", []))
                         print(f"[read_document] ✅ 收到文档，段落数: {para_count}，表格数: {table_count}")
                         writer(
                             {

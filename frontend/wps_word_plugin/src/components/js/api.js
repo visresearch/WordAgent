@@ -361,7 +361,8 @@ function chatStream(message, options = {}) {
     mode = 'agent',
     model = 'auto',
     documentRange = null,
-    history = []
+    history = [],
+    files = []
   } = options;
 
   // 设置当前会话的回调
@@ -382,6 +383,7 @@ function chatStream(message, options = {}) {
         model,
         documentRange,
         history,
+        files,
         timestamp: Date.now()
       });
     } catch (error) {
@@ -700,6 +702,33 @@ async function saveSettings(settings) {
 // ============== 缓存管理 API ==============
 
 /**
+ * 上传文件到后端
+ * @param {File[]} files - 要上传的文件列表
+ * @returns {Promise<Object>} - { success, files: [{file_id, filename, size, content_type, is_image}] }
+ */
+async function uploadFiles(files) {
+  const formData = new FormData();
+  for (const file of files) {
+    formData.append('files', file);
+  }
+
+  try {
+    const response = await fetch(`${CONFIG.baseURL}/api/chat/upload`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      return { success: false, error: `HTTP ${response.status}`, files: [] };
+    }
+
+    return await response.json();
+  } catch (error) {
+    return { success: false, error: error.message, files: [] };
+  }
+}
+
+/**
  * 扫描 WPS 图片缓存
  * @returns {Promise<Object>} { dir, fileCount, totalSize }
  */
@@ -737,6 +766,9 @@ export default {
   // WebSocket 管理
   wsManager,
 
+  // 文件上传
+  uploadFiles,
+
   // 会话管理 API
   getSessions,
   createSession,
@@ -772,6 +804,8 @@ export {
   parseDocumentRange,
 
   wsManager,
+
+  uploadFiles,
 
   getSessions,
   createSession,

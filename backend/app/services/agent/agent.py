@@ -356,6 +356,7 @@ async def process_writing_request_stream(
     model: str | None = None,
     mode: str | None = None,
     chat_id: str | None = None,
+    attached_files: list[dict] | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     使用 LangGraph ReAct Agent 处理写作请求（流式输出）
@@ -367,6 +368,7 @@ async def process_writing_request_stream(
         model: 用户选择的模型
         mode: 对话模式（agent/plan）
         chat_id: WebSocket 会话 ID（用于工具回调）
+        attached_files: 附件列表 [{file_id, filename, content_type, is_image}, ...]
 
     Yields:
         SSE 格式的流式输出
@@ -437,7 +439,46 @@ async def process_writing_request_stream(
             )
             print(f"[Agent] 文档范围: {document_range}")
 
-        messages.append(HumanMessage(content=user_content))
+        # 处理附件：图片走多模态，文本类文件注入为上下文
+        image_content_parts = []
+        text_file_parts = []
+        if attached_files:
+            from app.api.routes.files import read_file_as_base64, read_text_file
+
+            for f in attached_files:
+                file_id = f.get("file_id", "")
+                filename = f.get("filename", "")
+                content_type = f.get("content_type", "")
+                is_image = f.get("is_image", False)
+
+                if is_image:
+                    # 图片转 base64 作为多模态内容
+                    b64 = read_file_as_base64(file_id)
+                    if b64:
+                        image_content_parts.append(
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:{content_type};base64,{b64}"},
+                            }
+                        )
+                        print(f"[Agent] 🖼️ 附件图片: {filename}")
+                else:
+                    # 非图片文件，提取文本内容
+                    text = read_text_file(file_id, filename)
+                    if text:
+                        text_file_parts.append(f"\n--- 附件: {filename} ---\n{text}")
+                        print(f"[Agent] 📄 附件文本: {filename} ({len(text)} chars)")
+
+        # 将文本附件内容追加到用户消息
+        if text_file_parts:
+            user_content += "\n" + "\n".join(text_file_parts)
+
+        # 构建 HumanMessage：如果有图片则使用多模态格式，否则纯文本
+        if image_content_parts:
+            human_content = [{"type": "text", "text": user_content}] + image_content_parts
+            messages.append(HumanMessage(content=human_content))
+        else:
+            messages.append(HumanMessage(content=user_content))
 
         print(f"[Agent] 消息数量: {len(messages)}")
 

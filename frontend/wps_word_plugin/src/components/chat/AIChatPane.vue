@@ -832,7 +832,7 @@ export default {
     /**
      * 处理用户发送消息（由 ChatInput 触发）
      */
-    handleSend(userMessage) {
+    async handleSend(userMessage) {
       const userMsgObj = {
         role: 'user',
         content: userMessage
@@ -854,6 +854,22 @@ export default {
         userMsgObj.selectionContext = selectionContext;
       }
 
+      // 上传附件（在清空前捕获）
+      let uploadedFilesMeta = [];
+      if (this.uploadedFiles.length > 0) {
+        try {
+          const uploadResult = await api.uploadFiles(this.uploadedFiles);
+          if (uploadResult.success && uploadResult.files) {
+            uploadedFilesMeta = uploadResult.files;
+            console.log('[AIChatPane] 附件上传成功:', uploadedFilesMeta.length, '个文件');
+          } else {
+            console.warn('[AIChatPane] 附件上传失败:', uploadResult.error);
+          }
+        } catch (err) {
+          console.warn('[AIChatPane] 附件上传异常:', err);
+        }
+      }
+
       this.messages.push(userMsgObj);
       this.historyLoaded = true;
 
@@ -862,13 +878,13 @@ export default {
 
       this.saveMessageToHistory('user', userMessage, null, selectionContext);
 
-      this._sendStreamRequest(userMessage, documentRange);
+      this._sendStreamRequest(userMessage, documentRange, uploadedFilesMeta);
     },
 
     /**
      * 发送流式请求的公共方法
      */
-    _sendStreamRequest(userMessage, documentRange) {
+    _sendStreamRequest(userMessage, documentRange, files = []) {
       this.isLoading = true;
       const streamSessionId = this.currentSessionId;
       this._streamingSessionId = streamSessionId;
@@ -893,6 +909,7 @@ export default {
         model: this.selectedModel || 'auto',
         documentRange: documentRange,
         history: this.messages.slice(0, -1).slice(-10),
+        files: files,
 
         onMessage: (data) => {
           this._handleStreamMessage(data, aiMsg);

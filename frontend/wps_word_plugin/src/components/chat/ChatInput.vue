@@ -4,18 +4,7 @@
     <div v-for="(file, index) in uploadedFiles" :key="`${file.name}-${file.size}-${file.lastModified}-${index}`" class="current-selection-bar">
       <div class="selection-bar-content">
         <div class="selection-bar-icon">
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 16 16"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
-            <path d="M6 5.5V11a2 2 0 0 0 4 0V4a3 3 0 1 0-6 0v7a4 4 0 0 0 8 0V6" />
-          </svg>
+          <img :src="fileIcon" alt="附件" class="selection-bar-icon-img" />
         </div>
         <div class="selection-bar-info">
           <span class="selection-bar-preview">{{ file.name }} ({{ formatFileSize(file.size) }})</span>
@@ -458,6 +447,13 @@ export default {
   color: #667eea;
   display: flex;
   align-items: center;
+}
+
+.selection-bar-icon-img {
+  width: 14px;
+  height: 14px;
+  display: block;
+  user-select: none;
 }
 
 .selection-bar-info {

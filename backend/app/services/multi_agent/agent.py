@@ -82,6 +82,7 @@ class MultiAgentState(BaseModel):
     # 用户原始请求
     user_message: str = ""
     document_range: list[dict] = Field(default_factory=list)
+    attached_files: list[dict] = Field(default_factory=list)  # 附件列表
 
     # 记忆上下文（包含总结 + RAG 检索结果）
     memory_context: str = ""
@@ -506,6 +507,20 @@ def _build_multi_agent_graph(llm, model_name: str):
             range_info = json.dumps(state.document_range, ensure_ascii=False)
             task += f"\n\n用户选中了文档范围: {range_info}"
 
+        # 注入附件内容（文本类文件内容追加到任务，图片仅标注存在）
+        if state.attached_files:
+            from app.api.routes.files import read_text_file
+
+            for f in state.attached_files:
+                filename = f.get("filename", "")
+                is_image = f.get("is_image", False)
+                if is_image:
+                    task += f"\n\n[附件图片: {filename}]（图片内容已随消息发送给模型）"
+                else:
+                    text = read_text_file(f.get("file_id", ""), filename)
+                    if text:
+                        task += f"\n\n--- 附件: {filename} ---\n{text}"
+
         # 注入记忆上下文
         context = state.memory_context if state.memory_context else ""
 
@@ -720,6 +735,7 @@ async def process_writing_request_stream(
     model: str | None = None,
     mode: str | None = None,
     chat_id: str | None = None,
+    attached_files: list[dict] | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     多智能体流式处理写作请求（与单 agent 接口完全兼容）。
@@ -772,6 +788,7 @@ async def process_writing_request_stream(
             user_message=message,
             document_range=document_range or [],
             memory_context=memory_context,
+            attached_files=attached_files or [],
         )
 
         queue: asyncio.Queue = asyncio.Queue()

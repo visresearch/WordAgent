@@ -112,6 +112,7 @@ async def chat_websocket(websocket: WebSocket):
                 model = data.get("model", "auto")
                 document_range = data.get("documentRange")
                 history = data.get("history", [])
+                attached_files = data.get("files", [])  # 附件列表 [{file_id, filename, content_type, is_image}, ...]
 
                 print("=" * 50)
                 print("收到 WebSocket 聊天请求:")
@@ -120,11 +121,13 @@ async def chat_websocket(websocket: WebSocket):
                 print(f"模型: {model}")
                 if document_range:
                     print(f"文档范围: {document_range}")
+                if attached_files:
+                    print(f"附件: {[f.get('filename', '?') for f in attached_files]}")
                 print("=" * 50)
 
                 # 启动流式处理
                 stream_task = asyncio.create_task(
-                    _run_ws_stream(websocket, chat_id, message, mode, model, document_range, history)
+                    _run_ws_stream(websocket, chat_id, message, mode, model, document_range, history, attached_files)
                 )
 
                 # 在流式生成期间，继续从队列读取消息（document_response / stop）
@@ -211,6 +214,7 @@ async def _run_ws_stream(
     model: str,
     document_range: list | None,
     history: list,
+    attached_files: list | None = None,
 ):
     """在 WebSocket 上运行流式处理"""
     try:
@@ -223,6 +227,7 @@ async def _run_ws_stream(
             model=model,
             mode=mode,
             chat_id=chat_id,
+            attached_files=attached_files or [],
         ):
             # chunk 格式: "data: {...}\n\n" 或 "data: [DONE]\n\n"
             # 解析 SSE 格式，转为 WebSocket JSON
