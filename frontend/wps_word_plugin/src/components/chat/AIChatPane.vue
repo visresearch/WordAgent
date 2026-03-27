@@ -24,6 +24,7 @@
         :models-loading="modelsLoading"
         :is-loading="isLoading"
         :selections="selections"
+        :uploaded-files="uploadedFiles"
         :pending-document="pendingDocument"
         :pending-deletes="pendingDeletes"
         @update:mode="mode = $event"
@@ -32,6 +33,8 @@
         @stop="stopGeneration"
         @add-selection="addSelectionManually"
         @remove-selection="removeSelection"
+        @add-files="addFiles"
+        @remove-file="removeFile"
         @refresh-models="loadModels"
         @confirm-pending="confirmPending"
         @cancel-pending="cancelPending"
@@ -74,6 +77,7 @@ export default {
       isLoading: false,
       lastReadJSON: null,
       selections: [],  // 多选区数组 [{preview, startText, endText, startParaIndex, endParaIndex, charCount, hasMore}]
+      uploadedFiles: [], // 已添加文件列表（File 对象）
       currentStreamCtrl: null,
       currentSessionId: null,
       currentSessionTitle: null,
@@ -748,6 +752,40 @@ export default {
     },
 
     /**
+     * 添加文件（来自 ChatInput 上传）
+     */
+    addFiles(files) {
+      if (!Array.isArray(files) || files.length === 0) {
+        return;
+      }
+
+      for (const file of files) {
+        const exists = this.uploadedFiles.some(
+          f => f.name === file.name && f.size === file.size && f.lastModified === file.lastModified
+        );
+        if (!exists) {
+          this.uploadedFiles.push(file);
+        }
+      }
+    },
+
+    /**
+     * 移除指定索引的文件
+     */
+    removeFile(index) {
+      if (index >= 0 && index < this.uploadedFiles.length) {
+        this.uploadedFiles.splice(index, 1);
+      }
+    },
+
+    /**
+     * 清空已添加文件
+     */
+    clearAllFiles() {
+      this.uploadedFiles = [];
+    },
+
+    /**
      * 清除所有选区
      */
     clearAllSelections() {
@@ -820,6 +858,7 @@ export default {
       this.historyLoaded = true;
 
       this.clearAllSelections();
+      this.clearAllFiles();
 
       this.saveMessageToHistory('user', userMessage, null, selectionContext);
 

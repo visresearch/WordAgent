@@ -1,5 +1,38 @@
 <template>
   <div>
+    <!-- 已添加文件预览列表 -->
+    <div v-for="(file, index) in uploadedFiles" :key="`${file.name}-${file.size}-${file.lastModified}-${index}`" class="current-selection-bar">
+      <div class="selection-bar-content">
+        <div class="selection-bar-icon">
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M6 5.5V11a2 2 0 0 0 4 0V4a3 3 0 1 0-6 0v7a4 4 0 0 0 8 0V6" />
+          </svg>
+        </div>
+        <div class="selection-bar-info">
+          <span class="selection-bar-preview">{{ file.name }} ({{ formatFileSize(file.size) }})</span>
+        </div>
+        <button class="selection-bar-clear" title="移除文件" @click="$emit('remove-file', index)">
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 16 16"
+            fill="currentColor"
+          >
+            <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z" />
+          </svg>
+        </button>
+      </div>
+    </div>
+
     <!-- 多选区预览列表 -->
     <div v-for="(sel, index) in selections" :key="index" class="current-selection-bar">
       <div class="selection-bar-content">
@@ -152,24 +185,22 @@
           </div>
           <div class="toolbar-right">
             <div class="btn-wrapper">
+              <button class="add-selection-btn" title="添加文件" @click="triggerFilePicker">
+                <img :src="fileIcon" alt="添加文件" class="toolbar-icon" />
+              </button>
+              <span class="tooltip">添加文件</span>
+            </div>
+            <input
+              ref="fileInput"
+              type="file"
+              class="file-input-hidden"
+              accept=".png,.jpg,.jpeg,.pdf,.docx,.txt,.md"
+              multiple
+              @change="handleFileChange"
+            />
+            <div class="btn-wrapper">
               <button class="add-selection-btn" title="添加选区" @click="$emit('add-selection')">
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                  stroke="currentColor"
-                >
-                  <rect
-                    x="2"
-                    y="2"
-                    width="12"
-                    height="12"
-                    rx="2"
-                    stroke-width="1.5"
-                  />
-                  <path d="M8 5v6M5 8h6" stroke-width="1.5" stroke-linecap="round" />
-                </svg>
+                <img :src="addIcon" alt="添加选区" class="toolbar-icon" />
               </button>
               <span class="tooltip">添加选区</span>
             </div>
@@ -180,19 +211,7 @@
                 :disabled="!inputText.trim()"
                 @click="sendMessage"
               >
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                >
-                  <path
-                    d="M1 8L15 1L8 15L7 9L1 8Z"
-                    stroke="currentColor"
-                    stroke-width="1.5"
-                    stroke-linejoin="round"
-                  />
-                </svg>
+                <img :src="sendIcon" alt="发送" class="toolbar-icon" />
               </button>
               <button v-else class="stop-btn" @click="$emit('stop')">
                 <svg
@@ -229,6 +248,10 @@
 </template>
 
 <script>
+import addIcon from '@/assets/icons/add.svg';
+import fileIcon from '@/assets/icons/file.svg';
+import sendIcon from '@/assets/icons/send.svg';
+
 export default {
   name: 'ChatInput',
   props: {
@@ -256,6 +279,10 @@ export default {
       type: Array,
       default: () => []
     },
+    uploadedFiles: {
+      type: Array,
+      default: () => []
+    },
     pendingDocument: {
       type: Object,
       default: null
@@ -265,12 +292,15 @@ export default {
       default: () => []
     }
   },
-  emits: ['send', 'stop', 'add-selection', 'remove-selection', 'update:mode', 'update:selectedModel', 'refresh-models', 'confirm-pending', 'cancel-pending'],
+  emits: ['send', 'stop', 'add-selection', 'remove-selection', 'add-files', 'remove-file', 'update:mode', 'update:selectedModel', 'refresh-models', 'confirm-pending', 'cancel-pending'],
   data() {
     return {
       inputText: '',
       modeDropdownOpen: false,
-      modelDropdownOpen: false
+      modelDropdownOpen: false,
+      addIcon,
+      fileIcon,
+      sendIcon
     };
   },
   computed: {
@@ -306,6 +336,58 @@ export default {
         textarea.style.height = 'auto';
         textarea.style.height = textarea.scrollHeight + 'px';
       }
+    },
+
+    triggerFilePicker() {
+      const fileInput = this.$refs.fileInput;
+      if (fileInput) {
+        fileInput.click();
+      }
+    },
+
+    handleFileChange(event) {
+      const fileList = event?.target?.files;
+      if (!fileList || fileList.length === 0) {
+        return;
+      }
+
+      const allowedExtensions = new Set(['png', 'jpg', 'jpeg', 'pdf', 'docx', 'txt', 'md']);
+      const validFiles = [];
+      const invalidFiles = [];
+
+      for (const file of Array.from(fileList)) {
+        const fileName = file.name || '';
+        const ext = fileName.includes('.') ? fileName.split('.').pop().toLowerCase() : '';
+        if (allowedExtensions.has(ext)) {
+          validFiles.push(file);
+        } else {
+          invalidFiles.push(fileName || '未命名文件');
+        }
+      }
+
+      if (validFiles.length > 0) {
+        this.$emit('add-files', validFiles);
+      }
+
+      if (invalidFiles.length > 0) {
+        alert(`以下文件格式不支持：${invalidFiles.join('，')}。仅支持 png、jpg、pdf、docx、txt、md。`);
+      }
+
+      event.target.value = '';
+    },
+
+    formatFileSize(size) {
+      if (!size || size <= 0) {
+        return '0 B';
+      }
+      const units = ['B', 'KB', 'MB', 'GB'];
+      let index = 0;
+      let value = size;
+      while (value >= 1024 && index < units.length - 1) {
+        value /= 1024;
+        index++;
+      }
+      return `${value.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
     },
 
     sendMessage() {
@@ -688,6 +770,17 @@ export default {
 .add-selection-btn:hover {
   background: #f0f0f0;
   color: #667eea;
+}
+
+.toolbar-icon {
+  width: 12px;
+  height: 12px;
+  display: block;
+  user-select: none;
+}
+
+.file-input-hidden {
+  display: none;
 }
 
 .send-btn {

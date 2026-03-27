@@ -411,6 +411,321 @@ function cleanCellText(text) {
   return text.replace(/[\r\n\u0007\u0001]+$/g, '');
 }
 
+const MATH_FONT_KEYWORDS = ['cambria math', 'dejavu math', 'tex gyre', 'stix', 'latin modern math'];
+
+const MATH_SYMBOL_TO_LATEX = {
+  '\u221e': '\\infty',
+  '\u2211': '\\sum',
+  '\u220f': '\\prod',
+  '\u222b': '\\int',
+  '\u221a': '\\sqrt',
+  '\u00d7': '\\times',
+  '\u00f7': '\\div',
+  '\u00b1': '\\pm',
+  '\u2213': '\\mp',
+  '\u2264': '\\le',
+  '\u2265': '\\ge',
+  '\u2260': '\\ne',
+  '\u2248': '\\approx',
+  '\u2261': '\\equiv',
+  '\u00b7': '\\cdot',
+  '\u22c5': '\\cdot',
+  '\u03b1': '\\alpha',
+  '\u03b2': '\\beta',
+  '\u03b3': '\\gamma',
+  '\u03b4': '\\delta',
+  '\u03b5': '\\epsilon',
+  '\u03b8': '\\theta',
+  '\u03bb': '\\lambda',
+  '\u03bc': '\\mu',
+  '\u03c0': '\\pi',
+  '\u03c1': '\\rho',
+  '\u03c3': '\\sigma',
+  '\u03c6': '\\phi',
+  '\u03c9': '\\omega',
+  '\u0393': '\\Gamma',
+  '\u0394': '\\Delta',
+  '\u0398': '\\Theta',
+  '\u039b': '\\Lambda',
+  '\u03a0': '\\Pi',
+  '\u03a3': '\\Sigma',
+  '\u03a6': '\\Phi',
+  '\u03a9': '\\Omega',
+  '\u2212': '-'
+};
+
+const SUPERSCRIPT_CHAR_MAP = {
+  '\u2070': '0', '\u00b9': '1', '\u00b2': '2', '\u00b3': '3', '\u2074': '4',
+  '\u2075': '5', '\u2076': '6', '\u2077': '7', '\u2078': '8', '\u2079': '9',
+  '\u207a': '+', '\u207b': '-', '\u207c': '=', '\u207d': '(', '\u207e': ')',
+  '\u207f': 'n', '\u1d43': 'a', '\u1d47': 'b', '\u1d9c': 'c', '\u1d48': 'd',
+  '\u1d49': 'e', '\u1da0': 'f', '\u1d4d': 'g', '\u02b0': 'h', '\u2071': 'i',
+  '\u02b2': 'j', '\u1d4f': 'k', '\u02e1': 'l', '\u1d50': 'm',
+  '\u1d52': 'o', '\u1d56': 'p', '\u02b3': 'r', '\u02e2': 's', '\u1d57': 't',
+  '\u1d58': 'u', '\u1d5b': 'v', '\u02b7': 'w', '\u02e3': 'x', '\u02b8': 'y',
+  '\u1dbb': 'z'
+};
+
+const SUBSCRIPT_CHAR_MAP = {
+  '\u2080': '0', '\u2081': '1', '\u2082': '2', '\u2083': '3', '\u2084': '4',
+  '\u2085': '5', '\u2086': '6', '\u2087': '7', '\u2088': '8', '\u2089': '9',
+  '\u208a': '+', '\u208b': '-', '\u208c': '=', '\u208d': '(', '\u208e': ')',
+  '\u2090': 'a', '\u2091': 'e', '\u2092': 'o', '\u2093': 'x', '\u2094': 'schwa',
+  '\u2095': 'h', '\u2096': 'k', '\u2097': 'l', '\u2098': 'm', '\u2099': 'n',
+  '\u209a': 'p', '\u209b': 's', '\u209c': 't'
+};
+
+function isMathFont(fontName) {
+  if (!fontName) {
+    return false;
+  }
+  const normalized = String(fontName).toLowerCase();
+  return MATH_FONT_KEYWORDS.some((keyword) => normalized.includes(keyword));
+}
+
+function containsMathUnicode(text) {
+  if (!text) {
+    return false;
+  }
+  return /[\u2200-\u22ff\u27c0-\u27ef\u2980-\u29ff\u2a00-\u2aff\u2070-\u209f]|[\ud835\udc00-\ud835\udfff]/u.test(text);
+}
+
+function stripMathDelimiters(text) {
+  let value = (text || '').trim();
+  if (!value) {
+    return '';
+  }
+  if (value.startsWith('$$') && value.endsWith('$$') && value.length > 4) {
+    value = value.slice(2, -2).trim();
+  } else if (value.startsWith('$') && value.endsWith('$') && value.length > 2) {
+    value = value.slice(1, -1).trim();
+  } else if (value.startsWith('\\(') && value.endsWith('\\)') && value.length > 4) {
+    value = value.slice(2, -2).trim();
+  } else if (value.startsWith('\\[') && value.endsWith('\\]') && value.length > 4) {
+    value = value.slice(2, -2).trim();
+  }
+  return value;
+}
+
+function convertScriptCharsToLatex(text, scriptMap, marker) {
+  let result = '';
+  let buffer = '';
+
+  for (const ch of text) {
+    const mapped = scriptMap[ch];
+    if (mapped) {
+      buffer += mapped;
+      continue;
+    }
+
+    if (buffer) {
+      result += `${marker}{${buffer}}`;
+      buffer = '';
+    }
+    result += ch;
+  }
+
+  if (buffer) {
+    result += `${marker}{${buffer}}`;
+  }
+
+  return result;
+}
+
+function replaceMathSymbolsWithLatex(text) {
+  let value = text;
+  for (const [symbol, latex] of Object.entries(MATH_SYMBOL_TO_LATEX)) {
+    value = value.split(symbol).join(latex);
+  }
+  return value;
+}
+
+function repairCommonFormulaPatterns(text) {
+  let value = text;
+
+  value = value
+    .replace(/\s*\(\s*/g, '(')
+    .replace(/\s*\)\s*/g, ')')
+    .replace(/\s*\-\s*/g, '-')
+    .replace(/\s*=\s*/g, '=')
+    .replace(/\s+!/g, '!')
+    .replace(/\s*\^\s*/g, '^')
+    .replace(/\s*_\s*/g, '_');
+
+  value = value.replace(/([A-Za-z])\(n\)\(([A-Za-z])\)/g, '$1^{(n)}($2)');
+  value = value.replace(/\(x-a\)\s*n\b/g, '(x-a)^n');
+
+  if (!/\\sum/.test(value)) {
+    value = value.replace(/n=0\s*\\infty/g, '\\sum_{n=0}^{\\infty}');
+    value = value.replace(/\bn=0\s*\\infty/g, '\\sum_{n=0}^{\\infty}');
+  }
+
+  value = value.replace(/\\sum\s*\{?\s*n\s*=\s*0\s*\}?\s*\^?\s*\\infty/g, '\\sum_{n=0}^{\\infty}');
+
+  if (/f\^\{\(n\)\}\(a\)/.test(value) && /n!/.test(value) && !/\\frac\{/.test(value)) {
+    value = value.replace(/f\^\{\(n\)\}\(a\)\s*n!/g, '\\frac{f^{(n)}(a)}{n!}');
+  }
+
+  value = value
+    .replace(/\(\s*x\s*\)/g, '(x)')
+    .replace(/\(\s*a\s*\)/g, '(a)')
+    .replace(/\(\s*n\s*\)/g, '(n)')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return value;
+}
+
+function scoreLatexCandidate(text) {
+  if (!text) {
+    return -100;
+  }
+
+  let score = 0;
+  if (/\\sum/.test(text)) score += 4;
+  if (/\\sum_\{[^}]+\}\^\{[^}]+\}/.test(text)) score += 4;
+  if (/\\frac\{[^}]+\}\{[^}]+\}/.test(text)) score += 4;
+  if (/\\infty/.test(text)) score += 2;
+  if (/\^[{(]?[A-Za-z0-9]+/.test(text)) score += 2;
+  if (/_\{[^}]+\}/.test(text)) score += 2;
+  if (/[A-Za-z]\^\{\(n\)\}/.test(text)) score += 2;
+  if (/\(x-a\)\^n/.test(text)) score += 2;
+  if (/n\s*=\s*0\s*\\infty/.test(text)) score -= 4;
+  if (/\\sum\s+n\s*=/.test(text)) score -= 3;
+  if (/\s{2,}/.test(text)) score -= 1;
+
+  return score;
+}
+
+function normalizeFormulaTextToLatex(text) {
+  let value = stripMathDelimiters((text || '').replace(/[\r\n\f]+/g, ' ').trim());
+  if (!value) {
+    return '';
+  }
+
+  value = value.normalize('NFKD');
+  value = replaceMathSymbolsWithLatex(value);
+  value = convertScriptCharsToLatex(value, SUPERSCRIPT_CHAR_MAP, '^');
+  value = convertScriptCharsToLatex(value, SUBSCRIPT_CHAR_MAP, '_');
+  value = repairCommonFormulaPatterns(value);
+  value = value.replace(/\s+/g, ' ').trim();
+
+  value = value.replace(/\\sum\s*([a-zA-Z]\s*=\s*[^\\\s]+)\s*\\infty/g, '\\sum_{$1}^{\\infty}');
+  value = value.replace(/\\sum_\{\s*([a-zA-Z])\s*=\s*([^}]+)\s*\}\^\{\s*\\infty\s*\}/g, '\\sum_{$1=$2}^{\\infty}');
+
+  if (/\\sum_\{n=0\}\^\{\\infty\}/.test(value) && /f\^\{\(n\)\}\(a\)/.test(value) && /\(x-a\)\^n/.test(value) && !/\\frac\{/.test(value)) {
+    value = value.replace(/f\^\{\(n\)\}\(a\)\s*n!/g, '\\frac{f^{(n)}(a)}{n!}');
+  }
+
+  return value;
+}
+
+function normalizeParsedRun(run) {
+  if (!run || !run.text) {
+    return run;
+  }
+
+  const text = run.text;
+  const rStyle = run.rStyle || DEFAULT_RSTYLE;
+  const fontName = rStyle[RSTYLE.FONT_NAME] || '';
+  const hasLatexSyntax = /\\[a-zA-Z]+/.test(text) || /[_^]\{?[^\s]/.test(text) || /^\$\$?[\s\S]+\$\$?$/.test(text.trim());
+
+  if (!hasLatexSyntax && !isMathFont(fontName) && !containsMathUnicode(text)) {
+    return run;
+  }
+
+  const latexText = normalizeFormulaTextToLatex(text);
+  if (!latexText) {
+    return run;
+  }
+
+  return {
+    ...run,
+    text: latexText,
+    isFormula: true,
+    formulaFormat: 'latex'
+  };
+}
+
+function extractFormulaRunsFromRange(paraRange) {
+  const formulaRuns = [];
+  if (!paraRange) {
+    return formulaRuns;
+  }
+
+  try {
+    const oMaths = paraRange.OMaths;
+    if (!oMaths || oMaths.Count <= 0) {
+      return formulaRuns;
+    }
+
+    for (let i = 1; i <= oMaths.Count; i++) {
+      try {
+        const oMath = oMaths.Item(i);
+        const formulaRange = oMath.Range;
+        if (!formulaRange) {
+          continue;
+        }
+
+        let originalFormulaText = '';
+        try {
+          originalFormulaText = cleanText(formulaRange.Text || '');
+        } catch (e) {}
+
+        let linearFormulaText = '';
+        try {
+          oMath.Linearize();
+          const linearText = cleanText(formulaRange.Text || '');
+          if (linearText) {
+            linearFormulaText = linearText;
+          }
+        } catch (e) {}
+
+        try {
+          oMath.BuildUp();
+        } catch (e) {}
+
+        const originalLatex = normalizeFormulaTextToLatex(originalFormulaText);
+        const linearLatex = normalizeFormulaTextToLatex(linearFormulaText);
+
+        let latexText = originalLatex;
+        if (scoreLatexCandidate(linearLatex) > scoreLatexCandidate(originalLatex)) {
+          latexText = linearLatex;
+        }
+
+        if (!latexText) {
+          continue;
+        }
+
+        const font = formulaRange.Font || {};
+        formulaRuns.push({
+          start: formulaRange.Start,
+          end: formulaRange.End,
+          text: latexText,
+          rStyle: makeRStyle(
+            font.Name || 'Cambria Math',
+            font.Size || 12,
+            false,
+            true,
+            0,
+            '#000000',
+            getRGBColor(font.Color),
+            0,
+            false,
+            false,
+            false
+          ),
+          isFormula: true,
+          formulaFormat: 'latex'
+        });
+      } catch (e) {}
+    }
+  } catch (e) {}
+
+  formulaRuns.sort((a, b) => a.start - b.start);
+  return formulaRuns;
+}
+
 // ============== 图片处理 ==============
 
 /**
@@ -491,6 +806,9 @@ function parseCellParagraphs(cellRange, doc) {
         try {
           const chars = paraRange.Characters;
           if (chars && chars.Count > 0) {
+            const formulaRuns = extractFormulaRunsFromRange(paraRange);
+            let formulaRunIndex = 0;
+            let activeFormulaEnd = -1;
             let lastFormat = null;
             let currentRun = null;
 
@@ -502,6 +820,35 @@ function parseCellParagraphs(cellRange, doc) {
                 continue;
               }
 
+              const charStart = typeof char.Start === 'number' ? char.Start : null;
+              if (charStart !== null && formulaRuns.length > 0) {
+                while (formulaRunIndex < formulaRuns.length && charStart >= formulaRuns[formulaRunIndex].end) {
+                  formulaRunIndex++;
+                }
+
+                const currentFormula = formulaRuns[formulaRunIndex];
+                if (currentFormula && charStart >= currentFormula.start && charStart < currentFormula.end) {
+                  if (currentRun && currentRun.text) {
+                    currentRun.text = cleanCellText(currentRun.text);
+                    if (currentRun.text) {
+                      paraData.runs.push(normalizeParsedRun(currentRun));
+                    }
+                  }
+
+                  if (activeFormulaEnd !== currentFormula.end) {
+                    const formulaRunData = { ...currentFormula };
+                    delete formulaRunData.start;
+                    delete formulaRunData.end;
+                    paraData.runs.push(formulaRunData);
+                    activeFormulaEnd = currentFormula.end;
+                  }
+
+                  currentRun = null;
+                  lastFormat = null;
+                  continue;
+                }
+              }
+
               const font = char.Font;
               const formatKey = `${font.Name}_${font.Size}_${font.Bold}_${font.Italic}_${font.Color}`;
 
@@ -509,7 +856,7 @@ function parseCellParagraphs(cellRange, doc) {
                 if (currentRun && currentRun.text) {
                   currentRun.text = cleanCellText(currentRun.text);
                   if (currentRun.text) {
-                    paraData.runs.push(currentRun);
+                    paraData.runs.push(normalizeParsedRun(currentRun));
                   }
                 }
                 currentRun = {
@@ -537,13 +884,13 @@ function parseCellParagraphs(cellRange, doc) {
             if (currentRun && currentRun.text) {
               currentRun.text = cleanCellText(currentRun.text);
               if (currentRun.text) {
-                paraData.runs.push(currentRun);
+                paraData.runs.push(normalizeParsedRun(currentRun));
               }
             }
           }
         } catch (e) {
           const font = paraRange.Font;
-          paraData.runs.push({
+          paraData.runs.push(normalizeParsedRun({
             text: paraText,
             rStyle: makeRStyle(
               font.Name || '',
@@ -557,7 +904,7 @@ function parseCellParagraphs(cellRange, doc) {
               false,
               false
             )
-          });
+          }));
         }
 
         if (paraData.runs.length > 0) {
@@ -869,6 +1216,9 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex) {
         // 解析 runs
         const chars = paraRange.Characters;
         if (chars && chars.Count > 0) {
+          const formulaRuns = extractFormulaRunsFromRange(paraRange);
+          let formulaRunIndex = 0;
+          let activeFormulaEnd = -1;
           let lastFormat = null;
           let currentRun = null;
 
@@ -879,6 +1229,32 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex) {
 
             if (charText.match(/^[\r\n\f\u0007]+$/)) {
               continue;
+            }
+
+            const charStart = typeof char.Start === 'number' ? char.Start : null;
+            if (charStart !== null && formulaRuns.length > 0) {
+              while (formulaRunIndex < formulaRuns.length && charStart >= formulaRuns[formulaRunIndex].end) {
+                formulaRunIndex++;
+              }
+
+              const currentFormula = formulaRuns[formulaRunIndex];
+              if (currentFormula && charStart >= currentFormula.start && charStart < currentFormula.end) {
+                if (currentRun && currentRun.text) {
+                  paragraphData.runs.push(normalizeParsedRun(currentRun));
+                }
+
+                if (activeFormulaEnd !== currentFormula.end) {
+                  const formulaRunData = { ...currentFormula };
+                  delete formulaRunData.start;
+                  delete formulaRunData.end;
+                  paragraphData.runs.push(formulaRunData);
+                  activeFormulaEnd = currentFormula.end;
+                }
+
+                currentRun = null;
+                lastFormat = null;
+                continue;
+              }
             }
 
             let highlightIndex = 0;
@@ -900,7 +1276,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex) {
               currentRun.text += charText;
             } else {
               if (currentRun && currentRun.text) {
-                paragraphData.runs.push(currentRun);
+                paragraphData.runs.push(normalizeParsedRun(currentRun));
               }
               currentRun = {
                 text: charText,
@@ -921,7 +1297,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex) {
             }
           }
           if (currentRun && currentRun.text) {
-            paragraphData.runs.push(currentRun);
+            paragraphData.runs.push(normalizeParsedRun(currentRun));
           }
         }
 
@@ -1178,6 +1554,9 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex) {
         // 解析 runs - 使用Characters确保捕获Tab等特殊字符
         const chars = paraRange.Characters;
         if (chars && chars.Count > 0) {
+          const formulaRuns = extractFormulaRunsFromRange(paraRange);
+          let formulaRunIndex = 0;
+          let activeFormulaEnd = -1;
           let lastFormat = null;
           let currentRun = null;
 
@@ -1189,6 +1568,32 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex) {
             // 跳过段落结束符等，但保留Tab
             if (charText.match(/^[\r\n\f\u0007]+$/)) {
               continue;
+            }
+
+            const charStart = typeof char.Start === 'number' ? char.Start : null;
+            if (charStart !== null && formulaRuns.length > 0) {
+              while (formulaRunIndex < formulaRuns.length && charStart >= formulaRuns[formulaRunIndex].end) {
+                formulaRunIndex++;
+              }
+
+              const currentFormula = formulaRuns[formulaRunIndex];
+              if (currentFormula && charStart >= currentFormula.start && charStart < currentFormula.end) {
+                if (currentRun && currentRun.text) {
+                  paragraphData.runs.push(normalizeParsedRun(currentRun));
+                }
+
+                if (activeFormulaEnd !== currentFormula.end) {
+                  const formulaRunData = { ...currentFormula };
+                  delete formulaRunData.start;
+                  delete formulaRunData.end;
+                  paragraphData.runs.push(formulaRunData);
+                  activeFormulaEnd = currentFormula.end;
+                }
+
+                currentRun = null;
+                lastFormat = null;
+                continue;
+              }
             }
 
             // 获取高亮颜色（使用 Range 的 HighlightColorIndex）
@@ -1220,7 +1625,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex) {
               currentRun.text += charText;
             } else {
               if (currentRun && currentRun.text) {
-                paragraphData.runs.push(currentRun);
+                paragraphData.runs.push(normalizeParsedRun(currentRun));
               }
               currentRun = {
                 text: charText,
@@ -1242,7 +1647,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex) {
             }
           }
           if (currentRun && currentRun.text) {
-            paragraphData.runs.push(currentRun);
+            paragraphData.runs.push(normalizeParsedRun(currentRun));
           }
         }
 
@@ -1798,9 +2203,15 @@ function generateDocxFromJSON(jsonData, doc, insertParaIndex) {
 
         if (para.runs && para.runs.length > 0) {
           for (const run of para.runs) {
-            const runText = run.text || '';
+            let runText = run.text || '';
             if (!runText) {
               continue;
+            }
+
+            const rStyle = resolveStyle(styles, run.rStyle, DEFAULT_RSTYLE);
+            const isExplicitLatexRun = run.isFormula === true && run.formulaFormat === 'latex';
+            if (isExplicitLatexRun) {
+              runText = run.text || normalizeFormulaTextToLatex(run.text);
             }
 
             const range = doc.Range(currentPos, currentPos);
@@ -1810,8 +2221,6 @@ function generateDocxFromJSON(jsonData, doc, insertParaIndex) {
             const font = insertedRange.Font;
 
             // 应用字符样式（直接使用JSON中的值）
-            const rStyle = resolveStyle(styles, run.rStyle, DEFAULT_RSTYLE);
-
             // 字体和字号
             if (rStyle[RSTYLE.FONT_NAME]) {
               font.Name = rStyle[RSTYLE.FONT_NAME];
