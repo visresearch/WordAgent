@@ -1268,13 +1268,13 @@ export default {
         this.pendingDeletes = [];
       }
 
-      // 2. 确认生成文档（去掉文策AI批注）
+      // 2. 确认生成文档（去掉文策AI-添加批注）
       if (this.pendingDocumentMsg && doc) {
         try {
           const comments = doc.Comments;
           for (let i = comments.Count; i >= 1; i--) {
             const comment = comments.Item(i);
-            if (comment.Author === '文策AI') {
+            if (comment.Author === '文策AI-添加') {
               comment.Delete();
             }
           }
@@ -1386,7 +1386,7 @@ export default {
             try {
               const insertedRange = doc.Range(result.startPos, result.endPos);
               const comment = doc.Comments.Add(insertedRange, '待添加内容');
-              comment.Author = '文策AI';
+              comment.Author = '文策AI-添加';
               console.log('批注添加成功');
             } catch (e) {
               console.error('添加批注失败:', e);

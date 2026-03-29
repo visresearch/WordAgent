@@ -45,7 +45,7 @@ async def chat_websocket(websocket: WebSocket):
 
     消息协议（JSON）：
     前端 → 后端:
-      - {"type": "chat", "message": "...", "mode": "agent", "model": "auto", "documentJson": {...}, "history": [...]}
+            - {"type": "chat", "message": "...", "mode": "agent", "model": "auto", "documentRange": [...], "documentMeta": {...}, "history": [...]} 
       - {"type": "document_response", "documentJson": {...}}
       - {"type": "delete_response", "deletedCount": 3} 或 {"type": "delete_response", "cancelled": true}
       - {"type": "stop"}
@@ -111,6 +111,7 @@ async def chat_websocket(websocket: WebSocket):
                 mode = data.get("mode", "agent")  # 默认 agent 模式（单智能体）
                 model = data.get("model", "auto")
                 document_range = data.get("documentRange")
+                document_meta = data.get("documentMeta") or {}
                 history = data.get("history", [])
                 attached_files = data.get("files", [])  # 附件列表 [{file_id, filename, content_type, is_image}, ...]
 
@@ -121,13 +122,32 @@ async def chat_websocket(websocket: WebSocket):
                 print(f"模型: {model}")
                 if document_range:
                     print(f"文档范围: {document_range}")
+                if document_meta:
+                    print(
+                        "文档元信息:",
+                        {
+                            "documentName": document_meta.get("documentName", ""),
+                            "totalParas": document_meta.get("totalParas", 0),
+                            "parsedAt": document_meta.get("parsedAt", ""),
+                        },
+                    )
                 if attached_files:
                     print(f"附件: {[f.get('filename', '?') for f in attached_files]}")
                 print("=" * 50)
 
                 # 启动流式处理
                 stream_task = asyncio.create_task(
-                    _run_ws_stream(websocket, chat_id, message, mode, model, document_range, history, attached_files)
+                    _run_ws_stream(
+                        websocket,
+                        chat_id,
+                        message,
+                        mode,
+                        model,
+                        document_range,
+                        document_meta,
+                        history,
+                        attached_files,
+                    )
                 )
 
                 # 在流式生成期间，继续从队列读取消息（document_response / stop）
@@ -213,6 +233,7 @@ async def _run_ws_stream(
     mode: str,
     model: str,
     document_range: list | None,
+    document_meta: dict | None,
     history: list,
     attached_files: list | None = None,
 ):
@@ -223,6 +244,7 @@ async def _run_ws_stream(
         async for chunk in stream_fn(
             message=message,
             document_range=document_range,
+            document_meta=document_meta or {},
             history=history,
             model=model,
             mode=mode,

@@ -82,6 +82,7 @@ class MultiAgentState(BaseModel):
     # 用户原始请求
     user_message: str = ""
     document_range: list[dict] = Field(default_factory=list)
+    document_meta: dict = Field(default_factory=dict)  # 文档全局元信息（totalParas/documentName/parsedAt 等）
     attached_files: list[dict] = Field(default_factory=list)  # 附件列表
 
     # 记忆上下文（包含总结 + RAG 检索结果）
@@ -507,6 +508,14 @@ def _build_multi_agent_graph(llm, model_name: str):
             range_info = json.dumps(state.document_range, ensure_ascii=False)
             task += f"\n\n用户选中了文档范围: {range_info}"
 
+        if state.document_meta:
+            meta_info = json.dumps(state.document_meta, ensure_ascii=False)
+            task += (
+                "\n\n文档全局元信息（来自前端当前文档状态，非正文内容）:"
+                f"\n{meta_info}"
+                "\n请结合这些信息理解任务上下文（如 totalParas/documentName/parsedAt）。"
+            )
+
         # 注入附件内容（文本类文件内容追加到任务，图片仅标注存在）
         if state.attached_files:
             from app.api.routes.files import read_text_file
@@ -731,6 +740,7 @@ def _build_multi_agent_graph(llm, model_name: str):
 async def process_writing_request_stream(
     message: str,
     document_range: list[dict] | None = None,
+    document_meta: dict | None = None,
     history: list | None = None,
     model: str | None = None,
     mode: str | None = None,
@@ -787,6 +797,7 @@ async def process_writing_request_stream(
         initial_state = MultiAgentState(
             user_message=message,
             document_range=document_range or [],
+            document_meta=document_meta or {},
             memory_context=memory_context,
             attached_files=attached_files or [],
         )
@@ -810,6 +821,7 @@ async def process_writing_request_stream(
                         "model": model_name,
                         "mode": mode or "plan",
                         "has_document_range": bool(document_range),
+                        "has_document_meta": bool(document_meta),
                         "chat_id": chat_id or "",
                     },
                 }

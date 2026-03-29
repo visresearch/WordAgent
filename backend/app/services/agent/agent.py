@@ -352,6 +352,7 @@ def build_graph(llm_with_tools):
 async def process_writing_request_stream(
     message: str,
     document_range: list[dict] | None = None,
+    document_meta: dict | None = None,
     history: list | None = None,
     model: str | None = None,
     mode: str | None = None,
@@ -364,6 +365,7 @@ async def process_writing_request_stream(
     Args:
         message: 用户消息
         document_range: 文档范围列表 [{startParaIndex: int, endParaIndex: int}, ...]
+        document_meta: 文档全局元信息（如 totalParas/documentName/parsedAt 等）
         history: 历史消息
         model: 用户选择的模型
         mode: 对话模式（agent/plan）
@@ -439,6 +441,24 @@ async def process_writing_request_stream(
             )
             print(f"[Agent] 文档范围: {document_range}")
 
+        # 注入文档全局元信息（随用户提问发送）
+        if document_meta:
+            meta_text = json.dumps(document_meta, ensure_ascii=False)
+            user_content += (
+                "\n\n[文档全局元信息]"
+                "\n以下属性来自前端当前文档状态，不是正文内容。"
+                f"\n{meta_text}"
+                "\n请在分析任务时结合这些元信息（例如 totalParas、documentName、parsedAt 等）。"
+            )
+            print(
+                "[Agent] 文档元信息:",
+                {
+                    "documentName": document_meta.get("documentName", ""),
+                    "totalParas": document_meta.get("totalParas", 0),
+                    "parsedAt": document_meta.get("parsedAt", ""),
+                },
+            )
+
         # 处理附件：图片走多模态，文本类文件注入为上下文
         image_content_parts = []
         text_file_parts = []
@@ -505,6 +525,7 @@ async def process_writing_request_stream(
                         "model": model_name,
                         "mode": mode or "agent",
                         "has_document_range": bool(document_range),
+                        "has_document_meta": bool(document_meta),
                         "chat_id": chat_id or "",
                     },
                 }

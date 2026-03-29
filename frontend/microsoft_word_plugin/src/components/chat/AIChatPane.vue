@@ -24,6 +24,7 @@
         :models-loading="modelsLoading"
         :is-loading="isLoading"
         :selections="selections"
+        :uploaded-files="uploadedFiles"
         :pending-document="pendingDocument"
         :pending-deletes="pendingDeletes"
         @update:mode="mode = $event"
@@ -32,6 +33,8 @@
         @stop="stopGeneration"
         @add-selection="addSelectionFromWord"
         @remove-selection="removeSelection"
+        @add-files="addFiles"
+        @remove-file="removeFile"
         @confirm-pending="confirmPending"
         @cancel-pending="cancelPending"
       />
@@ -74,6 +77,7 @@ export default {
       isLoading: false,
       lastReadJSON: null,
       selections: [],
+      uploadedFiles: [],
       currentStreamCtrl: null,
       currentSessionId: null,
       currentSessionTitle: null,
@@ -434,6 +438,31 @@ export default {
       }
     },
 
+    addFiles(files) {
+      if (!Array.isArray(files) || files.length === 0) {
+        return;
+      }
+
+      for (const file of files) {
+        const exists = this.uploadedFiles.some(
+          f => f.name === file.name && f.size === file.size && f.lastModified === file.lastModified
+        );
+        if (!exists) {
+          this.uploadedFiles.push(file);
+        }
+      }
+    },
+
+    removeFile(index) {
+      if (index >= 0 && index < this.uploadedFiles.length) {
+        this.uploadedFiles.splice(index, 1);
+      }
+    },
+
+    clearAllFiles() {
+      this.uploadedFiles = [];
+    },
+
     // ============== 消息发送与流式处理 ==============
 
     retryMessage(aiMessageIndex) {
@@ -450,7 +479,7 @@ export default {
       this._sendStreamRequest(userMessage, null);
     },
 
-    handleSend(userMessage) {
+    async handleSend(userMessage) {
       const userMsgObj = {
         role: 'user',
         content: userMessage
@@ -468,15 +497,32 @@ export default {
         userMsgObj.selectionContext = selectionContext;
       }
 
+      let uploadedFilesMeta = [];
+
+      if (this.uploadedFiles.length > 0) {
+        try {
+          const uploadResult = await api.uploadFiles(this.uploadedFiles);
+          if (uploadResult.success && uploadResult.files) {
+            uploadedFilesMeta = uploadResult.files;
+            console.log('[AIChatPane] 附件上传成功:', uploadedFilesMeta.length, '个文件');
+          } else {
+            console.warn('[AIChatPane] 附件上传失败:', uploadResult.error);
+          }
+        } catch (err) {
+          console.warn('[AIChatPane] 附件上传异常:', err);
+        }
+      }
+
       this.messages.push(userMsgObj);
       this.historyLoaded = true;
       this.selections = [];
+      this.clearAllFiles();
 
       this.saveMessageToHistory('user', userMessage, null, selectionContext);
-      this._sendStreamRequest(userMessage, null);
+      this._sendStreamRequest(userMessage, null, uploadedFilesMeta);
     },
 
-    _sendStreamRequest(userMessage, documentRange) {
+    _sendStreamRequest(userMessage, documentRange, files = []) {
       this.isLoading = true;
       const streamSessionId = this.currentSessionId;
       this._streamingSessionId = streamSessionId;
@@ -500,6 +546,7 @@ export default {
         model: this.selectedModel || 'auto',
         documentRange: documentRange,
         history: this.messages.slice(0, -1).slice(-10),
+        files: files,
 
         onMessage: (data) => {
           this._handleStreamMessage(data, aiMsg);

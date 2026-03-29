@@ -321,6 +321,7 @@ function chatStream(message, options = {}) {
     model = "auto",
     documentRange = null,
     history = [],
+    files = [],
   } = options;
 
   wsManager.onMessage = onMessage;
@@ -338,6 +339,7 @@ function chatStream(message, options = {}) {
         model,
         documentRange,
         history,
+        files,
         timestamp: Date.now(),
       });
     } catch (error) {
@@ -486,6 +488,33 @@ async function clearAllSessions() {
   });
 }
 
+/**
+ * 上传文件到后端
+ * @param {File[]} files - 要上传的文件列表
+ * @returns {Promise<Object>} - { success, files: [{file_id, filename, size, content_type, is_image}] }
+ */
+async function uploadFiles(files) {
+  const formData = new FormData();
+  for (const file of files) {
+    formData.append("files", file);
+  }
+
+  try {
+    const response = await fetch(`${CONFIG.baseURL}/api/chat/upload`, {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!response.ok) {
+      return { success: false, error: `HTTP ${response.status}`, files: [] };
+    }
+
+    return await response.json();
+  } catch (error) {
+    return { success: false, error: error.message, files: [] };
+  }
+}
+
 // ============== 设置管理 API ==============
 
 /**
@@ -623,6 +652,7 @@ export default {
   getSessionMessages,
   addSessionMessage,
   clearAllSessions,
+  uploadFiles,
 
   getSettings,
   saveSettings,
@@ -651,6 +681,7 @@ export {
   getSessionMessages,
   addSessionMessage,
   clearAllSessions,
+  uploadFiles,
   getSettings,
   saveSettings,
   scanCache,

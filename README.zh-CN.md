@@ -108,18 +108,11 @@
 - python 3.11.14
 - Win10/11、Ubuntu22.04
 
-### 构建前端WPS Word加载项
+### 构建前端加载项
 
 ```bash
-cd frontend/wps_word_plugin
-pnpm intsall
-pnpm build
-```
-
-### 构建前端Microsoft Word加载项
-
-```bash
-cd frontend/microsoft_word_plugin
+cd frontend/wps_word_plugin       # WPS Word加载项
+cd frontend/microsoft_word_plugin # 或Microsoft Word加载项
 pnpm intsall
 pnpm build
 ```
@@ -128,10 +121,6 @@ pnpm build
 
 ```bash
 cd backend
-uv venv --python 3.11.14
-source .venv/bin/activate  # Linux
-.venv\Scripts\activate     # Windows
-uv sync
 uv run python main.py
 ```
 

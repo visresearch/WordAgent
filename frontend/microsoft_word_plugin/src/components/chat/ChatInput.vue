@@ -1,5 +1,24 @@
 <template>
   <div>
+    <!-- 已添加文件预览列表 -->
+    <div v-for="(file, index) in uploadedFiles" :key="`${file.name}-${file.size}-${file.lastModified}-${index}`" class="current-selection-bar">
+      <div class="selection-bar-content">
+        <div class="selection-bar-icon">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M8.5 1.5a3 3 0 0 0-3 3v6a2.5 2.5 0 0 0 5 0V5a1.5 1.5 0 0 0-3 0v5a.5.5 0 0 0 1 0V5a.5.5 0 0 1 1 0v5a1.5 1.5 0 0 1-3 0v-6a2 2 0 1 1 4 0v6.5a3 3 0 1 1-6 0v-6a.5.5 0 0 1 1 0v6a2 2 0 1 0 4 0V4.5a1 1 0 0 0-1-1z"/>
+          </svg>
+        </div>
+        <div class="selection-bar-info">
+          <span class="selection-bar-preview">{{ file.name }} ({{ formatFileSize(file.size) }})</span>
+        </div>
+        <button class="selection-bar-clear" title="移除文件" @click="$emit('remove-file', index)">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z" />
+          </svg>
+        </button>
+      </div>
+    </div>
+
     <!-- 多选区预览列表 -->
     <div v-for="(sel, index) in selections" :key="index" class="current-selection-bar">
       <div class="selection-bar-content">
@@ -101,6 +120,22 @@
           </div>
           <div class="toolbar-right">
             <div class="btn-wrapper">
+              <button class="add-selection-btn" title="添加文件" @click="triggerFilePicker">
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor">
+                  <path d="M8.5 2a2.5 2.5 0 0 0-2.5 2.5v6a2 2 0 1 0 4 0V5a1.5 1.5 0 0 0-3 0v5a1 1 0 0 0 2 0V5" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              </button>
+              <span class="tooltip">添加文件</span>
+            </div>
+            <input
+              ref="fileInput"
+              type="file"
+              class="file-input-hidden"
+              accept=".png,.jpg,.jpeg,.pdf,.docx,.txt,.md"
+              multiple
+              @change="handleFileChange"
+            />
+            <div class="btn-wrapper">
               <button class="add-selection-btn" title="添加选区" @click="$emit('add-selection')">
                 <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor">
                   <rect x="2" y="2" width="12" height="12" rx="2" stroke-width="1.5" />
@@ -140,10 +175,11 @@ export default {
     modelsLoading: { type: Boolean, default: false },
     isLoading: { type: Boolean, default: false },
     selections: { type: Array, default: () => [] },
+    uploadedFiles: { type: Array, default: () => [] },
     pendingDocument: { type: Object, default: null },
     pendingDeletes: { type: Array, default: () => [] }
   },
-  emits: ['send', 'stop', 'add-selection', 'remove-selection', 'update:mode', 'update:selectedModel', 'confirm-pending', 'cancel-pending'],
+  emits: ['send', 'stop', 'add-selection', 'remove-selection', 'add-files', 'remove-file', 'update:mode', 'update:selectedModel', 'confirm-pending', 'cancel-pending'],
   data() {
     return {
       inputText: '',
@@ -176,6 +212,55 @@ export default {
     document.removeEventListener('click', this.closeDropdowns);
   },
   methods: {
+    triggerFilePicker() {
+      const fileInput = this.$refs.fileInput;
+      if (fileInput) {
+        fileInput.click();
+      }
+    },
+    handleFileChange(event) {
+      const fileList = event?.target?.files;
+      if (!fileList || fileList.length === 0) {
+        return;
+      }
+
+      const allowedExtensions = new Set(['png', 'jpg', 'jpeg', 'pdf', 'docx', 'txt', 'md']);
+      const validFiles = [];
+      const invalidFiles = [];
+
+      for (const file of Array.from(fileList)) {
+        const fileName = file.name || '';
+        const ext = fileName.includes('.') ? fileName.split('.').pop().toLowerCase() : '';
+        if (allowedExtensions.has(ext)) {
+          validFiles.push(file);
+        } else {
+          invalidFiles.push(fileName || '未命名文件');
+        }
+      }
+
+      if (validFiles.length > 0) {
+        this.$emit('add-files', validFiles);
+      }
+
+      if (invalidFiles.length > 0) {
+        alert(`以下文件格式不支持：${invalidFiles.join('，')}。仅支持 png、jpg、jpeg、pdf、docx、txt、md。`);
+      }
+
+      event.target.value = '';
+    },
+    formatFileSize(size) {
+      if (!size || size <= 0) {
+        return '0 B';
+      }
+      const units = ['B', 'KB', 'MB', 'GB'];
+      let index = 0;
+      let value = size;
+      while (value >= 1024 && index < units.length - 1) {
+        value /= 1024;
+        index++;
+      }
+      return `${value.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
+    },
     autoResize() {
       const textarea = this.$refs.chatInput;
       if (textarea) {
@@ -380,6 +465,10 @@ export default {
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+.file-input-hidden {
+  display: none;
 }
 
 .btn-wrapper {

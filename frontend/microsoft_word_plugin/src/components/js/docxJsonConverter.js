@@ -390,9 +390,226 @@ function cleanText(text) {
     .replace(/\r$/, "");
 }
 
+function cleanCellText(text) {
+  if (!text) return "";
+  return text.replace(/[\r\n\u0007\u0001]+$/g, "");
+}
+
+const MATH_FONT_KEYWORDS = ["cambria math", "dejavu math", "tex gyre", "stix", "latin modern math"];
+
+const MATH_SYMBOL_TO_LATEX = {
+  "\u221e": "\\infty",
+  "\u2211": "\\sum",
+  "\u220f": "\\prod",
+  "\u222b": "\\int",
+  "\u221a": "\\sqrt",
+  "\u00d7": "\\times",
+  "\u00f7": "\\div",
+  "\u00b1": "\\pm",
+  "\u2213": "\\mp",
+  "\u2264": "\\le",
+  "\u2265": "\\ge",
+  "\u2260": "\\ne",
+  "\u2248": "\\approx",
+  "\u2261": "\\equiv",
+  "\u00b7": "\\cdot",
+  "\u22c5": "\\cdot",
+  "\u03b1": "\\alpha",
+  "\u03b2": "\\beta",
+  "\u03b3": "\\gamma",
+  "\u03b4": "\\delta",
+  "\u03b5": "\\epsilon",
+  "\u03b8": "\\theta",
+  "\u03bb": "\\lambda",
+  "\u03bc": "\\mu",
+  "\u03c0": "\\pi",
+  "\u03c1": "\\rho",
+  "\u03c3": "\\sigma",
+  "\u03c6": "\\phi",
+  "\u03c9": "\\omega",
+  "\u0393": "\\Gamma",
+  "\u0394": "\\Delta",
+  "\u0398": "\\Theta",
+  "\u039b": "\\Lambda",
+  "\u03a0": "\\Pi",
+  "\u03a3": "\\Sigma",
+  "\u03a6": "\\Phi",
+  "\u03a9": "\\Omega",
+  "\u2212": "-",
+};
+
+const SUPERSCRIPT_CHAR_MAP = {
+  "\u2070": "0", "\u00b9": "1", "\u00b2": "2", "\u00b3": "3", "\u2074": "4",
+  "\u2075": "5", "\u2076": "6", "\u2077": "7", "\u2078": "8", "\u2079": "9",
+  "\u207a": "+", "\u207b": "-", "\u207c": "=", "\u207d": "(", "\u207e": ")",
+  "\u207f": "n", "\u1d43": "a", "\u1d47": "b", "\u1d9c": "c", "\u1d48": "d",
+  "\u1d49": "e", "\u1da0": "f", "\u1d4d": "g", "\u02b0": "h", "\u2071": "i",
+  "\u02b2": "j", "\u1d4f": "k", "\u02e1": "l", "\u1d50": "m",
+  "\u1d52": "o", "\u1d56": "p", "\u02b3": "r", "\u02e2": "s", "\u1d57": "t",
+  "\u1d58": "u", "\u1d5b": "v", "\u02b7": "w", "\u02e3": "x", "\u02b8": "y",
+  "\u1dbb": "z",
+};
+
+const SUBSCRIPT_CHAR_MAP = {
+  "\u2080": "0", "\u2081": "1", "\u2082": "2", "\u2083": "3", "\u2084": "4",
+  "\u2085": "5", "\u2086": "6", "\u2087": "7", "\u2088": "8", "\u2089": "9",
+  "\u208a": "+", "\u208b": "-", "\u208c": "=", "\u208d": "(", "\u208e": ")",
+  "\u2090": "a", "\u2091": "e", "\u2092": "o", "\u2093": "x", "\u2094": "schwa",
+  "\u2095": "h", "\u2096": "k", "\u2097": "l", "\u2098": "m", "\u2099": "n",
+  "\u209a": "p", "\u209b": "s", "\u209c": "t",
+};
+
+function isMathFont(fontName) {
+  if (!fontName) {
+    return false;
+  }
+  const normalized = String(fontName).toLowerCase();
+  return MATH_FONT_KEYWORDS.some((keyword) => normalized.includes(keyword));
+}
+
+function containsMathUnicode(text) {
+  if (!text) {
+    return false;
+  }
+  return /[\u2200-\u22ff\u27c0-\u27ef\u2980-\u29ff\u2a00-\u2aff\u2070-\u209f]|[\ud835\udc00-\ud835\udfff]/u.test(text);
+}
+
+function stripMathDelimiters(text) {
+  let value = (text || "").trim();
+  if (!value) {
+    return "";
+  }
+  if (value.startsWith("$$") && value.endsWith("$$") && value.length > 4) {
+    value = value.slice(2, -2).trim();
+  } else if (value.startsWith("$") && value.endsWith("$") && value.length > 2) {
+    value = value.slice(1, -1).trim();
+  } else if (value.startsWith("\\(") && value.endsWith("\\)") && value.length > 4) {
+    value = value.slice(2, -2).trim();
+  } else if (value.startsWith("\\[") && value.endsWith("\\]") && value.length > 4) {
+    value = value.slice(2, -2).trim();
+  }
+  return value;
+}
+
+function convertScriptCharsToLatex(text, scriptMap, marker) {
+  let result = "";
+  let buffer = "";
+
+  for (const ch of text) {
+    const mapped = scriptMap[ch];
+    if (mapped) {
+      buffer += mapped;
+      continue;
+    }
+
+    if (buffer) {
+      result += `${marker}{${buffer}}`;
+      buffer = "";
+    }
+    result += ch;
+  }
+
+  if (buffer) {
+    result += `${marker}{${buffer}}`;
+  }
+
+  return result;
+}
+
+function replaceMathSymbolsWithLatex(text) {
+  let value = text;
+  for (const [symbol, latex] of Object.entries(MATH_SYMBOL_TO_LATEX)) {
+    value = value.split(symbol).join(latex);
+  }
+  return value;
+}
+
+function repairCommonFormulaPatterns(text) {
+  let value = text;
+
+  value = value
+    .replace(/\s*\(\s*/g, "(")
+    .replace(/\s*\)\s*/g, ")")
+    .replace(/\s*\-\s*/g, "-")
+    .replace(/\s*=\s*/g, "=")
+    .replace(/\s+!/g, "!")
+    .replace(/\s*\^\s*/g, "^")
+    .replace(/\s*_\s*/g, "_");
+
+  value = value.replace(/([A-Za-z])\(n\)\(([A-Za-z])\)/g, "$1^{(n)}($2)");
+  value = value.replace(/\(x-a\)\s*n\b/g, "(x-a)^n");
+
+  if (!/\\sum/.test(value)) {
+    value = value.replace(/n=0\s*\\infty/g, "\\sum_{n=0}^{\\infty}");
+    value = value.replace(/\bn=0\s*\\infty/g, "\\sum_{n=0}^{\\infty}");
+  }
+
+  value = value.replace(/\\sum\s*\{?\s*n\s*=\s*0\s*\}?\s*\^?\s*\\infty/g, "\\sum_{n=0}^{\\infty}");
+
+  if (/f\^\{\(n\)\}\(a\)/.test(value) && /n!/.test(value) && !/\\frac\{/.test(value)) {
+    value = value.replace(/f\^\{\(n\)\}\(a\)\s*n!/g, "\\frac{f^{(n)}(a)}{n!}");
+  }
+
+  value = value
+    .replace(/\(\s*x\s*\)/g, "(x)")
+    .replace(/\(\s*a\s*\)/g, "(a)")
+    .replace(/\(\s*n\s*\)/g, "(n)")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return value;
+}
+
+function normalizeFormulaTextToLatex(text) {
+  let value = stripMathDelimiters((text || "").replace(/[\r\n\f]+/g, " ").trim());
+  if (!value) {
+    return "";
+  }
+
+  value = value.normalize("NFKD");
+  value = replaceMathSymbolsWithLatex(value);
+  value = convertScriptCharsToLatex(value, SUPERSCRIPT_CHAR_MAP, "^");
+  value = convertScriptCharsToLatex(value, SUBSCRIPT_CHAR_MAP, "_");
+  value = repairCommonFormulaPatterns(value);
+  value = value.replace(/\s+/g, " ").trim();
+
+  value = value.replace(/\\sum\s*([a-zA-Z]\s*=\s*[^\\\s]+)\s*\\infty/g, "\\sum_{$1}^{\\infty}");
+  value = value.replace(/\\sum_\{\s*([a-zA-Z])\s*=\s*([^}]+)\s*\}\^\{\s*\\infty\s*\}/g, "\\sum_{$1=$2}^{\\infty}");
+
+  return value;
+}
+
+function normalizeParsedRun(run) {
+  if (!run || !run.text) {
+    return run;
+  }
+
+  const text = run.text;
+  const rStyle = run.rStyle || DEFAULT_RSTYLE;
+  const fontName = rStyle[RSTYLE.FONT_NAME] || "";
+  const hasLatexSyntax = /\\[a-zA-Z]+/.test(text) || /[_^]\{?[^\s]/.test(text) || /^\$\$?[\s\S]+\$\$?$/.test(text.trim());
+
+  if (!hasLatexSyntax && !isMathFont(fontName) && !containsMathUnicode(text)) {
+    return run;
+  }
+
+  const latexText = normalizeFormulaTextToLatex(text);
+  if (!latexText) {
+    return run;
+  }
+
+  return {
+    ...run,
+    text: latexText,
+    isFormula: true,
+    formulaFormat: "latex",
+  };
+}
+
 // ============== OOXML 解析辅助函数 ==============
 
 const NS_W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+const NS_M = "http://schemas.openxmlformats.org/officeDocument/2006/math";
 
 /**
  * 判断字符是否为 CJK（中日韩）字符
@@ -725,6 +942,45 @@ function parseRunsFromOoxml(ooxmlString) {
 
     const runs = [];
 
+    function pushNormalizedRun(run) {
+      const normalized = normalizeParsedRun(run);
+      if (!normalized || !normalized.text) {
+        return;
+      }
+      runs.push(normalized);
+    }
+
+    function processMathElement(mathElement) {
+      if (!mathElement) return;
+      const mTextElements = mathElement.getElementsByTagNameNS(NS_M, "t");
+      let rawMathText = "";
+      for (let i = 0; i < mTextElements.length; i++) {
+        rawMathText += mTextElements[i].textContent || "";
+      }
+      rawMathText = cleanCellText(rawMathText);
+      if (!rawMathText) return;
+
+      const latexText = normalizeFormulaTextToLatex(rawMathText) || rawMathText;
+      pushNormalizedRun({
+        text: latexText,
+        rStyle: makeRStyle(
+          "Cambria Math",
+          12,
+          false,
+          true,
+          0,
+          "#000000",
+          "#000000",
+          0,
+          false,
+          false,
+          false
+        ),
+        isFormula: true,
+        formulaFormat: "latex",
+      });
+    }
+
     // 遍历段落的子节点，处理 w:r 和 w:hyperlink 中的 w:r
     function processRunElement(wRun) {
       let text = "";
@@ -732,6 +988,11 @@ function parseRunsFromOoxml(ooxmlString) {
       const tElements = wRun.getElementsByTagNameNS(NS_W, "t");
       for (let j = 0; j < tElements.length; j++) {
         text += tElements[j].textContent || "";
+      }
+      // 收集 <m:t> 文本（公式 OMML）
+      const mTextElements = wRun.getElementsByTagNameNS(NS_M, "t");
+      for (let j = 0; j < mTextElements.length; j++) {
+        text += mTextElements[j].textContent || "";
       }
       // 收集 <w:tab> 制表符
       const tabElements = wRun.getElementsByTagNameNS(NS_W, "tab");
@@ -770,7 +1031,7 @@ function parseRunsFromOoxml(ooxmlString) {
       if (fontAscii && fontEastAsia && fontAscii !== fontEastAsia) {
         const segments = splitByScript(text, fontAscii, fontEastAsia);
         for (const seg of segments) {
-          runs.push({
+          pushNormalizedRun({
             text: seg.text,
             rStyle: makeRStyle(
               seg.font,
@@ -790,7 +1051,7 @@ function parseRunsFromOoxml(ooxmlString) {
       } else {
         // 字体相同或只有一种，直接使用
         const fontName = fontAscii || fontEastAsia || "";
-        runs.push({
+        pushNormalizedRun({
           text,
           rStyle: makeRStyle(
             fontName,
@@ -816,6 +1077,8 @@ function parseRunsFromOoxml(ooxmlString) {
 
       if (child.localName === "r" && child.namespaceURI === NS_W) {
         processRunElement(child);
+      } else if ((child.localName === "oMath" || child.localName === "oMathPara") && child.namespaceURI === NS_M) {
+        processMathElement(child);
       } else if (child.localName === "hyperlink") {
         // 超链接内也包含 w:r
         const innerRuns = child.getElementsByTagNameNS(NS_W, "r");
@@ -831,7 +1094,11 @@ function parseRunsFromOoxml(ooxmlString) {
       for (let i = 1; i < runs.length; i++) {
         const prev = merged[merged.length - 1];
         const curr = runs[i];
-        if (JSON.stringify(prev.rStyle) === JSON.stringify(curr.rStyle)) {
+        if (
+          JSON.stringify(prev.rStyle) === JSON.stringify(curr.rStyle) &&
+          prev.isFormula === curr.isFormula &&
+          prev.formulaFormat === curr.formulaFormat
+        ) {
           prev.text += curr.text;
         } else {
           merged.push(curr);
@@ -1054,7 +1321,12 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
                     if (fmtKey === lastFmtKey && curRun) {
                       curRun.text += t;
                     } else {
-                      if (curRun && curRun.text) cellRuns.push(curRun);
+                      if (curRun && curRun.text) {
+                        const normalizedRun = normalizeParsedRun(curRun);
+                        if (normalizedRun && normalizedRun.text) {
+                          cellRuns.push(normalizedRun);
+                        }
+                      }
                       curRun = {
                         text: t,
                         rStyle: makeRStyle(
@@ -1068,7 +1340,12 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
                       lastFmtKey = fmtKey;
                     }
                   }
-                  if (curRun && curRun.text) cellRuns.push(curRun);
+                  if (curRun && curRun.text) {
+                    const normalizedRun = normalizeParsedRun(curRun);
+                    if (normalizedRun && normalizedRun.text) {
+                      cellRuns.push(normalizedRun);
+                    }
+                  }
 
                   if (cellRuns.length > 0) {
                     paragraphsData.push({
@@ -1182,7 +1459,12 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
               if (formatKey === lastFormatKey && currentRun) {
                 currentRun.text += t;
               } else {
-                if (currentRun && currentRun.text) runs.push(currentRun);
+                if (currentRun && currentRun.text) {
+                  const normalizedRun = normalizeParsedRun(currentRun);
+                  if (normalizedRun && normalizedRun.text) {
+                    runs.push(normalizedRun);
+                  }
+                }
                 currentRun = {
                   text: t,
                   rStyle: makeRStyle(
@@ -1202,7 +1484,12 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
                 lastFormatKey = formatKey;
               }
             }
-            if (currentRun && currentRun.text) runs.push(currentRun);
+            if (currentRun && currentRun.text) {
+              const normalizedRun = normalizeParsedRun(currentRun);
+              if (normalizedRun && normalizedRun.text) {
+                runs.push(normalizedRun);
+              }
+            }
           }
 
           if (!runs || runs.length === 0) {
@@ -1392,7 +1679,12 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
                   if (formatKey === lastFormatKey && currentRun) {
                     currentRun.text += t;
                   } else {
-                    if (currentRun && currentRun.text) runs.push(currentRun);
+                    if (currentRun && currentRun.text) {
+                      const normalizedRun = normalizeParsedRun(currentRun);
+                      if (normalizedRun && normalizedRun.text) {
+                        runs.push(normalizedRun);
+                      }
+                    }
                     currentRun = {
                       text: t,
                       rStyle: makeRStyle(
@@ -1412,7 +1704,12 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
                     lastFormatKey = formatKey;
                   }
                 }
-                if (currentRun && currentRun.text) runs.push(currentRun);
+                if (currentRun && currentRun.text) {
+                  const normalizedRun = normalizeParsedRun(currentRun);
+                  if (normalizedRun && normalizedRun.text) {
+                    runs.push(normalizedRun);
+                  }
+                }
 
                 if (runs.length > 0) {
                   paragraphsData.push({
@@ -1759,7 +2056,12 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
               if (formatKey === lastFormatKey && currentRun) {
                 currentRun.text += t;
               } else {
-                if (currentRun && currentRun.text) runs.push(currentRun);
+                if (currentRun && currentRun.text) {
+                  const normalizedRun = normalizeParsedRun(currentRun);
+                  if (normalizedRun && normalizedRun.text) {
+                    runs.push(normalizedRun);
+                  }
+                }
                 currentRun = {
                   text: t,
                   rStyle: makeRStyle(
@@ -1779,7 +2081,12 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
                 lastFormatKey = formatKey;
               }
             }
-            if (currentRun && currentRun.text) runs.push(currentRun);
+            if (currentRun && currentRun.text) {
+              const normalizedRun = normalizeParsedRun(currentRun);
+              if (normalizedRun && normalizedRun.text) {
+                runs.push(normalizedRun);
+              }
+            }
 
             // 最终降级：整段作为一个 run
             if (runs.length === 0 && paraText) {
@@ -1789,7 +2096,7 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
               );
               await context.sync();
 
-              runs.push({
+              const fallbackRun = normalizeParsedRun({
                 text: paraText,
                 rStyle: makeRStyle(
                   font.name || "",
@@ -1805,6 +2112,9 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
                   font.subscript === true
                 ),
               });
+              if (fallbackRun && fallbackRun.text) {
+                runs.push(fallbackRun);
+              }
             }
           }
 
@@ -2010,10 +2320,14 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection") {
           if (para.runs && para.runs.length > 0) {
             let charOffset = 0;
             for (const run of para.runs) {
-              const runText = run.text || "";
+              let runText = run.text || "";
               if (!runText) continue;
 
               const rStyle = resolveStyle(styles, run.rStyle, DEFAULT_RSTYLE);
+              const isExplicitLatexRun = run.isFormula === true && run.formulaFormat === "latex";
+              if (isExplicitLatexRun) {
+                runText = run.text || normalizeFormulaTextToLatex(run.text);
+              }
 
               try {
                 // 使用 getRange 获取段落中的子范围

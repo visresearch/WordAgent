@@ -101,6 +101,40 @@ async function request(url, options = {}) {
   }
 }
 
+/**
+ * 获取当前文档全局元信息（随用户 chat 请求发送给后端）
+ * @returns {Object|null}
+ */
+function getCurrentDocumentMeta() {
+  try {
+    const app = window.Application;
+    const doc = app?.ActiveDocument;
+    if (!doc) {
+      return null;
+    }
+
+    const totalParas = doc.Paragraphs?.Count || 0;
+
+    let pageCount = 0;
+    try {
+      pageCount = doc.ComputeStatistics ? doc.ComputeStatistics(2) : 0;
+    } catch (e) {
+      pageCount = 0;
+    }
+
+    return {
+      totalParas,
+      documentName: doc.Name || '',
+      pageCount,
+      isReadOnly: !!doc.ReadOnly,
+      parsedAt: new Date().toISOString()
+    };
+  } catch (error) {
+    console.warn('[Meta] 获取文档元信息失败:', error);
+    return null;
+  }
+}
+
 // ============== API 方法 ==============
 
 // ============== WebSocket 管理 ==============
@@ -375,6 +409,9 @@ function chatStream(message, options = {}) {
       // 确保 WebSocket 已连接
       await wsManager.connect();
 
+      // 文档全局元信息：随用户提问发送，不放在 read_document 回包里
+      const documentMeta = getCurrentDocumentMeta();
+
       // 发送聊天请求
       await wsManager.send({
         type: 'chat',
@@ -382,6 +419,7 @@ function chatStream(message, options = {}) {
         mode,
         model,
         documentRange,
+        documentMeta,
         history,
         files,
         timestamp: Date.now()
@@ -425,11 +463,7 @@ async function parseDocumentRange(startParaIndex = 0, endParaIndex = -1) {
           return;
         }
 
-        const totalParas = doc.Paragraphs?.Count || 0;
         const isFullDocument = (startParaIndex === 0 && endParaIndex === -1);
-        const effectiveEndParaIndex = isFullDocument
-          ? -1
-          : Math.min(endParaIndex, Math.max(totalParas - 1, 0));
         let result;
 
         if (isFullDocument) {
@@ -445,16 +479,8 @@ async function parseDocumentRange(startParaIndex = 0, endParaIndex = -1) {
           result = parseDocxToJSON(null, startParaIndex, endParaIndex);
         }
 
-        if (!result.error) {
-          result._meta = {
-            isFullDocument,
-            startParaIndex: isFullDocument ? 0 : startParaIndex,
-            endParaIndex: effectiveEndParaIndex,
-            totalParas,
-            documentName: doc.Name || '',
-            parsedAt: new Date().toISOString()
-          };
-        }
+        // read_document / query_document 回包仅返回文档内容，不携带全局 meta。
+        // 全局 meta 在 chatStream 中通过 documentMeta 单独发送。
 
         resolve(result);
       } catch (error) {
@@ -715,7 +741,7 @@ async function uploadFiles(files) {
   try {
     const response = await fetch(`${CONFIG.baseURL}/api/chat/upload`, {
       method: 'POST',
-      body: formData,
+      body: formData
     });
 
     if (!response.ok) {
