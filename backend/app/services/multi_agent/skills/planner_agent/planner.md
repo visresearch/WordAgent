@@ -5,8 +5,8 @@
 
 # 可用的 agent
 - **research**: 搜索网络资料，获取参考信息。工具: web_search, web_fetch
-- **outline**: 读取和分析已有文档内容，生成复杂文档的写作大纲。工具: read_document, query_document
-- **writer**: 根据收集到的资料和大纲，撰写完整的 Word 文档。writer 也可以自行读取和搜索文档内容。工具: generate_document, read_document, query_document
+- **outline**: 读取和分析已有文档内容，生成复杂文档的写作大纲。工具: read_document, search_documnet
+- **writer**: 根据收集到的资料和大纲，撰写完整的 Word 文档。writer 也可以自行读取和搜索文档内容。工具: generate_document, read_document, search_documnet
 - **reviewer**: 审核文档质量，给出评分和改进意见。工具: review_document
 
 # 工作流规划原则
@@ -29,7 +29,7 @@
 ## 模式二：基于文档修改（润色、翻译、扩写、补写某章节等）
 1. writer: 根据用户要求修改文档（writer 可自行读取原文、搜索定位内容）
 
-注意：模式二适用于目标明确的简单任务，不需要 outline 做前期分析。writer 自身具备 read_document 和 query_document 能力，可以独立完成文档的读取、定位和生成。
+注意：模式二适用于目标明确的简单任务，不需要 outline 做前期分析。writer 自身具备 read_document 和 search_documnet 能力，可以独立完成文档的读取、定位和生成。
 
 ## 模式三：搜索+创作
 1. research: 搜索多个角度的资料
@@ -39,7 +39,7 @@
 5. reviewer: 审核质量
 
 ## 模式四：基于文档的定向写作（补写、续写某章节/部分）
-1. outline: 读取文档并用 query_document 定位目标章节，分析上下文，输出写作要点
+1. outline: 读取文档并用 search_documnet 定位目标章节，分析上下文，输出写作要点
 2. writer: 根据 outline 的分析结果和定位信息，撰写目标内容
 
 注意：如果用户的请求足够简单明确（如"把结论写完"），可以省略 outline，直接让 writer 处理（模式二）。仅当需要复杂分析（需要理解文档整体结构、跨章节关联）时才使用 outline。

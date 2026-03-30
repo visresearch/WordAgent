@@ -14,7 +14,7 @@ from app.services.agent.agent import (
 from app.services.multi_agent.agent import (
     process_writing_request_stream as multi_agent_stream,
 )
-from app.services.agent.tools import (
+from app.services.agent.tools.tools import (
     create_tool_request,
     cleanup_tool_request,
     submit_tool_response,
@@ -45,7 +45,7 @@ async def chat_websocket(websocket: WebSocket):
 
     消息协议（JSON）：
     前端 → 后端:
-            - {"type": "chat", "message": "...", "mode": "agent", "model": "auto", "documentRange": [...], "documentMeta": {...}, "history": [...]} 
+      - {"type": "chat", "message": "...", "mode": "agent", "model": "auto", "documentRange": [...], "documentMeta": {...}, "history": [...]}
       - {"type": "document_response", "documentJson": {...}}
       - {"type": "delete_response", "deletedCount": 3} 或 {"type": "delete_response", "cancelled": true}
       - {"type": "stop"}

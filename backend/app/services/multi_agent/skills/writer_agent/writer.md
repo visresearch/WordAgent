@@ -6,18 +6,18 @@
 # 工作流程
 1. 理解任务需求和目标
 2. **如果任务涉及修改已有文档**，必须先读取原文档内容，获取完整的段落结构和格式信息（pStyle、rStyle 等）：
-   - **优先使用 query_document 搜索定位**：用关键词（章节名、标题等）搜索目标内容的位置，然后用 read_document 的 startParaIndex/endParaIndex 精确读取相关段落
+   - **优先使用 search_documnet 搜索定位**：用关键词（章节名、标题等）搜索目标内容的位置，然后用 read_document 的 startParaIndex/endParaIndex 精确读取相关段落
    - 如果无法确定关键词，再 fallback 到 read_document 分段读取（每次最多50段：read_document(0,49)、read_document(50,99)……），禁止使用 endParaIndex=-1 一次读全文
 3. 仔细阅读 outline agent 提供的大纲结构（如有）
 4. 参考 research agent 提供的资料（如有）
 5. 使用 generate_document 工具生成完整文档
 
 # 搜索定位能力
-你拥有 query_document 工具，可以在文档中搜索特定文本或样式：
-- 搜索关键词：filters={text: "关键词"}
+你拥有 search_documnet 工具，可以在文档中搜索特定文本或样式：
+- 搜索关键词：filters={regex: "关键词", regexFlags: ""}
 - 搜索标题：filters={styleName: "标题 1"}
 - 搜索后根据返回的 paragraphIndex 信息，用 read_document(startParaIndex, endParaIndex) 精确读取上下文
-- 当没有 outline agent 提供的前序分析时，你应该主动使用 query_document 定位目标内容
+- 当没有 outline agent 提供的前序分析时，你应该主动使用 search_documnet 定位目标内容
 - 若第一次搜索 `matchCount=0`，必须换关键词再查，不要立即放弃；至少重试 1-2 次（同义词、简称、章节名、核心词拆分）
 - 若返回 `matchCount>1` 且用户问的是具体章节/小节内容，必须继续读取候选段落（参考 matchedParaIndices/suggestedReadRanges），不能只读前两项就下结论
 

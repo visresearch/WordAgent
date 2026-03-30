@@ -46,7 +46,7 @@ from pydantic import BaseModel, Field
 
 from app.services.llm_client import LLMClientManager, resolve_model
 from app.services.multi_agent.prompts import get_agent_prompt
-from app.services.utils import parse_tool_args_with_repair
+from app.services.utils import normalize_tool_args, parse_tool_args_with_repair
 from app.services.multi_agent.tools import (
     AGENT_TOOLS,
     TOOL_MAP,
@@ -60,7 +60,7 @@ from app.services.multi_agent.tools import (
     delete_document,
     web_search,
     web_fetch,
-    query_document,
+    search_documnet,
 )
 
 # 所有多智能体工具的映射（含新增工具）
@@ -166,7 +166,7 @@ def _run_sub_agent(
         text_output: agent 最终的文字回复
         tool_result_json: 如果 agent 调用了 generate_document / create_workflow / review_document，
                           返回最后一次调用的结构化结果
-        tool_data: 收集的文档相关工具调用记录（read_document / query_document）
+        tool_data: 收集的文档相关工具调用记录（read_document / search_documnet）
     """
     tool_map = {t.name: t for t in tools}
     llm_with_tools = llm.bind_tools(tools)
@@ -279,7 +279,8 @@ def _run_sub_agent(
                 continue
 
             try:
-                result = tool_fn.invoke(parsed_args)
+                normalized_args = normalize_tool_args(tool_name, parsed_args)
+                result = tool_fn.invoke(normalized_args)
                 if isinstance(result, dict):
                     content = json.dumps(result, ensure_ascii=False)
                     last_structured_result = result
@@ -297,7 +298,7 @@ def _run_sub_agent(
                 repaired_tool_calls.append(
                     {
                         "name": tool_name,
-                        "args": parsed_args,
+                        "args": normalized_args,
                         "id": tool_call_id,
                         "type": "tool_call",
                     }
@@ -306,8 +307,8 @@ def _run_sub_agent(
                 repaired_any = True
                 print(f"  [{agent_name}] ✅ 已修复并执行 invalid tool_call: {tool_name}")
 
-                if tool_name == "query_document":
-                    _tool_data.append({"tool": tool_name, "args": parsed_args, "result": content})
+                if tool_name == "search_documnet":
+                    _tool_data.append({"tool": tool_name, "args": normalized_args, "result": content})
 
                 if agent_name == "writer" and tool_name == "generate_document":
                     _writer_generated = True
@@ -357,7 +358,7 @@ def _run_sub_agent(
                         break
                     messages.append(
                         SystemMessage(
-                            content="你刚才的工具调用格式不完整（JSON 被截断或参数非法）。请重新调用工具，确保 tool arguments 是完整且可解析的 JSON，字符串中的双引号必须正确转义。必须使用新版样式引用格式：pStyle/rStyle/cStyle/tStyle 只能是样式ID（如 pS_1/rS_1/cS_1/tS_1），禁止直接传样式数组；并在 styles 字典提供对应定义。"
+                            content="你刚才的工具调用格式不完整（JSON 被截断或参数非法）。请重新调用工具，确保 tool arguments 是完整且可解析的 JSON，字符串中的双引号必须正确转义。必须使用新版样式引用格式：pStyle/rStyle/cStyle/tStyle 只能是样式ID（如 pS_1/rS_1/cS_1/tS_1），禁止直接传样式数组；并在 styles 字典提供对应定义。若内容过长，可拆成多次 generate_document 调用分批输出。"
                         )
                     )
                     continue
@@ -403,7 +404,8 @@ def _run_sub_agent(
             tool_fn = tool_map.get(tool_name)
             if tool_fn:
                 try:
-                    result = tool_fn.invoke(tc["args"])
+                    tool_args = normalize_tool_args(tool_name, tc.get("args", {}))
+                    result = tool_fn.invoke(tool_args)
                     if isinstance(result, dict):
                         content = json.dumps(result, ensure_ascii=False)
                         last_structured_result = result
@@ -421,15 +423,19 @@ def _run_sub_agent(
                     messages.append(ToolMessage(content=content, tool_call_id=tc["id"], name=tool_name))
 
                     # 收集文档搜索工具的调用结果（位置信息），供下游 agent 共享
-                    # 注意：只收集 query_document（位置信息小），不收集 read_document（文档内容大）
-                    if tool_name == "query_document":
-                        _tool_data.append({"tool": tool_name, "args": tc["args"], "result": content})
+                    # 注意：只收集 search_documnet（位置信息小），不收集 read_document（文档内容大）
+                    if tool_name == "search_documnet":
+                        _tool_data.append({"tool": tool_name, "args": tool_args, "result": content})
 
                     # writer 调用 generate_document 完成后标记退出
                     if agent_name == "writer" and tool_name == "generate_document":
                         _writer_generated = True
                 except Exception as e:
-                    err = f"错误: 工具 {tool_name} 调用失败: {e}。请严格按工具 schema 重新构造参数。"
+                    err = (
+                        f"错误: 工具 {tool_name} 调用失败: {e}。"
+                        "请严格按工具 schema 重新构造参数。"
+                        "若调用 generate_document，document 字段必须是对象(dict)而不是 JSON 字符串。"
+                    )
                     print(f"  [{agent_name}] ❌ {err}")
                     messages.append(ToolMessage(content=err, tool_call_id=tc["id"], name=tool_name))
             else:
@@ -441,9 +447,8 @@ def _run_sub_agent(
                     )
                 )
 
-        # writer 完成 generate_document 后直接退出循环
-        if _writer_generated:
-            break
+        # 允许 writer 在长文场景下多次调用 generate_document 分批输出。
+        # 当模型不再发起 tool_call 时，会在上方 no tool_call 分支自然退出。
     else:
         # 达到最大迭代但还在调用工具 — 取最后一条 AI 回复
         for m in reversed(messages):
@@ -463,7 +468,7 @@ def _format_shared_tool_data(tool_data: list[dict]) -> str:
         tool_name = item["tool"]
         args = item["args"]
         result = item["result"]
-        if tool_name == "query_document":
+        if tool_name == "search_documnet":
             filters = args.get("filters", {})
             filter_desc = ", ".join(f"{k}={v}" for k, v in filters.items())
             parts.append(f"### 文档搜索: {filter_desc}\n{result}")

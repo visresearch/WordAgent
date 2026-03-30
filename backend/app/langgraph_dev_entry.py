@@ -7,7 +7,7 @@ You can optionally switch mode via LANGGRAPH_DEV_MODE=single|multi.
 import os
 
 from app.services.agent.agent import build_graph, create_llm
-from app.services.agent.tools import ALL_TOOLS
+from backend.app.services.agent.tools.tools import ALL_TOOLS
 from app.services.multi_agent.agent import _build_multi_agent_graph, _create_llm
 from app.services.llm_client import resolve_model
 

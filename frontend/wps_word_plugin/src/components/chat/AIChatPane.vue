@@ -978,7 +978,7 @@ export default {
       }
 
       // 后端请求查询文档：委托 api.js 解析文档并执行 Style Query DSL
-      if (data.type === 'query_document') {
+      if (data.type === 'search_documnet') {
         console.log('[AIChatPane] 后端请求查询文档, query:', data.query);
         msg.contentParts.push({
           type: 'status',

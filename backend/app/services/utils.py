@@ -69,3 +69,22 @@ def parse_tool_args_with_repair(raw_args: Any) -> dict | None:
             except json.JSONDecodeError:
                 pass
     return None
+
+
+def normalize_tool_args(tool_name: str, raw_args: Any) -> dict:
+    """归一化工具参数，修复常见的模型参数形态偏差。"""
+    args = parse_tool_args_with_repair(raw_args)
+    if args is None:
+        raise ValueError("工具参数不是合法 JSON 对象")
+
+    # 兼容模型将 document 误生成为 JSON 字符串的情况
+    # 预期: {"document": {...}}，实际偶发: {"document": "{...}"}
+    if tool_name == "generate_document":
+        document = args.get("document")
+        if isinstance(document, str):
+            parsed_document = parse_tool_args_with_repair(document)
+            if not isinstance(parsed_document, dict):
+                raise ValueError("generate_document.document 必须是对象(dict)，不能是字符串")
+            args = {**args, "document": parsed_document}
+
+    return args

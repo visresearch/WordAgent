@@ -397,6 +397,24 @@ function matchNumber(value, filter) {
 }
 
 /**
+ * 构造安全的正则对象（非法正则返回 null）
+ * @param {string} pattern
+ * @param {string} flags
+ * @returns {RegExp|null}
+ */
+function buildRegex(pattern, flags = 'i') {
+  if (!pattern || typeof pattern !== 'string') {
+    return null;
+  }
+  try {
+    return new RegExp(pattern, typeof flags === 'string' ? flags : 'i');
+  } catch (err) {
+    console.warn('[docxQuery] 非法正则表达式，已忽略:', pattern, flags, err?.message || err);
+    return null;
+  }
+}
+
+/**
  * 检查 run 是否匹配 filters
  * @param {Object} run - run 对象 {text, rStyle}
  * @param {Object} filters - 筛选条件
@@ -404,11 +422,21 @@ function matchNumber(value, filter) {
  */
 function matchRunFilters(run, filters) {
   const rs = run.rStyle || [];
+  const textRegex = buildRegex(filters.regex, filters.regexFlags);
   
   for (const [key, expected] of Object.entries(filters)) {
     switch (key) {
       case 'text':
         if (!(run.text || '').toLowerCase().includes(String(expected).toLowerCase())) {
+          return false;
+        }
+        break;
+      case 'regex':
+        if (!textRegex) {
+          return false;
+        }
+        textRegex.lastIndex = 0;
+        if (!textRegex.test(run.text || '')) {
           return false;
         }
         break;
@@ -484,6 +512,7 @@ function matchRunFilters(run, filters) {
       case 'alignment':
       case 'styleName':
       case 'lineSpacing':
+      case 'regexFlags':
         break;
       default:
         break;
@@ -500,6 +529,7 @@ function matchRunFilters(run, filters) {
  */
 function matchParagraphFilters(para, filters) {
   const ps = para.pStyle || [];
+  const paraRegex = buildRegex(filters.regex, filters.regexFlags);
   
   for (const [key, expected] of Object.entries(filters)) {
     switch (key) {
@@ -510,6 +540,19 @@ function matchParagraphFilters(para, filters) {
         }
         break;
       }
+      case 'regex': {
+        if (!paraRegex) {
+          return false;
+        }
+        paraRegex.lastIndex = 0;
+        const paraText = getFieldValue(para, 'text');
+        if (!paraRegex.test(paraText)) {
+          return false;
+        }
+        break;
+      }
+      case 'regexFlags':
+        break;
       case 'alignment':
         if ((ps[PSTYLE.ALIGNMENT] || 'left').toLowerCase() !== String(expected).toLowerCase()) {
           return false;

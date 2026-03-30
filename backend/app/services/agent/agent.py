@@ -37,8 +37,8 @@ from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, Rem
 from langgraph.graph import END, START, MessagesState, StateGraph
 
 from app.services.llm_client import LLMClientManager, resolve_model
-from app.services.agent.prompts import get_agent_prompt_skills, get_agent_prompt
-from app.services.utils import parse_tool_args_with_repair
+from app.services.agent.prompts import get_core_skills, get_on_demand_skill_index, get_agent_prompt
+from app.services.utils import normalize_tool_args, parse_tool_args_with_repair
 from app.services.agent.tools import (
     ALL_TOOLS,
     TOOL_MAP,
@@ -146,7 +146,8 @@ def build_graph(llm_with_tools):
             tool_fn = TOOL_MAP.get(tool_name)
             if tool_fn:
                 try:
-                    result = tool_fn.invoke(tool_call["args"])
+                    tool_args = normalize_tool_args(tool_name, tool_call.get("args", {}))
+                    result = tool_fn.invoke(tool_args)
                     # 标准化结果为字符串
                     if isinstance(result, dict):
                         content = json.dumps(result, ensure_ascii=False)
@@ -157,7 +158,11 @@ def build_graph(llm_with_tools):
 
                     results.append(ToolMessage(content=content, tool_call_id=tool_call["id"], name=tool_name))
                 except Exception as e:
-                    err = f"错误: 工具 {tool_name} 调用失败: {e}。请按工具 schema 重新构造参数。"
+                    err = (
+                        f"错误: 工具 {tool_name} 调用失败: {e}。"
+                        "请按工具 schema 重新构造参数。"
+                        "若调用 generate_document，document 字段必须是对象(dict)而不是 JSON 字符串。"
+                    )
                     print(f"[Tools] ❌ {err}")
                     results.append(ToolMessage(content=err, tool_call_id=tool_call["id"], name=tool_name))
             else:
@@ -183,6 +188,7 @@ def build_graph(llm_with_tools):
                     "段落/字符/单元格/表格样式字段只能填样式ID（如 pS_1、rS_1、cS_1、tS_1），"
                     "并在 styles 字典中提供对应样式数组。确保 JSON 结构完整。"
                     "正文中如果需要引号，请优先使用中文引号“”，或对英文双引号进行转义。"
+                    "若内容过长，可拆成多次 generate_document 调用分批输出。"
                 ),
             ]
         }
@@ -211,7 +217,8 @@ def build_graph(llm_with_tools):
                 continue
 
             try:
-                result = tool_fn.invoke(parsed_args)
+                normalized_args = normalize_tool_args(tool_name, parsed_args)
+                result = tool_fn.invoke(normalized_args)
                 if isinstance(result, dict):
                     content = json.dumps(result, ensure_ascii=False)
                 elif isinstance(result, str):
@@ -222,7 +229,7 @@ def build_graph(llm_with_tools):
                 repaired_tool_calls.append(
                     {
                         "name": tool_name,
-                        "args": parsed_args,
+                        "args": normalized_args,
                         "id": tc.get("id", "repaired_invalid_tool_call"),
                         "type": "tool_call",
                     }
@@ -256,7 +263,8 @@ def build_graph(llm_with_tools):
                 SystemMessage(
                     content="[RETRY_GENERATE] 你刚才的 generate_document tool call 参数不是合法 JSON。"
                     "请仅重试一次，并确保：1) JSON 完整；2) 样式使用 ID 引用；"
-                    "3) 文本中不要直接使用未转义的英文双引号，改用中文引号“”或先转义。"
+                    "3) 文本中不要直接使用未转义的英文双引号，改用中文引号“”或先转义；"
+                    "4) 若内容过长可拆成多次 generate_document 调用。"
                 ),
             ]
         }
@@ -391,12 +399,12 @@ async def process_writing_request_stream(
         # 构建初始消息列表
         messages = []
 
-        # 注入系统提示技能（拆分为多个 SystemMessage，便于维护和按模式裁剪）
-        for skill_prompt in get_agent_prompt_skills(mode=mode):
+        # 注入核心技能（身份、风格、基本规则 — 始终加载）
+        for skill_prompt in get_core_skills(mode=mode):
             messages.append(SystemMessage(content=skill_prompt))
 
-        # 注入系统提示（从模块化 md 文件加载，合并为单条 SystemMessage 以兼容小模型）
-        # messages.append(SystemMessage(content=get_agent_prompt(mode=mode)))
+        # 注入按需技能索引（告知 Agent 可用技能及加载时机）
+        messages.append(SystemMessage(content=get_on_demand_skill_index()))
 
         # 注入自定义提示（如果有）
         from app.services.llm_client import get_custom_prompt
@@ -603,6 +611,11 @@ async def process_writing_request_stream(
                         print(f"[Agent] ⏭️ 跳过 read_document 工具返回值")
                         continue
 
+                    if tool_name == "load_skill":
+                        # load_skill 结果是内部提示注入，不发给前端
+                        print(f"[Agent] ⏭️ 跳过 load_skill 工具返回值")
+                        continue
+
                     if tool_name == "generate_document":
                         # generate_document 结果发给前端渲染
                         generate_tool_result = True
@@ -613,7 +626,11 @@ async def process_writing_request_stream(
                                 yield f"data: {json.dumps({'type': 'json', 'content': doc_json}, ensure_ascii=False)}\n\n"
                                 continue
                         except json.JSONDecodeError:
-                            pass
+                            # 工具调用失败时 content 是错误字符串，主动透传状态避免前端无反馈
+                            err_msg = content if isinstance(content, str) else str(content)
+                            print(f"[Agent] ❌ generate_document 返回非 JSON: {err_msg}")
+                            yield f"data: {json.dumps({'type': 'status', 'content': err_msg}, ensure_ascii=False)}\n\n"
+                            continue
 
                     if tool_name == "delete_document":
                         # delete_document 结果是确认/取消信息，不需要转发（stream_writer 已经处理了状态）

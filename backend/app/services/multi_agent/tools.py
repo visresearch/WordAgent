@@ -275,9 +275,14 @@ class RangeFilter(BaseModel):
 class QueryFilter(BaseModel):
     """查询筛选条件，所有字段为 AND 关系。只需填写需要筛选的字段，其余留空。"""
 
-    # 文本匹配
-    text: str | None = Field(
-        default=None, description="文本包含匹配（run 级别匹配 run.text；paragraph 级别拼接所有 runs 的 text）"
+    # 文本匹配（统一使用正则）
+    regex: str | None = Field(
+        default=None,
+        description="正则表达式匹配文本（run 级别匹配 run.text；paragraph 级别匹配段落拼接文本）",
+    )
+    regexFlags: str | None = Field(
+        default="i",
+        description="正则标志位，如 i(忽略大小写)、m(多行)、s(dotall)。例如 'im'",
     )
 
     # Run 级别样式（type=run 时直接匹配；type=paragraph 时检查段落中是否存在匹配的 run）
@@ -500,7 +505,12 @@ def generate_document(document: DocumentOutput) -> dict:
     - tables: Table 对象的数组（可选）
     - styles: 样式字典（必填，且必须覆盖所有样式引用）
     - insertParaIndex: 插入位置（段落索引，0-based），前端在该段落之前插入内容
+    - document 必须是对象(dict)，不能把整个 document 再包成 JSON 字符串
     不要把 "tables" 字符串放进 paragraphs 数组里！
+
+    【长文分批生成】
+    当内容很长时，可多次调用 generate_document 分批输出（每次一部分段落），
+    以降低超长 JSON 或截断导致的调用失败风险。
 
     【表格生成说明】
     表格通过 tables 数组生成，每个 Table 对象包含：
@@ -553,7 +563,7 @@ def generate_document(document: DocumentOutput) -> dict:
 
 
 @tool
-def query_document(query: DocumentQuery) -> str:
+def search_documnet(query: DocumentQuery) -> str:
     """
     搜索文档内容 - 在前端文档中按文本或样式条件搜索匹配内容。
 
@@ -562,8 +572,9 @@ def query_document(query: DocumentQuery) -> str:
     - 用户说"加粗的楷体文字": type=run, filters={bold: true, fontName: "楷体"}
     - 用户说"所有标题": type=paragraph, filters={styleName: "标题"}
     - 用户说"字号大于14的文字": type=run, filters={fontSize: {gt: 14}}
-    - 用户说"搜索关键词xxx": type=run, filters={text: "xxx"}
-    - 用户说"找到实习目的": type=run, filters={text: "实习目的"}
+    - 用户说"搜索关键词xxx": type=run, filters={regex: "xxx", regexFlags: "i"}
+    - 用户说"找到实习目的": type=run, filters={regex: "实习目的", regexFlags: ""}
+    - 用户说"按正则找学号": type=run, filters={regex: "\\d{8}", regexFlags: ""}
 
     【JSON 结构说明】
     文档中 paragraph 没有顶层 text 字段，文本通过 runs[].text 拼接获得。
@@ -594,23 +605,23 @@ def query_document(query: DocumentQuery) -> str:
     filter_desc = ", ".join(f"{k}={v}" for k, v in filters.items())
     writer(
         {
-            "type": "query_document",
+            "type": "search_documnet",
             "content": f"🔍 正在搜索文档: {filter_desc}",
             "query": query_dict,
         }
     )
-    print(f"[query_document] 请求前端搜索文档 (type={query_type}, filters={filters})")
+    print(f"[search_documnet] 请求前端搜索文档 (type={query_type}, filters={filters})")
 
     # 通过 WebSocket 回调等待前端查询结果
     chat_id = _current_chat_id.get(None)
     if is_stop_requested(chat_id):
-        print("[query_document] ⛔ 检测到停止请求，终止搜索")
+        print("[search_documnet] ⛔ 检测到停止请求，终止搜索")
         return '{"matches": [], "matchCount": 0, "error": "stopped_by_user"}'
 
     if chat_id:
         q = _pending_tool_requests.get(chat_id)
         if q:
-            print(f"[query_document] WebSocket 模式，等待前端回传查询结果 (session={chat_id})")
+            print(f"[search_documnet] WebSocket 模式，等待前端回传查询结果 (session={chat_id})")
 
             loop = _pending_loops.get(chat_id)
             if loop:
@@ -621,7 +632,7 @@ def query_document(query: DocumentQuery) -> str:
                 try:
                     result = future.result(timeout=35)
                     if result.get("type") == "stop" or result.get("error") == "stopped_by_user":
-                        print("[query_document] ⛔ 用户已停止，终止搜索")
+                        print("[search_documnet] ⛔ 用户已停止，终止搜索")
                         return '{"matches": [], "matchCount": 0, "error": "stopped_by_user"}'
                     matches = result.get("matches", [])
                     match_count = result.get("matchCount", 0)
@@ -639,7 +650,7 @@ def query_document(query: DocumentQuery) -> str:
                     ]
 
                     if match_count > 0:
-                        print(f"[query_document] ✅ 查询完成，匹配 {match_count} 项，涉及段落 {matched_para_indices}")
+                        print(f"[search_documnet] ✅ 查询完成，匹配 {match_count} 项，涉及段落 {matched_para_indices}")
                         writer(
                             {
                                 "type": "query_complete",
@@ -657,7 +668,7 @@ def query_document(query: DocumentQuery) -> str:
                             ensure_ascii=False,
                         )
                     else:
-                        print("[query_document] ⚠️ 未找到匹配项")
+                        print("[search_documnet] ⚠️ 未找到匹配项")
                         writer({"type": "query_complete", "content": "⚠️ 未找到匹配内容，建议更换关键词重试"})
                         return json.dumps(
                             {
@@ -671,15 +682,15 @@ def query_document(query: DocumentQuery) -> str:
                             ensure_ascii=False,
                         )
                 except (TimeoutError, concurrent.futures.TimeoutError):
-                    print("[query_document] ⏰ 等待查询结果超时")
+                    print("[search_documnet] ⏰ 等待查询结果超时")
                     writer({"type": "status", "content": "⏰ 搜索超时"})
                     return '{"matches": [], "matchCount": 0, "error": "timeout"}'
                 except Exception as e:
-                    print(f"[query_document] ❌ 等待查询结果出错: {e}")
+                    print(f"[search_documnet] ❌ 等待查询结果出错: {e}")
                     return '{"matches": [], "matchCount": 0, "error": "' + str(e) + '"}'
 
     # 非 WebSocket 模式
-    print("[query_document] ⚠️ 非 WebSocket 模式，无法执行查询")
+    print("[search_documnet] ⚠️ 非 WebSocket 模式，无法执行查询")
     return '{"matches": [], "matchCount": 0, "error": "non-websocket"}'
 
 
@@ -959,7 +970,7 @@ def create_workflow(workflow: Workflow) -> str:
 
     可用的 agent：
     - research: 负责搜索网络资料（web_search, web_fetch）
-    - outline: 负责读取文档和生成大纲（read_document, query_document）
+    - outline: 负责读取文档和生成大纲（read_document, search_documnet）
     - writer: 负责生成 Word 文档（generate_document）
     - reviewer: 负责审核文档质量并打分（review_document）
 
@@ -1037,7 +1048,7 @@ def delete_document(startParaIndex: int = 0, endParaIndex: int = -1) -> str:
     【调用场景】
     - 用户要求删除某些段落、章节或内容
     - 用户说"删掉第X段"、"把这部分去掉"、"移除这段内容"
-    - 配合 query_document 定位后，删除匹配的段落
+    - 配合 search_documnet 定位后，删除匹配的段落
 
     【注意】
     - 删除操作需要用户在前端确认后才会执行
@@ -1064,14 +1075,14 @@ def delete_document(startParaIndex: int = 0, endParaIndex: int = -1) -> str:
 
 # region Tools 注册
 
-ALL_TOOLS = [read_document, generate_document, delete_document, query_document, web_search, web_fetch]
+ALL_TOOLS = [read_document, generate_document, delete_document, search_documnet, web_search, web_fetch]
 TOOL_MAP = {t.name: t for t in ALL_TOOLS}
 
 # 按 agent 角色分组的工具集
 PLANNER_TOOLS = [create_workflow]
 RESEARCH_TOOLS = [web_search, web_fetch]
-OUTLINE_TOOLS = [read_document, query_document]
-WRITER_TOOLS = [generate_document, delete_document, read_document, query_document]
+OUTLINE_TOOLS = [read_document, search_documnet]
+WRITER_TOOLS = [generate_document, delete_document, read_document, search_documnet]
 REVIEWER_TOOLS = [review_document]
 
 AGENT_TOOLS = {

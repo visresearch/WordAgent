@@ -17,6 +17,7 @@
 /* global Word */
 
 import { parseDocxToJSON } from "./docxJsonConverter.js";
+import { executeStyleQuery } from "./docxQuery.js";
 
 // ============== 配置 ==============
 
@@ -246,7 +247,6 @@ const wsManager = {
 
   /**
    * 处理后端的文档查询请求：解析全文后执行查询并回传
-   * Office.js 版暂时返回全文段落作为查询结果
    * @param {Object} query - Query DSL 对象
    */
   async _handleQueryRequest(query) {
@@ -257,23 +257,21 @@ const wsManager = {
         throw new Error(docData.error);
       }
 
-      // Office.js 版暂无 docxQuery，返回全文段落供后端处理
-      const paragraphs = docData.paragraphs || [];
-      const matches = paragraphs
-        .map((p, index) => ({
-          index,
-          text: (p.runs || []).map((r) => r.text || "").join(""),
-          pStyle: p.pStyle,
-        }))
-        .filter((m) => m.text);
+      const result = executeStyleQuery(docData, query || {});
+      const matchedParaIndices = [...new Set(
+        (result.matches || [])
+          .map((m) => m?.paragraphIndex)
+          .filter((idx) => Number.isInteger(idx))
+      )].sort((a, b) => a - b);
 
       await this.send({
         type: "query_response",
-        matches: matches,
-        matchCount: matches.length,
+        matches: result.matches,
+        matchCount: result.matchCount,
       });
 
-      console.log("[WebSocket] 已回传查询结果，段落数:", matches.length);
+      console.log("[WebSocket] 已回传查询结果，匹配数:", result.matchCount);
+      console.log("[WebSocket] 匹配段落索引:", matchedParaIndices);
     } catch (err) {
       console.error("[WebSocket] 查询文档失败:", err);
       await this.send({

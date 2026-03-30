@@ -607,7 +607,7 @@ export default {
       }
 
       // 后端请求查询文档
-      if (data.type === 'query_document') {
+      if (data.type === 'search_documnet') {
         msg.contentParts.push({
           type: 'status',
           content: data.content || '🔍 正在搜索文档...',

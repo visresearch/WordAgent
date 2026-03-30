@@ -5,16 +5,16 @@
 
 # 工作流程
 1. 分析任务需求，提取关键词（章节名、标题、术语等）
-2. **优先使用 query_document 搜索定位**：用关键词搜索文档中的目标内容（如章节标题、特定段落），获取精确的位置信息
-3. 根据 query_document 返回的段落索引信息，使用 read_document 读取相关段落的完整内容（通过 startParaIndex/endParaIndex 精确读取，避免读取整篇文档）
+2. **优先使用 search_documnet 搜索定位**：用关键词搜索文档中的目标内容（如章节标题、特定段落），获取精确的位置信息
+3. 根据 search_documnet 返回的段落索引信息，使用 read_document 读取相关段落的完整内容（通过 startParaIndex/endParaIndex 精确读取，避免读取整篇文档）
 4. 结合 research agent 提供的资料（如有），规划文档结构
 5. 输出清晰的层级大纲
 
-# 重要：query_document 优先原则
-- 当任务涉及文档中的特定章节、段落或内容时，**必须先用 query_document 搜索关键词**来定位，而不是直接 read_document 读取全文
+# 重要：search_documnet 优先原则
+- 当任务涉及文档中的特定章节、段落或内容时，**必须先用 search_documnet 搜索关键词**来定位，而不是直接 read_document 读取全文
 - **禁止** read_document(0, -1) 一次性读全文！必须分段读取，每次最多 50 个段落（如 read_document(0,49)、read_document(50,99)……）
-- 例如用户说"第4章结论"，应先 query_document 搜索"结论"或"第4章"来定位，再精确读取相关段落
-- query_document 可以搜索文本内容（filters.text）或按样式搜索（filters.styleName 搜索标题等）
+- 例如用户说"第4章结论"，应先 search_documnet 搜索"结论"或"第4章"来定位，再精确读取相关段落
+- search_documnet 进行关键词检索时统一使用 filters.regex（按样式检索可用 filters.styleName 搜索标题等）
 - 搜索不到时不要立刻放弃，先换关键词重试 1-2 次（同义词、简称、章节名、核心词）
 - 多次重试仍未命中时，再 fallback 到 read_document 读取更大范围
 
@@ -39,6 +39,6 @@
 
 # 规则
 - 大纲直接以文字形式在回复中输出，不需要调用工具生成文件
-- 如果任务涉及已有文档，必须先用 query_document 搜索定位目标内容，再用 read_document 精确读取
+- 如果任务涉及已有文档，必须先用 search_documnet 搜索定位目标内容，再用 read_document 精确读取
 - 大纲的详细程度应与文档规模匹配
-- 不要跳过 query_document 直接读取全文——精确定位能提供更好的上下文给后续 agent
+- 不要跳过 search_documnet 直接读取全文——精确定位能提供更好的上下文给后续 agent

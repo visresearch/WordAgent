@@ -479,7 +479,7 @@ async function parseDocumentRange(startParaIndex = 0, endParaIndex = -1) {
           result = parseDocxToJSON(null, startParaIndex, endParaIndex);
         }
 
-        // read_document / query_document 回包仅返回文档内容，不携带全局 meta。
+        // read_document / search_documnet 回包仅返回文档内容，不携带全局 meta。
         // 全局 meta 在 chatStream 中通过 documentMeta 单独发送。
 
         resolve(result);

@@ -18,11 +18,11 @@
 
 ## 1. Overview
 
-Word Agent is an AI-assisted writing system (single-agent and multi-agent) for office suites such as WPS and Microsoft Word. After installing the add-in, users can interact with AI through natural language to get writing suggestions, content generation, and structure optimization.
+Word Agent is an AI-assisted writing system (single-agent and multi-agent): WenCe AI. After installing the add-in in office suites (such as WPS and Microsoft Word), users can interact with AI through natural language to get writing suggestions, content generation, and structure optimization.
 
 > WenCe AI (Word Agent): strategy-driven writing, smarter expression.
 
-The backend is built with FastAPI. The frontend add-ins communicate with the backend through streaming interfaces so users can see LLM outputs in real time.
+The backend is built with FastAPI. The frontend add-ins communicate with the backend through streaming interfaces so users can see LLM outputs in real time and get a seamless writing-assistant experience.
 
 The frontend is built with Vue 3 and JavaScript. A key module is the DocxJson bidirectional converter, which transforms formatted Word content to JSON and back.
 
@@ -42,8 +42,8 @@ Main data structures:
 
 Compared with common AI writing tools, WenCe AI focuses on:
 
-1. **Cross-version and cross-platform compatibility**: built on mainstream office software, available on Windows and Linux.
-2. **Native rich-text document editing**: agents understand Word structure and can modify both content and structure with formatting awareness.
+1. **Cross-version and cross-platform compatibility**: built on mainstream office software with a Copilot-like add-in experience, available on Windows and Linux.
+2. **Native rich-text document editing**: agents understand Word structure, can search the web, and can modify both structure and content with formatting awareness.
 3. **Efficient editing with multi-agent collaboration**: specialized agents cooperate to produce deeper long-form content.
 4. **Open model ecosystem**: users can configure their own API providers and models.
 
@@ -58,6 +58,12 @@ Example (single-agent mode): in WPS, a user asks for a detailed report on the Ir
 ![](./docs/preview.png)
 
 Generated content includes both text and formatting metadata (title/body styles, bold, fonts, indentation, spacing, etc.), which allows rendering as a properly formatted Word document.
+
+Another example: when a user asks, "Expand my internship objective into five points," the agent can first call `query_document` to locate target paragraphs, then call `read_document` to fetch the original content, call `delete_document` to remove old text, and finally call `generate_document` to produce the rewritten result.
+
+The frontend add-in can render before/after changes with different highlight colors so users can clearly see what was modified.
+
+![](./docs/preview2.png)
 
 ## 3. Roadmap
 
@@ -109,40 +115,31 @@ The frontend flow is the same, while the backend uses a planner-driven multi-age
 - Python 3.11.14
 - Windows 10/11 or Ubuntu 22.04
 
-### 5.2 Build WPS add-in
+### 5.2 Build frontend add-in
 
 ```bash
+# Option A: WPS Word add-in
 cd frontend/wps_word_plugin
+# Option B: Microsoft Word add-in
+# cd frontend/microsoft_word_plugin
 pnpm install
 pnpm build
 ```
 
-### 5.3 Build Microsoft Word add-in
-
-```bash
-cd frontend/microsoft_word_plugin
-pnpm install
-pnpm build
-```
-
-### 5.4 Run backend service
+### 5.3 Run backend service
 
 ```bash
 cd backend
-uv venv --python 3.11.14
-source .venv/bin/activate  # Linux
-.venv\Scripts\activate     # Windows
-uv sync
 uv run python main.py
 ```
 
-### 5.5 LangSmith tracing
+### 5.4 LangSmith tracing
 
 The project supports LangSmith tracing for agent behavior analysis. See [backend/README.md](backend/README.md) for setup details.
 
 ![](./docs/Langsmith.png)
 
-### 5.6 Packaging
+### 5.5 Packaging
 
 ```bash
 cd backend/deploy
@@ -153,13 +150,13 @@ Built binaries are located in `backend/deploy/dist`.
 
 You can also download packaged artifacts from Releases.
 
-### 5.7 Download
+### 5.6 Download
 
 Release artifacts: [Release](https://github.com/visresearch/WordAgent/releases)
 
-### 5.8 Run packaged app
+### 5.7 Run packaged app
 
-Double-click the executable, start backend service, install add-in, open Word/WPS, trust the add-in, and start using the system.
+After download, extract the package and run the executable. Start backend service (`wence_word_plugin` -> install), open Word, trust the add-in, and start using the system.
 
 You must configure an LLM API provider. The project has been tested with Alibaba Bailian Qwen models.
 
@@ -169,14 +166,14 @@ Current compatibility status (ongoing):
 
 - [x] Qwen 3.5 Plus (stable)
 - [x] Qwen3 Max (stable)
+- [x] GLM-5 (stable)
+- [x] GPT 5.4 (stable)
 - [x] MiniMax M2.5 (stable)
 - [x] Step 3.5 Flash (stable)
+- [x] DeepSeek v3.2 (stable)
 - [x] Kimi K2.5 (may enter tool-call loops)
-- [x] Qwen Max (unstable tool calls in some scenarios)
-- [x] DeepSeek v3.2 (possible generation hangs)
-- [x] ChatGLM (possible generation hangs)
+- [x] Qwen Max (unstable tool calls, may fail to generate document)
 - [ ] Gemini 3.1 Pro
-- [ ] GPT 5.4
 
 Note: part of development used free credits from [Alibaba Bailian](https://bailian.console.aliyun.com/) and [OpenRouter](https://openrouter.ai/models?q=free).
 
