@@ -161,7 +161,7 @@ def build_graph(llm_with_tools):
                     err = (
                         f"错误: 工具 {tool_name} 调用失败: {e}。"
                         "请按工具 schema 重新构造参数。"
-                        "若调用 generate_document，document 字段必须是对象(dict)而不是 JSON 字符串。"
+                        "若调用 edit_document，document 字段必须是对象(dict)而不是 JSON 字符串。"
                     )
                     print(f"[Tools] ❌ {err}")
                     results.append(ToolMessage(content=err, tool_call_id=tool_call["id"], name=tool_name))
@@ -183,12 +183,14 @@ def build_graph(llm_with_tools):
             "messages": [
                 RemoveMessage(id=last_message.id),
                 SystemMessage(
-                    content="[RETRY_GENERATE] 你刚才尝试调用 generate_document 但 tool call 无效（可能是 JSON 不完整或被截断）。"
-                    "请再次调用 generate_document 工具生成文档，并确保参数是完整合法 JSON。必须使用新版样式引用格式："
+                    content="[RETRY_EDIT] 你刚才尝试调用 edit_document 但 tool call 无效（可能是 JSON 不完整或被截断）。"
+                    "请再次调用 edit_document 工具编辑文档，并确保参数是完整合法 JSON。必须使用新版样式引用格式："
                     "段落/字符/单元格/表格样式字段只能填样式ID（如 pS_1、rS_1、cS_1、tS_1），"
-                    "并在 styles 字典中提供对应样式数组。确保 JSON 结构完整。"
+                    "并在 styles 字典中提供对应样式数组。document.styles 是必填字段。"
+                    "若有 document.paragraphs，每个段落必须提供 paraIndex。"
+                    "删除-only 场景不要传 document。确保 JSON 结构完整。"
                     "正文中如果需要引号，请优先使用中文引号“”，或对英文双引号进行转义。"
-                    "若内容过长，可拆成多次 generate_document 调用分批输出。"
+                    "若内容过长，可拆成多次 edit_document 调用分批输出。"
                 ),
             ]
         }
@@ -261,10 +263,12 @@ def build_graph(llm_with_tools):
             "messages": [
                 RemoveMessage(id=last_message.id),
                 SystemMessage(
-                    content="[RETRY_GENERATE] 你刚才的 generate_document tool call 参数不是合法 JSON。"
+                    content="[RETRY_EDIT] 你刚才的 edit_document tool call 参数不是合法 JSON。"
                     "请仅重试一次，并确保：1) JSON 完整；2) 样式使用 ID 引用；"
-                    "3) 文本中不要直接使用未转义的英文双引号，改用中文引号“”或先转义；"
-                    "4) 若内容过长可拆成多次 generate_document 调用。"
+                    "3) document.styles 必填且覆盖所有引用样式；"
+                    "4) 若有 document.paragraphs，则每段必须有 paraIndex；"
+                    "5) 文本中不要直接使用未转义的英文双引号，改用中文引号“”或先转义；"
+                    "6) 若内容过长可拆成多次 edit_document 调用。"
                 ),
             ]
         }
@@ -322,9 +326,7 @@ def build_graph(llm_with_tools):
 
         if should_retry:
             # 检查是否已经重试过（防止无限循环）
-            has_retried = any(
-                isinstance(m, SystemMessage) and "[RETRY_GENERATE]" in m.content for m in state["messages"]
-            )
+            has_retried = any(isinstance(m, SystemMessage) and "[RETRY_EDIT]" in m.content for m in state["messages"])
             if not has_retried:
                 print("[Router] -> retry")
                 return "retry"
@@ -445,7 +447,11 @@ async def process_writing_request_stream(
             user_content = (
                 f"用户要求：{message}\n\n"
                 f"⚠️ 请先调用 read_document 工具读取以下文档范围（必须调用，不可跳过）：\n{range_instructions}\n"
-                f"读取到文档内容后，根据用户要求进行处理，并调用 generate_document 工具输出结果。"
+                "读取到文档内容后，根据用户要求进行处理，并调用 edit_document 工具输出结果。\n"
+                "⚠️ edit_document 参数硬约束：\n"
+                "- delete-only：只传 startParaIndex/endParaIndex 或 deleteRanges，不传 document。\n"
+                "- insert/replace：document.styles 必填；document.paragraphs 每个段落都必须提供 paraIndex。\n"
+                "- 若缺少 styles 或 paraIndex，先补齐后再调用，禁止直接调用。"
             )
             print(f"[Agent] 文档范围: {document_range}")
 
@@ -518,8 +524,9 @@ async def process_writing_request_stream(
         # 队列用于线程间传递流式数据
         queue: asyncio.Queue = asyncio.Queue()
         has_tool_result = False
-        generate_tool_result = False
-        generating_notified = False  # 是否已通知前端"正在生成文档"
+        edit_tool_result = False
+        edit_tool_called = False
+        editing_notified = False  # 是否已通知前端"正在编辑文档"
         _collected_text_parts: list[str] = []  # 收集 AI 回复文本，用于存入长期记忆
         # 构建 LangSmith tracing config（可选）
         langsmith_config = None
@@ -590,15 +597,15 @@ async def process_writing_request_stream(
                 msg = chunk[0]
                 content = msg.content
 
-                # 检测 LLM 开始生成 generate_document 的 tool_call 参数
-                if isinstance(msg, AIMessageChunk) and not generating_notified:
+                # 检测 LLM 开始生成 edit_document 的 tool_call 参数
+                if isinstance(msg, AIMessageChunk) and not editing_notified:
                     tool_call_chunks = getattr(msg, "tool_call_chunks", [])
                     for tc in tool_call_chunks:
-                        if tc.get("name") == "generate_document":
-                            generating_notified = True
-                            print("[Agent] 📝 检测到 LLM 准备生成文档")
+                        if tc.get("name") == "edit_document":
+                            editing_notified = True
+                            print("[Agent] 📝 检测到 LLM 准备编辑文档")
                             # 这里是流式 chunk 的早期信号，模型后续仍可能放弃 tool call
-                            yield f"data: {json.dumps({'type': 'generate_document', 'content': '📝 正在准备生成文档'}, ensure_ascii=False)}\n\n"
+                            yield f"data: {json.dumps({'type': 'edit_document', 'content': '📝 正在准备编辑文档'}, ensure_ascii=False)}\n\n"
                             break
 
                 if isinstance(msg, ToolMessage):
@@ -616,26 +623,27 @@ async def process_writing_request_stream(
                         print(f"[Agent] ⏭️ 跳过 load_skill 工具返回值")
                         continue
 
-                    if tool_name == "generate_document":
-                        # generate_document 结果发给前端渲染
-                        generate_tool_result = True
+                    if tool_name == "edit_document":
+                        # edit_document 结果在有插入内容时发给前端渲染
+                        edit_tool_called = True
                         try:
-                            doc_json = json.loads(content)
-                            if "paragraphs" in doc_json:
-                                print(f"[Agent] ✅ 提取到 generate_document 结果")
-                                yield f"data: {json.dumps({'type': 'json', 'content': doc_json}, ensure_ascii=False)}\n\n"
+                            payload = json.loads(content)
+                            if isinstance(payload, dict) and ("paragraphs" in payload or "tables" in payload):
+                                edit_tool_result = True
+                                print("[Agent] ✅ 提取到 edit_document 结果")
+                                yield f"data: {json.dumps({'type': 'json', 'content': payload}, ensure_ascii=False)}\n\n"
                                 continue
-                        except json.JSONDecodeError:
-                            # 工具调用失败时 content 是错误字符串，主动透传状态避免前端无反馈
-                            err_msg = content if isinstance(content, str) else str(content)
-                            print(f"[Agent] ❌ generate_document 返回非 JSON: {err_msg}")
-                            yield f"data: {json.dumps({'type': 'status', 'content': err_msg}, ensure_ascii=False)}\n\n"
+                            # delete-only 等非插入结果不需要转发
                             continue
-
-                    if tool_name == "delete_document":
-                        # delete_document 结果是确认/取消信息，不需要转发（stream_writer 已经处理了状态）
-                        print(f"[Agent] ⏭️ 跳过 delete_document 工具返回值: {content}")
-                        continue
+                        except json.JSONDecodeError:
+                            # edit_document 在删除-only场景可能返回文本确认；状态已通过 stream_writer 发送
+                            msg_text = content if isinstance(content, str) else str(content)
+                            if msg_text.startswith("错误:"):
+                                print(f"[Agent] ❌ edit_document 返回错误: {msg_text}")
+                                yield f"data: {json.dumps({'type': 'status', 'content': msg_text}, ensure_ascii=False)}\n\n"
+                            else:
+                                print(f"[Agent] ⏭️ 跳过 edit_document 非 JSON 返回: {msg_text}")
+                            continue
 
                     # 其他工具的结果，跳过
                     continue
@@ -658,21 +666,21 @@ async def process_writing_request_stream(
         if not has_tool_result and document_range:
             yield f"data: {json.dumps({'type': 'status', 'content': '⚠️ 没有检测到调用工具，模型可能不支持'}, ensure_ascii=False)}\n\n"
 
-        # 处理"看到生成草稿但最终未真正调用 generate_document"的场景（仅打印日志，不推送给前端避免困惑）
-        if generating_notified and not generate_tool_result:
-            print("[Agent] ❗ 模型取消了文档生成")
-            yield f"data: {json.dumps({'type': 'status', 'content': '❗ 模型取消了文档生成，请重新尝试'}, ensure_ascii=False)}\n\n"
+        # 处理"看到编辑草稿但最终未真正插入文档"的场景（仅打印日志，不推送给前端避免困惑）
+        if editing_notified and not edit_tool_called:
+            print("[Agent] ❗ 模型取消了文档编辑")
+            yield f"data: {json.dumps({'type': 'status', 'content': '❗ 模型取消了文档编辑，请重新尝试'}, ensure_ascii=False)}\n\n"
 
         # 将本轮对话存入长期记忆
         assistant_text = "".join(_collected_text_parts)
-        if assistant_text or generate_tool_result:
+        if assistant_text or edit_tool_called or edit_tool_result:
             try:
                 from app.services.memory import store_conversation_to_long_term
 
                 store_conversation_to_long_term(
                     session_id=chat_id or "",
                     user_message=message,
-                    assistant_message=assistant_text or "[已生成文档]",
+                    assistant_message=assistant_text or "[已编辑文档]",
                     model=model,
                     mode=mode,
                 )

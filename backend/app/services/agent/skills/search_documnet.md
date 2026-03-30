@@ -38,7 +38,7 @@ assistant: [调用 search_documnet({"type": "run", "filters": {"fontSize": {"gt"
 
 <example>
 user: 帮我润色"实习目的"那部分
-assistant: [先 search_documnet 定位 -> 拿到 paragraphIndex -> 再 read_document(startParaIndex, endParaIndex) 读取匹配段落 -> generate_document 输出]
+assistant: [先 search_documnet 定位 -> 拿到 paragraphIndex -> 再 read_document(startParaIndex, endParaIndex) 读取匹配段落 -> edit_document 输出]
 </example>
 
 <example>

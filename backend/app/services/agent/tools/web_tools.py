@@ -59,13 +59,18 @@ def web_fetch(url: str) -> str:
             or soup.find(
                 "div",
                 class_=lambda c: c
-                and any(k in (c if isinstance(c, str) else " ".join(c)) for k in ["content", "article", "post", "entry", "main"]),
+                and any(
+                    k in (c if isinstance(c, str) else " ".join(c))
+                    for k in ["content", "article", "post", "entry", "main"]
+                ),
             )
         )
         target = main_content if main_content else soup.body if soup.body else soup
 
         lines = []
-        for elem in target.find_all(["h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "td", "th", "blockquote", "pre", "code"]):
+        for elem in target.find_all(
+            ["h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "td", "th", "blockquote", "pre", "code"]
+        ):
             text = elem.get_text(strip=True)
             if not text:
                 continue

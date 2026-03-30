@@ -79,12 +79,12 @@ def normalize_tool_args(tool_name: str, raw_args: Any) -> dict:
 
     # 兼容模型将 document 误生成为 JSON 字符串的情况
     # 预期: {"document": {...}}，实际偶发: {"document": "{...}"}
-    if tool_name == "generate_document":
+    if tool_name in {"edit_document"}:
         document = args.get("document")
         if isinstance(document, str):
             parsed_document = parse_tool_args_with_repair(document)
             if not isinstance(parsed_document, dict):
-                raise ValueError("generate_document.document 必须是对象(dict)，不能是字符串")
+                raise ValueError(f"{tool_name}.document 必须是对象(dict)，不能是字符串")
             args = {**args, "document": parsed_document}
 
     return args

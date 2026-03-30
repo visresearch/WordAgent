@@ -15,6 +15,11 @@ class Run(BaseModel):
 class Paragraph(BaseModel):
     """段落 - 每行内容独立为一个段落，禁止在 text 中使用 \\n 换行。runs 为空数组时表示空段落"""
 
+    paraIndex: int | None = Field(
+        default=None,
+        description="目标段落索引（0-based）。edit_document 写入时建议为每个段落显式提供 paraIndex。",
+    )
+
     pStyle: str = Field(
         description='段落样式引用ID，如 "pS_1"，对应 document.styles["pS_1"]。空段落时可省略', default=""
     )
@@ -23,13 +28,6 @@ class Paragraph(BaseModel):
         "禁止在 text 中使用 \\n 换行，换行必须新建段落。空段落时为空数组。",
         default_factory=list,
     )
-
-    @model_validator(mode="after")
-    def validate_empty_paragraph_shape(self):
-        """runs 为空时视为空段落，空段落要求 pStyle 为空字符串。"""
-        if not self.runs and self.pStyle != "":
-            raise ValueError("空段落（runs 为空数组）要求 pStyle 为空字符串")
-        return self
 
 
 class CellParagraph(BaseModel):
@@ -66,6 +64,14 @@ class Cell(BaseModel):
 class Table(BaseModel):
     """表格。包含行列数、单元格内容、表格样式，以及可选的列宽和行高控制。"""
 
+    paraIndex: int | None = Field(
+        default=None,
+        description="目标段落索引（0-based）。按 paraIndex 插入模式下，建议为每个表格显式提供 paraIndex。",
+    )
+    endParaIndex: int | None = Field(
+        default=None,
+        description="表格结束段落索引（0-based，可选，主要用于读取结果回传/替换定位）。",
+    )
     rows: int = Field(description="行数")
     columns: int = Field(description="列数")
     cells: list[list[Cell]] = Field(description="单元格二维数组，cells[row][col]")
@@ -109,11 +115,9 @@ class DocumentOutput(BaseModel):
         "rowSpan/colSpan: 合并行/列数; alignment: 同pStyle; verticalAlignment: 0=顶端,1=居中,2=底端。\n"
         "tStyle 数组格式: [tableAlignment]。tableAlignment: 0=左对齐,1=居中,2=右对齐。"
     )
-    insertParaIndex: int = Field(
-        default=-1,
-        description="插入位置（段落索引，0-based），前端会在该段落之前插入生成的内容。"
-        "如果用户选中了文档范围，应设为该范围的 startParaIndex；"
-        "如果是新建内容无特定位置，设为 -1（文档末尾）或 0（文档开头）。",
+    insertParaIndex: int | None = Field(
+        default=None,
+        description="兼容字段（建议不再使用）。优先使用 paragraphs[].paraIndex 指定每个段落写入位置。",
     )
 
     @model_validator(mode="before")
@@ -133,6 +137,14 @@ class DocumentOutput(BaseModel):
                 # 跳过字符串等非法类型
             data["paragraphs"] = cleaned
         return data
+
+    @model_validator(mode="after")
+    def validate_styles_format(self):
+        """校验 styles 的值必须是列表格式。"""
+        for key, value in self.styles.items():
+            if not isinstance(value, list):
+                raise ValueError(f"styles['{key}'] 必须是列表格式，当前是 {type(value).__name__}")
+        return self
 
     @model_validator(mode="after")
     def validate_style_references(self):

@@ -11,7 +11,7 @@ assistant: [调用 web_search("2026年诺贝尔文学奖得主")]
 
 <example>
 user: 写一篇关于量子计算最新进展的文章
-assistant: [先调用 web_search("量子计算 最新进展 2026") 获取资料，再调用 generate_document 生成文档]
+assistant: [先调用 web_search("量子计算 最新进展 2026") 获取资料，再调用 edit_document 生成文档]
 </example>
 
 关键词触发：用户提到"搜索"、"查一下"、"上网找"、"最新"、"最近"或你缺乏相关知识时。

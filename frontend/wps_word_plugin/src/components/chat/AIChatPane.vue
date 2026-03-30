@@ -1047,63 +1047,81 @@ export default {
         return;
       }
 
-      // 后端请求删除文档段落：用蓝色批注标记，加入待删除列表（非阻塞，不影响 agent 继续运行）
-      if (data.type === 'delete_document') {
-        console.log('[AIChatPane] 后端请求删除文档段落, startParaIndex:', data.startParaIndex, 'endParaIndex:', data.endParaIndex);
+      // 统一编辑请求：可同时包含删除范围和插入内容（由 json 消息承载）
+      if (data.type === 'edit_document') {
+        const normalizedDeleteRanges = Array.isArray(data.deleteRanges) && data.deleteRanges.length > 0
+          ? data.deleteRanges
+          : (Number.isInteger(data.startParaIndex)
+            ? [{
+                startParaIndex: data.startParaIndex,
+                endParaIndex: Number.isInteger(data.endParaIndex) ? data.endParaIndex : data.startParaIndex
+              }]
+            : []);
+        const hasDelete = data.hasDelete === true || normalizedDeleteRanges.length > 0;
+        const hasInsert = data.hasInsert === true;
+        console.log('[AIChatPane] 后端请求编辑文档:', data);
+
         msg.contentParts.push({
           type: 'status',
-          content: data.content || `🗑️ 准备删除段落(${data.startParaIndex} - ${data.endParaIndex})`,
-          loading: false
+          content: data.content || '✏️ 正在编辑文档',
+          loading: !!hasInsert
         });
         this.scrollToBottom();
 
-        // 在文档中用蓝色批注标记要删除的段落
-        try {
-          const doc = window.Application.ActiveDocument;
-          if (doc) {
-            let startIdx = data.startParaIndex;
-            let endIdx = data.endParaIndex;
-            const totalParas = doc.Paragraphs.Count;
-            if (endIdx === -1) {
-              endIdx = totalParas - 1;
+        if (hasDelete) {
+          try {
+            const doc = window.Application.ActiveDocument;
+            if (doc) {
+              const totalParas = doc.Paragraphs.Count;
+              for (const rawRange of normalizedDeleteRanges) {
+                let startIdx = Number.isInteger(rawRange?.startParaIndex) ? rawRange.startParaIndex : null;
+                let endIdx = Number.isInteger(rawRange?.endParaIndex) ? rawRange.endParaIndex : startIdx;
+                if (startIdx === null) {
+                  continue;
+                }
+                if (endIdx === -1) {
+                  endIdx = totalParas - 1;
+                }
+
+                if (startIdx >= 0 && endIdx >= startIdx && endIdx < totalParas) {
+                  const startPara = doc.Paragraphs.Item(startIdx + 1); // WPS 1-based
+                  const endPara = doc.Paragraphs.Item(endIdx + 1);
+                  const rangeStart = startPara.Range.Start;
+                  const rangeEnd = endPara.Range.End;
+                  const deleteRange = doc.Range(rangeStart, rangeEnd);
+
+                  const comment = doc.Comments.Add(deleteRange, '待删除内容');
+                  comment.Author = '文策AI-删除';
+
+                  const deleteCount = endIdx - startIdx + 1;
+                  this.pendingDeletes.push({
+                    startParaIndex: startIdx,
+                    endParaIndex: endIdx,
+                    commentStartPos: rangeStart,
+                    commentEndPos: rangeEnd,
+                    preview: `AI 准备删除 ${deleteCount} 个段落（段落 ${startIdx} - ${endIdx}）`,
+                    msg: msg
+                  });
+                }
+              }
+              console.log('[AIChatPane] 已添加编辑删除标记批注，区间数:', normalizedDeleteRanges.length);
             }
-
-            const startPara = doc.Paragraphs.Item(startIdx + 1); // WPS 1-based
-            const endPara = doc.Paragraphs.Item(endIdx + 1);
-            const rangeStart = startPara.Range.Start;
-            const rangeEnd = endPara.Range.End;
-            const deleteRange = doc.Range(rangeStart, rangeEnd);
-
-            const comment = doc.Comments.Add(deleteRange, '待删除内容');
-            comment.Author = '文策AI-删除';
-            console.log('[AIChatPane] 已添加删除标记批注');
-
-            const deleteCount = endIdx - startIdx + 1;
-            this.pendingDeletes.push({
-              startParaIndex: startIdx,
-              endParaIndex: endIdx,
-              commentStartPos: rangeStart,
-              commentEndPos: rangeEnd,
-              preview: `AI 准备删除 ${deleteCount} 个段落（段落 ${startIdx} - ${endIdx}）`,
-              msg: msg
-            });
+          } catch (e) {
+            console.error('[AIChatPane] 标记编辑删除段落失败:', e);
           }
-        } catch (e) {
-          console.error('[AIChatPane] 标记删除段落失败:', e);
         }
         return;
       }
 
-      // 删除完成：替换 loading 状态
-      if (data.type === 'delete_complete') {
-        console.log('[AIChatPane] 文档删除完成');
+      if (data.type === 'edit_complete') {
+        console.log('[AIChatPane] 文档编辑完成');
         const parts = msg.contentParts;
         let found = false;
         for (let i = parts.length - 1; i >= 0; i--) {
           if (parts[i].type === 'status' && parts[i].loading) {
             parts.splice(i, 1, {
               type: 'status',
-              content: data.content || '✅ 删除完成',
+              content: data.content || '✅ 文档编辑完成',
               loading: false
             });
             found = true;
@@ -1113,7 +1131,7 @@ export default {
         if (!found) {
           parts.push({
             type: 'status',
-            content: data.content || '✅ 删除完成',
+            content: data.content || '✅ 文档编辑完成',
             loading: false
           });
         }
@@ -1121,44 +1139,6 @@ export default {
         return;
       }
 
-      if (data.type === 'generate_document') {
-        console.log('[AIChatPane] 生成文档中...');
-        msg.contentParts.push({
-          type: 'status',
-          content: data.content || '📝 正在生成文档',
-          loading: true
-        });
-        this.scrollToBottom();
-        return;
-      }
-
-      if (data.type === 'generate_complete') {
-        console.log('[AIChatPane] 文档生成完成');
-        const parts = msg.contentParts;
-        let found = false;
-        for (let i = parts.length - 1; i >= 0; i--) {
-          if (parts[i].type === 'status' && parts[i].loading) {
-            console.log('[AIChatPane] 找到 loading 状态，索引:', i, '内容:', parts[i].content);
-            parts.splice(i, 1, {
-              type: 'status',
-              content: data.content || '✅ 文档已生成',
-              loading: false
-            });
-            found = true;
-            break;
-          }
-        }
-        if (!found) {
-          console.warn('[AIChatPane] 未找到 loading 状态的 generate_document，直接追加');
-          parts.push({
-            type: 'status',
-            content: data.content || '✅ 文档已生成',
-            loading: false
-          });
-        }
-        this.scrollToBottom();
-        return;
-      }
       // 其他消息类型：text, json, status 等
       if (data.type === 'status' && data.content) {
         msg.contentParts.push({
@@ -1189,20 +1169,31 @@ export default {
       } else if (data.type === 'json' && data.content) {
         msg.documentJson = data.content;
 
+        const hasPendingDeleteForMsg = this.pendingDeletes.some(d => d.msg === msg);
+        const paragraphs = data.content.paragraphs || [];
+        const paraCount = paragraphs.length;
+        const tableCount = (data.content.tables || []).length;
+        let summary = `${paraCount} 个段落`;
+        if (tableCount > 0) {
+          summary += `，${tableCount} 个表格`;
+        }
+
+        if (hasPendingDeleteForMsg) {
+          console.log('检测到删改同次操作，延迟到确认后再插入文档');
+          this.pendingDocument = {
+            preview: `AI 已生成待替换内容（${summary}）`,
+            deferredInsert: true
+          };
+          this.pendingDocumentMsg = msg;
+          this.scrollToBottom();
+          return;
+        }
+
         console.log('收到完整JSON，自动输出到文档');
         this.$nextTick(() => {
           this.insertToWord(msg);
 
           // 插入后显示预览条，等待用户确认或取消
-          const paragraphs = data.content.paragraphs || [];
-          // const previewText = paragraphs.map(p => p.content || '').join(' ').slice(0, 60);
-          const paraCount = paragraphs.length;
-          const tableCount = (data.content.tables || []).length;
-          let summary = `${paraCount} 个段落`;
-          if (tableCount > 0) {
-            summary += `，${tableCount} 个表格`;
-          }
-
           this.pendingDocument = {
             preview: `AI 已生成（${summary}）`
           };
@@ -1268,7 +1259,16 @@ export default {
         this.pendingDeletes = [];
       }
 
-      // 2. 确认生成文档（去掉文策AI-添加批注）
+      // 2. 对于删改同次操作，确认时先删再插
+      if (this.pendingDocument && this.pendingDocument.deferredInsert && this.pendingDocumentMsg && doc) {
+        try {
+          this.insertToWord(this.pendingDocumentMsg);
+        } catch (e) {
+          console.error('确认阶段插入文档失败:', e);
+        }
+      }
+
+      // 3. 确认生成文档（去掉文策AI-添加批注）
       if (this.pendingDocumentMsg && doc) {
         try {
           const comments = doc.Comments;
@@ -1356,24 +1356,30 @@ export default {
         if (jsonData && (jsonData.paragraphs || jsonData.tables)) {
           console.log('检测到文档 JSON，使用格式化输出');
 
-          // 统一使用 JSON 中 AI 指定的 insertParaIndex 作为插入位置
-          let insertParaIndex = null;
-          if (jsonData.insertParaIndex !== null && jsonData.insertParaIndex !== undefined) {
-            insertParaIndex = jsonData.insertParaIndex;
-            if (insertParaIndex === -1) {
-              console.log('插入到文档末尾');
-            } else {
-              console.log('插入到 AI 指定段落索引:', insertParaIndex);
-            }
-          } else {
-            // 兼容旧数据：没有 insertParaIndex 时用光标位置
-            console.log('无 insertParaIndex，回退到光标位置');
-          }
+          const paragraphList = Array.isArray(jsonData.paragraphs) ? jsonData.paragraphs : [];
+          const hasParagraphParaIndex = paragraphList.some((p) => Number.isInteger(p?.paraIndex));
 
           msg.docLengthBefore = doc.Content.End;
           console.log('记录插入前文档长度:', msg.docLengthBefore);
 
-          const result = generateDocxFromJSON(jsonData, doc, insertParaIndex);
+          let result;
+          if (hasParagraphParaIndex) {
+            result = this.insertJsonByParaIndex(jsonData, doc);
+          } else {
+            // 兼容旧数据：没有 paraIndex 时，仍使用 insertParaIndex
+            let insertParaIndex = null;
+            if (jsonData.insertParaIndex !== null && jsonData.insertParaIndex !== undefined) {
+              insertParaIndex = jsonData.insertParaIndex;
+              if (insertParaIndex === -1) {
+                console.log('插入到文档末尾');
+              } else {
+                console.log('插入到 AI 指定段落索引:', insertParaIndex);
+              }
+            } else {
+              console.log('无 paraIndex/insertParaIndex，回退到光标位置');
+            }
+            result = generateDocxFromJSON(jsonData, doc, insertParaIndex);
+          }
 
           if (result.success) {
             console.log('带格式的文档内容已成功插入');
@@ -1402,6 +1408,74 @@ export default {
         console.error('插入文本失败:', error);
         alert('插入失败，请确保已打开Word文档');
       }
+    },
+
+    /**
+     * 按段落 paraIndex 分组插入：每个段落明确写入位置，不依赖 insertParaIndex。
+     * 为避免索引偏移，按 paraIndex 从大到小执行插入。
+     */
+    insertJsonByParaIndex(jsonData, doc) {
+      const paragraphs = Array.isArray(jsonData.paragraphs) ? jsonData.paragraphs : [];
+      const tables = Array.isArray(jsonData.tables) ? jsonData.tables : [];
+      if (paragraphs.length === 0 && tables.length === 0) {
+        return { success: false, error: 'paragraphs/tables 都为空，无法按 paraIndex 插入' };
+      }
+
+      const grouped = new Map();
+      const fallbackInsertParaIndex = Number.isInteger(jsonData?.insertParaIndex) ? jsonData.insertParaIndex : null;
+
+      const ensureGroup = (paraIndex) => {
+        if (!grouped.has(paraIndex)) {
+          grouped.set(paraIndex, { paragraphs: [], tables: [] });
+        }
+        return grouped.get(paraIndex);
+      };
+
+      for (const para of paragraphs) {
+        if (!Number.isInteger(para?.paraIndex)) {
+          return { success: false, error: '检测到段落缺少 paraIndex，无法按目标位置插入' };
+        }
+        const paraIndex = para.paraIndex;
+        const paraData = { ...para };
+        delete paraData.paraIndex;
+        ensureGroup(paraIndex).paragraphs.push(paraData);
+      }
+
+      for (const table of tables) {
+        let paraIndex = Number.isInteger(table?.paraIndex) ? table.paraIndex : fallbackInsertParaIndex;
+        if (!Number.isInteger(paraIndex)) {
+          return { success: false, error: '检测到表格缺少 paraIndex，且无可用 insertParaIndex 回退，无法按目标位置插入' };
+        }
+        const tableData = { ...table };
+        delete tableData.paraIndex;
+        delete tableData.endParaIndex;
+        ensureGroup(paraIndex).tables.push(tableData);
+      }
+
+      const sortedOps = Array.from(grouped.entries()).sort((a, b) => b[0] - a[0]);
+      let mergedStart = null;
+      let mergedEnd = null;
+
+      for (const [paraIndex, groupedData] of sortedOps) {
+        const payload = {
+          paragraphs: groupedData.paragraphs,
+          tables: groupedData.tables,
+          styles: jsonData.styles || {}
+        };
+        const opResult = generateDocxFromJSON(payload, doc, paraIndex);
+        if (!opResult.success) {
+          return opResult;
+        }
+        mergedStart = mergedStart === null ? opResult.startPos : Math.min(mergedStart, opResult.startPos);
+        mergedEnd = mergedEnd === null ? opResult.endPos : Math.max(mergedEnd, opResult.endPos);
+      }
+
+      return {
+        success: true,
+        doc,
+        startPos: mergedStart,
+        endPos: mergedEnd
+      };
     },
 
     /**

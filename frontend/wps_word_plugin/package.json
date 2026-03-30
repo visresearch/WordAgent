@@ -8,7 +8,7 @@
 		"dev": "vite --port 3889",
 		"build": "vite build",
 		"preview": "vite preview",
-		"lint": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs --fix --ignore-pattern dist/**",
+		"lint": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs --fix --ignore-pattern \"dist/**\"",
 		"format": "prettier --write src/"
 	},
 	"dependencies": {

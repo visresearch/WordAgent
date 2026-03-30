@@ -1,4 +1,4 @@
-"""单智能体文档相关工具（读、查、写、删）。"""
+"""单智能体文档相关工具（读、查、编）。"""
 
 import asyncio
 import concurrent.futures
@@ -16,7 +16,7 @@ _MAX_DOC_JSON_CHARS = 80_000
 
 def _compact_doc_json(doc_json: dict) -> str:
     """将文档 JSON 压缩到 LLM 可处理的大小。"""
-    full = json.dumps(doc_json, ensure_ascii=False)
+    full = json.dumps(doc_json, ensure_ascii=False, separators=(",", ":"))
     if len(full) <= _MAX_DOC_JSON_CHARS:
         return full
 
@@ -42,7 +42,9 @@ def _compact_doc_json(doc_json: dict) -> str:
                         cell_text = cell.get("text", "")
                         if not cell_text and cell.get("paragraphs"):
                             cell_text = "".join(
-                                "".join(r.get("text", "") if isinstance(r, dict) else str(r) for r in cp.get("runs", []))
+                                "".join(
+                                    r.get("text", "") if isinstance(r, dict) else str(r) for r in cp.get("runs", [])
+                                )
                                 for cp in cell.get("paragraphs", [])
                             )
                         cells.append(cell_text)
@@ -52,7 +54,7 @@ def _compact_doc_json(doc_json: dict) -> str:
             table_compact["cellTexts"] = rows
             compact["tables"].append(table_compact)
 
-    result = json.dumps(compact, ensure_ascii=False)
+    result = json.dumps(compact, ensure_ascii=False, separators=(",", ":"))
     print(f"[read_document] 📦 文档过大({len(full)} chars)，已精简为 {len(result)} chars（纯文本模式）")
     return result
 
@@ -136,12 +138,107 @@ def read_document(startParaIndex: int = 0, endParaIndex: int = 49) -> str:
 
 
 @tool
-def generate_document(document: DocumentOutput) -> dict:
-    """生成带格式的文档 JSON，用于插入到 Word 文档。"""
+def edit_document(
+    document: DocumentOutput | None = None,
+    startParaIndex: int | None = None,
+    endParaIndex: int | None = None,
+    deleteRanges: list[dict] | None = None,
+) -> dict | str:
+    """编辑文档：支持离散删除区间、按 paraIndex 插入内容，或先删后插（同一次调用）。"""
     writer = get_stream_writer()
+
+    has_insert = document is not None
+
+    normalized_delete_ranges: list[dict[str, int]] = []
+
+    if deleteRanges:
+        if not isinstance(deleteRanges, list):
+            return "错误: deleteRanges 必须是数组，元素形如 {startParaIndex, endParaIndex}"
+        for idx, r in enumerate(deleteRanges):
+            if not isinstance(r, dict):
+                return f"错误: deleteRanges[{idx}] 必须是对象"
+            s = r.get("startParaIndex")
+            e = r.get("endParaIndex", s)
+            if not isinstance(s, int) or not isinstance(e, int):
+                return f"错误: deleteRanges[{idx}] 的 startParaIndex/endParaIndex 必须是整数"
+            normalized_delete_ranges.append({"startParaIndex": s, "endParaIndex": e})
+
+    if startParaIndex is not None or endParaIndex is not None:
+        if startParaIndex is None:
+            return "错误: 使用 startParaIndex/endParaIndex 时必须提供 startParaIndex"
+        final_end = endParaIndex if endParaIndex is not None else startParaIndex
+        if not isinstance(final_end, int):
+            return "错误: endParaIndex 必须是整数"
+        normalized_delete_ranges.append({"startParaIndex": startParaIndex, "endParaIndex": final_end})
+
+    has_delete = len(normalized_delete_ranges) > 0
+
+    if not has_insert and not has_delete:
+        return "错误: edit_document 至少需要提供 document 或删除参数(startParaIndex/endParaIndex/deleteRanges)"
+
+    delete_start = normalized_delete_ranges[0]["startParaIndex"] if has_delete else None
+    delete_end = normalized_delete_ranges[0]["endParaIndex"] if has_delete else None
+
+    status_payload = {
+        "type": "edit_document",
+        "hasDelete": bool(has_delete),
+        "hasInsert": bool(has_insert),
+    }
+    if has_delete:
+        status_payload["deleteRanges"] = normalized_delete_ranges
+        status_payload.update(
+            {
+                "content": (
+                    f"✏️ 正在编辑文档（删除 {len(normalized_delete_ranges)} 个区间）"
+                    if len(normalized_delete_ranges) > 1
+                    else f"✏️ 正在编辑文档（删除段落 {delete_start} - {delete_end}）"
+                ),
+                "startParaIndex": delete_start,
+                "endParaIndex": delete_end,
+            }
+        )
+    else:
+        status_payload["content"] = "✏️ 正在编辑文档（插入新内容）"
+    writer(status_payload)
+
+    if not has_insert:
+        writer({"type": "edit_complete", "content": "✅ 已标记待删除段落，等待用户确认"})
+        print(f"[edit_document] 请求前端删除文档段落区间: {normalized_delete_ranges}")
+        return {
+            "action": "delete_only",
+            "deleteRanges": normalized_delete_ranges,
+            "startParaIndex": delete_start,
+            "endParaIndex": delete_end,
+            "message": (
+                f"已通知前端标记删除 {len(normalized_delete_ranges)} 个区间，等待用户确认"
+                if len(normalized_delete_ranges) > 1
+                else f"已通知前端标记删除段落 {delete_start} - {delete_end}，等待用户确认"
+            ),
+        }
+
     doc_dict = document.model_dump()
-    para_count = len(doc_dict.get("paragraphs", []))
-    writer({"type": "generate_complete", "content": f"✅ 文档已生成，共 {para_count} 个段落"})
+    paragraphs = doc_dict.get("paragraphs", [])
+    missing_para_index = [i for i, p in enumerate(paragraphs) if not isinstance(p.get("paraIndex"), int)]
+    if missing_para_index:
+        preview = ", ".join(str(i) for i in missing_para_index[:10])
+        return f"错误: edit_document 插入内容时每个段落都必须提供 paraIndex。缺失 paraIndex 的段落序号: {preview}"
+
+    para_count = len(paragraphs)
+    doc_dict["paragraphs"] = sorted(paragraphs, key=lambda p: p.get("paraIndex", -1))
+    # insertParaIndex 为兼容字段，paraIndex 模式下不再使用
+    doc_dict.pop("insertParaIndex", None)
+
+    if has_delete:
+        print(
+            "[edit_document] 请求前端执行删改 "
+            f"(deleteRanges={normalized_delete_ranges}, paraIndices={[p.get('paraIndex') for p in doc_dict.get('paragraphs', [])]})"
+        )
+    else:
+        print(
+            f"[edit_document] 请求前端插入文档 (paraIndices={[p.get('paraIndex') for p in doc_dict.get('paragraphs', [])]})"
+        )
+    writer({"type": "json", "content": doc_dict})
+    writer({"type": "edit_complete", "content": f"✅ 文档编辑完成，共 {para_count} 个段落"})
     return doc_dict
 
 
@@ -216,6 +313,7 @@ def search_documnet(query: DocumentQuery) -> str:
                                 "coverageAdvice": "若命中多处候选，按段落索引顺序逐个读取候选段落附近内容；证据充分即可停止",
                             },
                             ensure_ascii=False,
+                            separators=(",", ":"),
                         )
 
                     print("[search_documnet] ⚠️ 未找到匹配项")
@@ -230,6 +328,7 @@ def search_documnet(query: DocumentQuery) -> str:
                             "retryAdvice": "请更换关键词重试（同义词/简称/章节名/核心词）",
                         },
                         ensure_ascii=False,
+                        separators=(",", ":"),
                     )
                 except (TimeoutError, concurrent.futures.TimeoutError):
                     print("[search_documnet] ⏰ 等待查询结果超时")
@@ -241,19 +340,3 @@ def search_documnet(query: DocumentQuery) -> str:
 
     print("[search_documnet] ⚠️ 非 WebSocket 模式，无法执行查询")
     return '{"matches": [], "matchCount": 0, "error": "non-websocket"}'
-
-
-@tool
-def delete_document(startParaIndex: int = 0, endParaIndex: int = -1) -> str:
-    """删除文档中指定范围的段落。"""
-    writer = get_stream_writer()
-    writer(
-        {
-            "type": "delete_document",
-            "content": f"🗑️ 准备删除文档段落(段落 {startParaIndex} - {endParaIndex})",
-            "startParaIndex": startParaIndex,
-            "endParaIndex": endParaIndex,
-        }
-    )
-    print(f"[delete_document] 请求前端删除文档段落 (startParaIndex={startParaIndex}, endParaIndex={endParaIndex})")
-    return f"已通知前端标记删除段落 {startParaIndex} - {endParaIndex}，等待用户确认"

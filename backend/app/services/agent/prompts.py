@@ -13,11 +13,10 @@ _CORE_SKILL_FILES = [
 
 # 按需技能：通过 load_skill 工具按需加载（渐进式披露）
 _ON_DEMAND_SKILLS: dict[str, str] = {
-    "tool_strategy": "工具选择策略 — 当用户需要进行文档操作时加载，了解 query/read/generate/delete 的使用优先级和组合方式",
+    "tool_strategy": "工具选择策略 — 当用户需要进行文档操作时加载，了解 query/read/edit 的使用优先级和组合方式",
     "search_documnet": "search_documnet 工具详细规则 — 在需要查找/定位文档中特定内容时加载",
     "read_document": "read_document 工具详细规则 — 在需要读取文档段落内容时加载",
-    "generate_document": "generate_document 工具详细规则 — 在需要生成/输出文档内容时加载（包含 JSON 格式规范和样式引用规则）",
-    "delete_document": "delete_document 工具详细规则 — 在需要删除文档段落时加载",
+    "edit_document": "edit_document 工具详细规则 — 在需要删除/插入/替换文档内容时加载（包含 JSON 格式规范和最小改动原则）",
     "execution_rules": "执行规则 — 在开始执行任何文档操作前加载，包含调用前说明意图、最小改动等关键约束",
     "web_tools": "web_search / web_fetch 工具规则 — 在需要搜索或获取网页信息时加载",
 }
@@ -31,8 +30,7 @@ _COMMON_SKILL_FILES = [
     "read_document.md",
     "no_tool_scenario.md",
     "execution_rules.md",
-    "generate_document.md",
-    "delete_document.md",
+    "edit_document.md",
     "web_tools.md",
 ]
 
@@ -64,9 +62,15 @@ def get_on_demand_skill_index() -> str:
     lines.append("")
     lines.append("⚠️ 技能加载规则：")
     lines.append("1. 收到文档操作请求时，先加载 tool_strategy 和 execution_rules 了解整体策略")
-    lines.append("2. 使用具体工具前，加载对应工具的技能（如使用 generate_document 前加载 generate_document 技能）")
+    lines.append("2. 使用具体工具前，加载对应工具的技能（如使用 edit_document 前加载 edit_document 技能）")
     lines.append("3. 已加载的技能在本次对话中持续有效，无需重复加载")
     lines.append("4. 纯聊天/问答场景无需加载任何技能")
+    lines.append("")
+    lines.append("⚠️ edit_document 调用前硬性自检（必须全部满足）：")
+    lines.append("1. delete-only 场景不要传 document；用 startParaIndex/endParaIndex 或 deleteRanges 即可")
+    lines.append("2. insert/replace 场景传 document 时，document.styles 必填，且覆盖所有样式引用")
+    lines.append("3. insert/replace 场景中，document.paragraphs 每个段落都必须有 paraIndex（0-based）")
+    lines.append("4. 若缺少 styles 或 paraIndex，先补齐参数再调用 edit_document，禁止带缺失字段调用")
     return "\n".join(lines)
 
 
