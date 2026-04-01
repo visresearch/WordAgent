@@ -11,6 +11,8 @@ _pending_loops: dict[str, asyncio.AbstractEventLoop] = {}
 _stop_requested_sessions: set[str] = set()
 # 当前线程使用的 chat_id（通过 contextvars 传递到 tool 函数中）
 _current_chat_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("_current_chat_id", default=None)
+# 当前线程使用的模型名（供子智能体继承主智能体的模型）
+_current_model_name: contextvars.ContextVar[str | None] = contextvars.ContextVar("_current_model_name", default=None)
 
 
 def create_tool_request(chat_id: str) -> asyncio.Queue:

@@ -2,6 +2,7 @@
 
 from .callback import (
     _current_chat_id,
+    _current_model_name,
     clear_stop,
     cleanup_tool_request,
     create_tool_request,
@@ -11,10 +12,12 @@ from .callback import (
     submit_tool_response,
 )
 from .document_tools import delete_document, generate_document, read_document, search_documnet
-from .skill_tools import load_skill
+from .runSubAgent_tools import run_sub_agent
 from .web_tools import web_fetch, web_search
 
-ALL_TOOLS = [read_document, generate_document, delete_document, search_documnet, web_search, web_fetch, load_skill]
+# 主 Agent 工具集：read_document / search_documnet / run_sub_agent
+# 文档写入、删除、网络搜索等能力已委托给子智能体（通过 run_sub_agent 调用）
+ALL_TOOLS = [read_document, search_documnet, run_sub_agent]
 TOOL_MAP = {t.name: t for t in ALL_TOOLS}
 
 __all__ = [
@@ -27,10 +30,10 @@ __all__ = [
     "delete_document",
     "generate_document",
     "is_stop_requested",
-    "load_skill",
     "read_document",
     "register_loop",
     "request_stop",
+    "run_sub_agent",
     "search_documnet",
     "submit_tool_response",
     "web_fetch",

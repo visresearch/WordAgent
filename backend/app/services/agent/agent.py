@@ -37,7 +37,7 @@ from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, Rem
 from langgraph.graph import END, START, MessagesState, StateGraph
 
 from app.services.llm_client import LLMClientManager, resolve_model
-from app.services.agent.prompts import get_core_skills, get_on_demand_skill_index, get_agent_prompt
+from app.services.agent.prompts import get_core_skills, get_agent_prompt
 from app.services.utils import normalize_tool_args, parse_tool_args_with_repair
 from app.services.agent.tools import (
     ALL_TOOLS,
@@ -47,6 +47,7 @@ from app.services.agent.tools import (
     read_document,
     is_stop_requested,
 )
+from app.services.agent.tools.callback import _current_model_name
 
 
 # region Create LLM
@@ -399,12 +400,9 @@ async def process_writing_request_stream(
         # 构建初始消息列表
         messages = []
 
-        # 注入核心技能（身份、风格、基本规则 — 始终加载）
+        # 注入核心技能（身份、风格、工具策略、子智能体策略等 — 始终加载）
         for skill_prompt in get_core_skills(mode=mode):
             messages.append(SystemMessage(content=skill_prompt))
-
-        # 注入按需技能索引（告知 Agent 可用技能及加载时机）
-        messages.append(SystemMessage(content=get_on_demand_skill_index()))
 
         # 注入自定义提示（如果有）
         from app.services.llm_client import get_custom_prompt
@@ -545,6 +543,7 @@ async def process_writing_request_stream(
             try:
                 if chat_id:
                     _current_chat_id.set(chat_id)
+                _current_model_name.set(model_name)
 
                 stream_kwargs = {
                     "input": {"messages": messages},
@@ -611,9 +610,11 @@ async def process_writing_request_stream(
                         print(f"[Agent] ⏭️ 跳过 read_document 工具返回值")
                         continue
 
-                    if tool_name == "load_skill":
-                        # load_skill 结果是内部提示注入，不发给前端
-                        print(f"[Agent] ⏭️ 跳过 load_skill 工具返回值")
+                    if tool_name == "run_sub_agent":
+                        # run_sub_agent 结果是子智能体返回的摘要，不直接转发
+                        # （子智能体的 generate_document 等状态已通过 stream_writer 转发）
+                        print(f"[Agent] ⏭️ 跳过 run_sub_agent 工具返回值")
+                        has_tool_result = True
                         continue
 
                     if tool_name == "generate_document":
