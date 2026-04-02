@@ -2,17 +2,16 @@
 
 from .tools import (
     ALL_TOOLS,
+    BASE_TOOLS,
     TOOL_MAP,
     _current_chat_id,
     _current_model_name,
     clear_stop,
     cleanup_tool_request,
     create_tool_request,
-    bash,
     delete_document,
     generate_document,
     is_stop_requested,
-    load_skill,
     read_document,
     register_loop,
     request_stop,
@@ -20,21 +19,19 @@ from .tools import (
     search_documnet,
     submit_tool_response,
     web_fetch,
-    web_search,
 )
 
 __all__ = [
     "ALL_TOOLS",
+    "BASE_TOOLS",
     "TOOL_MAP",
     "_current_chat_id",
     "clear_stop",
     "cleanup_tool_request",
     "create_tool_request",
-    "bash",
     "delete_document",
     "generate_document",
     "is_stop_requested",
-    "load_skill",
     "read_document",
     "register_loop",
     "request_stop",
@@ -42,5 +39,4 @@ __all__ = [
     "search_documnet",
     "submit_tool_response",
     "web_fetch",
-    "web_search",
 ]

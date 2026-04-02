@@ -692,13 +692,13 @@ async function getSettings() {
 
     if (!response.success) {
       console.error('获取设置失败:', response.error);
-      return { providers: [] };
+      return { providers: [], mcpServers: [] };
     }
 
     return response.data;
   } catch (error) {
     console.error('获取设置异常:', error);
-    return { providers: [] };
+    return { providers: [], mcpServers: [] };
   }
 }
 
@@ -723,6 +723,29 @@ async function saveSettings(settings) {
     console.error('保存设置异常:', error);
     throw error;
   }
+}
+
+/**
+ * 测试 MCP 服务器连接
+ * @param {Object} params - 测试参数
+ * @param {string} params.name - 服务器名称
+ * @param {Object} params.config - MCP 服务器 JSON 配置
+ * @returns {Promise<Object>} 测试结果
+ */
+async function testMcpServer({ name, config }) {
+  const response = await request('/api/settings/mcp/test', {
+    method: 'POST',
+    body: {
+      name,
+      config
+    }
+  });
+
+  if (!response.success) {
+    throw new Error(response.error || '测试 MCP 服务器连接失败');
+  }
+
+  return response.data;
 }
 
 // ============== 缓存管理 API ==============
@@ -809,6 +832,7 @@ export default {
   // 设置管理 API
   getSettings,
   saveSettings,
+  testMcpServer,
 
   // 缓存管理 API
   scanCache,
@@ -845,6 +869,7 @@ export {
 
   getSettings,
   saveSettings,
+  testMcpServer,
   scanCache,
   clearCache,
   updateConfig,

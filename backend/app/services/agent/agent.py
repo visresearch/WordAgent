@@ -40,20 +40,19 @@ from app.services.llm_client import create_llm, resolve_model
 from app.services.agent.prompts import get_core_prompts
 from app.services.utils import normalize_tool_args, parse_tool_args_with_repair
 from app.services.agent.tools import (
-    ALL_TOOLS,
-    TOOL_MAP,
+    BASE_TOOLS,
     _current_chat_id,
     register_loop,
     is_stop_requested,
 )
 from app.services.agent.tools.callback import _current_model_name
-from app.services.agent.tools.skill_tools import build_skills_catalog_prompt
+from app.services.agent.tools.mcp_tools import load_mcp_tools, build_mcp_tools_prompt
 
 
 # region LangGraph Agent（ReAct）
 
 
-def build_graph(llm_with_tools):
+def build_graph(llm_with_tools, tool_map: dict, mcp_tool_names: set[str] | None = None):
     """
     构建 LangGraph ReAct 工作流（单一智能体）
 
@@ -63,6 +62,8 @@ def build_graph(llm_with_tools):
 
     agent 自动循环调用工具，直到不再需要工具为止。
     """
+    tool_names_str = " / ".join(tool_map.keys())
+    _mcp_names = mcp_tool_names or set()
     graph = StateGraph(MessagesState)
 
     # ---- 节点 ----
@@ -79,9 +80,12 @@ def build_graph(llm_with_tools):
 
     def tools_node(state: MessagesState) -> dict:
         """工具执行节点 - 执行 Agent 请求的所有工具"""
+        from langgraph.config import get_stream_writer as _get_sw
+
         last_message = state["messages"][-1]
         results = []
         chat_id = _current_chat_id.get(None)
+        writer = _get_sw()
 
         for tool_call in last_message.tool_calls:
             if is_stop_requested(chat_id):
@@ -90,7 +94,14 @@ def build_graph(llm_with_tools):
             tool_name = tool_call["name"]
             print(f"[Tools] 执行工具: {tool_name}")
 
-            tool_fn = TOOL_MAP.get(tool_name)
+            # MCP 工具调用时输出状态到前端
+            if tool_name in _mcp_names:
+                args_preview = json.dumps(tool_call.get("args", {}), ensure_ascii=False)
+                if len(args_preview) > 100:
+                    args_preview = args_preview[:100] + "..."
+                writer({"type": "status", "content": f"🔧 调用 MCP 工具: {tool_name}({args_preview})"})
+
+            tool_fn = tool_map.get(tool_name)
             if tool_fn:
                 try:
                     tool_args = normalize_tool_args(tool_name, tool_call.get("args", {}))
@@ -130,7 +141,7 @@ def build_graph(llm_with_tools):
                 RemoveMessage(id=last_message.id),
                 SystemMessage(
                     content="[RETRY_TOOL_CALL] 你刚才的工具调用无效（可能是 JSON 不完整或被截断）。"
-                    "请基于当前可用工具重试一次：read_document / search_documnet / generate_document / delete_document / run_sub_agent / load_skill / bash。"
+                    f"请基于当前可用工具重试一次：{tool_names_str}。"
                     "文档改写优先由你直接调用 generate_document/delete_document 完成；仅在简化场景可调用 run_sub_agent(agent_type='simplifier')。"
                 ),
             ]
@@ -150,7 +161,7 @@ def build_graph(llm_with_tools):
                 break
 
             tool_name = tc.get("name", "")
-            tool_fn = TOOL_MAP.get(tool_name)
+            tool_fn = tool_map.get(tool_name)
             if not tool_fn:
                 continue
 
@@ -206,7 +217,7 @@ def build_graph(llm_with_tools):
                 SystemMessage(
                     content="[RETRY_TOOL_CALL] 你刚才的 tool call 参数不是合法 JSON。"
                     "请仅重试一次，并确保参数完整合法。"
-                    "可用工具：read_document / search_documnet / generate_document / delete_document / run_sub_agent / load_skill / bash。"
+                    f"可用工具：{tool_names_str}。"
                 ),
             ]
         }
@@ -331,11 +342,15 @@ async def process_writing_request_stream(
     model_name = resolve_model(model or "auto")
     llm = create_llm(model_name)
 
-    tools = ALL_TOOLS
+    # 加载 MCP 动态工具（从用户设置）
+    mcp_tools, mcp_client = await load_mcp_tools()
+    mcp_tool_names = {t.name for t in mcp_tools}
+    tools = list(BASE_TOOLS) + mcp_tools
+    tool_map = {t.name: t for t in tools}
     print(f"[Agent] 已绑定 {[t.name for t in tools]}")
 
     llm_with_tools = llm.bind_tools(tools)
-    app = build_graph(llm_with_tools)
+    app = build_graph(llm_with_tools, tool_map, mcp_tool_names)
 
     try:
         # 构建初始消息列表
@@ -345,10 +360,10 @@ async def process_writing_request_stream(
         for core_prompt in get_core_prompts(mode=mode):
             messages.append(SystemMessage(content=core_prompt))
 
-        # 注入可用 Skills 列表（动态扫描），让模型知道何时调用 load_skill
-        skills_catalog_prompt = build_skills_catalog_prompt()
-        if skills_catalog_prompt:
-            messages.append(SystemMessage(content=skills_catalog_prompt))
+        # 注入 MCP 工具提示（让模型知道有哪些额外工具可用）
+        mcp_prompt = build_mcp_tools_prompt(mcp_tools)
+        if mcp_prompt:
+            messages.append(SystemMessage(content=mcp_prompt))
 
         # 注入自定义提示（如果有）
         from app.services.llm_client import get_custom_prompt
@@ -554,11 +569,6 @@ async def process_writing_request_stream(
                             yield f"data: {json.dumps({'type': 'status', 'content': content}, ensure_ascii=False)}\n\n"
                         elif isinstance(content, str) and content:
                             _collected_text_parts.append(content)
-                        continue
-
-                    if tool_name == "load_skill":
-                        # load_skill 的完整内容较长，不直接透传；给出状态提示并让模型继续按指令执行
-                        yield f"data: {json.dumps({'type': 'status', 'content': '🧩 Skill 已加载，正在按指令继续执行'}, ensure_ascii=False)}\n\n"
                         continue
 
                     if tool_name == "generate_document":

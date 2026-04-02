@@ -13,15 +13,17 @@ from .callback import (
 )
 from .document_tools import delete_document, generate_document, read_document, search_documnet
 from .runSubAgent_tools import run_sub_agent
-from .skill_tools import bash, load_skill
-from .web_tools import web_fetch, web_search
+from .web_tools import web_fetch
 
-# 主 Agent 工具集：主导文档处理，同时支持 Skills 加载与命令执行
-ALL_TOOLS = [read_document, search_documnet, generate_document, delete_document, run_sub_agent, load_skill, bash]
-TOOL_MAP = {t.name: t for t in ALL_TOOLS}
+# 基础工具集（不含 MCP 动态工具）
+BASE_TOOLS = [read_document, search_documnet, generate_document, delete_document, run_sub_agent]
+# 向后兼容
+ALL_TOOLS = BASE_TOOLS
+TOOL_MAP = {t.name: t for t in BASE_TOOLS}
 
 __all__ = [
     "ALL_TOOLS",
+    "BASE_TOOLS",
     "TOOL_MAP",
     "_current_chat_id",
     "clear_stop",
@@ -29,8 +31,6 @@ __all__ = [
     "create_tool_request",
     "delete_document",
     "generate_document",
-    "load_skill",
-    "bash",
     "is_stop_requested",
     "read_document",
     "register_loop",
@@ -39,5 +39,4 @@ __all__ = [
     "search_documnet",
     "submit_tool_response",
     "web_fetch",
-    "web_search",
 ]

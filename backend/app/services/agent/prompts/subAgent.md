@@ -10,14 +10,15 @@
 ## 子智能体类型与职责
 - `simplifier`：负责文本简化与改写（通俗化、压缩冗余、保留原意重述）
 - `reviewer`：负责文档审阅（纠错、校对、质量评估、问题清单）
-- `researcher`：负责外部信息收集（联网检索、资料整理、来源摘要）
+
+注意：外部信息检索（网络搜索、网页获取等）已由 MCP 服务器提供的工具完成，主 Agent 可直接调用，无需经过子智能体。
 
 ## 分发规则
 1. 文档有“写入/改动”目标：优先由主 Agent 直接调用 `generate_document` / `delete_document`
 2. 文档有“简化/压缩/通俗改写”目标：分发给 `simplifier`
 3. 文档有“审阅/检查”目标：分发给 `reviewer`
-4. 任务依赖外部资料：分发给 `researcher`
-5. 复杂任务可串行分发：先 `researcher`，再主 Agent 落地写改（必要时调用 `simplifier`）
+4. 任务依赖外部资料：直接调用 MCP 提供的搜索/网页工具，然后由主 Agent 落地写改
+5. 复杂任务可串行：先 MCP 工具研究，再主 Agent 落地写改（必要时调用 `simplifier`）
 
 ## prompt 组装要求
 1. 用一句话写清最终目标
@@ -43,5 +44,5 @@ assistant: [调用 run_sub_agent(agent_type="reviewer", ...)]
 
 <example>
 user: 先查最新行业信息，再写一段放进文档
-assistant: [调用 run_sub_agent(agent_type="researcher", ...)] -> [主 Agent 直接 generate_document]
+assistant: [调用 MCP 搜索工具检索信息] -> [主 Agent 直接 generate_document]
 </example>

@@ -3,7 +3,6 @@
 子智能体类型：
 - simplifier: 简化智能体（read_document, generate_document, search_documnet, delete_document）
 - reviewer:   审阅智能体（read_document, search_documnet）
-- researcher: 研究智能体（web_search, web_fetch）
 """
 
 import json
@@ -23,22 +22,18 @@ from .callback import _current_chat_id, _current_model_name, is_stop_requested
 _AGENT_TYPE_TOOL_NAMES: dict[str, list[str]] = {
     "simplifier": ["read_document", "generate_document", "search_documnet", "delete_document"],
     "reviewer": ["read_document", "search_documnet"],
-    "researcher": ["web_search", "web_fetch"],
 }
 
 
 def _resolve_tools(agent_type: str):
     """根据子智能体类型返回 (tools_list, tool_map)。"""
     from .document_tools import delete_document, generate_document, read_document, search_documnet
-    from .web_tools import web_fetch, web_search
 
     _all = {
         "read_document": read_document,
         "generate_document": generate_document,
         "search_documnet": search_documnet,
         "delete_document": delete_document,
-        "web_search": web_search,
-        "web_fetch": web_fetch,
     }
     names = _AGENT_TYPE_TOOL_NAMES.get(agent_type, [])
     tools = [_all[n] for n in names if n in _all]
@@ -72,15 +67,6 @@ _SUB_AGENT_BASE_PROMPTS: dict[str, str] = {
         "3. 仔细分析内容，给出详细的审阅意见\n\n"
         "请给出专业、具体的审阅反馈，包括问题描述和改进建议。"
     ),
-    "researcher": (
-        "你是专业的网络研究智能体。你的职责是根据指令搜索和获取网络信息。\n"
-        "可用工具：web_search（网络搜索）、web_fetch（获取网页内容）。\n\n"
-        "工作流程：\n"
-        "1. 用 web_search 搜索相关信息\n"
-        "2. 用 web_fetch 获取有价值的网页详细内容\n"
-        "3. 整理并总结研究结果\n\n"
-        "请高效搜索，整理出结构化的研究报告。"
-    ),
 }
 
 # 各类型子智能体需要预加载的提示文件
@@ -98,10 +84,6 @@ _SUB_AGENT_PROMPT_FILES: dict[str, list[str]] = {
         "style.md",
         "read_document.md",
         "search_documnet.md",
-    ],
-    "researcher": [
-        "style.md",
-        "web_tools.md",
     ],
 }
 
@@ -314,19 +296,18 @@ def _build_sub_agent_graph(llm_with_tools, tool_map: dict):
 def run_sub_agent(
     description: str,
     prompt: str,
-    agent_type: Literal["simplifier", "reviewer", "researcher"],
+    agent_type: Literal["simplifier", "reviewer"],
 ) -> str:
     """创建并运行子智能体来完成专项任务。
 
     可用的子智能体类型：
     - simplifier: 简化智能体，具备读取、生成、搜索、删除文档的能力
     - reviewer:   审阅智能体，具备读取和搜索文档的能力
-    - researcher: 研究智能体，具备网络搜索和网页拓取的能力
 
     Args:
-        description: 任务简要描述（如"生成项目报告"、"审阅合同条款"、"搜索最新政策"）
+        description: 任务简要描述（如"生成项目报告"、"审阅合同条款"）
         prompt: 给子智能体的详细任务指令
-        agent_type: 子智能体类型（simplifier / reviewer / researcher）
+        agent_type: 子智能体类型（simplifier / reviewer）
     """
     writer = get_stream_writer()
 

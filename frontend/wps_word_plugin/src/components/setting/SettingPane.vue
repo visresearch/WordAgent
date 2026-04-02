@@ -9,15 +9,7 @@
         :class="{ active: currentTab === tab.id }"
         @click="currentTab = tab.id"
       >
-        <svg
-          class="nav-icon"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-        >
-          <path :d="tab.icon" />
-        </svg>
+        <img :src="tab.icon" class="nav-icon" alt="" />
         <span class="nav-text">{{ tab.name }}</span>
       </div>
     </div>
@@ -78,6 +70,24 @@
         </div>
       </div>
 
+      <!-- MCP 服务器管理 -->
+      <div v-if="currentTab === 'mcp'" class="tab-content">
+        <div class="tab-header">
+          <h2 class="tab-title">
+            MCP 服务器管理
+          </h2>
+          <p class="tab-desc">
+            管理 MCP 服务器名称和 JSON 配置，支持连接测试
+          </p>
+        </div>
+        <div class="setting-section">
+          <MCPserverSetting
+            :mcp-servers="settings.mcpServers"
+            @update:mcp-servers="onMcpServersChange"
+          />
+        </div>
+      </div>
+
       <!-- 数据管理 -->
       <div v-if="currentTab === 'data'" class="tab-content full-height">
         <DataManagementPane
@@ -112,14 +122,21 @@ import { ref, reactive, computed, onMounted } from 'vue';
 import api from '../js/api.js';
 import GeneralSetting from './GeneralSetting.vue';
 import ModelSetting from './ModelSetting.vue';
+import MCPserverSetting from './MCPserverSetting.vue';
 import PersonalizationPane from './PersonalizationSetting.vue';
 import DataManagementPane from './DataManagementSetting.vue';
+import iconSetting from '../../assets/icons/setting.svg';
+import iconModel from '../../assets/icons/model.svg';
+import iconUser from '../../assets/icons/user.svg';
+import iconMcp from '../../assets/icons/mcp.svg';
+import iconData from '../../assets/icons/data.svg';
 
 export default {
   name: 'SettingPane',
   components: {
     GeneralSetting,
     ModelSetting,
+    MCPserverSetting,
     PersonalizationPane,
     DataManagementPane
   },
@@ -133,22 +150,27 @@ export default {
       {
         id: 'general',
         name: '通用',
-        icon: 'M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z'
+        icon: iconSetting
       },
       {
         id: 'model',
         name: '大模型',
-        icon: 'M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z M3.27 6.96L12 12.01l8.73-5.05 M12 22.08V12'
+        icon: iconModel
       },
       {
         id: 'personalization',
         name: '个性化',
-        icon: 'M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2 M12 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8z'
+        icon: iconUser
+      },
+      {
+        id: 'mcp',
+        name: 'MCP',
+        icon: iconMcp
       },
       {
         id: 'data',
         name: '数据管理',
-        icon: 'M12.89 1.45l8 4A2 2 0 0 1 22 7.24v9.53a2 2 0 0 1-1.11 1.79l-8 4a2 2 0 0 1-1.79 0l-8-4a2 2 0 0 1-1.1-1.8V7.24a2 2 0 0 1 1.11-1.79l8-4a2 2 0 0 1 1.78 0z M2.32 6.16L12 11l9.68-4.84 M12 22V11'
+        icon: iconData
       }
     ]);
 
@@ -161,6 +183,7 @@ export default {
         port: 0
       },
       providers: [],
+      mcpServers: [],
       customPrompt: '',
       temperature: 0.7
     });
@@ -238,6 +261,13 @@ export default {
           if (data.temperature !== undefined) {
             settings.temperature = data.temperature;
           }
+          if (Array.isArray(data.mcpServers)) {
+            settings.mcpServers = data.mcpServers.map(s => ({
+              name: s.name || '',
+              config: (s.config && typeof s.config === 'object') ? s.config : {},
+              expanded: false
+            }));
+          }
         }
       } catch (error) {
         console.error('加载设置失败:', error);
@@ -259,6 +289,10 @@ export default {
             apiKey: p.apiKey,
             models: p.models,
             enabled: p.enabled
+          })),
+          mcpServers: settings.mcpServers.map(s => ({
+            name: s.name,
+            config: (s.config && typeof s.config === 'object') ? s.config : {}
           })),
           customPrompt: settings.customPrompt,
           temperature: settings.temperature
@@ -306,6 +340,14 @@ export default {
       }));
     };
 
+    const onMcpServersChange = (newServers) => {
+      settings.mcpServers = newServers.map(s => ({
+        name: s.name || '',
+        config: (s.config && typeof s.config === 'object') ? s.config : {},
+        expanded: s.expanded ?? false
+      }));
+    };
+
     onMounted(() => {
       loadSettings();
       loadCacheInfo();
@@ -325,6 +367,7 @@ export default {
       onGeneralSettingsChange,
       onPersonalizationChange,
       onProvidersChange,
+      onMcpServersChange,
       onCacheUpdate
     };
   }
@@ -382,6 +425,7 @@ export default {
   width: 18px;
   height: 18px;
   flex-shrink: 0;
+  object-fit: contain;
 }
 
 .nav-text {

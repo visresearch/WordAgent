@@ -5,9 +5,11 @@
 
 import json
 import os
+import shutil
 from pathlib import Path
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -49,6 +51,15 @@ class UserSettings(BaseModel):
     # 个性化设置
     customPrompt: str = ""
     temperature: float = 0.7
+    # MCP 服务器设置
+    mcpServers: list[dict[str, Any]] = []
+
+
+class MCPServerTestRequest(BaseModel):
+    """MCP 服务器连接测试请求"""
+
+    name: str = ""
+    config: dict[str, Any] | str
 
 
 @router.get("/settings")
@@ -98,6 +109,79 @@ async def save_settings(settings: UserSettings):
     except Exception as e:
         print(f"保存设置失败: {e}")
         raise HTTPException(status_code=500, detail=f"保存设置失败: {str(e)}")
+
+
+@router.post("/settings/mcp/test")
+async def test_mcp_server(payload: MCPServerTestRequest):
+    """测试 MCP 服务器连接"""
+    try:
+        config = payload.config
+        if isinstance(config, str):
+            try:
+                config = json.loads(config)
+            except Exception:
+                return {"success": False, "message": "服务器配置不是合法 JSON"}
+
+        if not isinstance(config, dict):
+            return {"success": False, "message": "服务器配置必须是 JSON 对象"}
+
+        server_name = payload.name.strip() or str(config.get("name", "")).strip() or "未命名服务器"
+
+        # 优先按 URL 方式测试（SSE/HTTP MCP）
+        url = str(config.get("url") or config.get("endpoint") or "").strip()
+        if url:
+            timeout = float(config.get("timeout", 8))
+            headers = config.get("headers") if isinstance(config.get("headers"), dict) else {}
+
+            try:
+                async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+                    # MCP 服务实际可能不支持 GET；这里只验证网络可达和服务有响应
+                    resp = await client.get(url, headers=headers)
+                return {
+                    "success": True,
+                    "message": f"{server_name} 连接成功 (HTTP {resp.status_code})",
+                }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "message": f"{server_name} 连接失败: {str(e)}",
+                }
+
+        # 其次按 stdio 方式测试（仅检查命令可执行，不真正启动进程）
+        command = str(config.get("command") or "").strip()
+        if command:
+            if os.path.isabs(command):
+                cmd_path = Path(command)
+                if cmd_path.exists() and os.access(cmd_path, os.X_OK):
+                    return {
+                        "success": True,
+                        "message": f"{server_name} 命令可用: {command}",
+                    }
+                return {
+                    "success": False,
+                    "message": f"{server_name} 命令不可执行: {command}",
+                }
+
+            resolved = shutil.which(command)
+            if resolved:
+                return {
+                    "success": True,
+                    "message": f"{server_name} 命令可用: {resolved}",
+                }
+            return {
+                "success": False,
+                "message": f"{server_name} 命令未找到: {command}",
+            }
+
+        return {
+            "success": False,
+            "message": "配置缺少 url 或 command 字段，无法测试连接",
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"测试连接失败: {str(e)}",
+        }
 
 
 # ============== WPS 缓存路径 ==============

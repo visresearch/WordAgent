@@ -107,76 +107,76 @@ def web_fetch(url: str) -> str:
         return "该网页无法访问（已跳过）。请直接使用已有的搜索摘要继续完成任务，不要因此放弃生成文档。"
 
 
-@tool
-def web_search(query: str, max_results: int = 5) -> str:
-    """网络搜索 - 使用 Bing 搜索引擎检索信息。"""
-    from curl_cffi import requests as curl_requests
-    from bs4 import BeautifulSoup
+# @tool
+# def web_search(query: str, max_results: int = 5) -> str:
+#     """网络搜索 - 使用 Bing 搜索引擎检索信息。"""
+#     from curl_cffi import requests as curl_requests
+#     from bs4 import BeautifulSoup
 
-    from app.services.llm_client import get_httpx_proxy_url
+#     from app.services.llm_client import get_httpx_proxy_url
 
-    writer = get_stream_writer()
-    writer({"type": "status", "content": f"🔎 正在搜索: {query}"})
-    print(f"[web_search] 开始搜索: {query}")
+#     writer = get_stream_writer()
+#     writer({"type": "status", "content": f"🔎 正在搜索: {query}"})
+#     print(f"[web_search] 开始搜索: {query}")
 
-    headers = {
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-    }
+#     headers = {
+#         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+#         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+#     }
 
-    try:
-        proxy_url = get_httpx_proxy_url()
-        proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
-        bing_url = "https://www.bing.com/search" if proxy_url else "https://cn.bing.com/search"
-        params = {"q": query, "count": str(max_results * 2)}
+#     try:
+#         proxy_url = get_httpx_proxy_url()
+#         proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
+#         bing_url = "https://www.bing.com/search" if proxy_url else "https://cn.bing.com/search"
+#         params = {"q": query, "count": str(max_results * 2)}
 
-        resp = curl_requests.get(
-            bing_url,
-            params=params,
-            headers=headers,
-            impersonate="chrome131",
-            timeout=15,
-            allow_redirects=True,
-            proxies=proxies,
-            verify=False,
-        )
-        resp.raise_for_status()
+#         resp = curl_requests.get(
+#             bing_url,
+#             params=params,
+#             headers=headers,
+#             impersonate="chrome131",
+#             timeout=15,
+#             allow_redirects=True,
+#             proxies=proxies,
+#             verify=False,
+#         )
+#         resp.raise_for_status()
 
-        soup = BeautifulSoup(resp.text, "lxml")
-        results = []
-        for item in soup.select("li.b_algo"):
-            if len(results) >= max_results:
-                break
+#         soup = BeautifulSoup(resp.text, "lxml")
+#         results = []
+#         for item in soup.select("li.b_algo"):
+#             if len(results) >= max_results:
+#                 break
 
-            title_elem = item.select_one("h2 a")
-            if not title_elem:
-                continue
-            title = title_elem.get_text(strip=True)
-            href = title_elem.get("href", "")
+#             title_elem = item.select_one("h2 a")
+#             if not title_elem:
+#                 continue
+#             title = title_elem.get_text(strip=True)
+#             href = title_elem.get("href", "")
 
-            snippet_elem = item.select_one(".b_caption p") or item.select_one("p")
-            snippet = snippet_elem.get_text(strip=True) if snippet_elem else ""
+#             snippet_elem = item.select_one(".b_caption p") or item.select_one("p")
+#             snippet = snippet_elem.get_text(strip=True) if snippet_elem else ""
 
-            if title and href:
-                results.append({"title": title, "href": href, "snippet": snippet})
+#             if title and href:
+#                 results.append({"title": title, "href": href, "snippet": snippet})
 
-        if not results:
-            msg = f"未找到与 '{query}' 相关的搜索结果"
-            print(f"[web_search] ⚠️ {msg}")
-            writer({"type": "status", "content": f"⚠️ {msg}"})
-            return msg
+#         if not results:
+#             msg = f"未找到与 '{query}' 相关的搜索结果"
+#             print(f"[web_search] ⚠️ {msg}")
+#             writer({"type": "status", "content": f"⚠️ {msg}"})
+#             return msg
 
-        formatted = []
-        for i, r in enumerate(results, 1):
-            formatted.append(f"{i}. [{r['title']}]({r['href']})\\n   {r['snippet']}")
+#         formatted = []
+#         for i, r in enumerate(results, 1):
+#             formatted.append(f"{i}. [{r['title']}]({r['href']})\\n   {r['snippet']}")
 
-        output = f"搜索关键词: {query}\\n结果数: {len(results)}\\n\\n" + "\\n\\n".join(formatted)
-        print(f"[web_search] ✅ 找到 {len(results)} 条结果")
-        writer({"type": "status", "content": f"✅ 搜索完成，找到 {len(results)} 条结果"})
-        return output
+#         output = f"搜索关键词: {query}\\n结果数: {len(results)}\\n\\n" + "\\n\\n".join(formatted)
+#         print(f"[web_search] ✅ 找到 {len(results)} 条结果")
+#         writer({"type": "status", "content": f"✅ 搜索完成，找到 {len(results)} 条结果"})
+#         return output
 
-    except Exception as e:
-        msg = f"搜索失败: {e}"
-        print(f"[web_search] ❌ {msg}")
-        writer({"type": "status", "content": f"❌ {msg}"})
-        return msg
+#     except Exception as e:
+#         msg = f"搜索失败: {e}"
+#         print(f"[web_search] ❌ {msg}")
+#         writer({"type": "status", "content": f"❌ {msg}"})
+#         return msg
