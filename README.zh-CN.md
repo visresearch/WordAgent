@@ -66,9 +66,8 @@
 - [x] 支持WPS Word桌面客户端
 - [x] 支持Windows、Linux
 - [x] 支持单智能体模式
-- [x] 支持Token消耗优化
-- [x] 支持多智能体模式
-- [x] 支持Microsoft Word网页版
+- [ ] 支持多智能体模式
+- [ ] 支持Microsoft Word网页版
 - [ ] 支持表格、插图等复杂样式编辑
 
 ## 四、系统架构
@@ -163,8 +162,8 @@ uv run pyinstaller wence.spec
 - [x] MiniMax M2.5运行稳定
 - [x] Step 3.5 Flash运行稳定
 - [x] DeepSeek v3.2运行稳定
+- [x] Claude Sonnet 4.6运行稳定
 - [x] Kimi K2.5容易出现工具调用死循环
-- [x] Qwen Max工具调用不稳定（没有生成文档）
 - [ ] Gemini 3.1 Pro
 
 注：本项目开发使用了部分[阿里云百炼](https://bailian.console.aliyun.com/)、[Openrouter](https://openrouter.ai/models?q=free)免费额度

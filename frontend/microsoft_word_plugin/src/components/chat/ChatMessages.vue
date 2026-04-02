@@ -60,9 +60,8 @@
                 <path d="M8 10.293L3.854 6.146a.5.5 0 1 1 .708-.707L8 8.879l3.438-3.44a.5.5 0 0 1 .708.708L8 10.293z" />
               </svg>
             </div>
-            <div v-show="msg.thinkingExpanded" class="thinking-content">
-              {{ msg.thinking }}
-            </div>
+            <!-- eslint-disable-next-line vue/no-v-html -->
+            <div v-show="msg.thinkingExpanded" class="thinking-content markdown-body" v-html="renderMarkdown(msg.thinking)"></div>
           </div>
           <!-- 用户消息 -->
           <span v-else-if="msg.role === 'user'">{{ msg.content }}</span>
@@ -293,7 +292,6 @@ export default {
   font-size: 12px;
   line-height: 1.6;
   color: #5a6378;
-  white-space: pre-wrap;
   word-wrap: break-word;
   max-height: 300px;
   overflow-y: auto;

@@ -94,8 +94,7 @@
                 <circle cx="12" cy="12" r="10" />
                 <path d="M12 6v6l4 2" />
               </svg>
-              <span class="thinking-label">深度思考</span>
-              <span v-if="msg.thinkingDuration" class="thinking-duration">{{ msg.thinkingDuration }}</span>
+              <span class="thinking-label">{{ msg.thinkingDone ? '深度思考（已结束）' : '深度思考' }}</span>
               <svg
                 class="thinking-arrow"
                 :class="{ rotated: msg.thinkingExpanded }"
@@ -107,25 +106,26 @@
                 <path d="M8 10.293L3.854 6.146a.5.5 0 1 1 .708-.707L8 8.879l3.438-3.44a.5.5 0 0 1 .708.708L8 10.293z" />
               </svg>
             </div>
-            <div v-show="msg.thinkingExpanded" class="thinking-content">
-              {{ msg.thinking }}
-            </div>
+            <!-- eslint-disable-next-line vue/no-v-html -->
+            <div v-show="msg.thinkingExpanded" class="thinking-content markdown-body" v-html="renderMarkdown(msg.thinking)"></div>
           </div>
           <!-- 用户消息直接显示文本 -->
-          <span v-else-if="msg.role === 'user'">{{ msg.content }}</span>
+          <span v-if="msg.role === 'user'">{{ msg.content }}</span>
           <!-- AI 消息使用 contentParts 渲染，区分 status 和 text -->
-          <template v-else-if="msg.contentParts && msg.contentParts.length > 0">
-            <div v-for="(part, partIndex) in msg.contentParts" :key="partIndex">
-              <div v-if="part.type === 'status'" class="status-line">
-                <span class="typing">{{ part.content }}</span>
-                <span v-if="part.loading" class="loading-spinner"></span>
+          <template v-else>
+            <template v-if="msg.contentParts && msg.contentParts.length > 0">
+              <div v-for="(part, partIndex) in msg.contentParts" :key="partIndex">
+                <div v-if="part.type === 'status'" class="status-line">
+                  <span class="typing">{{ part.content }}</span>
+                  <span v-if="part.loading" class="loading-spinner"></span>
+                </div>
+                <div v-else-if="part.type === 'text'" class="markdown-body" v-html="renderMarkdown(part.content)"></div>
               </div>
-              <div v-else-if="part.type === 'text'" class="markdown-body" v-html="renderMarkdown(part.content)"></div>
-            </div>
+            </template>
+            <!-- 兼容旧的 content 字段 -->
+            <!-- eslint-disable-next-line vue/no-v-html -->
+            <div v-else-if="msg.content" class="markdown-body" v-html="renderMarkdown(msg.content)"></div>
           </template>
-          <!-- 兼容旧的 content 字段 -->
-          <!-- eslint-disable-next-line vue/no-v-html -->
-          <div v-else-if="msg.content" class="markdown-body" v-html="renderMarkdown(msg.content)"></div>
         </div>
       </div>
       <!-- AI 消息的操作图标按钮（在消息框外下方） -->
@@ -424,12 +424,6 @@ export default {
   flex: 1;
 }
 
-.thinking-duration {
-  font-size: 11px;
-  color: #8893a7;
-  margin-right: 4px;
-}
-
 .thinking-arrow {
   color: #8893a7;
   transition: transform 0.3s ease;
@@ -444,7 +438,6 @@ export default {
   font-size: 12px;
   line-height: 1.6;
   color: #5a6378;
-  white-space: pre-wrap;
   word-wrap: break-word;
   max-height: 300px;
   overflow-y: auto;

@@ -144,6 +144,7 @@ class SessionService:
         document_json: dict | None = None,
         selection_context: list | dict | None = None,
         content_parts: list[dict] | None = None,
+        thinking: str | None = None,
         model: str | None = None,
         mode: str | None = None,
     ) -> ChatMessage | None:
@@ -170,6 +171,7 @@ class SessionService:
             document_json=document_json,
             selection_context=selection_context,
             content_parts=content_parts,
+            thinking=thinking,
             model=model,
             mode=mode,
         )

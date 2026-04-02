@@ -68,6 +68,8 @@ class ChatMessage(Base):
     selection_context = Column(JSON, nullable=True)
     # 结构化消息内容（包含 status 和 text 类型的部分）
     content_parts = Column(JSON, nullable=True)
+    # 深度思考内容（AI 推理过程，可选）
+    thinking = Column(Text, nullable=True)
     # 使用的模型
     model = Column(String(64), nullable=True)
     # 使用的模式（agent/ask）
@@ -93,6 +95,7 @@ class ChatMessage(Base):
             "documentJson": self.document_json,
             "selectionContext": self.selection_context,
             "contentParts": self.content_parts,
+            "thinking": self.thinking,
             "model": self.model,
             "mode": self.mode,
             "createdAt": self.created_at.isoformat() if self.created_at else None,

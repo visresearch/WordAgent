@@ -4,6 +4,16 @@ import json
 from typing import Any
 
 
+def _strip_code_fence(text: str) -> str:
+    """去掉可能包裹参数的 Markdown 代码块围栏。"""
+    cleaned = text.strip()
+    if cleaned.startswith("```") and cleaned.endswith("```"):
+        lines = cleaned.splitlines()
+        if len(lines) >= 2:
+            return "\n".join(lines[1:-1]).strip()
+    return cleaned
+
+
 def repair_unescaped_quotes_in_json(raw: str) -> str:
     """修复 JSON 字符串值中的未转义双引号。"""
     out: list[str] = []
@@ -59,6 +69,8 @@ def parse_tool_args_with_repair(raw_args: Any) -> dict | None:
     if not isinstance(raw_args, str) or not raw_args.strip():
         return None
 
+    raw_args = _strip_code_fence(raw_args)
+
     try:
         return json.loads(raw_args)
     except json.JSONDecodeError:
@@ -82,9 +94,25 @@ def normalize_tool_args(tool_name: str, raw_args: Any) -> dict:
     if tool_name == "generate_document":
         document = args.get("document")
         if isinstance(document, str):
-            parsed_document = parse_tool_args_with_repair(document)
+            doc_raw = _strip_code_fence(document).strip()
+            parsed_document = parse_tool_args_with_repair(doc_raw)
+
+            # 兼容 Python 字面量字符串（如 str(dict)）
             if not isinstance(parsed_document, dict):
-                raise ValueError("generate_document.document 必须是对象(dict)，不能是字符串")
+                try:
+                    import ast
+
+                    literal_val = ast.literal_eval(doc_raw)
+                    if isinstance(literal_val, dict):
+                        parsed_document = literal_val
+                except Exception:
+                    pass
+
+            if not isinstance(parsed_document, dict):
+                raise ValueError(
+                    "generate_document.document 解析失败。请传对象(dict)而非字符串；"
+                    "若为 JSON 字符串请确保内部引号已正确转义。"
+                )
             args = {**args, "document": parsed_document}
 
     return args

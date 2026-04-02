@@ -267,7 +267,10 @@ export default {
               ? msg.contentParts
               : (msg.content ? [{ type: 'text', content: msg.content }] : []),
             documentJson: msg.documentJson || null,
-            selectionContext: msg.selectionContext || null
+            selectionContext: msg.selectionContext || null,
+            thinking: msg.thinking || '',
+            thinkingExpanded: false,
+            thinkingDone: true
           }));
 
           if (result.data.lastUsedModel) {
@@ -327,7 +330,7 @@ export default {
       return null;
     },
 
-    async saveMessageToHistory(role, content, documentJson = null, selectionContext = null, contentParts = null) {
+    async saveMessageToHistory(role, content, documentJson = null, selectionContext = null, contentParts = null, thinking = null) {
       let sessionId = await this.ensureSession();
       if (!sessionId) return;
 
@@ -338,6 +341,7 @@ export default {
           documentJson,
           selectionContext,
           contentParts,
+          thinking,
           model: this.selectedModel || 'auto',
           mode: this.mode
         });
@@ -356,6 +360,7 @@ export default {
             documentJson,
             selectionContext,
             contentParts,
+            thinking,
             model: this.selectedModel || 'auto',
             mode: this.mode
           });
@@ -569,7 +574,7 @@ export default {
           if (this.currentSessionId === streamSessionId) {
             this.scrollToBottom();
             if (aiMsg.content) {
-              this.saveMessageToHistory('assistant', aiMsg.content, aiMsg.documentJson, null, aiMsg.contentParts);
+              this.saveMessageToHistory('assistant', aiMsg.content, aiMsg.documentJson, null, aiMsg.contentParts, aiMsg.thinking || null);
             }
           } else {
             if (aiMsg.content) {
@@ -578,6 +583,7 @@ export default {
                 content: aiMsg.content,
                 documentJson: aiMsg.documentJson,
                 contentParts: aiMsg.contentParts,
+                thinking: aiMsg.thinking || null,
                 model: this.selectedModel || 'auto',
                 mode: this.mode
               });

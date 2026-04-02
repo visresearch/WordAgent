@@ -80,6 +80,16 @@ async def init_db():
             except Exception as e:
                 print(f"⚠️ 清理 sessions 历史字段失败: {e}")
 
+            # 迁移：为 chat_messages 添加 thinking 列
+            if "chat_messages" in tables:
+                try:
+                    msg_columns = {col["name"] for col in sa_inspect(connection).get_columns("chat_messages")}
+                    if "thinking" not in msg_columns:
+                        connection.exec_driver_sql("ALTER TABLE chat_messages ADD COLUMN thinking TEXT")
+                        print("✅ 已添加字段: chat_messages.thinking")
+                except Exception as e:
+                    print(f"⚠️ 添加 chat_messages.thinking 字段失败: {e}")
+
         await conn.run_sync(_check_and_create)
 
 

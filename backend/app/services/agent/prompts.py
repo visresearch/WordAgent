@@ -45,16 +45,3 @@ def get_agent_prompt_parts(mode: str | None = None) -> list[str]:
 def get_agent_prompt(mode: str | None = None) -> str:
     """兼容旧调用: 合并全部提示为单个系统提示。"""
     return "\n\n".join(get_agent_prompt_parts(mode=mode))
-
-
-# 兼容旧命名，避免影响历史调用
-def _read_skill_file(file_name: str) -> str:
-    return _read_prompt_file(file_name)
-
-
-def get_core_skills(mode: str | None = None) -> list[str]:
-    return get_core_prompts(mode=mode)
-
-
-def get_agent_prompt_skills(mode: str | None = None) -> list[str]:
-    return get_agent_prompt_parts(mode=mode)

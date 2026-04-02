@@ -411,7 +411,10 @@ export default {
               ? msg.contentParts
               : (msg.content ? [{ type: 'text', content: msg.content }] : []),
             documentJson: msg.documentJson || null,
-            selectionContext: msg.selectionContext || null
+            selectionContext: msg.selectionContext || null,
+            thinking: msg.thinking || '',
+            thinkingExpanded: false,
+            thinkingDone: true
           }));
 
           if (result.data.lastUsedModel) {
@@ -499,7 +502,7 @@ export default {
     /**
      * 保存消息到后端（基于会话）
      */
-    async saveMessageToHistory(role, content, documentJson = null, selectionContext = null, contentParts = null) {
+    async saveMessageToHistory(role, content, documentJson = null, selectionContext = null, contentParts = null, thinking = null) {
       // 确保有会话
       let sessionId = await this.ensureSession();
       if (!sessionId) {
@@ -520,6 +523,7 @@ export default {
           documentJson,
           selectionContext,
           contentParts,
+          thinking,
           model: this.selectedModel || 'auto',
           mode: this.mode
         });
@@ -545,6 +549,7 @@ export default {
             documentJson,
             selectionContext,
             contentParts,
+            thinking,
             model: this.selectedModel || 'auto',
             mode: this.mode
           });
@@ -898,7 +903,7 @@ export default {
         thinking: '',
         thinkingExpanded: true,
         thinkingStartTime: null,
-        thinkingDuration: '',
+        thinkingDone: false,
         statusText: ''
       });
       // 必须从响应式数组中取引用（Vue 3 push 后内部对象会被包装为 Proxy）
@@ -924,8 +929,11 @@ export default {
           this.isLoading = false;
           this._streamingSessionId = null;
 
-          if (aiMsg.thinking && aiMsg.thinkingExpanded) {
-            aiMsg.thinkingExpanded = false;
+          if (aiMsg.thinking) {
+            aiMsg.thinkingDone = true;
+            if (aiMsg.thinkingExpanded) {
+              aiMsg.thinkingExpanded = false;
+            }
           }
 
           // 流完成时用户可能已切到其他 session
@@ -933,7 +941,7 @@ export default {
             // 仍在原 session，正常保存
             this.scrollToBottom();
             if (aiMsg.content) {
-              this.saveMessageToHistory('assistant', aiMsg.content, aiMsg.documentJson, null, aiMsg.contentParts);
+              this.saveMessageToHistory('assistant', aiMsg.content, aiMsg.documentJson, null, aiMsg.contentParts, aiMsg.thinking || null);
             }
           } else {
             // 用户已切走，直接调用 API 保存到原 session
@@ -944,6 +952,7 @@ export default {
                 content: aiMsg.content,
                 documentJson: aiMsg.documentJson,
                 contentParts: aiMsg.contentParts,
+                thinking: aiMsg.thinking || null,
                 model: this.selectedModel || 'auto',
                 mode: this.mode
               });
@@ -963,6 +972,14 @@ export default {
      */
     _handleStreamMessage(data, aiMsg) {
       const msg = aiMsg;
+
+      // 收到非 thinking 事件时，标记思考已结束
+      if (data.type !== 'thinking' && msg.thinkingStartTime && !msg.thinkingDone) {
+        msg.thinkingDone = true;
+        if (msg.thinkingExpanded) {
+          msg.thinkingExpanded = false;
+        }
+      }
 
       // 后端请求读取文档：委托 api.js 解析文档并回传
       if (data.type === 'read_document') {
@@ -1163,6 +1180,7 @@ export default {
       if (data.type === 'thinking' && data.content) {
         if (!msg.thinkingStartTime) {
           msg.thinkingStartTime = Date.now();
+          msg.thinkingDone = false;
         }
         msg.thinking += data.content;
         this.scrollToBottom();
@@ -1178,12 +1196,6 @@ export default {
         this.scrollToBottom();
         return;
       } else if (data.type === 'text' && data.content) {
-        if (msg.thinkingStartTime && msg.thinkingExpanded) {
-          const duration = Math.round((Date.now() - msg.thinkingStartTime) / 1000);
-          msg.thinkingDuration = `${duration}秒`;
-          msg.thinkingExpanded = false;
-        }
-
         const content = data.content;
         msg.content += content;
 

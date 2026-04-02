@@ -39,6 +39,7 @@ class AddMessageRequest(BaseModel):
     documentJson: Any | None = None
     selectionContext: list | dict | None = None
     contentParts: list[dict] | None = None
+    thinking: str | None = None
     model: str | None = None
     mode: str | None = None
 
@@ -284,6 +285,7 @@ async def add_message(
             document_json=request.documentJson,
             selection_context=request.selectionContext,
             content_parts=request.contentParts,
+            thinking=request.thinking,
             model=request.model,
             mode=request.mode,
         )
