@@ -140,27 +140,27 @@ async def load_mcp_tools() -> tuple[list, list]:
 
 
 def build_mcp_tools_prompt(mcp_tools: list) -> str:
-    """构建 MCP 工具的系统提示，让模型知道有哪些额外工具可用。"""
+    """Build system prompt text for available MCP tools."""
     if not mcp_tools:
         return ""
 
     lines = [
-        "## 外部 MCP 工具",
+        "## External MCP Tools",
         "",
-        "除了文档操作工具外，你还可以使用以下由 MCP 服务器提供的额外工具：",
+        "In addition to document tools, you can use these extra tools provided by MCP servers:",
         "",
     ]
     for t in mcp_tools:
-        desc = t.description or "无描述"
-        # 截取首行描述
+        desc = t.description or "No description"
+        # Use first line only
         first_line = desc.split("\n")[0].strip()
         lines.append(f"- `{t.name}`: {first_line}")
 
     lines.extend(
         [
             "",
-            "当用户的请求涉及网络搜索、信息检索、数据查询等需要外部信息的场景时，应主动调用这些 MCP 工具来获取信息。",
-            "调用这些工具与调用其他内置工具的方式完全相同。",
+            "When user requests require external information (web search, retrieval, data query), proactively call these MCP tools.",
+            "Invocation pattern is the same as for built-in tools.",
         ]
     )
 

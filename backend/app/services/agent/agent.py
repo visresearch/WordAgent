@@ -153,7 +153,7 @@ def _prepare_tools_for_agent(tools: list, mcp_tool_names: set[str]) -> list:
                 # 检查停止信号
                 chat_id = _current_chat_id.get(None)
                 if is_stop_requested(chat_id):
-                    return "操作已被用户取消"
+                    return "Operation cancelled by user"
 
                 # MCP 工具状态输出
                 if mcp:
@@ -179,12 +179,12 @@ def _prepare_tools_for_agent(tools: list, mcp_tool_names: set[str]) -> list:
                             required = args_schema.get("required")
                             if isinstance(required, list):
                                 required_fields = [str(x) for x in required]
-                        required_hint = f"必填参数: {required_fields}. " if required_fields else ""
+                        required_hint = f"Required params: {required_fields}. " if required_fields else ""
                         provided_keys = sorted(list(normalized.keys())) if isinstance(normalized, dict) else []
                         return (
-                            f"MCP 工具 {tname} 调用失败: {e}. "
-                            f"{required_hint}当前提供参数: {provided_keys}. "
-                            "请严格按该工具 schema 重新构造参数并重试一次。"
+                            f"MCP tool {tname} call failed: {e}. "
+                            f"{required_hint}Provided params: {provided_keys}. "
+                            "Please rebuild arguments strictly according to the tool schema and retry once."
                         )
                     raise
 
@@ -250,13 +250,13 @@ async def process_writing_request_stream(
 
     custom_prompt = get_custom_prompt()
     if custom_prompt:
-        system_parts.append(f"用户自定义指令: {custom_prompt}")
+        system_parts.append(f"User custom instructions: {custom_prompt}")
     from datetime import datetime
 
-    weekdays = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
+    weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
     now = datetime.now()
-    current_time = now.strftime("%Y年%m月%d日 %H:%M") + " " + weekdays[now.weekday()]
-    system_parts.append(f"当前时间: {current_time}")
+    current_time = now.strftime("%Y-%m-%d %H:%M") + " " + weekdays[now.weekday()]
+    system_parts.append(f"Current time: {current_time}")
     system_prompt = "\n\n".join(system_parts)
 
     app = create_agent(
@@ -292,11 +292,11 @@ async def process_writing_request_stream(
                 for r in document_range
             )
             user_content = (
-                f"用户要求：{message}\n\n"
-                f"⚠️ 请先调用 read_document 工具读取以下文档范围（必须调用，不可跳过）：\n{range_instructions}\n"
-                f"读取到文档内容后，根据用户要求继续处理。"
-                f"文档修改与写作优先由你直接调用 generate_document/delete_document 完成。"
-                f"仅在明确需要文本简化时，才调用 run_sub_agent(agent_type='simplifier')。"
+                f"User request: {message}\n\n"
+                f"⚠️ First call read_document for the following ranges (mandatory, do not skip):\n{range_instructions}\n"
+                f"After reading the document content, continue based on the user request. "
+                f"For writing/modification, prioritize direct calls to generate_document/delete_document. "
+                f"If professional review feedback is needed, call run_sub_agent(agent_type='reviewer')."
             )
             print(f"[Agent] 文档范围: {document_range}")
 
@@ -304,10 +304,10 @@ async def process_writing_request_stream(
         if document_meta:
             meta_text = json.dumps(document_meta, ensure_ascii=False)
             user_content += (
-                "\n\n[文档全局元信息]"
-                "\n以下属性来自前端当前文档状态，不是正文内容。"
+                "\n\n[Document Global Metadata]"
+                "\nThe following fields come from frontend document state and are not body content."
                 f"\n{meta_text}"
-                "\n请在分析任务时结合这些元信息（例如 totalParas、documentName、parsedAt 等）。"
+                "\nUse these metadata fields in task analysis (e.g., totalParas, documentName, parsedAt)."
             )
             print(
                 "[Agent] 文档元信息:",
@@ -461,7 +461,7 @@ async def process_writing_request_stream(
                         # （子智能体状态与文档 JSON 已通过 stream_writer 转发）
                         print(f"[Agent] ⏭️ 跳过 run_sub_agent 工具返回值")
                         # 失败信息主动透传，避免前端无反馈
-                        if isinstance(content, str) and content.startswith("子智能体执行失败"):
+                        if isinstance(content, str) and content.startswith("Sub-agent execution failed"):
                             yield f"data: {json.dumps({'type': 'status', 'content': content}, ensure_ascii=False)}\n\n"
                         elif isinstance(content, str) and content:
                             _collected_text_parts.append(content)
@@ -539,7 +539,7 @@ async def process_writing_request_stream(
                 store_conversation_to_long_term(
                     session_id=chat_id or "",
                     user_message=message,
-                    assistant_message=assistant_text or "[已执行工具]",
+                    assistant_message=assistant_text or "[Tool calls executed]",
                     model=model,
                     mode=mode,
                 )
@@ -551,5 +551,5 @@ async def process_writing_request_stream(
     except Exception as e:
         print(f"[Agent Error] {e}")
         traceback.print_exc()
-        yield f"data: {json.dumps({'type': 'text', 'content': f'错误: {str(e)}'}, ensure_ascii=False)}\n\n"
+        yield f"data: {json.dumps({'type': 'text', 'content': f'Error: {str(e)}'}, ensure_ascii=False)}\n\n"
         yield "data: [DONE]\n\n"

@@ -1,4 +1,4 @@
-"""单智能体工具使用的文档与查询 Schema。"""
+"""Document and query schemas used by agent tools."""
 
 from typing import Literal
 
@@ -6,120 +6,115 @@ from pydantic import BaseModel, Field, model_validator
 
 
 class Run(BaseModel):
-    """格式块 - 一段具有相同格式的文字"""
+    """A text run with uniform character formatting."""
 
-    text: str = Field(description="文字内容")
-    rStyle: str = Field(description='字符样式引用ID，如 "rS_1"，对应 document.styles["rS_1"]')
+    text: str = Field(description="Text content")
+    rStyle: str = Field(description='Character style reference ID, e.g. "rS_1", mapped to document.styles["rS_1"]')
 
 
 class Paragraph(BaseModel):
-    """段落 - 每行内容独立为一个段落，禁止在 text 中使用 \\n 换行。runs 为空数组时表示空段落"""
+    """A paragraph. Each line should be a separate paragraph; do not use \\n in run text."""
 
     pStyle: str = Field(
-        description='段落样式引用ID，如 "pS_1"，对应 document.styles["pS_1"]。空段落时可省略', default=""
+        description='Paragraph style reference ID, e.g. "pS_1", mapped to document.styles["pS_1"]. Optional for empty paragraphs.',
+        default="",
     )
     runs: list[Run] = Field(
-        description="格式块数组。一个段落可包含多个 run（不同格式的文字拆为不同 run）。"
-        "禁止在 text 中使用 \\n 换行，换行必须新建段落。空段落时为空数组。",
+        description="Array of runs. A paragraph can contain multiple runs with different formatting."
+        " Do not use \\n for line breaks in text; create new paragraphs instead."
+        " Use an empty array for blank paragraphs.",
         default_factory=list,
     )
 
     @model_validator(mode="after")
     def validate_empty_paragraph_shape(self):
-        """runs 为空时视为空段落，空段落要求 pStyle 为空字符串。"""
+        """If runs is empty, paragraph is considered blank and pStyle must be empty."""
         if not self.runs and self.pStyle != "":
-            raise ValueError("空段落（runs 为空数组）要求 pStyle 为空字符串")
+            raise ValueError("Blank paragraph requires empty pStyle when runs is an empty array")
         return self
 
 
 class CellParagraph(BaseModel):
-    """单元格内段落 - 一个单元格可包含多个段落，每个段落有独立的样式和格式块"""
+    """A paragraph inside a table cell."""
 
-    text: str = Field(description="段落文本（可选，所有 runs 的文本拼接）", default="")
-    pStyle: str = Field(description='段落样式引用ID，如 "pS_1"。控制对齐、行距等段落格式', default="")
+    text: str = Field(description="Paragraph text (optional; typically the concatenation of run texts)", default="")
+    pStyle: str = Field(description='Paragraph style reference ID, e.g. "pS_1"', default="")
     runs: list[Run] = Field(
-        description="格式块数组。单元格内一个段落可包含多个不同格式的 run",
+        description="Array of runs. A cell paragraph can contain multiple runs with different formatting.",
         default_factory=list,
     )
 
 
 class Cell(BaseModel):
-    """表格单元格。支持两种模式：
-    1. 简单模式：只填 text + cStyle（单段落纯文本，字体由 rStyle 控制）
-    2. 多段落模式：填 paragraphs + cStyle（单元格内多段落，每段有独立格式）
-    优先使用 paragraphs 模式以获得精确的格式还原。"""
+    """Table cell.
 
-    text: str = Field(description="单元格文本（简单模式必填；多段落模式下可为空字符串）", default="")
+    Two modes are supported:
+    1. Simple mode: use text + cStyle (single-paragraph plain text; font via rStyle)
+    2. Multi-paragraph mode: use paragraphs + cStyle (multiple styled paragraphs inside one cell)
+    Multi-paragraph mode is preferred for precise style preservation.
+    """
+
+    text: str = Field(description="Cell text (required in simple mode; may be empty in multi-paragraph mode)", default="")
     paragraphs: list[CellParagraph] | None = Field(
         default=None,
-        description="单元格内段落数组（多段落模式）。每个段落有独立的 pStyle 和 runs。"
-        "填写此字段时，text 字段会被忽略，内容以 paragraphs 为准。",
+        description="Array of paragraphs inside the cell (multi-paragraph mode)."
+        " Each paragraph has independent pStyle and runs."
+        " If this field is provided, text is ignored.",
     )
     rStyle: str | None = Field(
         default=None,
-        description='单元格整体字符样式引用ID（简单模式使用），如 "rS_1"。'
-        "多段落模式下由各 run 的 rStyle 控制，此字段可省略。",
+        description='Cell-level character style reference ID for simple mode, e.g. "rS_1".'
+        " In multi-paragraph mode, each run controls style via its own rStyle; this field can be omitted.",
     )
-    cStyle: str = Field(description='单元格样式引用ID，如 "cS_1"，对应 document.styles["cS_1"]')
+    cStyle: str = Field(description='Cell style reference ID, e.g. "cS_1", mapped to document.styles["cS_1"]')
 
 
 class Table(BaseModel):
-    """表格。包含行列数、单元格内容、表格样式，以及可选的列宽和行高控制。"""
+    """Table schema with rows, columns, cells, style, and optional width/height controls."""
 
-    rows: int = Field(description="行数")
-    columns: int = Field(description="列数")
-    cells: list[list[Cell]] = Field(description="单元格二维数组，cells[row][col]")
-    tStyle: str = Field(description='表格样式引用ID，如 "tS_1"，对应 document.styles["tS_1"]')
+    rows: int = Field(description="Number of rows")
+    columns: int = Field(description="Number of columns")
+    cells: list[list[Cell]] = Field(description="2D cell array, indexed as cells[row][col]")
+    tStyle: str = Field(description='Table style reference ID, e.g. "tS_1", mapped to document.styles["tS_1"]')
     columnWidths: list[float] | None = Field(
         default=None,
-        description="每列宽度数组（磅值），长度必须等于 columns。"
-        "省略时前端自动等分页面宽度。如 [120, 280] 表示第1列120磅、第2列280磅。",
+        description="Column widths in points; length must equal columns."
+        " If omitted, frontend auto-distributes width. Example: [120, 280].",
     )
     rowHeights: list[list[int | float]] | None = Field(
         default=None,
-        description="每行高度数组，长度必须等于 rows。每项为 [height, heightRule]："
-        "height=高度（磅值）；heightRule: 0=自动（文字撑高）、1=最小值（至少这么高）、2=固定值。"
-        "省略时行高自动由内容决定。如 [[40, 1], [40, 1]] 表示2行各至少40磅高。",
+        description="Row heights; length must equal rows. Each item is [height, heightRule], where"
+        " height is in points and heightRule: 0=auto, 1=at least, 2=exact."
+        " If omitted, height is content-driven. Example: [[40, 1], [40, 1]].",
     )
 
 
 class DocumentOutput(BaseModel):
-    """文档输出结构。paragraphs 和 tables 是两个独立的顶级字段，不要混合。"""
+    """Document output schema. paragraphs and tables are independent top-level fields."""
 
-    paragraphs: list[Paragraph] = Field(description="段落数组，每个元素必须是 Paragraph 对象，不要放字符串")
-    tables: list[Table] = Field(default_factory=list, description="表格数组，每个元素必须是 Table 对象")
+    paragraphs: list[Paragraph] = Field(description="Paragraph array; every item must be a Paragraph object")
+    tables: list[Table] = Field(default_factory=list, description="Table array; every item must be a Table object")
     styles: dict[str, list] = Field(
-        description="样式字典（必填）。key 为引用ID（如 pS_1、rS_1、cS_1、tS_1），value 为样式数组。"
-        "必须包含所有 pStyle/rStyle/cStyle/tStyle 引用到的样式定义。\n"
-        "pStyle 数组格式: [对齐, 行距, 左缩进, 右缩进, 首行缩进, 段前, 段后, 样式名, 行距规则]。"
-        "对齐: left/center/right/justify; "
-        "行距: 磅值(points)，仅在行距规则=3/4/5时生效(规则0/1/2为预设档位，WPS忽略此字段)，以12pt字号为例：单倍=12,1.5倍=18,双倍=24; "
-        "左缩进/右缩进/首行缩进: 磅值，每个中文字符≈12磅，2字符缩进=24，0=无缩进; "
-        "段前/段后: 磅值，如12=约1行，0=无间距; "
-        "样式名: 如'正文','标题 1','标题 2'等; "
-        "行距规则(WPS常量): 0=单倍行距,1=1.5倍行距,2=双倍行距,3=至少,4=固定值,5=多倍行距。"
-        "注意：规则0/1/2为预设档位(WPS自动计算行距，忽略行距字段)；规则3/4/5使用行距字段的磅值；普通文档推荐用行距规则=3(至少)配合明确的磅值。\n"
-        "rStyle 数组格式: [字体, 字号, 粗体, 斜体, 下划线, 下划线颜色, 颜色, 高亮, 删除线, 上标, 下标]。"
-        "字体: 如'宋体','Times New Roman'; 字号: 磅值; 粗体/斜体: bool; "
-        "下划线: 0=无,1=单线,3=双线,4=虚线,6=粗线,11=波浪线; "
-        "下划线颜色/颜色: #RRGGBB格式; "
-        "高亮: 0=无,1=黑,2=蓝,3=青绿,4=鲜绿,5=粉红,6=红,7=黄,9=深蓝,10=青,11=绿,12=紫罗兰,13=深红,14=深黄,15=深灰,16=浅灰; "
-        "删除线/上标/下标: bool。\n"
-        "cStyle 数组格式: [rowSpan, colSpan, alignment, verticalAlignment]。"
-        "rowSpan/colSpan: 合并行/列数; alignment: 同pStyle; verticalAlignment: 0=顶端,1=居中,2=底端。\n"
-        "tStyle 数组格式: [tableAlignment]。tableAlignment: 0=左对齐,1=居中,2=右对齐。"
+        description="Style dictionary (required). Key is style ID (e.g. pS_1, rS_1, cS_1, tS_1); value is style array."
+        " Must include all styles referenced by pStyle/rStyle/cStyle/tStyle.\n"
+        "pStyle format: [alignment, lineSpacing, leftIndent, rightIndent, firstLineIndent, beforeSpacing, afterSpacing, styleName, lineSpacingRule]."
+        " alignment: left/center/right/justify. lineSpacing and indents are points.\n"
+        "rStyle format: [fontName, fontSize, bold, italic, underline, underlineColor, color, highlight, strikethrough, superscript, subscript]."
+        " colors use #RRGGBB.\n"
+        "cStyle format: [rowSpan, colSpan, alignment, verticalAlignment], where verticalAlignment: 0=top, 1=center, 2=bottom.\n"
+        "tStyle format: [tableAlignment], where tableAlignment: 0=left, 1=center, 2=right."
     )
     insertParaIndex: int = Field(
         default=-1,
-        description="插入位置（段落索引，0-based），前端会在该段落之前插入生成的内容。"
-        "如果用户选中了文档范围，应设为该范围的 startParaIndex；"
-        "如果是新建内容无特定位置，设为 -1（文档末尾）或 0（文档开头）。",
+        description="Insertion index (0-based). Frontend inserts content before this paragraph."
+        " For selected-range edits, use startParaIndex."
+        " For new content without a fixed position, use -1 (end) or 0 (beginning).",
     )
 
     @model_validator(mode="before")
     @classmethod
     def filter_invalid_paragraphs(cls, data):
-        """过滤 paragraphs 中的非法项。"""
+        """Filter invalid items from paragraphs."""
         if isinstance(data, dict) and "paragraphs" in data:
             cleaned = []
             for p in data["paragraphs"]:
@@ -136,7 +131,7 @@ class DocumentOutput(BaseModel):
 
     @model_validator(mode="after")
     def validate_style_references(self):
-        """校验样式引用必须存在于 styles 字典中。"""
+        """Validate that all style references exist in styles dictionary."""
         style_keys = set(self.styles.keys())
         missing: set[str] = set()
 
@@ -168,63 +163,93 @@ class DocumentOutput(BaseModel):
 
         if missing:
             refs = ", ".join(sorted(missing))
-            raise ValueError(f"styles 缺少引用定义: {refs}")
+            raise ValueError(f"Missing style definitions in styles: {refs}")
+        return self
+
+    @model_validator(mode="after")
+    def validate_style_value_shapes(self):
+        """Validate style values are primitive arrays with expected minimum lengths."""
+        primitive_types = (str, int, float, bool)
+
+        for style_id, style_value in self.styles.items():
+            if not isinstance(style_value, list):
+                raise ValueError(f"styles[{style_id}] must be an array, got {type(style_value).__name__}")
+
+            for idx, item in enumerate(style_value):
+                if not isinstance(item, primitive_types):
+                    raise ValueError(
+                        f"styles[{style_id}][{idx}] must be a primitive (str/int/float/bool), got {type(item).__name__}"
+                    )
+
+            if style_id.startswith("pS_") and len(style_value) < 9:
+                raise ValueError(f"styles[{style_id}] must contain at least 9 items for paragraph style")
+            if style_id.startswith("rS_") and len(style_value) < 11:
+                raise ValueError(f"styles[{style_id}] must contain at least 11 items for run style")
+            if style_id.startswith("cS_") and len(style_value) < 4:
+                raise ValueError(f"styles[{style_id}] must contain at least 4 items for cell style")
+            if style_id.startswith("tS_") and len(style_value) < 1:
+                raise ValueError(f"styles[{style_id}] must contain at least 1 item for table style")
+
         return self
 
 
 class RangeFilter(BaseModel):
-    """数值范围筛选，用于 fontSize、lineSpacing 等字段"""
+    """Numeric range filter, used by fields such as fontSize and lineSpacing."""
 
-    gt: float | None = Field(default=None, description="大于")
-    lt: float | None = Field(default=None, description="小于")
-    gte: float | None = Field(default=None, description="大于等于")
-    lte: float | None = Field(default=None, description="小于等于")
+    gt: float | None = Field(default=None, description="Greater than")
+    lt: float | None = Field(default=None, description="Less than")
+    gte: float | None = Field(default=None, description="Greater than or equal to")
+    lte: float | None = Field(default=None, description="Less than or equal to")
 
 
 class QueryFilter(BaseModel):
-    """查询筛选条件，所有字段为 AND 关系。只需填写需要筛选的字段，其余留空。"""
+    """Query filters. All provided fields are combined with AND semantics."""
 
     # 文本匹配（统一使用正则）
     regex: str | None = Field(
         default=None,
-        description="正则表达式匹配文本（run 级别匹配 run.text；paragraph 级别匹配段落拼接文本）",
+        description="Regex for text matching (run-level matches run.text; paragraph-level matches concatenated paragraph text)",
     )
     regexFlags: str | None = Field(
         default="i",
-        description="正则标志位，如 i(忽略大小写)、m(多行)、s(dotall)。例如 'im'",
+        description="Regex flags, e.g. i (ignore case), m (multiline), s (dotall). Example: 'im'",
     )
 
     # Run 级别样式（type=run 时直接匹配；type=paragraph 时检查段落中是否存在匹配的 run）
-    fontName: str | None = Field(default=None, description="字体名，精确匹配，如 '宋体'、'楷体'、'Times New Roman'")
+    fontName: str | None = Field(default=None, description="Font name, exact match, e.g. 'SimSun', 'KaiTi', 'Times New Roman'")
     fontSize: float | RangeFilter | None = Field(
-        default=None, description="字号。精确值如 14；或范围如 {gt: 14}、{gte: 14, lte: 18}"
+        default=None,
+        description="Font size. Exact value (e.g. 14) or range (e.g. {gt: 14}, {gte: 14, lte: 18})",
     )
-    bold: bool | None = Field(default=None, description="粗体")
-    italic: bool | None = Field(default=None, description="斜体")
-    underline: int | None = Field(default=None, description="下划线: 0=无, 1=单线, 3=双线, 4=虚线, 6=粗线, 11=波浪线")
-    color: str | None = Field(default=None, description="字体颜色 #RRGGBB 格式，如 '#FF0000' 为红色")
+    bold: bool | None = Field(default=None, description="Bold")
+    italic: bool | None = Field(default=None, description="Italic")
+    underline: int | None = Field(default=None, description="Underline: 0=none, 1=single, 3=double, 4=dashed, 6=thick, 11=wave")
+    color: str | None = Field(default=None, description="Text color in #RRGGBB format, e.g. '#FF0000'")
     highlight: int | None = Field(
-        default=None, description="高亮色: 0=无, 1=黑, 2=蓝, 3=青绿, 4=鲜绿, 5=粉红, 6=红, 7=黄"
+        default=None,
+        description="Highlight color index: 0=none, 1=black, 2=blue, 3=cyan-green, 4=bright green, 5=pink, 6=red, 7=yellow",
     )
-    strikethrough: bool | None = Field(default=None, description="删除线")
-    superscript: bool | None = Field(default=None, description="上标")
-    subscript: bool | None = Field(default=None, description="下标")
+    strikethrough: bool | None = Field(default=None, description="Strikethrough")
+    superscript: bool | None = Field(default=None, description="Superscript")
+    subscript: bool | None = Field(default=None, description="Subscript")
 
     # Paragraph 级别样式（仅 type=paragraph 时有效）
-    alignment: str | None = Field(default=None, description="段落对齐: left/center/right/justify")
+    alignment: str | None = Field(default=None, description="Paragraph alignment: left/center/right/justify")
     styleName: str | None = Field(
-        default=None, description="段落样式名，包含匹配（如 '标题' 可匹配 '标题 1'、'标题 2'）"
+        default=None,
+        description="Paragraph style name (contains match), e.g. 'Heading' can match 'Heading 1' and 'Heading 2'",
     )
     lineSpacing: float | RangeFilter | None = Field(
-        default=None, description="行距（磅值）。单倍=12, 1.5倍=18, 双倍=24；精确值如 18；或范围如 {gt: 18}"
+        default=None,
+        description="Line spacing in points. Single=12, 1.5x=18, double=24. Exact value or range supported.",
     )
 
 
 class DocumentQuery(BaseModel):
-    """文档查询 DSL"""
+    """Document query DSL."""
 
     type: Literal["run", "paragraph"] = Field(
         default="run",
-        description="搜索粒度：run=格式块级别（精确到同一格式的文字片段），paragraph=段落级别",
+        description="Search granularity: run (text run level) or paragraph (paragraph level)",
     )
-    filters: QueryFilter = Field(description="筛选条件，所有字段为 AND 关系，只填需要的字段")
+    filters: QueryFilter = Field(description="Filter set; provided fields are combined with AND semantics")

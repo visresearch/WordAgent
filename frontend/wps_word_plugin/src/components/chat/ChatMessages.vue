@@ -73,7 +73,7 @@
           <span
             v-if="msg.role === 'assistant' && !msg.content && !msg.thinking && !msg.statusText && !(msg.contentParts && msg.contentParts.length > 0) && isLoading"
             class="typing"
-          >💭 AI正在思考中</span>
+          >💭 AI正在准备中</span>
           <!-- 状态提示文本 -->
           <span
             v-if="msg.statusText"

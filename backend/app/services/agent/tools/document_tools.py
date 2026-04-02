@@ -1,4 +1,4 @@
-"""单智能体文档相关工具（读、查、写、删）。"""
+"""Document tools for the agent (read, search, generate, delete)."""
 
 import asyncio
 import concurrent.futures
@@ -10,12 +10,12 @@ from langgraph.config import get_stream_writer
 from .callback import _current_chat_id, _pending_loops, _pending_tool_requests, is_stop_requested
 from .schemas import DocumentOutput, DocumentQuery
 
-# 返回给 LLM 的文档 JSON 最大字符数（超过则精简样式信息，仅保留文本）
+# 返回给 LLM 的文档 JSON 最大字符数（超过则进入精简模式）
 _MAX_DOC_JSON_CHARS = 80_000
 
 
 def _compact_doc_json(doc_json: dict) -> str:
-    """将文档 JSON 压缩到 LLM 可处理的大小。"""
+    """Compact document JSON to a size the LLM can handle."""
     full = json.dumps(doc_json, ensure_ascii=False)
     if len(full) <= _MAX_DOC_JSON_CHARS:
         return full
@@ -26,7 +26,7 @@ def _compact_doc_json(doc_json: dict) -> str:
         text = "".join(r.get("text", "") if isinstance(r, dict) else str(r) for r in p.get("runs", []))
         compact["paragraphs"].append({"paraIndex": p.get("paraIndex"), "text": text})
 
-    # 保留表格的文本信息
+    # 保留表格文本信息
     if doc_json.get("tables"):
         compact["tables"] = []
         for t in doc_json["tables"]:
@@ -55,18 +55,18 @@ def _compact_doc_json(doc_json: dict) -> str:
             compact["tables"].append(table_compact)
 
     result = json.dumps(compact, ensure_ascii=False)
-    print(f"[read_document] 📦 文档过大({len(full)} chars)，已精简为 {len(result)} chars（纯文本模式）")
+    print(f"[read_document] 📦 文档过大 ({len(full)} chars)，已精简为 {len(result)} chars（纯文本模式）")
     return result
 
 
 @tool
 def read_document(startParaIndex: int = 0, endParaIndex: int = 49) -> str:
-    """读取文档内容。通过 WebSocket 请求前端解析指定范围的文档并返回。"""
+    """Read document content. Requests the frontend to parse and return the specified paragraph range via WebSocket."""
     writer = get_stream_writer()
     writer(
         {
             "type": "read_document",
-            "content": f"📑 正在读取文档(段落 {startParaIndex} - {endParaIndex})",
+            "content": f"📑 正在读取文档（段落 {startParaIndex} - {endParaIndex}）",
             "startParaIndex": startParaIndex,
             "endParaIndex": endParaIndex,
         }
@@ -111,7 +111,7 @@ def read_document(startParaIndex: int = 0, endParaIndex: int = 49) -> str:
                         writer(
                             {
                                 "type": "read_complete",
-                                "content": f"✅ 文档读取完成(段落 {startParaIndex} - {endParaIndex})",
+                                "content": f"✅ 文档读取完成（段落 {startParaIndex} - {endParaIndex}）",
                             }
                         )
                         return _compact_doc_json(doc_json)
@@ -139,7 +139,7 @@ def read_document(startParaIndex: int = 0, endParaIndex: int = 49) -> str:
 
 @tool
 def generate_document(document: DocumentOutput) -> dict:
-    """生成带格式的文档 JSON，用于插入到 Word 文档。"""
+    """Generate a formatted document JSON for insertion into the Word document."""
     writer = get_stream_writer()
     doc_dict = document.model_dump()
     para_count = len(doc_dict.get("paragraphs", []))
@@ -149,7 +149,7 @@ def generate_document(document: DocumentOutput) -> dict:
 
 @tool
 def search_documnet(query: DocumentQuery) -> str:
-    """搜索文档内容 - 在前端文档中按文本或样式条件搜索匹配内容。"""
+    """Search document content — search for matching content in the frontend document by text or style criteria."""
     writer = get_stream_writer()
 
     query_dict = query.model_dump(exclude_none=True)
@@ -215,7 +215,7 @@ def search_documnet(query: DocumentQuery) -> str:
                                 "matchCount": match_count,
                                 "matchedParaIndices": matched_para_indices,
                                 "suggestedReadRanges": suggested_read_ranges,
-                                "coverageAdvice": "若命中多处候选，按段落索引顺序逐个读取候选段落附近内容；证据充分即可停止",
+                                "coverageAdvice": "When multiple candidates are found, read nearby context around each candidate in paragraph-index order, and stop early once evidence is sufficient.",
                             },
                             ensure_ascii=False,
                         )
@@ -229,7 +229,7 @@ def search_documnet(query: DocumentQuery) -> str:
                             "matchedParaIndices": [],
                             "suggestedReadRanges": [],
                             "triedQuery": query_dict,
-                            "retryAdvice": "请更换关键词重试（同义词/简称/章节名/核心词）",
+                            "retryAdvice": "Try alternative keywords (synonyms, abbreviations, section names, core terms).",
                         },
                         ensure_ascii=False,
                     )
@@ -247,15 +247,15 @@ def search_documnet(query: DocumentQuery) -> str:
 
 @tool
 def delete_document(startParaIndex: int = 0, endParaIndex: int = -1) -> str:
-    """删除文档中指定范围的段落。"""
+    """Delete a specified range of paragraphs from the document."""
     writer = get_stream_writer()
     writer(
         {
             "type": "delete_document",
-            "content": f"🗑️ 准备删除文档段落(段落 {startParaIndex} - {endParaIndex})",
+            "content": f"🗑️ 准备删除文档段落（{startParaIndex} - {endParaIndex}）",
             "startParaIndex": startParaIndex,
             "endParaIndex": endParaIndex,
         }
     )
     print(f"[delete_document] 请求前端删除文档段落 (startParaIndex={startParaIndex}, endParaIndex={endParaIndex})")
-    return f"已通知前端标记删除段落 {startParaIndex} - {endParaIndex}，等待用户确认"
+    return f"Frontend notified to mark paragraphs {startParaIndex} - {endParaIndex} for deletion, awaiting user confirmation"

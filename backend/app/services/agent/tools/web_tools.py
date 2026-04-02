@@ -1,4 +1,4 @@
-"""单智能体网络工具。"""
+"""Web tools for the agent."""
 
 from langchain_core.tools import tool
 from langgraph.config import get_stream_writer
@@ -6,15 +6,15 @@ from langgraph.config import get_stream_writer
 
 @tool
 def web_fetch(url: str) -> str:
-    """拓取网页内容 - 根据 URL 获取网页正文，自动清洗 HTML 标签、脚本、样式等。"""
+    """Fetch webpage content — retrieves the main text of a URL, automatically cleaning HTML tags, scripts, and styles."""
     from curl_cffi import requests as curl_requests
     from bs4 import BeautifulSoup
 
     from app.services.llm_client import get_httpx_proxy_url
 
     writer = get_stream_writer()
-    writer({"type": "status", "content": f"🌐 正在拓取网页: {url}"})
-    print(f"[web_fetch] 开始拓取: {url}")
+    writer({"type": "status", "content": f"🌐 正在抓取网页: {url}"})
+    print(f"[web_fetch] 开始抓取: {url}")
 
     try:
         from urllib.parse import urlparse
@@ -91,22 +91,22 @@ def web_fetch(url: str) -> str:
         if len(result) < 100:
             result = target.get_text(separator="\n", strip=True)
         if len(result) > 8000:
-            result = result[:8000] + "\n\n[内容已截断，原文过长]"
+            result = result[:8000] + "\n\n[Content truncated, original text too long]"
 
         title = soup.title.get_text(strip=True) if soup.title else ""
         if title:
-            result = f"标题: {title}\n\n{result}"
+            result = f"Title: {title}\n\n{result}"
 
-        print(f"[web_fetch] ✅ 已拓取 {len(result)} 字符")
-        writer({"type": "status", "content": "✅ 网页拓取完成"})
+        print(f"[web_fetch] ✅ 抓取完成，共 {len(result)} 字符")
+        writer({"type": "status", "content": "✅ 网页抓取完成"})
         return result
 
     except curl_requests.errors.RequestsError as e:
         status = getattr(getattr(e, "response", None), "status_code", None)
-        print(f"[web_fetch] ❌ 拓取失败: HTTP {status or e}")
-        writer({"type": "status", "content": "❌ 该网页无法访问，跳过"})
-        return "该网页无法访问（已跳过）。请直接使用已有的搜索摘要继续完成任务，不要因此放弃生成文档。"
+        print(f"[web_fetch] ❌ 抓取失败: HTTP {status or e}")
+        writer({"type": "status", "content": "❌ 网页不可访问，已跳过"})
+        return "This webpage is inaccessible (skipped). Proceed with available search summaries to complete the task. Do not abandon document generation because of this."
     except Exception as e:
-        print(f"[web_fetch] ❌ 拓取失败: {e}")
-        writer({"type": "status", "content": "❌ 该网页无法访问，跳过"})
-        return "该网页无法访问（已跳过）。请直接使用已有的搜索摘要继续完成任务，不要因此放弃生成文档。"
+        print(f"[web_fetch] ❌ 抓取失败: {e}")
+        writer({"type": "status", "content": "❌ 网页不可访问，已跳过"})
+        return "This webpage is inaccessible (skipped). Proceed with available search summaries to complete the task. Do not abandon document generation because of this."
