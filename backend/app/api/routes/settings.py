@@ -27,6 +27,7 @@ class ProviderConfig(BaseModel):
     name: str
     baseUrl: str
     apiKey: str
+    apiType: str = "openai"  # openai / anthropic
     models: list[dict[str, Any]] = []
     enabled: bool = True
 

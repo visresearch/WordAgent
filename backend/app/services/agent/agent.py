@@ -33,12 +33,14 @@ def _try_init_langsmith():
 
 _langsmith_enabled = _try_init_langsmith()
 
-from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage, SystemMessage, ToolMessage
-from langgraph.graph import END, START, MessagesState, StateGraph
+from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
+from langchain.agents import create_agent
+from langchain.chat_models import init_chat_model
+from langgraph.checkpoint.memory import InMemorySaver
 
-from app.services.llm_client import create_llm, resolve_model
+from app.services.llm_client import resolve_model, supports_thinking, get_llm_init_kwargs
 from app.services.agent.prompts import get_core_prompts
-from app.services.utils import normalize_tool_args, parse_tool_args_with_repair
+from app.services.utils import normalize_tool_args
 from app.services.agent.tools import (
     BASE_TOOLS,
     _current_chat_id,
@@ -52,259 +54,145 @@ from app.services.agent.tools.mcp_tools import load_mcp_tools, build_mcp_tools_p
 # region LangGraph Agent（ReAct）
 
 
-def build_graph(llm_with_tools, tool_map: dict, mcp_tool_names: set[str] | None = None):
-    """
-    构建 LangGraph ReAct 工作流（单一智能体）
+def _extract_text_content(content) -> str:
+    """将 LLM 消息内容统一转换为纯文本，兼容 Claude 的结构化 content blocks。"""
+    if content is None:
+        return ""
 
-    流程：
-    START -> agent -> (有 tool_calls?) -> tools -> agent -> ... -> END
-                   -> (无 tool_calls) -> END
+    if isinstance(content, str):
+        return content
 
-    agent 自动循环调用工具，直到不再需要工具为止。
-    """
-    tool_names_str = " / ".join(tool_map.keys())
-    _mcp_names = mcp_tool_names or set()
-    graph = StateGraph(MessagesState)
+    if isinstance(content, dict):
+        # 常见块格式：{"type": "text", "text": "..."}
+        text = content.get("text")
+        if isinstance(text, str):
+            return text
+        # 兜底：部分实现可能用 content 字段
+        fallback = content.get("content")
+        return fallback if isinstance(fallback, str) else ""
 
-    # ---- 节点 ----
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            item_text = _extract_text_content(item)
+            if item_text:
+                parts.append(item_text)
+        return "".join(parts)
 
-    def agent_node(state: MessagesState) -> dict:
-        """单一 Agent 节点 - 决定下一步行动或直接回复"""
-        chat_id = _current_chat_id.get(None)
-        if is_stop_requested(chat_id):
-            print(f"[Agent] ⛔ 收到停止信号，终止 Agent 节点 (session={chat_id})")
-            return {"messages": []}
-        print("[Agent] 开始处理")
-        response = llm_with_tools.invoke(state["messages"])
-        return {"messages": [response]}
+    # 其他类型不向前端输出，避免出现 [object Object]
+    return ""
 
-    def tools_node(state: MessagesState) -> dict:
-        """工具执行节点 - 执行 Agent 请求的所有工具"""
-        from langgraph.config import get_stream_writer as _get_sw
 
-        last_message = state["messages"][-1]
-        results = []
-        chat_id = _current_chat_id.get(None)
-        writer = _get_sw()
+def _extract_thinking_content(content) -> str:
+    """提取 thinking/reasoning 内容，兼容 Claude 与 OpenAI 常见结构。"""
+    if content is None:
+        return ""
 
-        for tool_call in last_message.tool_calls:
-            if is_stop_requested(chat_id):
-                print(f"[Tools] ⛔ 收到停止信号，终止后续工具执行 (session={chat_id})")
-                break
-            tool_name = tool_call["name"]
-            print(f"[Tools] 执行工具: {tool_name}")
+    if isinstance(content, str):
+        return content
 
-            # MCP 工具调用时输出状态到前端
-            if tool_name in _mcp_names:
-                args_preview = json.dumps(tool_call.get("args", {}), ensure_ascii=False)
-                if len(args_preview) > 100:
-                    args_preview = args_preview[:100] + "..."
-                writer({"type": "status", "content": f"🔧 调用 MCP 工具: {tool_name}({args_preview})"})
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            item_text = _extract_thinking_content(item)
+            if item_text:
+                parts.append(item_text)
+        return "".join(parts)
 
-            tool_fn = tool_map.get(tool_name)
-            if tool_fn:
+    if not isinstance(content, dict):
+        return ""
+
+    block_type = str(content.get("type", "")).lower()
+
+    # Claude 风格: {"type": "thinking", "thinking": "..."}
+    if block_type == "thinking":
+        for key in ("thinking", "text", "content"):
+            val = content.get(key)
+            if isinstance(val, str) and val:
+                return val
+
+    # OpenAI 常见风格：reasoning / reasoning_content / summary_text
+    if block_type in {"reasoning", "reasoning_content", "summary_text"}:
+        for key in ("reasoning", "text", "content"):
+            val = content.get(key)
+            if isinstance(val, str) and val:
+                return val
+
+        # 某些返回会将推理摘要放在 summary 数组里
+        summary = content.get("summary")
+        if summary is not None:
+            summary_text = _extract_thinking_content(summary)
+            if summary_text:
+                return summary_text
+
+    # 兼容没有明确 type，但有 reasoning 字段的结构
+    reasoning = content.get("reasoning")
+    if isinstance(reasoning, str) and reasoning:
+        return reasoning
+
+    summary = content.get("summary")
+    if summary is not None:
+        return _extract_thinking_content(summary)
+
+    return ""
+
+
+def _prepare_tools_for_agent(tools: list, mcp_tool_names: set[str]) -> list:
+    """包装工具，添加参数标准化、MCP 状态输出和停止信号检查。"""
+    for tool in tools:
+        if not hasattr(tool, "func") or tool.func is None:
+            continue
+
+        original_func = tool.func
+        tool_name = tool.name
+        is_mcp = tool_name in mcp_tool_names
+        tool_args_schema = getattr(tool, "args_schema", None)
+
+        def _make_wrapper(orig_fn, tname, mcp, args_schema):
+            def wrapper(**kwargs):
+                # 检查停止信号
+                chat_id = _current_chat_id.get(None)
+                if is_stop_requested(chat_id):
+                    return "操作已被用户取消"
+
+                # MCP 工具状态输出
+                if mcp:
+                    try:
+                        from langgraph.config import get_stream_writer
+
+                        writer = get_stream_writer()
+                        preview = json.dumps(kwargs, ensure_ascii=False)
+                        if len(preview) > 100:
+                            preview = preview[:100] + "..."
+                        writer({"type": "status", "content": f"🔧 调用 MCP 工具: {tname}({preview})"})
+                    except Exception:
+                        pass
+
+                # 参数标准化
+                normalized = normalize_tool_args(tname, kwargs)
                 try:
-                    tool_args = normalize_tool_args(tool_name, tool_call.get("args", {}))
-                    result = tool_fn.invoke(tool_args)
-                    # 标准化结果为字符串
-                    if isinstance(result, dict):
-                        content = json.dumps(result, ensure_ascii=False)
-                    elif isinstance(result, str):
-                        content = result
-                    else:
-                        content = str(result)
-
-                    results.append(ToolMessage(content=content, tool_call_id=tool_call["id"], name=tool_name))
+                    return orig_fn(**normalized)
                 except Exception as e:
-                    err = (
-                        f"错误: 工具 {tool_name} 调用失败: {e}。"
-                        "请按工具 schema 重新构造参数。"
-                    )
-                    print(f"[Tools] ❌ {err}")
-                    results.append(ToolMessage(content=err, tool_call_id=tool_call["id"], name=tool_name))
-            else:
-                print(f"[Tools] ⚠️ 未知工具: {tool_name}")
-                results.append(
-                    ToolMessage(content=f"错误: 未知工具 {tool_name}", tool_call_id=tool_call["id"], name=tool_name)
-                )
+                    if mcp:
+                        required_fields: list[str] = []
+                        if isinstance(args_schema, dict):
+                            required = args_schema.get("required")
+                            if isinstance(required, list):
+                                required_fields = [str(x) for x in required]
+                        required_hint = f"必填参数: {required_fields}. " if required_fields else ""
+                        provided_keys = sorted(list(normalized.keys())) if isinstance(normalized, dict) else []
+                        return (
+                            f"MCP 工具 {tname} 调用失败: {e}. "
+                            f"{required_hint}当前提供参数: {provided_keys}. "
+                            "请严格按该工具 schema 重新构造参数并重试一次。"
+                        )
+                    raise
 
-        return {"messages": results}
+            return wrapper
 
-    def retry_node(state: MessagesState) -> dict:
-        """当模型中途放弃 tool call 时，移除失败的消息并提示重试"""
-        last_message = state["messages"][-1]
-        invalid_calls = getattr(last_message, "invalid_tool_calls", [])
-        tool_names = [tc.get("name", "?") for tc in invalid_calls] if invalid_calls else []
-        print(f"[Retry] 移除失败的消息 (invalid tools: {tool_names})，添加重试提示")
-        return {
-            "messages": [
-                RemoveMessage(id=last_message.id),
-                SystemMessage(
-                    content="[RETRY_TOOL_CALL] 你刚才的工具调用无效（可能是 JSON 不完整或被截断）。"
-                    f"请基于当前可用工具重试一次：{tool_names_str}。"
-                    "文档改写优先由你直接调用 generate_document/delete_document 完成；仅在简化场景可调用 run_sub_agent(agent_type='simplifier')。"
-                ),
-            ]
-        }
+        tool.func = _make_wrapper(original_func, tool_name, is_mcp, tool_args_schema)
 
-    def repair_invalid_tool_call_node(state: MessagesState) -> dict:
-        """尝试修复 invalid_tool_calls 并直接执行，减少二次生成失败概率。"""
-        last_message = state["messages"][-1]
-        invalid_calls = getattr(last_message, "invalid_tool_calls", []) or []
-        chat_id = _current_chat_id.get(None)
-        repaired_tool_calls = []
-        repaired_results = []
-
-        for tc in invalid_calls:
-            if is_stop_requested(chat_id):
-                print(f"[Repair] ⛔ 收到停止信号，终止修复执行 (session={chat_id})")
-                break
-
-            tool_name = tc.get("name", "")
-            tool_fn = tool_map.get(tool_name)
-            if not tool_fn:
-                continue
-
-            parsed_args = parse_tool_args_with_repair(tc.get("args", {}))
-            if parsed_args is None:
-                print(f"[Repair] ❌ 无法修复工具参数: {tool_name}")
-                continue
-
-            try:
-                normalized_args = normalize_tool_args(tool_name, parsed_args)
-                result = tool_fn.invoke(normalized_args)
-                if isinstance(result, dict):
-                    content = json.dumps(result, ensure_ascii=False)
-                elif isinstance(result, str):
-                    content = result
-                else:
-                    content = str(result)
-
-                repaired_tool_calls.append(
-                    {
-                        "name": tool_name,
-                        "args": normalized_args,
-                        "id": tc.get("id", "repaired_invalid_tool_call"),
-                        "type": "tool_call",
-                    }
-                )
-                repaired_results.append(
-                    ToolMessage(
-                        content=content,
-                        tool_call_id=tc.get("id", "repaired_invalid_tool_call"),
-                        name=tool_name,
-                    )
-                )
-                print(f"[Repair] ✅ 已修复并执行工具: {tool_name}")
-            except Exception as e:
-                print(f"[Repair] ❌ 工具执行失败: {tool_name}, error={e}")
-
-        if repaired_results:
-            print("[Repair] ✅ 已重建合法 tool_calls，继续 Agent")
-            return {
-                "messages": [
-                    RemoveMessage(id=last_message.id),
-                    AIMessage(content="", tool_calls=repaired_tool_calls),
-                    *repaired_results,
-                ]
-            }
-
-        # 无法修复时，回退到一次重试指令
-        print("[Repair] -> retry (无法自动修复参数)")
-        return {
-            "messages": [
-                RemoveMessage(id=last_message.id),
-                SystemMessage(
-                    content="[RETRY_TOOL_CALL] 你刚才的 tool call 参数不是合法 JSON。"
-                    "请仅重试一次，并确保参数完整合法。"
-                    f"可用工具：{tool_names_str}。"
-                ),
-            ]
-        }
-
-    # ---- 路由 ----
-
-    # 最大工具调用轮次（agent -> tools -> agent 算一轮），防止无限循环
-    MAX_TOOL_ROUNDS = 20
-
-    def should_continue(state: MessagesState) -> str:
-        """判断 Agent 是否还需要调用工具"""
-        chat_id = _current_chat_id.get(None)
-        if is_stop_requested(chat_id):
-            print(f"[Router] -> END (用户停止, session={chat_id})")
-            return END
-
-        last_message = state["messages"][-1]
-        if hasattr(last_message, "tool_calls") and last_message.tool_calls:
-            # 统计已完成的工具调用轮次（ToolMessage 的数量近似于轮次）
-            tool_rounds = sum(1 for m in state["messages"] if isinstance(m, ToolMessage))
-            if tool_rounds >= MAX_TOOL_ROUNDS:
-                print(f"[Router] -> END (已达到最大工具调用轮次 {MAX_TOOL_ROUNDS})")
-                return END
-            print(f"[Router] -> tools (第 {tool_rounds + 1} 轮)")
-            return "tools"
-
-        # 优先尝试修复 invalid_tool_calls（模型生成了非法 JSON 参数）
-        invalid_calls = getattr(last_message, "invalid_tool_calls", [])
-        if invalid_calls:
-            print(f"[Router] ⚠️ 检测到无效的工具调用: {[tc.get('name', '?') for tc in invalid_calls]}")
-            for idx, tc in enumerate(invalid_calls, 1):
-                print(
-                    "[Router] invalid_tool_call[{idx}] name={name} id={id} error={error} args={args}".format(
-                        idx=idx,
-                        name=tc.get("name", "?"),
-                        id=tc.get("id", "?"),
-                        error=tc.get("error", "?"),
-                        args=tc.get("args", ""),
-                    )
-                )
-            print("[Router] -> repair")
-            return "repair"
-
-        # 检测中途放弃的工具调用，自动重试一次
-        should_retry = False
-
-        # 信号2: finish_reason 为 length（输出被截断）
-        metadata = getattr(last_message, "response_metadata", {})
-        finish_reason = metadata.get("finish_reason")
-        if finish_reason:
-            print(f"[Router] finish_reason={finish_reason}")
-        if finish_reason == "length":
-            print("[Router] ⚠️ 模型输出被截断 (finish_reason=length)")
-            should_retry = True
-
-        if should_retry:
-            # 检查是否已经重试过（防止无限循环）
-            has_retried = any(
-                isinstance(m, SystemMessage) and "[RETRY_TOOL_CALL]" in m.content for m in state["messages"]
-            )
-            if not has_retried:
-                print("[Router] -> retry")
-                return "retry"
-            else:
-                print("[Router] -> END (已重试过，不再重试)")
-
-        print("[Router] -> END")
-        return END
-
-    # ---- 构建图 ----
-
-    graph.add_node("agent", agent_node)
-    graph.add_node("tools", tools_node)
-    graph.add_node("retry", retry_node)
-    graph.add_node("repair", repair_invalid_tool_call_node)
-
-    graph.add_edge(START, "agent")
-    graph.add_conditional_edges(
-        "agent",
-        should_continue,
-        {"tools": "tools", "retry": "retry", "repair": "repair", END: END},
-    )
-    graph.add_edge("tools", "agent")  # 工具执行完毕，始终回到 Agent
-    graph.add_edge("retry", "agent")  # 重试后回到 Agent 重新生成
-    graph.add_edge("repair", "agent")  # 修复执行后回到 Agent 收尾
-
-    return graph.compile()
+    return tools
 
 
 # region 主处理函数
@@ -340,45 +228,47 @@ async def process_writing_request_stream(
     print(f"[Agent] 模式: {mode}")
 
     model_name = resolve_model(model or "auto")
-    llm = create_llm(model_name)
+    _thinking_enabled = supports_thinking(model_name)
+    llm_kwargs = get_llm_init_kwargs(model_name, enable_thinking=_thinking_enabled)
+    llm = init_chat_model(**llm_kwargs)
+    if _thinking_enabled:
+        print(f"[Agent] 🧠 模型 {model_name} 支持 thinking 模式，已启用")
 
-    # 加载 MCP 动态工具（从用户设置）
-    mcp_tools, mcp_client = await load_mcp_tools()
+    # 加载 MCP 动态工具（从用户设置，每个服务器独立加载）
+    mcp_tools, mcp_clients = await load_mcp_tools()
     mcp_tool_names = {t.name for t in mcp_tools}
     tools = list(BASE_TOOLS) + mcp_tools
-    tool_map = {t.name: t for t in tools}
+    _prepare_tools_for_agent(tools, mcp_tool_names)
     print(f"[Agent] 已绑定 {[t.name for t in tools]}")
 
-    llm_with_tools = llm.bind_tools(tools)
-    app = build_graph(llm_with_tools, tool_map, mcp_tool_names)
+    # 构建系统提示（合并所有 system prompt 为单一字符串）
+    system_parts = list(get_core_prompts(mode=mode))
+    mcp_prompt = build_mcp_tools_prompt(mcp_tools)
+    if mcp_prompt:
+        system_parts.append(mcp_prompt)
+    from app.services.llm_client import get_custom_prompt
+
+    custom_prompt = get_custom_prompt()
+    if custom_prompt:
+        system_parts.append(f"用户自定义指令: {custom_prompt}")
+    from datetime import datetime
+
+    weekdays = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
+    now = datetime.now()
+    current_time = now.strftime("%Y年%m月%d日 %H:%M") + " " + weekdays[now.weekday()]
+    system_parts.append(f"当前时间: {current_time}")
+    system_prompt = "\n\n".join(system_parts)
+
+    app = create_agent(
+        model=llm,
+        tools=tools,
+        system_prompt=system_prompt,
+        checkpointer=InMemorySaver(),
+    )
 
     try:
-        # 构建初始消息列表
+        # 构建初始消息列表（create_agent 已注入 system_prompt，这里只构建记忆 + 用户消息）
         messages = []
-
-        # 注入核心技能（身份、风格、工具策略、子智能体策略等 — 始终加载）
-        for core_prompt in get_core_prompts(mode=mode):
-            messages.append(SystemMessage(content=core_prompt))
-
-        # 注入 MCP 工具提示（让模型知道有哪些额外工具可用）
-        mcp_prompt = build_mcp_tools_prompt(mcp_tools)
-        if mcp_prompt:
-            messages.append(SystemMessage(content=mcp_prompt))
-
-        # 注入自定义提示（如果有）
-        from app.services.llm_client import get_custom_prompt
-
-        custom_prompt = get_custom_prompt()
-        if custom_prompt:
-            messages.append(SystemMessage(content=f"用户自定义指令: {custom_prompt}"))
-
-        # 注入当前时间
-        from datetime import datetime
-
-        weekdays = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
-        now = datetime.now()
-        current_time = now.strftime("%Y年%m月%d日 %H:%M") + " " + weekdays[now.weekday()]
-        messages.append(SystemMessage(content=f"当前时间: {current_time}"))  # 注入当前时间，帮助模型做出与时俱进的回复
 
         # 注入三层记忆（长期 RAG → 摘要 → 短期 k=5 轮）
         from app.services.memory import build_memory_messages
@@ -506,12 +396,18 @@ async def process_writing_request_stream(
                     _current_chat_id.set(chat_id)
                 _current_model_name.set(model_name)
 
+                import uuid as _uuid
+
+                _thread_id = str(_uuid.uuid4())
+                _config = {"configurable": {"thread_id": _thread_id}}
+                if langsmith_config:
+                    _config.update(langsmith_config)
+
                 stream_kwargs = {
                     "input": {"messages": messages},
                     "stream_mode": ["messages", "custom"],
+                    "config": _config,
                 }
-                if langsmith_config:
-                    stream_kwargs["config"] = langsmith_config
 
                 response = app.stream(**stream_kwargs)
 
@@ -574,20 +470,52 @@ async def process_writing_request_stream(
                     if tool_name == "generate_document":
                         # 主 Agent 直接生成文档时，透传 JSON 给前端
                         try:
-                            doc_json = json.loads(content)
+                            # content 可能是 dict（LangGraph 直接传递）或 str（序列化后的文本）
+                            if isinstance(content, dict):
+                                doc_json = content
+                            elif isinstance(content, str):
+                                try:
+                                    doc_json = json.loads(content)
+                                except json.JSONDecodeError:
+                                    # str(dict) 产生的 Python 格式（单引号/True/False/None）
+                                    import ast
+
+                                    doc_json = ast.literal_eval(content)
+                            else:
+                                doc_json = None
                             if isinstance(doc_json, dict) and "paragraphs" in doc_json:
                                 yield f"data: {json.dumps({'type': 'json', 'content': doc_json}, ensure_ascii=False)}\n\n"
                                 continue
-                        except (json.JSONDecodeError, TypeError):
+                        except Exception:
                             pass
 
                     # 其他工具的结果，跳过
                     continue
 
-                # 普通文本输出（Agent 的回复）
-                if content:
-                    _collected_text_parts.append(content)
-                    yield f"data: {json.dumps({'type': 'text', 'content': content}, ensure_ascii=False)}\n\n"
+                # 处理结构化 content blocks（兼容 Claude/OpenAI thinking/reasoning）
+                if isinstance(content, list):
+                    for block in content:
+                        if isinstance(block, dict):
+                            block_type = str(block.get("type", "")).lower()
+
+                            if block_type in {"thinking", "reasoning", "reasoning_content", "summary_text"}:
+                                thinking_text = _extract_thinking_content(block)
+                                if thinking_text:
+                                    yield f"data: {json.dumps({'type': 'thinking', 'content': thinking_text}, ensure_ascii=False)}\n\n"
+                                continue
+
+                            if block_type in {"text", "output_text"}:
+                                text = block.get("text", "") or block.get("content", "")
+                                if text:
+                                    _collected_text_parts.append(text)
+                                    yield f"data: {json.dumps({'type': 'text', 'content': text}, ensure_ascii=False)}\n\n"
+                    continue
+
+                # 普通文本输出（非 thinking 模式）
+                normalized_text = _extract_text_content(content)
+                if normalized_text:
+                    _collected_text_parts.append(normalized_text)
+                    yield f"data: {json.dumps({'type': 'text', 'content': normalized_text}, ensure_ascii=False)}\n\n"
 
             elif input_type == "custom":
                 # stream_writer 的输出（工具的状态消息）

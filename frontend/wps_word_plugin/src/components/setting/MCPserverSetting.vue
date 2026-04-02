@@ -1,20 +1,7 @@
 <template>
   <div class="mcp-setting-container">
     <div class="section-header">
-      <svg
-        class="section-icon"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-      >
-        <path d="M8 8h8v8" />
-        <path d="M16 8L8 16" />
-        <path d="M3 12h3" />
-        <path d="M18 12h3" />
-        <path d="M12 3v3" />
-        <path d="M12 18v3" />
-      </svg>
+      <img class="section-icon" :src="iconMcp" alt="MCP 图标" />
       <div class="section-title-group">
         <h2 class="section-title">
           MCP 服务器配置
@@ -63,9 +50,23 @@
             </svg>
             <span class="server-name">{{ server.name || '未命名服务器' }}</span>
           </div>
-          <button class="btn-delete" @click.stop="removeServer(index)">
-            删除
-          </button>
+          <div class="server-actions" @click.stop>
+            <label class="switch switch-sm" title="启用/禁用 MCP 服务器">
+              <input v-model="server.enabled" type="checkbox" @change="emitChange" />
+              <span class="slider"></span>
+            </label>
+            <button class="action-btn delete" title="删除" @click.stop="removeServer(index)">
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 16 16"
+                fill="currentColor"
+              >
+                <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z" />
+                <path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z" />
+              </svg>
+            </button>
+          </div>
         </div>
 
         <div v-if="server.expanded" class="server-body">
@@ -127,6 +128,7 @@
 <script>
 import { nextTick, ref, watch } from 'vue';
 import api from '../js/api.js';
+import iconMcp from '../../assets/icons/mcp.svg';
 
 function normalizeServer(server = {}) {
   const name = server.name || '';
@@ -135,6 +137,7 @@ function normalizeServer(server = {}) {
   return {
     name,
     config,
+    enabled: server.enabled !== false,
     configSource: JSON.stringify(config, null, 2),
     expanded: server.expanded ?? false,
     testing: false,
@@ -171,6 +174,7 @@ export default {
       emit('update:mcp-servers', localServers.value.map((s) => ({
         name: s.name,
         config: s.config,
+        enabled: s.enabled !== false,
         expanded: s.expanded
       })));
       nextTick(() => {
@@ -272,6 +276,7 @@ export default {
       localServers.value.push({
         name: '',
         config: {},
+        enabled: true,
         configSource: '',
         expanded: true,
         testing: false,
@@ -331,6 +336,7 @@ export default {
     };
 
     return {
+      iconMcp,
       localServers,
       addServer,
       removeServer,
@@ -461,18 +467,35 @@ export default {
   color: #111827;
 }
 
-.btn-delete {
-  border: none;
-  border-radius: 6px;
-  background: #fee2e2;
-  color: #dc2626;
-  font-size: 12px;
-  padding: 6px 10px;
-  cursor: pointer;
+.server-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
-.btn-delete:hover {
-  background: #fecaca;
+.action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #666;
+  transition: all 0.2s;
+}
+
+.action-btn:hover {
+  background: #f5f5f5;
+  color: #333;
+}
+
+.action-btn.delete:hover {
+  background: #fee2e2;
+  color: #dc2626;
+  border-color: #fecaca;
 }
 
 .server-body {
@@ -596,5 +619,67 @@ export default {
 
 .test-message.error {
   color: #dc2626;
+}
+
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+}
+
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #ccc;
+  transition: 0.3s;
+  border-radius: 24px;
+}
+
+.slider:before {
+  position: absolute;
+  content: "";
+  height: 18px;
+  width: 18px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  transition: 0.3s;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.switch input:checked + .slider {
+  background-color: #667eea;
+}
+
+.switch input:checked + .slider:before {
+  transform: translateX(20px);
+}
+
+.switch-sm {
+  width: 36px;
+  height: 20px;
+}
+
+.switch-sm .slider:before {
+  height: 14px;
+  width: 14px;
+  left: 3px;
+  bottom: 3px;
+}
+
+.switch-sm input:checked + .slider:before {
+  transform: translateX(16px);
 }
 </style>

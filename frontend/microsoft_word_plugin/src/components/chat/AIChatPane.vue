@@ -766,6 +766,15 @@ export default {
       }
 
       // 其他状态消息
+      if (data.type === 'thinking' && data.content) {
+        if (!msg.thinkingStartTime) {
+          msg.thinkingStartTime = Date.now();
+        }
+        msg.thinking += data.content;
+        this.scrollToBottom();
+        return;
+      }
+
       if (data.type === 'status' && data.content) {
         msg.contentParts.push({ type: 'status', content: data.content, loading: !!data.loading });
         this.scrollToBottom();

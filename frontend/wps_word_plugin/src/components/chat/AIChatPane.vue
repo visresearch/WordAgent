@@ -1159,7 +1159,16 @@ export default {
         this.scrollToBottom();
         return;
       }
-      // 其他消息类型：text, json, status 等
+      // 其他消息类型：text, json, status, thinking 等
+      if (data.type === 'thinking' && data.content) {
+        if (!msg.thinkingStartTime) {
+          msg.thinkingStartTime = Date.now();
+        }
+        msg.thinking += data.content;
+        this.scrollToBottom();
+        return;
+      }
+
       if (data.type === 'status' && data.content) {
         msg.contentParts.push({
           type: 'status',

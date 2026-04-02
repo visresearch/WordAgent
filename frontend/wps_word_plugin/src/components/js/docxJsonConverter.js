@@ -582,17 +582,39 @@ function scoreLatexCandidate(text) {
   }
 
   let score = 0;
-  if (/\\sum/.test(text)) score += 4;
-  if (/\\sum_\{[^}]+\}\^\{[^}]+\}/.test(text)) score += 4;
-  if (/\\frac\{[^}]+\}\{[^}]+\}/.test(text)) score += 4;
-  if (/\\infty/.test(text)) score += 2;
-  if (/\^[{(]?[A-Za-z0-9]+/.test(text)) score += 2;
-  if (/_\{[^}]+\}/.test(text)) score += 2;
-  if (/[A-Za-z]\^\{\(n\)\}/.test(text)) score += 2;
-  if (/\(x-a\)\^n/.test(text)) score += 2;
-  if (/n\s*=\s*0\s*\\infty/.test(text)) score -= 4;
-  if (/\\sum\s+n\s*=/.test(text)) score -= 3;
-  if (/\s{2,}/.test(text)) score -= 1;
+  if (/\\sum/.test(text)) {
+    score += 4;
+  }
+  if (/\\sum_\{[^}]+\}\^\{[^}]+\}/.test(text)) {
+    score += 4;
+  }
+  if (/\\frac\{[^}]+\}\{[^}]+\}/.test(text)) {
+    score += 4;
+  }
+  if (/\\infty/.test(text)) {
+    score += 2;
+  }
+  if (/\^[{(]?[A-Za-z0-9]+/.test(text)) {
+    score += 2;
+  }
+  if (/_\{[^}]+\}/.test(text)) {
+    score += 2;
+  }
+  if (/[A-Za-z]\^\{\(n\)\}/.test(text)) {
+    score += 2;
+  }
+  if (/\(x-a\)\^n/.test(text)) {
+    score += 2;
+  }
+  if (/n\s*=\s*0\s*\\infty/.test(text)) {
+    score -= 4;
+  }
+  if (/\\sum\s+n\s*=/.test(text)) {
+    score -= 3;
+  }
+  if (/\s{2,}/.test(text)) {
+    score -= 1;
+  }
 
   return score;
 }
@@ -1835,13 +1857,17 @@ function generateTable(doc, tableData, currentPos, styles) {
 
           for (let pi = 0; pi < cellData.paragraphs.length; pi++) {
             const para = cellData.paragraphs[pi];
-            if (pi > 0) fullText += '\r'; // 段落分隔符
+            if (pi > 0) {
+              fullText += '\r';
+            } // 段落分隔符
 
             paraMetadata.push({ pStyle: para.pStyle });
 
             for (const run of para.runs) {
               const runText = cleanCellText(run.text || '');
-              if (!runText) continue;
+              if (!runText) {
+                continue;
+              }
               runMetadata.push({
                 offset: fullText.length,
                 length: runText.length,
@@ -1863,8 +1889,12 @@ function generateTable(doc, tableData, currentPos, styles) {
                 const font = formatRange.Font;
                 font.Reset();
                 const rStyle = resolveStyle(styles, rm.rStyle, DEFAULT_RSTYLE);
-                if (rStyle[RSTYLE.FONT_NAME]) font.Name = rStyle[RSTYLE.FONT_NAME];
-                if (rStyle[RSTYLE.FONT_SIZE]) font.Size = rStyle[RSTYLE.FONT_SIZE];
+                if (rStyle[RSTYLE.FONT_NAME]) {
+                  font.Name = rStyle[RSTYLE.FONT_NAME];
+                }
+                if (rStyle[RSTYLE.FONT_SIZE]) {
+                  font.Size = rStyle[RSTYLE.FONT_SIZE];
+                }
                 font.Bold = rStyle[RSTYLE.BOLD] ? -1 : 0;
                 font.Italic = rStyle[RSTYLE.ITALIC] ? -1 : 0;
                 if (rStyle[RSTYLE.UNDERLINE]) {
@@ -1884,7 +1914,9 @@ function generateTable(doc, tableData, currentPos, styles) {
                   try {
                     formatRange.HighlightColorIndex = rStyle[RSTYLE.HIGHLIGHT];
                   } catch (e) {
-                    try { font.HighlightColorIndex = rStyle[RSTYLE.HIGHLIGHT]; } catch (e2) {}
+                    try {
+                      font.HighlightColorIndex = rStyle[RSTYLE.HIGHLIGHT]; 
+                    } catch (e2) {}
                   }
                 }
                 font.StrikeThrough = rStyle[RSTYLE.STRIKETHROUGH] ? -1 : 0;
@@ -1929,8 +1961,12 @@ function generateTable(doc, tableData, currentPos, styles) {
           const rStyle = resolveStyle(styles, cellData.rStyle, DEFAULT_RSTYLE);
           const font = cellRange.Font;
           font.Reset();
-          if (rStyle[RSTYLE.FONT_NAME]) font.Name = rStyle[RSTYLE.FONT_NAME];
-          if (rStyle[RSTYLE.FONT_SIZE]) font.Size = rStyle[RSTYLE.FONT_SIZE];
+          if (rStyle[RSTYLE.FONT_NAME]) {
+            font.Name = rStyle[RSTYLE.FONT_NAME];
+          }
+          if (rStyle[RSTYLE.FONT_SIZE]) {
+            font.Size = rStyle[RSTYLE.FONT_SIZE];
+          }
           font.Bold = rStyle[RSTYLE.BOLD] ? -1 : 0;
           font.Italic = rStyle[RSTYLE.ITALIC] ? -1 : 0;
 

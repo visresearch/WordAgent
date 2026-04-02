@@ -26,6 +26,11 @@ def _load_mcp_server_configs() -> dict[str, dict[str, Any]]:
     for server in mcp_servers:
         name = server.get("name", "").strip()
         config = server.get("config", {})
+        enabled = server.get("enabled", True)
+        if isinstance(enabled, str):
+            enabled = enabled.strip().lower() not in {"0", "false", "off", "no"}
+        if not enabled:
+            continue
         if not name or not isinstance(config, dict):
             continue
 
@@ -76,51 +81,62 @@ def _wrap_mcp_tool_for_sync(tool, loop: asyncio.AbstractEventLoop):
     )
 
 
-async def load_mcp_tools() -> tuple[list, Any | None]:
+async def load_mcp_tools() -> tuple[list, list]:
     """
-    异步加载所有已配置的 MCP 服务器工具。
+    异步加载所有已配置的 MCP 服务器工具，每个服务器独立加载互不影响。
 
     返回的工具已包装为同步可调用，可在线程中通过 tool.invoke() 使用。
-    返回值: (tools, client) — client 需在使用期间保持存活。
+    返回值: (tools, clients) — clients 列表需在使用期间保持存活。
     """
     config = _load_mcp_server_configs()
     if not config:
         print("[MCP] ℹ️ 未配置 MCP 服务器，跳过加载")
-        return [], None
+        return [], []
 
     try:
         from langchain_mcp_adapters.client import MultiServerMCPClient
     except ImportError:
         print("[MCP] ⚠️ langchain-mcp-adapters 未安装，跳过 MCP 工具加载")
-        return [], None
+        return [], []
 
-    try:
-        loop = asyncio.get_running_loop()
-        client = MultiServerMCPClient(config)
-        raw_tools = await client.get_tools()
-        wrapped = [_wrap_mcp_tool_for_sync(t, loop) for t in raw_tools]
-        print(f"[MCP] ✅ 已加载 {len(wrapped)} 个 MCP 工具: {[t.name for t in wrapped]}")
-        return wrapped, client
-    except Exception as e:
-        # SSE 连接失败时，尝试将 sse 的 transport 改为 streamable_http 重试
-        sse_servers = [name for name, cfg in config.items() if cfg.get("transport") == "sse"]
-        if sse_servers:
-            print(f"[MCP] ⚠️ SSE 连接失败，尝试以 streamable_http 重试: {sse_servers}")
-            for name in sse_servers:
-                config[name]["transport"] = "streamable_http"
-            try:
-                client = MultiServerMCPClient(config)
-                raw_tools = await client.get_tools()
-                wrapped = [_wrap_mcp_tool_for_sync(t, loop) for t in raw_tools]
-                print(f"[MCP] ✅ 已加载 {len(wrapped)} 个 MCP 工具 (streamable_http 回退): {[t.name for t in wrapped]}")
-                return wrapped, client
-            except Exception as e2:
-                print(f"[MCP] ❌ 加载 MCP 工具失败 (含回退): {e2}")
-        else:
-            print(f"[MCP] ❌ 加载 MCP 工具失败: {e}")
-        import traceback
-        traceback.print_exc()
-        return [], None
+    loop = asyncio.get_running_loop()
+    all_tools: list = []
+    live_clients: list = []
+
+    for name, server_cfg in config.items():
+        try:
+            client = MultiServerMCPClient({name: server_cfg})
+            raw_tools = await client.get_tools()
+            wrapped = [_wrap_mcp_tool_for_sync(t, loop) for t in raw_tools]
+            all_tools.extend(wrapped)
+            live_clients.append(client)
+            print(f"[MCP] ✅ {name}: 已加载 {len(wrapped)} 个工具 {[t.name for t in wrapped]}")
+        except Exception:
+            # SSE 连接失败时，尝试以 streamable_http 重试
+            if server_cfg.get("transport") == "sse":
+                try:
+                    fallback_cfg = {**server_cfg, "transport": "streamable_http"}
+                    client = MultiServerMCPClient({name: fallback_cfg})
+                    raw_tools = await client.get_tools()
+                    wrapped = [_wrap_mcp_tool_for_sync(t, loop) for t in raw_tools]
+                    all_tools.extend(wrapped)
+                    live_clients.append(client)
+                    print(f"[MCP] ✅ {name}: 已加载 {len(wrapped)} 个工具 (streamable_http 回退)")
+                    continue
+                except Exception as e2:
+                    print(f"[MCP] ❌ {name}: 加载失败 (含 streamable_http 回退): {e2}")
+            else:
+                import traceback
+
+                print(f"[MCP] ❌ {name}: 加载失败")
+                traceback.print_exc()
+
+    if all_tools:
+        print(f"[MCP] 📊 共加载 {len(all_tools)} 个工具 (来自 {len(live_clients)} 个服务器)")
+    else:
+        print("[MCP] ⚠️ 所有 MCP 服务器均加载失败，无可用工具")
+
+    return all_tools, live_clients
 
 
 def build_mcp_tools_prompt(mcp_tools: list) -> str:
@@ -140,11 +156,12 @@ def build_mcp_tools_prompt(mcp_tools: list) -> str:
         first_line = desc.split("\n")[0].strip()
         lines.append(f"- `{t.name}`: {first_line}")
 
-    lines.extend([
-        "",
-        "当用户的请求涉及网络搜索、信息检索、数据查询等需要外部信息的场景时，"
-        "应主动调用这些 MCP 工具来获取信息。",
-        "调用这些工具与调用其他内置工具的方式完全相同。",
-    ])
+    lines.extend(
+        [
+            "",
+            "当用户的请求涉及网络搜索、信息检索、数据查询等需要外部信息的场景时，应主动调用这些 MCP 工具来获取信息。",
+            "调用这些工具与调用其他内置工具的方式完全相同。",
+        ]
+    )
 
     return "\n".join(lines)

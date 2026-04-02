@@ -244,6 +244,7 @@ export default {
           if (data.providers) {
             settings.providers = data.providers.map(p => ({
               ...p,
+              apiType: p.apiType || 'openai',
               enabled: p.enabled !== false,
               expanded: false,
               showKey: false,
@@ -265,6 +266,7 @@ export default {
             settings.mcpServers = data.mcpServers.map(s => ({
               name: s.name || '',
               config: (s.config && typeof s.config === 'object') ? s.config : {},
+              enabled: s.enabled !== false,
               expanded: false
             }));
           }
@@ -287,12 +289,14 @@ export default {
             name: p.name,
             baseUrl: p.baseUrl,
             apiKey: p.apiKey,
+            apiType: p.apiType || 'openai',
             models: p.models,
             enabled: p.enabled
           })),
           mcpServers: settings.mcpServers.map(s => ({
             name: s.name,
-            config: (s.config && typeof s.config === 'object') ? s.config : {}
+            config: (s.config && typeof s.config === 'object') ? s.config : {},
+            enabled: s.enabled !== false
           })),
           customPrompt: settings.customPrompt,
           temperature: settings.temperature
@@ -333,6 +337,7 @@ export default {
     const onProvidersChange = (newProviders) => {
       settings.providers = newProviders.map(p => ({
         ...p,
+        apiType: p.apiType || 'openai',
         enabled: p.enabled !== false,
         expanded: p.expanded ?? false,
         showKey: p.showKey ?? false,
@@ -344,6 +349,7 @@ export default {
       settings.mcpServers = newServers.map(s => ({
         name: s.name || '',
         config: (s.config && typeof s.config === 'object') ? s.config : {},
+        enabled: s.enabled !== false,
         expanded: s.expanded ?? false
       }));
     };

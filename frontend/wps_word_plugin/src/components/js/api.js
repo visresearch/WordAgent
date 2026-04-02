@@ -649,16 +649,18 @@ function getConfig() {
  * @param {Object} params - 请求参数
  * @param {string} params.baseUrl - API 基础地址
  * @param {string} params.apiKey - API 密钥
+ * @param {string} [params.apiType] - API 类型（openai/anthropic）
  * @returns {Promise<Object>} - 返回模型列表
  */
-async function fetchAvailableModels({ baseUrl, apiKey }) {
+async function fetchAvailableModels({ baseUrl, apiKey, apiType = 'openai' }) {
   try {
     // 通过后端代理接口获取模型列表
     const result = await request('/api/chat/providers/models', {
       method: 'POST',
       body: {
         base_url: baseUrl,
-        api_key: apiKey
+        api_key: apiKey,
+        api_type: apiType
       }
     });
 

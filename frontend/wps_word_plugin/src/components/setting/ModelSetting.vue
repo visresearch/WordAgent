@@ -149,6 +149,27 @@
                 @input="emitChange"
               />
             </div>
+            <div class="form-row">
+              <label class="field-label">API 类型</label>
+              <div class="api-type-segment">
+                <button
+                  type="button"
+                  class="api-type-btn"
+                  :class="{ active: provider.apiType === 'openai' }"
+                  @click="setProviderApiType(pIndex, 'openai')"
+                >
+                  OpenAI 兼容
+                </button>
+                <button
+                  type="button"
+                  class="api-type-btn"
+                  :class="{ active: provider.apiType === 'anthropic' }"
+                  @click="setProviderApiType(pIndex, 'anthropic')"
+                >
+                  Anthropic
+                </button>
+              </div>
+            </div>
           </div>
 
           <!-- 模型操作按钮 -->
@@ -308,6 +329,7 @@ export default {
   setup(props, { emit }) {
     const localProviders = ref(props.providers.map(p => ({
       ...p,
+      apiType: p.apiType || 'openai',
       enabled: p.enabled !== false,
       expanded: p.expanded || false,
       showKey: p.showKey || false,
@@ -317,6 +339,7 @@ export default {
     watch(() => props.providers, (newVal) => {
       localProviders.value = newVal.map(p => ({
         ...p,
+        apiType: p.apiType || 'openai',
         enabled: p.enabled !== false,
         expanded: p.expanded || false,
         showKey: p.showKey || false,
@@ -339,6 +362,7 @@ export default {
         name: p.name,
         baseUrl: p.baseUrl,
         apiKey: p.apiKey,
+        apiType: p.apiType || 'openai',
         models: p.models,
         enabled: p.enabled,
         expanded: p.expanded,
@@ -352,6 +376,7 @@ export default {
         name: '',
         baseUrl: '',
         apiKey: '',
+        apiType: 'openai',
         models: [],
         enabled: true,
         expanded: true,
@@ -386,7 +411,8 @@ export default {
       try {
         const response = await api.fetchAvailableModels({
           baseUrl: provider.baseUrl,
-          apiKey: provider.apiKey
+          apiKey: provider.apiKey,
+          apiType: provider.apiType || 'openai'
         });
 
         const availableModels = response.models ? response.models.map(m => ({
@@ -462,6 +488,17 @@ export default {
       }
     };
 
+    const setProviderApiType = (index, apiType) => {
+      const provider = localProviders.value[index];
+      if (!provider) {
+        return;
+      }
+      if (provider.apiType !== apiType) {
+        provider.apiType = apiType;
+        emitChange();
+      }
+    };
+
     return {
       localProviders,
       enabledModelsCount,
@@ -474,7 +511,8 @@ export default {
       addModelFromAvailable,
       removeModelFromProvider,
       hideAvailableModels,
-      addCustomModel
+      addCustomModel,
+      setProviderApiType
     };
   }
 };
@@ -718,6 +756,36 @@ export default {
 
 .btn-toggle-visibility:hover {
   background: #e8e8e8;
+}
+
+.api-type-segment {
+  display: flex;
+  flex: 1;
+  gap: 8px;
+}
+
+.api-type-btn {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+  background: #fff;
+  color: #555;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.api-type-btn:hover {
+  border-color: #667eea;
+  color: #4f46e5;
+  background: #f8faff;
+}
+
+.api-type-btn.active {
+  border-color: #667eea;
+  color: #fff;
+  background: #667eea;
 }
 
 /* 模型操作按钮栏 */

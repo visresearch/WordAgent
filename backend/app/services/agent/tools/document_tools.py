@@ -42,7 +42,9 @@ def _compact_doc_json(doc_json: dict) -> str:
                         cell_text = cell.get("text", "")
                         if not cell_text and cell.get("paragraphs"):
                             cell_text = "".join(
-                                "".join(r.get("text", "") if isinstance(r, dict) else str(r) for r in cp.get("runs", []))
+                                "".join(
+                                    r.get("text", "") if isinstance(r, dict) else str(r) for r in cp.get("runs", [])
+                                )
                                 for cp in cell.get("paragraphs", [])
                             )
                         cells.append(cell_text)

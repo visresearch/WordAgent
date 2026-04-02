@@ -260,10 +260,7 @@ def _build_sub_agent_graph(llm_with_tools, tool_map: dict):
         # finish_reason=length → 重试一次
         metadata = getattr(last_message, "response_metadata", {})
         if metadata.get("finish_reason") == "length":
-            has_retried = any(
-                isinstance(m, SystemMessage) and "[RETRY]" in m.content
-                for m in state["messages"]
-            )
+            has_retried = any(isinstance(m, SystemMessage) and "[RETRY]" in m.content for m in state["messages"])
             if not has_retried:
                 print("[SubAgent/Router] ⚠️ 输出被截断 -> retry")
                 return "retry"
@@ -321,10 +318,12 @@ def run_sub_agent(
     tools, tool_map = _resolve_tools(agent_type)
 
     # ---- 创建 LLM（继承主 Agent 的模型）----
-    from app.services.llm_client import create_llm, resolve_model
+    from langchain.chat_models import init_chat_model
+
+    from app.services.llm_client import get_llm_init_kwargs, resolve_model
 
     model_name = _current_model_name.get(None) or resolve_model("auto")
-    llm = create_llm(model_name)
+    llm = init_chat_model(**get_llm_init_kwargs(model_name))
     print(f"[SubAgent] 使用模型: {model_name}")
     llm_with_tools = llm.bind_tools(tools)
 

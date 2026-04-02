@@ -5,7 +5,6 @@
 """
 
 import json
-import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,6 +28,7 @@ class LLMProvider:
     name: str
     api_key: str
     base_url: str
+    api_type: str  # openai / anthropic
     models: list[dict]  # 该 provider 下的模型列表
 
 
@@ -53,13 +53,33 @@ def normalize_base_url(base_url: str) -> str:
     - 移除末尾的 /
     - 如果没有版本后缀（如 /v1），自动添加 /v1
     """
-    url = base_url.rstrip("/")
+    url = (base_url or "").rstrip("/")
+    if not url:
+        return ""
 
     # 检查是否已有版本后缀（如 /v1, /v2 等）
     if not re.search(r"/v\d+$", url):
         url = url + "/v1"
 
     return url
+
+
+def infer_api_type(model_id: str, base_url: str, configured_type: str = "") -> str:
+    """推断 provider 的 API 类型。"""
+    if configured_type in {"openai", "anthropic"}:
+        return configured_type
+
+    lowered_url = (base_url or "").lower()
+    lowered_model = (model_id or "").lower()
+
+    # 官方 Anthropic 域名优先走 ChatAnthropic
+    if "anthropic.com" in lowered_url:
+        return "anthropic"
+
+    # 其余场景默认走 OpenAI 兼容接口（可承载 Claude 代理/中转）
+    if lowered_model.startswith("claude") and "anthropic" in lowered_url:
+        return "anthropic"
+    return "openai"
 
 
 def get_providers_from_settings() -> dict[str, LLMProvider]:
@@ -75,10 +95,24 @@ def get_providers_from_settings() -> dict[str, LLMProvider]:
         if not name:
             continue
 
+        base_url_raw = provider_data.get("baseUrl", "")
+        configured_api_type = str(provider_data.get("apiType", "")).strip().lower()
+
+        # 先用首个可用模型辅助推断，未提供则留空
+        first_model_id = ""
+        for m in provider_data.get("models", []):
+            if isinstance(m, dict) and m.get("enabled", True):
+                first_model_id = str(m.get("id", ""))
+                break
+
+        api_type = infer_api_type(first_model_id, base_url_raw, configured_api_type)
+        normalized_base_url = base_url_raw.rstrip("/") if api_type == "anthropic" else normalize_base_url(base_url_raw)
+
         providers[name] = LLMProvider(
             name=provider_data.get("name", ""),
             api_key=provider_data.get("apiKey", ""),
-            base_url=normalize_base_url(provider_data.get("baseUrl", "")),
+            base_url=normalized_base_url,
+            api_type=api_type,
             models=provider_data.get("models", []),
         )
 
@@ -172,10 +206,35 @@ def get_httpx_proxy_url() -> str | None:
     return get_proxy_url()
 
 
-def create_llm(model_name: str):
-    """创建 LangChain ChatOpenAI 实例。"""
-    from langchain_openai import ChatOpenAI
+def get_thinking_config(model_name: str) -> dict | None:
+    """根据模型名称返回 thinking 配置，不支持则返回 None。"""
+    lowered = (model_name or "").lower()
+    if not lowered.startswith("claude"):
+        return None
+    # Claude Opus 4 系列
+    if "opus-4" in lowered:
+        return {"type": "enabled", "budget_tokens": 10000}
+    # Claude Sonnet 4 系列（含 4.5）
+    if "sonnet-4" in lowered:
+        return {"type": "enabled", "budget_tokens": 8000}
+    # Claude 3.5 Sonnet v2 (20241022+)
+    if "3-5-sonnet" in lowered:
+        return {"type": "enabled", "budget_tokens": 8000}
+    return None
 
+
+def supports_thinking(model_name: str) -> bool:
+    """检查模型是否支持 thinking 模式。"""
+    return get_thinking_config(resolve_model(model_name)) is not None
+
+
+def _resolve_llm_params(model_name: str, enable_thinking: bool = False) -> dict:
+    """
+    根据模型名解析出 init_chat_model 所需的全部参数（含 model、model_provider）。
+
+    返回值可直接用于 init_chat_model(**params)。
+    不处理环境变量清理/恢复（由调用方负责）。
+    """
     actual_model_name = resolve_model(model_name)
     provider_info = LLMClientManager.get_provider_info(actual_model_name)
 
@@ -185,44 +244,48 @@ def create_llm(model_name: str):
     if not provider_info.api_key:
         raise ValueError(f"提供商 {provider_info.name} 未配置 API Key")
 
-    # 获取代理配置
+    effective_api_type = infer_api_type(actual_model_name, provider_info.base_url, provider_info.api_type)
     proxy_url = get_https_proxy_url() or get_http_proxy_url()
 
-    # 当用户未启用代理时，临时清除环境变量中的代理设置
-    # 防止 openai/httpx 读取到系统的 socks:// 代理导致 scheme 不支持报错
-    _proxy_env_keys = [
-        "HTTP_PROXY",
-        "HTTPS_PROXY",
-        "ALL_PROXY",
-        "http_proxy",
-        "https_proxy",
-        "all_proxy",
-    ]
-    saved_env = {}
-    if not proxy_url:
-        for key in _proxy_env_keys:
-            if key in os.environ:
-                saved_env[key] = os.environ.pop(key)
+    kwargs: dict = {
+        "model": actual_model_name,
+        "api_key": provider_info.api_key,
+        "temperature": get_temperature(),
+        "max_tokens": 16384,
+        "streaming": True,
+    }
 
-    try:
-        import httpx
+    if effective_api_type == "anthropic":
+        kwargs["model_provider"] = "anthropic"
+        if provider_info.base_url:
+            kwargs["base_url"] = provider_info.base_url
+        if proxy_url:
+            kwargs["anthropic_proxy"] = proxy_url
+        if enable_thinking:
+            thinking_config = get_thinking_config(actual_model_name)
+            if thinking_config:
+                kwargs["thinking"] = thinking_config
+                kwargs["temperature"] = 1  # Anthropic thinking 要求 temperature=1
+                print(f"[LLM] 🧠 已启用 thinking 模式: {thinking_config}")
+    else:
+        kwargs["model_provider"] = "openai"
+        kwargs["base_url"] = provider_info.base_url
+        if proxy_url:
+            import httpx
 
-        http_client = httpx.Client(proxy=proxy_url)
-        http_async_client = httpx.AsyncClient(proxy=proxy_url)
+            kwargs["http_client"] = httpx.Client(proxy=proxy_url)
+            kwargs["http_async_client"] = httpx.AsyncClient(proxy=proxy_url)
 
-        return ChatOpenAI(
-            model=actual_model_name,
-            openai_api_key=provider_info.api_key,
-            openai_api_base=provider_info.base_url,
-            temperature=get_temperature(),
-            max_tokens=16384,
-            streaming=True,
-            http_client=http_client,
-            http_async_client=http_async_client,
-        )
-    finally:
-        # 恢复环境变量
-        os.environ.update(saved_env)
+    return kwargs
+
+
+def get_llm_init_kwargs(model_name: str, enable_thinking: bool = False) -> dict:
+    """
+    获取 init_chat_model 所需的完整参数字典。
+
+    用法: init_chat_model(**get_llm_init_kwargs("gpt-4o"))
+    """
+    return _resolve_llm_params(model_name, enable_thinking)
 
 
 class LLMClientManager:

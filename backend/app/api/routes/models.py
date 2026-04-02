@@ -6,8 +6,10 @@
 import asyncio
 import json
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter
+import httpx
 from openai import AsyncOpenAI
 from pydantic import BaseModel
 
@@ -154,6 +156,7 @@ class ProviderModelsRequest(BaseModel):
 
     base_url: str
     api_key: str
+    api_type: Literal["openai", "anthropic"] = "openai"
 
 
 def normalize_base_url(base_url: str) -> str:
@@ -177,28 +180,63 @@ def normalize_base_url(base_url: str) -> str:
 async def get_provider_models(request: ProviderModelsRequest):
     """
     获取指定 Provider 的可用模型列表
-    通过调用 OpenAI 兼容的 /models 接口获取
+    - openai: 通过 OpenAI 兼容的 /models 接口获取
+    - anthropic: 通过 Anthropic 风格的 /v1/models 接口获取
     """
     try:
-        # 标准化 base_url（自动补全 /v1）
-        base_url = normalize_base_url(request.base_url)
-        print(f"📡 获取模型列表: {base_url}")
+        if request.api_type == "anthropic":
+            base = request.base_url.rstrip("/")
+            if base.endswith("/v1"):
+                url = f"{base}/models"
+            else:
+                url = f"{base}/v1/models"
 
-        # 创建 OpenAI 客户端
-        client = AsyncOpenAI(
-            base_url=base_url,
-            api_key=request.api_key,
-        )
+            print(f"📡 获取 Anthropic 模型列表: {url}")
+            headers = {
+                "x-api-key": request.api_key,
+                "anthropic-version": "2023-06-01",
+            }
+            async with httpx.AsyncClient(timeout=20) as client:
+                resp = await client.get(url, headers=headers)
+                resp.raise_for_status()
+                data = resp.json()
 
-        # 获取模型列表
-        models_response = await client.models.list()
+            models = []
+            for model in data.get("data", []):
+                model_id = model.get("id", "")
+                if not model_id:
+                    continue
+                models.append(
+                    {
+                        "id": model_id,
+                        "name": format_model_name(model_id),
+                        "owned_by": model.get("owned_by", "anthropic"),
+                    }
+                )
+        else:
+            # 标准化 base_url（自动补全 /v1）
+            base_url = normalize_base_url(request.base_url)
+            print(f"📡 获取 OpenAI 兼容模型列表: {base_url}")
 
-        # 转换为统一格式
-        models = []
-        for model in models_response.data:
-            models.append(
-                {"id": model.id, "name": format_model_name(model.id), "owned_by": getattr(model, "owned_by", "unknown")}
+            # 创建 OpenAI 客户端
+            client = AsyncOpenAI(
+                base_url=base_url,
+                api_key=request.api_key,
             )
+
+            # 获取模型列表
+            models_response = await client.models.list()
+
+            # 转换为统一格式
+            models = []
+            for model in models_response.data:
+                models.append(
+                    {
+                        "id": model.id,
+                        "name": format_model_name(model.id),
+                        "owned_by": getattr(model, "owned_by", "unknown"),
+                    }
+                )
 
         # 按模型 ID 字母顺序排序
         models.sort(key=lambda m: m["id"].lower())
