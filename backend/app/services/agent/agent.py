@@ -33,75 +33,21 @@ def _try_init_langsmith():
 
 _langsmith_enabled = _try_init_langsmith()
 
-from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, RemoveMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, START, MessagesState, StateGraph
 
-from app.services.llm_client import LLMClientManager, resolve_model
-from app.services.agent.prompts import get_core_skills, get_agent_prompt
+from app.services.llm_client import create_llm, resolve_model
+from app.services.agent.prompts import get_core_prompts
 from app.services.utils import normalize_tool_args, parse_tool_args_with_repair
 from app.services.agent.tools import (
     ALL_TOOLS,
     TOOL_MAP,
     _current_chat_id,
     register_loop,
-    read_document,
     is_stop_requested,
 )
 from app.services.agent.tools.callback import _current_model_name
-
-
-# region Create LLM
-
-
-def create_llm(model_name: str):
-    """创建 LLM 实例，根据提供商类型返回对应的 Chat 实例"""
-    import os
-
-    from app.services.llm_client import get_temperature
-
-    provider_info = LLMClientManager.get_provider_info(model_name)
-
-    from langchain_openai import ChatOpenAI
-    from app.services.llm_client import get_https_proxy_url, get_http_proxy_url
-
-    # 获取代理配置
-    proxy_url = get_https_proxy_url() or get_http_proxy_url()
-
-    # 当用户未启用代理时，临时清除环境变量中的代理设置
-    # 防止 openai/httpx 读取到系统的 socks:// 代理导致 scheme 不支持报错
-    _proxy_env_keys = [
-        "HTTP_PROXY",
-        "HTTPS_PROXY",
-        "ALL_PROXY",
-        "http_proxy",
-        "https_proxy",
-        "all_proxy",
-    ]
-    saved_env = {}
-    if not proxy_url:
-        for key in _proxy_env_keys:
-            if key in os.environ:
-                saved_env[key] = os.environ.pop(key)
-
-    try:
-        import httpx
-
-        http_client = httpx.Client(proxy=proxy_url)
-        http_async_client = httpx.AsyncClient(proxy=proxy_url)
-
-        return ChatOpenAI(
-            model=model_name,
-            openai_api_key=provider_info.api_key,
-            openai_api_base=provider_info.base_url,
-            temperature=get_temperature(),
-            max_tokens=16384,  # max_tokens 只限制“模型生成的输出”
-            streaming=True,
-            http_client=http_client,
-            http_async_client=http_async_client,
-        )
-    finally:
-        # 恢复环境变量
-        os.environ.update(saved_env)
+from app.services.agent.tools.skill_tools import build_skills_catalog_prompt
 
 
 # region LangGraph Agent（ReAct）
@@ -162,7 +108,6 @@ def build_graph(llm_with_tools):
                     err = (
                         f"错误: 工具 {tool_name} 调用失败: {e}。"
                         "请按工具 schema 重新构造参数。"
-                        "若调用 generate_document，document 字段必须是对象(dict)而不是 JSON 字符串。"
                     )
                     print(f"[Tools] ❌ {err}")
                     results.append(ToolMessage(content=err, tool_call_id=tool_call["id"], name=tool_name))
@@ -184,12 +129,9 @@ def build_graph(llm_with_tools):
             "messages": [
                 RemoveMessage(id=last_message.id),
                 SystemMessage(
-                    content="[RETRY_GENERATE] 你刚才尝试调用 generate_document 但 tool call 无效（可能是 JSON 不完整或被截断）。"
-                    "请再次调用 generate_document 工具生成文档，并确保参数是完整合法 JSON。必须使用新版样式引用格式："
-                    "段落/字符/单元格/表格样式字段只能填样式ID（如 pS_1、rS_1、cS_1、tS_1），"
-                    "并在 styles 字典中提供对应样式数组。确保 JSON 结构完整。"
-                    "正文中如果需要引号，请优先使用中文引号“”，或对英文双引号进行转义。"
-                    "若内容过长，可拆成多次 generate_document 调用分批输出。"
+                    content="[RETRY_TOOL_CALL] 你刚才的工具调用无效（可能是 JSON 不完整或被截断）。"
+                    "请基于当前可用工具重试一次：read_document / search_documnet / generate_document / delete_document / run_sub_agent / load_skill / bash。"
+                    "文档改写优先由你直接调用 generate_document/delete_document 完成；仅在简化场景可调用 run_sub_agent(agent_type='simplifier')。"
                 ),
             ]
         }
@@ -262,10 +204,9 @@ def build_graph(llm_with_tools):
             "messages": [
                 RemoveMessage(id=last_message.id),
                 SystemMessage(
-                    content="[RETRY_GENERATE] 你刚才的 generate_document tool call 参数不是合法 JSON。"
-                    "请仅重试一次，并确保：1) JSON 完整；2) 样式使用 ID 引用；"
-                    "3) 文本中不要直接使用未转义的英文双引号，改用中文引号“”或先转义；"
-                    "4) 若内容过长可拆成多次 generate_document 调用。"
+                    content="[RETRY_TOOL_CALL] 你刚才的 tool call 参数不是合法 JSON。"
+                    "请仅重试一次，并确保参数完整合法。"
+                    "可用工具：read_document / search_documnet / generate_document / delete_document / run_sub_agent / load_skill / bash。"
                 ),
             ]
         }
@@ -324,7 +265,7 @@ def build_graph(llm_with_tools):
         if should_retry:
             # 检查是否已经重试过（防止无限循环）
             has_retried = any(
-                isinstance(m, SystemMessage) and "[RETRY_GENERATE]" in m.content for m in state["messages"]
+                isinstance(m, SystemMessage) and "[RETRY_TOOL_CALL]" in m.content for m in state["messages"]
             )
             if not has_retried:
                 print("[Router] -> retry")
@@ -401,8 +342,13 @@ async def process_writing_request_stream(
         messages = []
 
         # 注入核心技能（身份、风格、工具策略、子智能体策略等 — 始终加载）
-        for skill_prompt in get_core_skills(mode=mode):
-            messages.append(SystemMessage(content=skill_prompt))
+        for core_prompt in get_core_prompts(mode=mode):
+            messages.append(SystemMessage(content=core_prompt))
+
+        # 注入可用 Skills 列表（动态扫描），让模型知道何时调用 load_skill
+        skills_catalog_prompt = build_skills_catalog_prompt()
+        if skills_catalog_prompt:
+            messages.append(SystemMessage(content=skills_catalog_prompt))
 
         # 注入自定义提示（如果有）
         from app.services.llm_client import get_custom_prompt
@@ -443,7 +389,9 @@ async def process_writing_request_stream(
             user_content = (
                 f"用户要求：{message}\n\n"
                 f"⚠️ 请先调用 read_document 工具读取以下文档范围（必须调用，不可跳过）：\n{range_instructions}\n"
-                f"读取到文档内容后，根据用户要求进行处理，并调用 generate_document 工具输出结果。"
+                f"读取到文档内容后，根据用户要求继续处理。"
+                f"文档修改与写作优先由你直接调用 generate_document/delete_document 完成。"
+                f"仅在明确需要文本简化时，才调用 run_sub_agent(agent_type='simplifier')。"
             )
             print(f"[Agent] 文档范围: {document_range}")
 
@@ -516,8 +464,6 @@ async def process_writing_request_stream(
         # 队列用于线程间传递流式数据
         queue: asyncio.Queue = asyncio.Queue()
         has_tool_result = False
-        generate_tool_result = False
-        generating_notified = False  # 是否已通知前端"正在生成文档"
         _collected_text_parts: list[str] = []  # 收集 AI 回复文本，用于存入长期记忆
         # 构建 LangSmith tracing config（可选）
         langsmith_config = None
@@ -589,17 +535,6 @@ async def process_writing_request_stream(
                 msg = chunk[0]
                 content = msg.content
 
-                # 检测 LLM 开始生成 generate_document 的 tool_call 参数
-                if isinstance(msg, AIMessageChunk) and not generating_notified:
-                    tool_call_chunks = getattr(msg, "tool_call_chunks", [])
-                    for tc in tool_call_chunks:
-                        if tc.get("name") == "generate_document":
-                            generating_notified = True
-                            print("[Agent] 📝 检测到 LLM 准备生成文档")
-                            # 这里是流式 chunk 的早期信号，模型后续仍可能放弃 tool call
-                            yield f"data: {json.dumps({'type': 'generate_document', 'content': '📝 正在准备生成文档'}, ensure_ascii=False)}\n\n"
-                            break
-
                 if isinstance(msg, ToolMessage):
                     # 根据工具名称决定是否转发给前端
                     tool_name = getattr(msg, "name", "")
@@ -612,31 +547,29 @@ async def process_writing_request_stream(
 
                     if tool_name == "run_sub_agent":
                         # run_sub_agent 结果是子智能体返回的摘要，不直接转发
-                        # （子智能体的 generate_document 等状态已通过 stream_writer 转发）
+                        # （子智能体状态与文档 JSON 已通过 stream_writer 转发）
                         print(f"[Agent] ⏭️ 跳过 run_sub_agent 工具返回值")
-                        has_tool_result = True
+                        # 失败信息主动透传，避免前端无反馈
+                        if isinstance(content, str) and content.startswith("子智能体执行失败"):
+                            yield f"data: {json.dumps({'type': 'status', 'content': content}, ensure_ascii=False)}\n\n"
+                        elif isinstance(content, str) and content:
+                            _collected_text_parts.append(content)
+                        continue
+
+                    if tool_name == "load_skill":
+                        # load_skill 的完整内容较长，不直接透传；给出状态提示并让模型继续按指令执行
+                        yield f"data: {json.dumps({'type': 'status', 'content': '🧩 Skill 已加载，正在按指令继续执行'}, ensure_ascii=False)}\n\n"
                         continue
 
                     if tool_name == "generate_document":
-                        # generate_document 结果发给前端渲染
-                        generate_tool_result = True
+                        # 主 Agent 直接生成文档时，透传 JSON 给前端
                         try:
                             doc_json = json.loads(content)
-                            if "paragraphs" in doc_json:
-                                print(f"[Agent] ✅ 提取到 generate_document 结果")
+                            if isinstance(doc_json, dict) and "paragraphs" in doc_json:
                                 yield f"data: {json.dumps({'type': 'json', 'content': doc_json}, ensure_ascii=False)}\n\n"
                                 continue
-                        except json.JSONDecodeError:
-                            # 工具调用失败时 content 是错误字符串，主动透传状态避免前端无反馈
-                            err_msg = content if isinstance(content, str) else str(content)
-                            print(f"[Agent] ❌ generate_document 返回非 JSON: {err_msg}")
-                            yield f"data: {json.dumps({'type': 'status', 'content': err_msg}, ensure_ascii=False)}\n\n"
-                            continue
-
-                    if tool_name == "delete_document":
-                        # delete_document 结果是确认/取消信息，不需要转发（stream_writer 已经处理了状态）
-                        print(f"[Agent] ⏭️ 跳过 delete_document 工具返回值: {content}")
-                        continue
+                        except (json.JSONDecodeError, TypeError):
+                            pass
 
                     # 其他工具的结果，跳过
                     continue
@@ -659,21 +592,16 @@ async def process_writing_request_stream(
         if not has_tool_result and document_range:
             yield f"data: {json.dumps({'type': 'status', 'content': '⚠️ 没有检测到调用工具，模型可能不支持'}, ensure_ascii=False)}\n\n"
 
-        # 处理"看到生成草稿但最终未真正调用 generate_document"的场景（仅打印日志，不推送给前端避免困惑）
-        if generating_notified and not generate_tool_result:
-            print("[Agent] ❗ 模型取消了文档生成")
-            yield f"data: {json.dumps({'type': 'status', 'content': '❗ 模型取消了文档生成，请重新尝试'}, ensure_ascii=False)}\n\n"
-
         # 将本轮对话存入长期记忆
         assistant_text = "".join(_collected_text_parts)
-        if assistant_text or generate_tool_result:
+        if assistant_text or has_tool_result:
             try:
                 from app.services.memory import store_conversation_to_long_term
 
                 store_conversation_to_long_term(
                     session_id=chat_id or "",
                     user_message=message,
-                    assistant_message=assistant_text or "[已生成文档]",
+                    assistant_message=assistant_text or "[已执行工具]",
                     model=model,
                     mode=mode,
                 )

@@ -1,7 +1,7 @@
 """主智能体调用子智能体的工具。
 
 子智能体类型：
-- writer:     写作智能体（read_document, generate_document, search_documnet, delete_document）
+- simplifier: 简化智能体（read_document, generate_document, search_documnet, delete_document）
 - reviewer:   审阅智能体（read_document, search_documnet）
 - researcher: 研究智能体（web_search, web_fetch）
 """
@@ -10,7 +10,7 @@ import json
 import traceback
 from typing import Literal
 
-from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
+from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.tools import tool
 from langgraph.config import get_stream_writer
 
@@ -21,7 +21,7 @@ from .callback import _current_chat_id, _current_model_name, is_stop_requested
 # ---------------------------------------------------------------------------
 
 _AGENT_TYPE_TOOL_NAMES: dict[str, list[str]] = {
-    "writer": ["read_document", "generate_document", "search_documnet", "delete_document"],
+    "simplifier": ["read_document", "generate_document", "search_documnet", "delete_document"],
     "reviewer": ["read_document", "search_documnet"],
     "researcher": ["web_search", "web_fetch"],
 }
@@ -51,16 +51,17 @@ def _resolve_tools(agent_type: str):
 # ---------------------------------------------------------------------------
 
 _SUB_AGENT_BASE_PROMPTS: dict[str, str] = {
-    "writer": (
-        "你是专业的文档写作智能体。你的职责是根据指令操作 Word 文档。\n"
+    "simplifier": (
+        "你是专业的文档简化与改写智能体。你的职责是根据指令操作 Word 文档。\n"
         "可用工具：read_document（读取文档段落）、generate_document（生成/输出文档内容）、"
         "search_documnet（搜索文档中的内容）、delete_document（删除文档段落）。\n\n"
         "工作流程：\n"
-        "1. 如需了解文档现有内容，先用 search_documnet 定位、再用 read_document 读取\n"
-        "2. 根据任务要求撰写/修改内容\n"
-        "3. 用 generate_document 输出最终文档\n"
-        "4. 如需删除内容，用 delete_document\n\n"
-        "请严格按照指令完成任务，输出高质量的文档内容。完成后，用简短文字总结你做了什么。"
+        "1. 凡是简化或改写已有段落，必须先 read_document 读取目标段落，获取原段落样式与 styles。\n"
+        "2. 修改已有段落时，必须先 delete_document 删除旧段落，再 generate_document 在原位置插入新段落（delete + generate）。\n"
+        "3. 修改已有段落时，除非用户明确要求改格式，否则必须保持原 pStyle/rStyle 与 styles 引用一致。\n"
+        "4. 如需定位目标段落，可先用 search_documnet 定位再 read_document 读取。\n"
+        "5. 仅新增内容（不是修改已有段落）时，可直接 generate_document。\n\n"
+        "请专注于简化、通俗化、压缩冗余和表达重写。完成后，用简短文字总结你做了什么。"
     ),
     "reviewer": (
         "你是专业的文档审阅智能体。你的职责是根据指令审阅和分析文档内容。\n"
@@ -82,9 +83,9 @@ _SUB_AGENT_BASE_PROMPTS: dict[str, str] = {
     ),
 }
 
-# 各类型子智能体需要预加载的技能文件
-_SUB_AGENT_SKILL_FILES: dict[str, list[str]] = {
-    "writer": [
+# 各类型子智能体需要预加载的提示文件
+_SUB_AGENT_PROMPT_FILES: dict[str, list[str]] = {
+    "simplifier": [
         "style.md",
         "tool_strategy.md",
         "execution_rules.md",
@@ -106,13 +107,13 @@ _SUB_AGENT_SKILL_FILES: dict[str, list[str]] = {
 
 
 def _build_sub_agent_system_prompt(agent_type: str) -> str:
-    """构建子智能体系统提示，包括基础提示和预加载的技能。"""
-    from app.services.agent.prompts import _read_skill_file
+    """构建子智能体系统提示，包括基础提示和预加载的提示。"""
+    from app.services.agent.prompts import _read_prompt_file
 
     parts = [_SUB_AGENT_BASE_PROMPTS.get(agent_type, "")]
-    for fname in _SUB_AGENT_SKILL_FILES.get(agent_type, []):
+    for fname in _SUB_AGENT_PROMPT_FILES.get(agent_type, []):
         try:
-            parts.append(_read_skill_file(fname))
+            parts.append(_read_prompt_file(fname))
         except FileNotFoundError:
             pass
     return "\n\n".join(parts)
@@ -313,19 +314,19 @@ def _build_sub_agent_graph(llm_with_tools, tool_map: dict):
 def run_sub_agent(
     description: str,
     prompt: str,
-    agent_type: Literal["writer", "reviewer", "researcher"],
+    agent_type: Literal["simplifier", "reviewer", "researcher"],
 ) -> str:
     """创建并运行子智能体来完成专项任务。
 
     可用的子智能体类型：
-    - writer:     写作智能体，具备读取、生成、搜索、删除文档的能力
+    - simplifier: 简化智能体，具备读取、生成、搜索、删除文档的能力
     - reviewer:   审阅智能体，具备读取和搜索文档的能力
     - researcher: 研究智能体，具备网络搜索和网页拓取的能力
 
     Args:
         description: 任务简要描述（如"生成项目报告"、"审阅合同条款"、"搜索最新政策"）
         prompt: 给子智能体的详细任务指令
-        agent_type: 子智能体类型（writer / reviewer / researcher）
+        agent_type: 子智能体类型（simplifier / reviewer / researcher）
     """
     writer = get_stream_writer()
 
@@ -339,8 +340,7 @@ def run_sub_agent(
     tools, tool_map = _resolve_tools(agent_type)
 
     # ---- 创建 LLM（继承主 Agent 的模型）----
-    from app.services.agent.agent import create_llm
-    from app.services.llm_client import resolve_model
+    from app.services.llm_client import create_llm, resolve_model
 
     model_name = _current_model_name.get(None) or resolve_model("auto")
     llm = create_llm(model_name)

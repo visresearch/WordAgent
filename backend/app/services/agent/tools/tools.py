@@ -13,11 +13,11 @@ from .callback import (
 )
 from .document_tools import delete_document, generate_document, read_document, search_documnet
 from .runSubAgent_tools import run_sub_agent
+from .skill_tools import bash, load_skill
 from .web_tools import web_fetch, web_search
 
-# 主 Agent 工具集：read_document / search_documnet / run_sub_agent
-# 文档写入、删除、网络搜索等能力已委托给子智能体（通过 run_sub_agent 调用）
-ALL_TOOLS = [read_document, search_documnet, run_sub_agent]
+# 主 Agent 工具集：主导文档处理，同时支持 Skills 加载与命令执行
+ALL_TOOLS = [read_document, search_documnet, generate_document, delete_document, run_sub_agent, load_skill, bash]
 TOOL_MAP = {t.name: t for t in ALL_TOOLS}
 
 __all__ = [
@@ -29,6 +29,8 @@ __all__ = [
     "create_tool_request",
     "delete_document",
     "generate_document",
+    "load_skill",
+    "bash",
     "is_stop_requested",
     "read_document",
     "register_loop",

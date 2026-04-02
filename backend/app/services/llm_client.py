@@ -5,6 +5,7 @@
 """
 
 import json
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -169,6 +170,59 @@ def get_https_proxy_url() -> str | None:
 def get_httpx_proxy_url() -> str | None:
     """获取 httpx 使用的单一代理 URL，未启用则返回 None"""
     return get_proxy_url()
+
+
+def create_llm(model_name: str):
+    """创建 LangChain ChatOpenAI 实例。"""
+    from langchain_openai import ChatOpenAI
+
+    actual_model_name = resolve_model(model_name)
+    provider_info = LLMClientManager.get_provider_info(actual_model_name)
+
+    if not provider_info:
+        raise ValueError(f"未找到模型 {actual_model_name} 对应的提供商配置，请在设置中添加")
+
+    if not provider_info.api_key:
+        raise ValueError(f"提供商 {provider_info.name} 未配置 API Key")
+
+    # 获取代理配置
+    proxy_url = get_https_proxy_url() or get_http_proxy_url()
+
+    # 当用户未启用代理时，临时清除环境变量中的代理设置
+    # 防止 openai/httpx 读取到系统的 socks:// 代理导致 scheme 不支持报错
+    _proxy_env_keys = [
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+    ]
+    saved_env = {}
+    if not proxy_url:
+        for key in _proxy_env_keys:
+            if key in os.environ:
+                saved_env[key] = os.environ.pop(key)
+
+    try:
+        import httpx
+
+        http_client = httpx.Client(proxy=proxy_url)
+        http_async_client = httpx.AsyncClient(proxy=proxy_url)
+
+        return ChatOpenAI(
+            model=actual_model_name,
+            openai_api_key=provider_info.api_key,
+            openai_api_base=provider_info.base_url,
+            temperature=get_temperature(),
+            max_tokens=16384,
+            streaming=True,
+            http_client=http_client,
+            http_async_client=http_async_client,
+        )
+    finally:
+        # 恢复环境变量
+        os.environ.update(saved_env)
 
 
 class LLMClientManager:
