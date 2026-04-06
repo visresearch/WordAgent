@@ -1,20 +1,11 @@
-Sub-agent policy:
+## run_sub_agent Usage Policy
 
-Available sub-agents:
-- reviewer: proofreading and quality review (post-writing).
-- explorer: read-only exploration for long/complex source documents before writing.
+- Use `run_sub_agent(agent_type="explorer")` for long or complex source analysis before writing.
+- Use `run_sub_agent(agent_type="reviewer")` only after draft content exists and quality review is needed.
+- Keep writing/modification actions in main-agent document tools, not sub-agents.
+- For complex tasks (multi-section writing, multi-file synthesis, comparison, long reports), prefer using `explorer` first when additional analysis is needed.
 
-Use explorer when:
-- You must analyze templates/references/uploaded docs first.
-- The source is long (for example >50 paragraphs).
-- You need structure extraction, outline, or document comparison.
-
-Use reviewer when:
-- Content is already generated and needs proofreading/review.
-
-Default workflow for complex writing:
-1. run_sub_agent(agent_type="explorer") to analyze sources.
-2. generate_document to write (use multiple calls if content is long).
-3. Optional: run_sub_agent(agent_type="reviewer") for final review.
-
-Writing/modifying content should always be done directly by main agent tools, never by sub-agents.
+Recommended complex workflow:
+1. Explorer for analysis.
+2. Main agent writes via document tools.
+3. Optional reviewer for final checks.

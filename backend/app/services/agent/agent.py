@@ -6,6 +6,7 @@ import asyncio
 import concurrent.futures
 import json
 import os
+import time
 import traceback
 from collections.abc import AsyncGenerator
 
@@ -42,7 +43,7 @@ from app.services.llm_client import resolve_model, supports_thinking, get_llm_in
 from app.services.agent.prompts import get_core_prompts
 from app.services.utils import normalize_tool_args
 from app.services.agent.tools import (
-    BASE_TOOLS,
+    get_base_tools_for_mode,
     _current_chat_id,
     register_loop,
     is_stop_requested,
@@ -137,6 +138,20 @@ def _extract_thinking_content(content) -> str:
     return ""
 
 
+def _is_transient_stream_error(exc: Exception) -> bool:
+    """判断是否是可重试的流式网络错误。"""
+    text = str(exc).lower()
+    transient_signals = [
+        "incomplete chunked read",
+        "peer closed connection",
+        "server disconnected",
+        "connection reset",
+        "read timeout",
+        "remoteprotocolerror",
+    ]
+    return any(sig in text for sig in transient_signals)
+
+
 def _prepare_tools_for_agent(tools: list, mcp_tool_names: set[str]) -> list:
     """包装工具，添加参数标准化、MCP 状态输出和停止信号检查。"""
     for tool in tools:
@@ -217,13 +232,19 @@ async def process_writing_request_stream(
         document_meta: 文档全局元信息（如 totalParas/documentName/parsedAt 等）
         history: 历史消息
         model: 用户选择的模型
-        mode: 对话模式（agent/plan）
+        mode: 对话模式（agent/ask/plan）
         chat_id: WebSocket 会话 ID（用于工具回调）
         attached_files: 附件列表 [{file_id, filename, content_type, is_image}, ...]
 
     Yields:
         SSE 格式的流式输出
     """
+    mode = (mode or "agent").strip().lower()
+    if mode == "plan":
+        mode = "agent"
+    elif mode not in {"agent", "ask"}:
+        mode = "agent"
+
     print("[Agent] 开始处理请求")
     print(f"[Agent] 模式: {mode}")
 
@@ -234,18 +255,22 @@ async def process_writing_request_stream(
     if _thinking_enabled:
         print(f"[Agent] 🧠 模型 {model_name} 支持 thinking 模式，已启用")
 
-    # 加载 MCP 动态工具（从用户设置，每个服务器独立加载）
-    mcp_tools, mcp_clients = await load_mcp_tools()
+    # ask 模式禁用 MCP；agent 模式按用户设置加载 MCP 动态工具
+    if mode == "agent":
+        mcp_tools, _ = await load_mcp_tools()
+    else:
+        mcp_tools = []
     mcp_tool_names = {t.name for t in mcp_tools}
-    tools = list(BASE_TOOLS) + mcp_tools
+    tools = get_base_tools_for_mode(mode) + mcp_tools
     _prepare_tools_for_agent(tools, mcp_tool_names)
     print(f"[Agent] 已绑定 {[t.name for t in tools]}")
 
     # 构建系统提示（合并所有 system prompt 为单一字符串）
     system_parts = list(get_core_prompts(mode=mode))
-    mcp_prompt = build_mcp_tools_prompt(mcp_tools)
-    if mcp_prompt:
-        system_parts.append(mcp_prompt)
+    if mode == "agent":
+        mcp_prompt = build_mcp_tools_prompt(mcp_tools)
+        if mcp_prompt:
+            system_parts.append(mcp_prompt)
     from app.services.llm_client import get_custom_prompt
 
     custom_prompt = get_custom_prompt()
@@ -270,7 +295,7 @@ async def process_writing_request_stream(
         # 构建初始消息列表（create_agent 已注入 system_prompt，这里只构建记忆 + 用户消息）
         messages = []
 
-        # 注入三层记忆（长期 RAG → 摘要 → 短期 k=5 轮）
+        # 注入记忆（当前默认：摘要 + 短期；长期 RAG 暂停）
         from app.services.memory import build_memory_messages
 
         memory_msgs = build_memory_messages(
@@ -278,6 +303,7 @@ async def process_writing_request_stream(
             current_message=message,
             llm=llm,
             session_id=chat_id,
+            enable_long_term=False,
         )
         if memory_msgs:
             messages.extend(memory_msgs)
@@ -291,13 +317,21 @@ async def process_writing_request_stream(
                 f"  - read_document(startParaIndex={r.get('startParaIndex', 0)}, endParaIndex={r.get('endParaIndex', -1)})"
                 for r in document_range
             )
-            user_content = (
-                f"User request: {message}\n\n"
-                f"⚠️ First call read_document for the following ranges (mandatory, do not skip):\n{range_instructions}\n"
-                f"After reading the document content, continue based on the user request. "
-                f"For writing/modification, prioritize direct calls to generate_document/delete_document. "
-                f"If professional review feedback is needed, call run_sub_agent(agent_type='reviewer')."
-            )
+            if mode == "ask":
+                user_content = (
+                    f"User request: {message}\n\n"
+                    f"⚠️ First call read_document for the following ranges (mandatory, do not skip):\n{range_instructions}\n"
+                    f"After reading the document content, answer the question with analysis and suggestions. "
+                    f"If professional review feedback is needed, call run_sub_agent(agent_type='reviewer')."
+                )
+            else:
+                user_content = (
+                    f"User request: {message}\n\n"
+                    f"⚠️ First call read_document for the following ranges (mandatory, do not skip):\n{range_instructions}\n"
+                    f"After reading the document content, continue based on the user request. "
+                    f"For writing/modification, prioritize direct calls to generate_document/delete_document. "
+                    f"If professional review feedback is needed, call run_sub_agent(agent_type='reviewer')."
+                )
             print(f"[Agent] 文档范围: {document_range}")
 
         # 注入文档全局元信息（随用户提问发送）
@@ -409,15 +443,28 @@ async def process_writing_request_stream(
                     "config": _config,
                 }
 
-                response = app.stream(**stream_kwargs)
+                max_attempts = 2
+                for attempt in range(1, max_attempts + 1):
+                    has_any_stream_item = False
+                    try:
+                        response = app.stream(**stream_kwargs)
 
-                for stream_item in response:
-                    if chat_id and is_stop_requested(chat_id):
-                        print(f"[Agent] ⛔ 检测到停止信号，结束流式处理 (session={chat_id})")
-                        break
-                    asyncio.run_coroutine_threadsafe(queue.put(stream_item), loop)
+                        for stream_item in response:
+                            has_any_stream_item = True
+                            if chat_id and is_stop_requested(chat_id):
+                                print(f"[Agent] ⛔ 检测到停止信号，结束流式处理 (session={chat_id})")
+                                break
+                            asyncio.run_coroutine_threadsafe(queue.put(stream_item), loop)
 
-                asyncio.run_coroutine_threadsafe(queue.put(None), loop)
+                        asyncio.run_coroutine_threadsafe(queue.put(None), loop)
+                        return
+                    except Exception as e:
+                        # 仅在“首包前失败 + 可重试网络错误”时自动重试一次，避免重复输出
+                        if attempt < max_attempts and (not has_any_stream_item) and _is_transient_stream_error(e):
+                            print(f"[Agent] ⚠️ 流式连接异常（第 {attempt} 次）: {e}，准备重试")
+                            time.sleep(0.5)
+                            continue
+                        raise
             except Exception as e:
                 asyncio.run_coroutine_threadsafe(queue.put(("error", str(e))), loop)
 
@@ -527,7 +574,7 @@ async def process_writing_request_stream(
                         yield f"data: {json.dumps({'type': 'status', 'content': str(chunk)}, ensure_ascii=False)}\n\n"
 
         # 只在 agent 模式下且期望生成文档时显示警告
-        if not has_tool_result and document_range:
+        if mode == "agent" and not has_tool_result and document_range:
             yield f"data: {json.dumps({'type': 'status', 'content': '⚠️ 没有检测到调用工具，模型可能不支持'}, ensure_ascii=False)}\n\n"
 
         # 将本轮对话存入长期记忆

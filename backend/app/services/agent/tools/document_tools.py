@@ -3,15 +3,36 @@
 import asyncio
 import concurrent.futures
 import json
+from datetime import datetime
 
 from langchain_core.tools import tool
 from langgraph.config import get_stream_writer
 
 from .callback import _current_chat_id, _pending_loops, _pending_tool_requests, is_stop_requested
 from .schemas import DocumentOutput, DocumentQuery
+from app.services.agent.prompts import get_tool_description
+from app.core.config import get_wence_data_dir
 
 # 返回给 LLM 的文档 JSON 最大字符数（超过则进入精简模式）
 _MAX_DOC_JSON_CHARS = 80_000
+
+
+def _save_generated_document_json(doc_dict: dict) -> str | None:
+    """将生成的文档 JSON 持久化到 wence_data/json 目录。"""
+    try:
+        json_dir = get_wence_data_dir() / "json"
+        json_dir.mkdir(parents=True, exist_ok=True)
+
+        timestamp = datetime.now().strftime("%Y-%m-%dT%H-%M-%S-%f")[:-3]
+        filename = f"document_{timestamp}.json"
+        file_path = json_dir / filename
+
+        json_str = json.dumps(doc_dict, ensure_ascii=False, indent=2)
+        file_path.write_text(json_str, encoding="utf-8")
+        return str(file_path)
+    except Exception as e:
+        print(f"[generate_document] ⚠️ 保存 JSON 文件失败: {e}")
+        return None
 
 
 def _compact_doc_json(doc_json: dict) -> str:
@@ -59,7 +80,7 @@ def _compact_doc_json(doc_json: dict) -> str:
     return result
 
 
-@tool
+@tool(description=get_tool_description("read_document"))
 def read_document(startParaIndex: int = 0, endParaIndex: int = 49) -> str:
     """Read document content. Requests the frontend to parse and return the specified paragraph range via WebSocket."""
     writer = get_stream_writer()
@@ -137,17 +158,26 @@ def read_document(startParaIndex: int = 0, endParaIndex: int = 49) -> str:
     return ""
 
 
-@tool
+@tool(description=get_tool_description("generate_document"))
 def generate_document(document: DocumentOutput) -> dict:
     """Generate a formatted document JSON for insertion into the Word document."""
     writer = get_stream_writer()
     doc_dict = document.model_dump()
     para_count = len(doc_dict.get("paragraphs", []))
+    saved_path = _save_generated_document_json(doc_dict)
+
+    if saved_path:
+        writer(
+            {
+                "type": "status",
+                "content": f"💾 生成 JSON 已保存: {saved_path}",
+            }
+        )
     writer({"type": "generate_complete", "content": f"✅ 文档已生成，共 {para_count} 个段落"})
     return doc_dict
 
 
-@tool
+@tool(description=get_tool_description("search_document"))
 def search_documnet(query: DocumentQuery) -> str:
     """Search document content — search for matching content in the frontend document by text or style criteria."""
     writer = get_stream_writer()
@@ -245,7 +275,7 @@ def search_documnet(query: DocumentQuery) -> str:
     return '{"matches": [], "matchCount": 0, "error": "non-websocket"}'
 
 
-@tool
+@tool(description=get_tool_description("delete_document"))
 def delete_document(startParaIndex: int = 0, endParaIndex: int = -1) -> str:
     """Delete a specified range of paragraphs from the document."""
     writer = get_stream_writer()

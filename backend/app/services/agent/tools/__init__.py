@@ -2,6 +2,8 @@
 
 from .tools import (
     ALL_TOOLS,
+    AGENT_BASE_TOOLS,
+    ASK_BASE_TOOLS,
     BASE_TOOLS,
     TOOL_MAP,
     _current_chat_id,
@@ -11,6 +13,7 @@ from .tools import (
     create_tool_request,
     delete_document,
     generate_document,
+    get_base_tools_for_mode,
     is_stop_requested,
     read_document,
     register_loop,
@@ -23,6 +26,8 @@ from .tools import (
 
 __all__ = [
     "ALL_TOOLS",
+    "AGENT_BASE_TOOLS",
+    "ASK_BASE_TOOLS",
     "BASE_TOOLS",
     "TOOL_MAP",
     "_current_chat_id",
@@ -31,6 +36,7 @@ __all__ = [
     "create_tool_request",
     "delete_document",
     "generate_document",
+    "get_base_tools_for_mode",
     "is_stop_requested",
     "read_document",
     "register_loop",

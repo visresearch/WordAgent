@@ -89,7 +89,7 @@
         <textarea
           ref="chatInput"
           v-model="inputText"
-          :placeholder="mode === 'plan' ? '概述需要研究的目标或问题' : '描述下一步要构建的内容'"
+          :placeholder="inputPlaceholder"
           class="chat-input"
           rows="1"
           @keydown.enter.exact.prevent="sendMessage"
@@ -100,7 +100,10 @@
             <!-- 模式选择 -->
             <div class="custom-select" :class="{ open: modeDropdownOpen }">
               <div class="select-trigger" @click="toggleModeDropdown">
-                <span>{{ mode === 'plan' ? 'Plan' : 'Agent' }}</span>
+                <span class="mode-option-content">
+                  <span class="mode-option-icon" :style="modeIconStyle(currentModeIcon)" aria-hidden="true"></span>
+                  <span>{{ currentModeLabel }}</span>
+                </span>
                 <svg
                   class="select-arrow"
                   width="8"
@@ -123,14 +126,24 @@
                   :class="{ active: mode === 'agent' }"
                   @click="selectMode('agent')"
                 >
-                  Agent
+                  <span class="mode-option-icon" :style="modeIconStyle(agentIcon)" aria-hidden="true"></span>
+                  <span>Agent</span>
+                </div>
+                <div
+                  class="select-option"
+                  :class="{ active: mode === 'ask' }"
+                  @click="selectMode('ask')"
+                >
+                  <span class="mode-option-icon" :style="modeIconStyle(askIcon)" aria-hidden="true"></span>
+                  <span>Ask</span>
                 </div>
                 <div
                   class="select-option"
                   :class="{ active: mode === 'plan' }"
                   @click="selectMode('plan')"
                 >
-                  Plan
+                  <span class="mode-option-icon" :style="modeIconStyle(planIcon)" aria-hidden="true"></span>
+                  <span>Plan</span>
                 </div>
               </div>
             </div>
@@ -238,7 +251,10 @@
 
 <script>
 import addIcon from '@/assets/icons/add.svg';
+import agentIcon from '@/assets/icons/agent.svg?url';
+import askIcon from '@/assets/icons/ask.svg?url';
 import fileIcon from '@/assets/icons/file.svg';
+import planIcon from '@/assets/icons/plan.svg?url';
 import sendIcon from '@/assets/icons/send.svg';
 
 export default {
@@ -288,11 +304,41 @@ export default {
       modeDropdownOpen: false,
       modelDropdownOpen: false,
       addIcon,
+      agentIcon,
+      askIcon,
       fileIcon,
+      planIcon,
       sendIcon
     };
   },
   computed: {
+    inputPlaceholder() {
+      if (this.mode === 'plan') {
+        return '概述需要研究的目标或问题';
+      }
+      if (this.mode === 'ask') {
+        return '输入要咨询的问题';
+      }
+      return '描述下一步要构建的内容';
+    },
+    currentModeLabel() {
+      if (this.mode === 'plan') {
+        return 'Plan';
+      }
+      if (this.mode === 'ask') {
+        return 'Ask';
+      }
+      return 'Agent';
+    },
+    currentModeIcon() {
+      if (this.mode === 'plan') {
+        return this.planIcon;
+      }
+      if (this.mode === 'ask') {
+        return this.askIcon;
+      }
+      return this.agentIcon;
+    },
     selectedModelName() {
       const model = this.availableModels.find((m) => m.id === this.selectedModel);
       return model ? model.name : '选择模型';
@@ -417,6 +463,12 @@ export default {
     selectModel(id) {
       this.$emit('update:selectedModel', id);
       this.modelDropdownOpen = false;
+    },
+
+    modeIconStyle(icon) {
+      return {
+        '--mode-icon-url': `url(${icon})`
+      };
     },
 
     closeDropdowns() {
@@ -675,7 +727,7 @@ export default {
 .select-trigger {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
   padding: 2px 4px;
   color: #666;
   cursor: pointer;
@@ -731,7 +783,32 @@ export default {
   min-width: 100px;
 }
 
+.mode-option-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.mode-option-icon {
+  width: 11px;
+  height: 11px;
+  display: block;
+  flex-shrink: 0;
+  background-color: currentColor;
+  -webkit-mask-image: var(--mode-icon-url);
+  mask-image: var(--mode-icon-url);
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+}
+
 .select-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   padding: 2px 10px;
   color: #333;
   cursor: pointer;

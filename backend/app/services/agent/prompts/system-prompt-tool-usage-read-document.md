@@ -1,3 +1,6 @@
-Use read_document to read required paragraph ranges.
-If reading large scope, split into chunks of at most 50 paragraphs.
-Avoid read_document(0, -1) in a single call.
+## read_document Usage Policy
+
+- Read only the paragraph ranges needed for the current task.
+- For broad coverage, read in chunks of at most 50 paragraphs.
+- Avoid full-document one-shot reads.
+- Prefer targeted follow-up reads around matched paragraph indices.

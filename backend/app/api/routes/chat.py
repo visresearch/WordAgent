@@ -22,6 +22,16 @@ from app.services.agent.tools.tools import (
 router = APIRouter()
 
 
+def _normalize_mode(mode: str | None) -> str:
+    """标准化前端传入模式：支持 agent/ask/plan，plan 暂按 agent 处理。"""
+    normalized = (mode or "agent").strip().lower()
+    if normalized == "plan":
+        return "agent"
+    if normalized in {"agent", "ask"}:
+        return normalized
+    return "agent"
+
+
 # ============== WebSocket 聊天接口 ==============
 
 
@@ -35,7 +45,7 @@ async def chat_websocket(websocket: WebSocket):
 
     消息协议（JSON）：
     前端 → 后端:
-      - {"type": "chat", "message": "...", "mode": "agent", "model": "auto", "documentRange": [...], "documentMeta": {...}, "history": [...]}
+            - {"type": "chat", "message": "...", "mode": "agent|ask|plan", "model": "auto", "documentRange": [...], "documentMeta": {...}, "history": [...]} 
       - {"type": "document_response", "documentJson": {...}}
       - {"type": "delete_response", "deletedCount": 3} 或 {"type": "delete_response", "cancelled": true}
       - {"type": "stop"}
@@ -95,7 +105,7 @@ async def chat_websocket(websocket: WebSocket):
 
                 # 聊天请求
                 message = data.get("message", "")
-                mode = data.get("mode", "agent")  # 默认 agent 模式（单智能体）
+                mode = _normalize_mode(data.get("mode", "agent"))
                 model = data.get("model", "auto")
                 document_range = data.get("documentRange")
                 document_meta = data.get("documentMeta") or {}
@@ -221,9 +231,7 @@ async def _run_ws_stream(
 ):
     """在 WebSocket 上运行流式处理"""
     try:
-        # 多智能体已移除，统一走单智能体
-        if mode == "plan":
-            mode = "agent"
+        mode = _normalize_mode(mode)
 
         async for chunk in single_agent_stream(
             message=message,

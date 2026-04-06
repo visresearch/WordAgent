@@ -3,8 +3,10 @@
 from langchain_core.tools import tool
 from langgraph.config import get_stream_writer
 
+from app.services.agent.prompts import get_tool_description
 
-@tool
+
+@tool(description=get_tool_description("web_fetch"))
 def web_fetch(url: str) -> str:
     """Fetch webpage content — retrieves the main text of a URL, automatically cleaning HTML tags, scripts, and styles."""
     from curl_cffi import requests as curl_requests

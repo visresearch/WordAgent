@@ -162,7 +162,7 @@ uv run pyinstaller wence.spec
 - [x] MiniMax M2.5运行稳定
 - [x] Step 3.5 Flash运行稳定
 - [x] DeepSeek v3.2运行稳定
-- [x] Claude Sonnet 4.6运行稳定
+- [x] Claude Sonnet 4.6生成文档工具会出现问题
 - [x] Kimi K2.5容易出现工具调用死循环
 - [ ] Gemini 3.1 Pro
 

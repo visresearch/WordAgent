@@ -8,9 +8,8 @@
 
 | 服务商 | 推荐模型 | 获取地址 |
 |---|---|---|
-| 阿里云百炼 | Qwen 3.5 Plus / Qwen3 Max | [bailian.console.aliyun.com](https://bailian.console.aliyun.com/) |
-| MiniMax | M2.5 | [minimax.chat](https://www.minimax.chat/) |
-| 阶跃星辰 | Step 3.5 Flash | [platform.stepfun.com](https://platform.stepfun.com/) |
+| 阿里云百炼 | Qwen 3.6 Plus | [bailian.console.aliyun.com](https://bailian.console.aliyun.com/) |
+| 2Coding | 多种模型 | [2coding.com](https://2coding.com/) |
 | OpenRouter | 多种模型 | [openrouter.ai](https://openrouter.ai/) |
 
 ## 填写配置
@@ -20,8 +19,12 @@
 3. 填写以下信息：
    - **API Key**：你从服务商处获取的 API 密钥
    - **Base URL**：服务商的 API 地址（如阿里云百炼为 `https://dashscope.aliyuncs.com/compatible-mode/v1`）
-   - **模型名称**：选择要使用的模型（如 `qwen-plus`）
-4. 点击 **保存** 完成配置
+   - **API类型**：根据你要使用的模型选择对应的API类型(如Qwen 3.6 Plus选择 `OpenAPI 兼容`，Claude Sonnet 4.6选择 `Anthropic`)。
+4. 点击 **获取模型列表** 按钮，选择你要使用的模型（如 Qwen 3.6 Plus）
+5. 在已添加的模型列表中，把刚刚添加的模型点击切换启用按钮
+6. 点击 **保存** 完成配置，方可在聊天面板中看到刚刚添加的模型。
+
+![](/model_setting.png)
 
 ::: tip 提示
 API Key 保存在本地，不会上传到任何服务器。

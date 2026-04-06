@@ -34,6 +34,8 @@ export default defineConfig({
             { text: '安装 WPS 加载项', link: '/guide/wps-plugin' },
             { text: '启动 Microsoft Word 加载项', link: '/guide/msword-plugin' },
             { text: '配置 API Key', link: '/guide/api-config' },
+            { text: '个性化配置', link: '/guide/personalization' },
+            { text: 'MCP 服务器配置', link: '/guide/mcp' },
             { text: '如何提问', link: '/guide/how-to-ask' },
             { text: '功能按钮说明', link: '/guide/features' },
             { text: '常见问题', link: '/guide/faq' },

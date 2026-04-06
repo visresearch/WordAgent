@@ -5,6 +5,8 @@
 1. 短期记忆 (Short-term)   — ConversationBufferWindowMemory(k=5)，保留最近 k 轮对话原文
 2. 总结记忆 (Summary)      — ConversationSummaryMemory，对更早的对话做 LLM 滚动摘要
 3. 长期记忆 (Long-term/RAG) — FAISS 向量库语义检索
+
+当前默认配置：长期记忆已临时关闭（见 ENABLE_LONG_TERM_MEMORY）。
 """
 
 from __future__ import annotations
@@ -27,6 +29,8 @@ from app.core.config import get_data_dir
 
 SHORT_TERM_K = 5  # 短期记忆保留最近 k 轮 (user+assistant 为一轮)
 LONG_TERM_TOP_K = 3  # RAG 检索返回 top-k 条
+# 临时开关：默认关闭长期记忆（RAG）注入与存储
+ENABLE_LONG_TERM_MEMORY = False
 
 # FAISS 向量库持久化目录
 _FAISS_INDEX_DIR = get_data_dir() / "memory_faiss_index"
@@ -194,6 +198,9 @@ def store_to_long_term(
     metadata: dict | None = None,
 ):
     """将一条消息存入 FAISS 长期向量记忆。"""
+    if not ENABLE_LONG_TERM_MEMORY:
+        return
+
     store = _get_vectorstore()
     if store is None:
         return
@@ -223,6 +230,9 @@ def retrieve_from_long_term(
     top_k: int = LONG_TERM_TOP_K,
 ) -> list[dict]:
     """从 FAISS 长期记忆中检索与 query 语义相关的历史消息。"""
+    if not ENABLE_LONG_TERM_MEMORY:
+        return []
+
     store = _get_vectorstore()
     if store is None:
         return []
@@ -280,7 +290,7 @@ def build_memory_messages(
     llm: "ChatOpenAI | None" = None,
     session_id: str | None = None,
     enable_summary: bool = True,
-    enable_long_term: bool = True,
+    enable_long_term: bool = False,
 ) -> list[SystemMessage | HumanMessage | AIMessage]:
     """
     构建包含三层记忆的消息列表，供 Agent 注入。
@@ -293,7 +303,7 @@ def build_memory_messages(
         llm: LLM 实例（用于生成摘要，None 时跳过摘要）
         session_id: 会话 ID（用于长期记忆检索）
         enable_summary: 是否启用总结记忆
-        enable_long_term: 是否启用长期记忆
+        enable_long_term: 是否启用长期记忆（受 ENABLE_LONG_TERM_MEMORY 总开关控制）
 
     Returns:
         按顺序排列的消息列表: [长期记忆上下文, 摘要上下文, 短期对话历史]
@@ -301,7 +311,7 @@ def build_memory_messages(
     result_messages: list[SystemMessage | HumanMessage | AIMessage] = []
 
     # 1) 长期记忆 (RAG) — 最先注入，作为背景知识
-    if enable_long_term and current_message:
+    if ENABLE_LONG_TERM_MEMORY and enable_long_term and current_message:
         try:
             retrieved = retrieve_from_long_term(query=current_message)
             if retrieved:

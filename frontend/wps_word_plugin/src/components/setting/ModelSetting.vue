@@ -186,17 +186,6 @@
               </svg>
               {{ provider.fetchingModels ? '获取中...' : '获取模型列表' }}
             </button>
-            <button class="btn-custom" @click="addCustomModel(pIndex)">
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 16 16"
-                fill="currentColor"
-              >
-                <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4z" />
-              </svg>
-              自定义模型
-            </button>
             <button 
               v-if="provider.availableModels && provider.availableModels.length > 0" 
               class="btn-hide-available" 
@@ -289,7 +278,7 @@
             >
               <path d="M7 11H5V9H7M14 7H11.38L13.29 9H14V9.75L15.87 11.71C15.95 11.5 16 11.25 16 11V9C16 7.9 15.11 7 14 7M4.45 2.62L3 4L5.86 7H5C3.9 7 3 7.9 3 9V17H5V13H7V17H9V10.3L10 11.34V17H12V13.45L19.55 21.38L21 20M20.9 17H21V15H20V9H21V7H17V9H18V13.95Z" />
             </svg>
-            <p>暂无模型，请点击"获取模型列表"或"自定义模型"</p>
+            <p>暂无模型，请点击"获取模型列表"</p>
           </div>
         </div>
       </div>
@@ -464,30 +453,6 @@ export default {
       localProviders.value[index].availableModels = [];
     };
 
-    const addCustomModel = (index) => {
-      const modelId = prompt('请输入自定义模型 ID:');
-      if (!modelId || !modelId.trim()) {
-        return;
-      }
-
-      const provider = localProviders.value[index];
-      if (!provider.models) {
-        provider.models = [];
-      }
-      
-      const exists = provider.models.some(m => m.id === modelId.trim());
-      if (!exists) {
-        provider.models.push({
-          id: modelId.trim(),
-          name: modelId.trim(),
-          enabled: false
-        });
-        emitChange();
-      } else {
-        alert('该模型已存在');
-      }
-    };
-
     const setProviderApiType = (index, apiType) => {
       const provider = localProviders.value[index];
       if (!provider) {
@@ -511,7 +476,6 @@ export default {
       addModelFromAvailable,
       removeModelFromProvider,
       hideAvailableModels,
-      addCustomModel,
       setProviderApiType
     };
   }
@@ -797,8 +761,7 @@ export default {
   border-bottom: 1px solid #f0f0f0;
 }
 
-.btn-fetch,
-.btn-custom {
+.btn-fetch {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -812,8 +775,7 @@ export default {
   transition: all 0.2s;
 }
 
-.btn-fetch:hover:not(:disabled),
-.btn-custom:hover {
+.btn-fetch:hover:not(:disabled) {
   background: #f8faff;
   border-color: #667eea;
 }
