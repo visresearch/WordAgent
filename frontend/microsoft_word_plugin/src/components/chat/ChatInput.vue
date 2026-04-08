@@ -4,9 +4,7 @@
     <div v-for="(file, index) in uploadedFiles" :key="`${file.name}-${file.size}-${file.lastModified}-${index}`" class="current-selection-bar">
       <div class="selection-bar-content">
         <div class="selection-bar-icon">
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M8.5 1.5a3 3 0 0 0-3 3v6a2.5 2.5 0 0 0 5 0V5a1.5 1.5 0 0 0-3 0v5a.5.5 0 0 0 1 0V5a.5.5 0 0 1 1 0v5a1.5 1.5 0 0 1-3 0v-6a2 2 0 1 1 4 0v6.5a3 3 0 1 1-6 0v-6a.5.5 0 0 1 1 0v6a2 2 0 1 0 4 0V4.5a1 1 0 0 0-1-1z"/>
-          </svg>
+          <img :src="fileIcon" alt="附件" class="selection-bar-icon-img" />
         </div>
         <div class="selection-bar-info">
           <span class="selection-bar-preview">{{ file.name }} ({{ formatFileSize(file.size) }})</span>
@@ -74,7 +72,7 @@
         <textarea
           ref="chatInput"
           v-model="inputText"
-          :placeholder="mode === 'plan' ? '概述需要研究的目标或问题' : '描述下一步要构建的内容'"
+          :placeholder="inputPlaceholder"
           class="chat-input"
           rows="1"
           @keydown.enter.exact.prevent="sendMessage"
@@ -85,14 +83,27 @@
             <!-- 模式选择 -->
             <div class="custom-select" :class="{ open: modeDropdownOpen }">
               <div class="select-trigger" @click="toggleModeDropdown">
-                <span>{{ mode === 'plan' ? 'Plan' : 'Agent' }}</span>
+                <span class="mode-option-content">
+                  <span class="mode-option-icon" :style="modeIconStyle(currentModeIcon)" aria-hidden="true"></span>
+                  <span>{{ currentModeLabel }}</span>
+                </span>
                 <svg class="select-arrow" width="8" height="8" viewBox="0 0 12 12">
                   <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none" />
                 </svg>
               </div>
               <div class="select-dropdown">
-                <div class="select-option" :class="{ active: mode === 'agent' }" @click="selectMode('agent')">Agent</div>
-                <div class="select-option" :class="{ active: mode === 'plan' }" @click="selectMode('plan')">Plan</div>
+                <div class="select-option" :class="{ active: mode === 'agent' }" @click="selectMode('agent')">
+                  <span class="mode-option-icon" :style="modeIconStyle(agentIcon)" aria-hidden="true"></span>
+                  <span>Agent</span>
+                </div>
+                <div class="select-option" :class="{ active: mode === 'ask' }" @click="selectMode('ask')">
+                  <span class="mode-option-icon" :style="modeIconStyle(askIcon)" aria-hidden="true"></span>
+                  <span>Ask</span>
+                </div>
+                <div class="select-option" :class="{ active: mode === 'plan' }" @click="selectMode('plan')">
+                  <span class="mode-option-icon" :style="modeIconStyle(planIcon)" aria-hidden="true"></span>
+                  <span>Plan</span>
+                </div>
               </div>
             </div>
 
@@ -121,9 +132,7 @@
           <div class="toolbar-right">
             <div class="btn-wrapper">
               <button class="add-selection-btn" title="添加文件" @click="triggerFilePicker">
-                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor">
-                  <path d="M8.5 2a2.5 2.5 0 0 0-2.5 2.5v6a2 2 0 1 0 4 0V5a1.5 1.5 0 0 0-3 0v5a1 1 0 0 0 2 0V5" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
-                </svg>
+                <img :src="fileIcon" alt="添加文件" class="toolbar-icon" />
               </button>
               <span class="tooltip">添加文件</span>
             </div>
@@ -166,6 +175,11 @@
 </template>
 
 <script>
+import agentIcon from '../../assets/icons/agent.svg';
+import askIcon from '../../assets/icons/ask.svg';
+import fileIcon from '../../assets/icons/file.svg';
+import planIcon from '../../assets/icons/plan.svg';
+
 export default {
   name: 'ChatInput',
   props: {
@@ -179,15 +193,46 @@ export default {
     pendingDocument: { type: Object, default: null },
     pendingDeletes: { type: Array, default: () => [] }
   },
-  emits: ['send', 'stop', 'add-selection', 'remove-selection', 'add-files', 'remove-file', 'update:mode', 'update:selectedModel', 'confirm-pending', 'cancel-pending'],
+  emits: ['send', 'stop', 'add-selection', 'remove-selection', 'add-files', 'remove-file', 'update:mode', 'update:selectedModel', 'refresh-models', 'confirm-pending', 'cancel-pending'],
   data() {
     return {
       inputText: '',
       modeDropdownOpen: false,
-      modelDropdownOpen: false
+      modelDropdownOpen: false,
+      agentIcon,
+      askIcon,
+      fileIcon,
+      planIcon
     };
   },
   computed: {
+    inputPlaceholder() {
+      if (this.mode === 'plan') {
+        return '概述需要研究的目标或问题';
+      }
+      if (this.mode === 'ask') {
+        return '输入要咨询的问题';
+      }
+      return '描述下一步要构建的内容';
+    },
+    currentModeLabel() {
+      if (this.mode === 'plan') {
+        return 'Plan';
+      }
+      if (this.mode === 'ask') {
+        return 'Ask';
+      }
+      return 'Agent';
+    },
+    currentModeIcon() {
+      if (this.mode === 'plan') {
+        return this.planIcon;
+      }
+      if (this.mode === 'ask') {
+        return this.askIcon;
+      }
+      return this.agentIcon;
+    },
     selectedModelName() {
       const model = this.availableModels.find((m) => m.id === this.selectedModel);
       return model ? model.name : '选择模型';
@@ -283,6 +328,9 @@ export default {
       if (this.modelsLoading) return;
       e.stopPropagation();
       this.modeDropdownOpen = false;
+      if (!this.modelDropdownOpen) {
+        this.$emit('refresh-models');
+      }
       this.modelDropdownOpen = !this.modelDropdownOpen;
     },
     selectMode(value) {
@@ -292,6 +340,11 @@ export default {
     selectModel(id) {
       this.$emit('update:selectedModel', id);
       this.modelDropdownOpen = false;
+    },
+    modeIconStyle(icon) {
+      return {
+        '--mode-icon-url': `url(${icon})`
+      };
     },
     closeDropdowns() {
       this.modeDropdownOpen = false;
@@ -318,6 +371,12 @@ export default {
   color: #667eea;
   display: flex;
   align-items: center;
+}
+.selection-bar-icon-img {
+  width: 14px;
+  height: 14px;
+  display: block;
+  user-select: none;
 }
 .selection-bar-info {
   flex: 1;
@@ -557,7 +616,30 @@ export default {
 .model-dropdown {
   min-width: 100px;
 }
+.mode-option-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.mode-option-icon {
+  width: 11px;
+  height: 11px;
+  display: block;
+  flex-shrink: 0;
+  background-color: currentColor;
+  -webkit-mask-image: var(--mode-icon-url);
+  mask-image: var(--mode-icon-url);
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+}
 .select-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   padding: 2px 10px;
   color: #333;
   cursor: pointer;
@@ -589,6 +671,12 @@ export default {
 .add-selection-btn:hover {
   background: #f0f0f0;
   color: #667eea;
+}
+.toolbar-icon {
+  width: 12px;
+  height: 12px;
+  display: block;
+  user-select: none;
 }
 .send-btn {
   width: 18px;

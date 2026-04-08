@@ -70,9 +70,8 @@ The frontend add-in can render before/after changes with different highlight col
 - [x] WPS Word desktop support
 - [x] Windows and Linux support
 - [x] Single-agent mode
-- [x] Token usage optimization
-- [x] Multi-agent mode
-- [x] Microsoft Word web add-in support
+- [ ] Multi-agent mode
+- [x] Microsoft Word web and desktop support
 - [ ] Advanced styles (tables, figures, etc.)
 
 ## 4. Architecture
@@ -171,8 +170,8 @@ Current compatibility status (ongoing):
 - [x] MiniMax M2.5 (stable)
 - [x] Step 3.5 Flash (stable)
 - [x] DeepSeek v3.2 (stable)
+- [x] Claude Sonnet 4.6 (issues when calling document-generation tools)
 - [x] Kimi K2.5 (may enter tool-call loops)
-- [x] Qwen Max (unstable tool calls, may fail to generate document)
 - [ ] Gemini 3.1 Pro
 
 Note: part of development used free credits from [Alibaba Bailian](https://bailian.console.aliyun.com/) and [OpenRouter](https://openrouter.ai/models?q=free).

@@ -67,7 +67,7 @@
 - [x] 支持Windows、Linux
 - [x] 支持单智能体模式
 - [ ] 支持多智能体模式
-- [ ] 支持Microsoft Word网页版
+- [x] 支持Microsoft Word网页版和桌面客户端
 - [ ] 支持表格、插图等复杂样式编辑
 
 ## 四、系统架构

@@ -45,7 +45,7 @@ async def chat_websocket(websocket: WebSocket):
 
     消息协议（JSON）：
     前端 → 后端:
-            - {"type": "chat", "message": "...", "mode": "agent|ask|plan", "model": "auto", "documentRange": [...], "documentMeta": {...}, "history": [...]} 
+            - {"type": "chat", "message": "...", "mode": "agent|ask|plan", "model": "auto", "documentRange": [...], "documentMeta": {...}, "history": [...]}
       - {"type": "document_response", "documentJson": {...}}
       - {"type": "delete_response", "deletedCount": 3} 或 {"type": "delete_response", "cancelled": true}
       - {"type": "stop"}

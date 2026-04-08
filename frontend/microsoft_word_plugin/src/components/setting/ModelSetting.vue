@@ -149,6 +149,27 @@
                 @input="emitChange"
               />
             </div>
+            <div class="form-row">
+              <label class="field-label">API 类型</label>
+              <div class="api-type-segment">
+                <button
+                  type="button"
+                  class="api-type-btn"
+                  :class="{ active: provider.apiType === 'openai' }"
+                  @click="setProviderApiType(pIndex, 'openai')"
+                >
+                  OpenAI 兼容
+                </button>
+                <button
+                  type="button"
+                  class="api-type-btn"
+                  :class="{ active: provider.apiType === 'anthropic' }"
+                  @click="setProviderApiType(pIndex, 'anthropic')"
+                >
+                  Anthropic
+                </button>
+              </div>
+            </div>
           </div>
 
           <!-- 模型操作按钮 -->
@@ -164,17 +185,6 @@
                 <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466z" />
               </svg>
               {{ provider.fetchingModels ? '获取中...' : '获取模型列表' }}
-            </button>
-            <button class="btn-custom" @click="addCustomModel(pIndex)">
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 16 16"
-                fill="currentColor"
-              >
-                <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4z" />
-              </svg>
-              自定义模型
             </button>
             <button 
               v-if="provider.availableModels && provider.availableModels.length > 0" 
@@ -268,7 +278,7 @@
             >
               <path d="M7 11H5V9H7M14 7H11.38L13.29 9H14V9.75L15.87 11.71C15.95 11.5 16 11.25 16 11V9C16 7.9 15.11 7 14 7M4.45 2.62L3 4L5.86 7H5C3.9 7 3 7.9 3 9V17H5V13H7V17H9V10.3L10 11.34V17H12V13.45L19.55 21.38L21 20M20.9 17H21V15H20V9H21V7H17V9H18V13.95Z" />
             </svg>
-            <p>暂无模型，请点击"获取模型列表"或"自定义模型"</p>
+            <p>暂无模型，请点击"获取模型列表"</p>
           </div>
         </div>
       </div>
@@ -308,6 +318,7 @@ export default {
   setup(props, { emit }) {
     const localProviders = ref(props.providers.map(p => ({
       ...p,
+      apiType: p.apiType || 'openai',
       enabled: p.enabled !== false,
       expanded: p.expanded || false,
       showKey: p.showKey || false,
@@ -317,6 +328,7 @@ export default {
     watch(() => props.providers, (newVal) => {
       localProviders.value = newVal.map(p => ({
         ...p,
+        apiType: p.apiType || 'openai',
         enabled: p.enabled !== false,
         expanded: p.expanded || false,
         showKey: p.showKey || false,
@@ -339,6 +351,7 @@ export default {
         name: p.name,
         baseUrl: p.baseUrl,
         apiKey: p.apiKey,
+        apiType: p.apiType || 'openai',
         models: p.models,
         enabled: p.enabled,
         expanded: p.expanded,
@@ -352,6 +365,7 @@ export default {
         name: '',
         baseUrl: '',
         apiKey: '',
+        apiType: 'openai',
         models: [],
         enabled: true,
         expanded: true,
@@ -386,7 +400,8 @@ export default {
       try {
         const response = await api.fetchAvailableModels({
           baseUrl: provider.baseUrl,
-          apiKey: provider.apiKey
+          apiKey: provider.apiKey,
+          apiType: provider.apiType || 'openai'
         });
 
         const availableModels = response.models ? response.models.map(m => ({
@@ -438,27 +453,14 @@ export default {
       localProviders.value[index].availableModels = [];
     };
 
-    const addCustomModel = (index) => {
-      const modelId = prompt('请输入自定义模型 ID:');
-      if (!modelId || !modelId.trim()) {
+    const setProviderApiType = (index, apiType) => {
+      const provider = localProviders.value[index];
+      if (!provider) {
         return;
       }
-
-      const provider = localProviders.value[index];
-      if (!provider.models) {
-        provider.models = [];
-      }
-      
-      const exists = provider.models.some(m => m.id === modelId.trim());
-      if (!exists) {
-        provider.models.push({
-          id: modelId.trim(),
-          name: modelId.trim(),
-          enabled: false
-        });
+      if (provider.apiType !== apiType) {
+        provider.apiType = apiType;
         emitChange();
-      } else {
-        alert('该模型已存在');
       }
     };
 
@@ -474,7 +476,7 @@ export default {
       addModelFromAvailable,
       removeModelFromProvider,
       hideAvailableModels,
-      addCustomModel
+      setProviderApiType
     };
   }
 };
@@ -704,6 +706,19 @@ export default {
   flex: 1;
 }
 
+/* Hide browser-native password reveal icons; keep only the custom eye button. */
+.api-key-wrapper .field-input[type='password']::-ms-reveal,
+.api-key-wrapper .field-input[type='password']::-ms-clear {
+  display: none;
+}
+
+.api-key-wrapper .field-input[type='password']::-webkit-credentials-auto-fill-button,
+.api-key-wrapper .field-input[type='password']::-webkit-contacts-auto-fill-button {
+  visibility: hidden;
+  display: none !important;
+  pointer-events: none;
+}
+
 .btn-toggle-visibility {
   padding: 8px 10px;
   background: #f5f5f5;
@@ -720,6 +735,36 @@ export default {
   background: #e8e8e8;
 }
 
+.api-type-segment {
+  display: flex;
+  flex: 1;
+  gap: 8px;
+}
+
+.api-type-btn {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+  background: #fff;
+  color: #555;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.api-type-btn:hover {
+  border-color: #667eea;
+  color: #4f46e5;
+  background: #f8faff;
+}
+
+.api-type-btn.active {
+  border-color: #667eea;
+  color: #fff;
+  background: #667eea;
+}
+
 /* 模型操作按钮栏 */
 .model-actions-bar {
   display: flex;
@@ -729,8 +774,7 @@ export default {
   border-bottom: 1px solid #f0f0f0;
 }
 
-.btn-fetch,
-.btn-custom {
+.btn-fetch {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -744,8 +788,7 @@ export default {
   transition: all 0.2s;
 }
 
-.btn-fetch:hover:not(:disabled),
-.btn-custom:hover {
+.btn-fetch:hover:not(:disabled) {
   background: #f8faff;
   border-color: #667eea;
 }

@@ -258,11 +258,13 @@ const wsManager = {
       }
 
       const result = executeStyleQuery(docData, query || {});
-      const matchedParaIndices = [...new Set(
-        (result.matches || [])
-          .map((m) => m?.paragraphIndex)
-          .filter((idx) => Number.isInteger(idx))
-      )].sort((a, b) => a - b);
+      const matchedParaIndices = [
+        ...new Set(
+          (result.matches || [])
+            .map((m) => m?.paragraphIndex)
+            .filter((idx) => Number.isInteger(idx))
+        ),
+      ].sort((a, b) => a - b);
 
       await this.send({
         type: "query_response",
@@ -526,13 +528,13 @@ async function getSettings() {
 
     if (!response.success) {
       console.error("获取设置失败:", response.error);
-      return { providers: [] };
+      return { providers: [], mcpServers: [] };
     }
 
     return response.data;
   } catch (error) {
     console.error("获取设置异常:", error);
-    return { providers: [] };
+    return { providers: [], mcpServers: [] };
   }
 }
 
@@ -560,13 +562,14 @@ async function saveSettings(settings) {
 /**
  * 获取指定 API 提供商支持的模型列表
  */
-async function fetchAvailableModels({ baseUrl, apiKey }) {
+async function fetchAvailableModels({ baseUrl, apiKey, apiType = "openai" }) {
   try {
     const result = await request("/api/chat/providers/models", {
       method: "POST",
       body: {
         base_url: baseUrl,
         api_key: apiKey,
+        api_type: apiType,
       },
     });
 
@@ -582,6 +585,25 @@ async function fetchAvailableModels({ baseUrl, apiKey }) {
     console.error("获取模型列表失败:", error);
     throw new Error(error.message || "获取模型列表失败");
   }
+}
+
+/**
+ * 测试 MCP 服务器连接
+ */
+async function testMcpServer({ name, config }) {
+  const response = await request("/api/settings/mcp/test", {
+    method: "POST",
+    body: {
+      name,
+      config,
+    },
+  });
+
+  if (!response.success) {
+    throw new Error(response.error || "测试 MCP 服务器连接失败");
+  }
+
+  return response.data;
 }
 
 // ============== 缓存管理 API ==============
@@ -654,6 +676,7 @@ export default {
 
   getSettings,
   saveSettings,
+  testMcpServer,
 
   scanCache,
   clearCache,
@@ -682,6 +705,7 @@ export {
   uploadFiles,
   getSettings,
   saveSettings,
+  testMcpServer,
   scanCache,
   clearCache,
   updateConfig,

@@ -20,7 +20,7 @@
       <img class="empty-icon" src="/images/robot.svg" alt="WenCe AI" />
       <div class="empty-text-container">
         <span class="empty-text">我能做什么</span>
-        <a href="https://cmcblog.netlify.app/" target="_blank" class="help-icon">
+        <a href="https://visresearch.github.io/WordAgent/" target="_blank" class="help-icon">
           <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
             <circle
               cx="8"

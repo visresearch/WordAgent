@@ -10,6 +10,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import ipaddress
 from pathlib import Path
 
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QFileDialog
 from qfluentwidgets import (
@@ -24,10 +25,17 @@ from qfluentwidgets import (
 
 
 def _get_runtime_base() -> Path:
-    """获取运行时基础目录（兼容 PyInstaller）。"""
+    """获取 backend 运行时基础目录（兼容 PyInstaller）。"""
     if getattr(sys, "frozen", False):
         return Path(sys._MEIPASS)
-    return Path(__file__).resolve().parents[3]
+    return Path(__file__).resolve().parents[2]
+
+
+def _get_workspace_base() -> Path:
+    """获取工作区根目录。"""
+    if getattr(sys, "frozen", False):
+        return Path(sys._MEIPASS)
+    return _get_runtime_base().parent
 
 
 def _get_resource_manifest() -> Path | None:
@@ -40,7 +48,10 @@ def _get_resource_manifest() -> Path | None:
             base / "manifest.xml",
         ]
     else:
-        candidates = [base / "gui" / "resources" / "manifest.xml"]
+        candidates = [
+            base / "gui" / "resources" / "manifest.xml",
+            base / "resources" / "manifest.xml",
+        ]
 
     for path in candidates:
         if path.exists():
@@ -50,7 +61,7 @@ def _get_resource_manifest() -> Path | None:
 
 def _get_frontend_dist_dir() -> Path | None:
     """获取 microsoft_word_plugin 的 dist 目录。"""
-    base = _get_runtime_base()
+    base = _get_workspace_base()
     if getattr(sys, "frozen", False):
         candidates = [
             base / "msoffice",
@@ -70,7 +81,7 @@ def _get_persistent_cert_dir() -> Path:
     if getattr(sys, "frozen", False):
         # 打包后使用 exe 同级目录，避免写入 _MEIPASS 临时目录。
         return Path(sys.executable).resolve().parent / "wence_data" / "certs"
-    return Path(__file__).resolve().parents[3] / "wence_data" / "certs"
+    return _get_runtime_base() / "wence_data" / "certs"
 
 
 def _generate_localhost_cert(target_dir: Path) -> tuple[Path, Path]:
@@ -167,7 +178,7 @@ class OfficeInstallInterface(QWidget):
         title = SubtitleLabel("Microsoft Word 加载项", self)
         layout.addWidget(title)
 
-        subtitle = CaptionLabel("仅支持 Office 网页版：下载 manifest、启动服务并用浏览器打开接受证书", self)
+        subtitle = CaptionLabel("管理 Microsoft Word 网页版和客户端加载项的安装与启用", self)
         subtitle.setTextColor(QColor("#888888"), QColor("#aaaaaa"))
         layout.addWidget(subtitle)
 
@@ -177,13 +188,22 @@ class OfficeInstallInterface(QWidget):
         card_layout.setSpacing(12)
 
         self._usage_label = BodyLabel(
-            "使用方法：\n"
-            "1. 点击“启动 HTTPS 服务”，然后点击“用浏览器打开”在浏览器中接受证书（仅首次需要）。\n"
-            "2. 打开 https://word.cloud.microsoft/ 并进入 Word 网页版。\n"
-            "3. 进入：开始->加载项->更多加载项->我的加载项->管理我的加载项->上传我的加载项\n"
-            "4. 上传下载好的 manifest.xml，完成加载。如果加载项界面未显示，请刷新页面。",
+            "网页版使用方法：<br/>"
+            "1. 点击“启动 HTTPS 服务”，然后点击“用浏览器打开”在浏览器中接受证书（仅首次需要）。<br/>"
+            "2. 打开 <a href='https://word.cloud.microsoft/' style='color: #2563eb; text-decoration: underline;'>https://word.cloud.microsoft/</a> 并进入 Word 网页版。<br/>"
+            "3. 进入：开始-&gt;加载项-&gt;更多加载项-&gt;我的加载项-&gt;管理我的加载项-&gt;上传我的加载项<br/>"
+            "4. 上传下载好的 manifest.xml，完成加载。如果加载项界面未显示，请刷新页面。<br/><br/>"
+            "客户端使用方法：<br/>"
+            "1. 点击“下载 manifest.xml”保存一个空文件夹中。<br/>"
+            "2. 右键属性这个文件夹，进入“共享”选项卡，点击“共享”，选择“Everyone”，点击“共享”并记下网络路径。<br/>"
+            "3. 打开 Microsoft Word 客户端，进入：文件-&gt;选项-&gt;信任中心-&gt;信任中心设置-&gt;受信任的加载项目录，在“目录URL”中输入网络路径并点击添加目录，重启Word完成加载。<br/>"
+            "4. 如果加载项界面未显示，进入：文件-&gt;选项-&gt;自定义功能区，将开发工具添加到“主选项卡”中。点击Word上方的“开发工具”选项卡，点击加载项-&gt;共享文件夹-&gt;文策AI助手，即可使用加载项。<br/><br/>"
+            "【详细图文教程请访问 <a href='https://visresearch.github.io/WordAgent/' style='color: #2563eb; text-decoration: underline;'>https://visresearch.github.io/WordAgent/</a>】",
             card,
         )
+        self._usage_label.setTextFormat(Qt.RichText)
+        self._usage_label.setTextInteractionFlags(Qt.TextBrowserInteraction)
+        self._usage_label.setOpenExternalLinks(True)
         self._usage_label.setWordWrap(True)
         card_layout.addWidget(self._usage_label)
 

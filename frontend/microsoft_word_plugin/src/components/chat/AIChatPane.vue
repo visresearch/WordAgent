@@ -35,6 +35,7 @@
         @remove-selection="removeSelection"
         @add-files="addFiles"
         @remove-file="removeFile"
+        @refresh-models="loadModels"
         @confirm-pending="confirmPending"
         @cancel-pending="cancelPending"
       />

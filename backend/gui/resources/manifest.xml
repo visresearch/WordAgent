@@ -12,7 +12,7 @@
   <Description DefaultValue="WenCe AI Writing Assistant - 智能写作助手"/>
   <IconUrl DefaultValue="https://localhost:3000/assets/icon-32.png"/>
   <HighResolutionIconUrl DefaultValue="https://localhost:3000/assets/icon-64.png"/>
-  <SupportUrl DefaultValue="https://github.com/riyuexingchennnn/wence_ai"/>
+  <SupportUrl DefaultValue="https://github.com/visresearch/WordAgent"/>
   <AppDomains>
     <AppDomain>https://localhost:3000</AppDomain>
   </AppDomains>
@@ -72,7 +72,7 @@
         <bt:Image id="Icon.80x80" DefaultValue="https://localhost:3000/assets/icon-80.png"/>
       </bt:Images>
       <bt:Urls>
-        <bt:Url id="GetStarted.LearnMoreUrl" DefaultValue="https://github.com/riyuexingchennnn/wence_ai"/>
+        <bt:Url id="GetStarted.LearnMoreUrl" DefaultValue="https://github.com/visresearch/WordAgent"/>
         <bt:Url id="Commands.Url" DefaultValue="https://localhost:3000/commands.html"/>
         <bt:Url id="Taskpane.Url" DefaultValue="https://localhost:3000/taskpane.html"/>
       </bt:Urls>

@@ -54,7 +54,9 @@ class Cell(BaseModel):
     Multi-paragraph mode is preferred for precise style preservation.
     """
 
-    text: str = Field(description="Cell text (required in simple mode; may be empty in multi-paragraph mode)", default="")
+    text: str = Field(
+        description="Cell text (required in simple mode; may be empty in multi-paragraph mode)", default=""
+    )
     paragraphs: list[CellParagraph] | None = Field(
         default=None,
         description="Array of paragraphs inside the cell (multi-paragraph mode)."
@@ -216,14 +218,18 @@ class QueryFilter(BaseModel):
     )
 
     # Run 级别样式（type=run 时直接匹配；type=paragraph 时检查段落中是否存在匹配的 run）
-    fontName: str | None = Field(default=None, description="Font name, exact match, e.g. 'SimSun', 'KaiTi', 'Times New Roman'")
+    fontName: str | None = Field(
+        default=None, description="Font name, exact match, e.g. 'SimSun', 'KaiTi', 'Times New Roman'"
+    )
     fontSize: float | RangeFilter | None = Field(
         default=None,
         description="Font size. Exact value (e.g. 14) or range (e.g. {gt: 14}, {gte: 14, lte: 18})",
     )
     bold: bool | None = Field(default=None, description="Bold")
     italic: bool | None = Field(default=None, description="Italic")
-    underline: int | None = Field(default=None, description="Underline: 0=none, 1=single, 3=double, 4=dashed, 6=thick, 11=wave")
+    underline: int | None = Field(
+        default=None, description="Underline: 0=none, 1=single, 3=double, 4=dashed, 6=thick, 11=wave"
+    )
     color: str | None = Field(default=None, description="Text color in #RRGGBB format, e.g. '#FF0000'")
     highlight: int | None = Field(
         default=None,

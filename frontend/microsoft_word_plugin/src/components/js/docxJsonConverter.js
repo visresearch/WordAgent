@@ -439,24 +439,77 @@ const MATH_SYMBOL_TO_LATEX = {
 };
 
 const SUPERSCRIPT_CHAR_MAP = {
-  "\u2070": "0", "\u00b9": "1", "\u00b2": "2", "\u00b3": "3", "\u2074": "4",
-  "\u2075": "5", "\u2076": "6", "\u2077": "7", "\u2078": "8", "\u2079": "9",
-  "\u207a": "+", "\u207b": "-", "\u207c": "=", "\u207d": "(", "\u207e": ")",
-  "\u207f": "n", "\u1d43": "a", "\u1d47": "b", "\u1d9c": "c", "\u1d48": "d",
-  "\u1d49": "e", "\u1da0": "f", "\u1d4d": "g", "\u02b0": "h", "\u2071": "i",
-  "\u02b2": "j", "\u1d4f": "k", "\u02e1": "l", "\u1d50": "m",
-  "\u1d52": "o", "\u1d56": "p", "\u02b3": "r", "\u02e2": "s", "\u1d57": "t",
-  "\u1d58": "u", "\u1d5b": "v", "\u02b7": "w", "\u02e3": "x", "\u02b8": "y",
+  "\u2070": "0",
+  "\u00b9": "1",
+  "\u00b2": "2",
+  "\u00b3": "3",
+  "\u2074": "4",
+  "\u2075": "5",
+  "\u2076": "6",
+  "\u2077": "7",
+  "\u2078": "8",
+  "\u2079": "9",
+  "\u207a": "+",
+  "\u207b": "-",
+  "\u207c": "=",
+  "\u207d": "(",
+  "\u207e": ")",
+  "\u207f": "n",
+  "\u1d43": "a",
+  "\u1d47": "b",
+  "\u1d9c": "c",
+  "\u1d48": "d",
+  "\u1d49": "e",
+  "\u1da0": "f",
+  "\u1d4d": "g",
+  "\u02b0": "h",
+  "\u2071": "i",
+  "\u02b2": "j",
+  "\u1d4f": "k",
+  "\u02e1": "l",
+  "\u1d50": "m",
+  "\u1d52": "o",
+  "\u1d56": "p",
+  "\u02b3": "r",
+  "\u02e2": "s",
+  "\u1d57": "t",
+  "\u1d58": "u",
+  "\u1d5b": "v",
+  "\u02b7": "w",
+  "\u02e3": "x",
+  "\u02b8": "y",
   "\u1dbb": "z",
 };
 
 const SUBSCRIPT_CHAR_MAP = {
-  "\u2080": "0", "\u2081": "1", "\u2082": "2", "\u2083": "3", "\u2084": "4",
-  "\u2085": "5", "\u2086": "6", "\u2087": "7", "\u2088": "8", "\u2089": "9",
-  "\u208a": "+", "\u208b": "-", "\u208c": "=", "\u208d": "(", "\u208e": ")",
-  "\u2090": "a", "\u2091": "e", "\u2092": "o", "\u2093": "x", "\u2094": "schwa",
-  "\u2095": "h", "\u2096": "k", "\u2097": "l", "\u2098": "m", "\u2099": "n",
-  "\u209a": "p", "\u209b": "s", "\u209c": "t",
+  "\u2080": "0",
+  "\u2081": "1",
+  "\u2082": "2",
+  "\u2083": "3",
+  "\u2084": "4",
+  "\u2085": "5",
+  "\u2086": "6",
+  "\u2087": "7",
+  "\u2088": "8",
+  "\u2089": "9",
+  "\u208a": "+",
+  "\u208b": "-",
+  "\u208c": "=",
+  "\u208d": "(",
+  "\u208e": ")",
+  "\u2090": "a",
+  "\u2091": "e",
+  "\u2092": "o",
+  "\u2093": "x",
+  "\u2094": "schwa",
+  "\u2095": "h",
+  "\u2096": "k",
+  "\u2097": "l",
+  "\u2098": "m",
+  "\u2099": "n",
+  "\u209a": "p",
+  "\u209b": "s",
+  "\u209c": "t",
 };
 
 function isMathFont(fontName) {
@@ -471,7 +524,9 @@ function containsMathUnicode(text) {
   if (!text) {
     return false;
   }
-  return /[\u2200-\u22ff\u27c0-\u27ef\u2980-\u29ff\u2a00-\u2aff\u2070-\u209f]|[\ud835\udc00-\ud835\udfff]/u.test(text);
+  return /[\u2200-\u22ff\u27c0-\u27ef\u2980-\u29ff\u2a00-\u2aff\u2070-\u209f]|[\ud835\udc00-\ud835\udfff]/u.test(
+    text
+  );
 }
 
 function stripMathDelimiters(text) {
@@ -574,7 +629,10 @@ function normalizeFormulaTextToLatex(text) {
   value = value.replace(/\s+/g, " ").trim();
 
   value = value.replace(/\\sum\s*([a-zA-Z]\s*=\s*[^\\\s]+)\s*\\infty/g, "\\sum_{$1}^{\\infty}");
-  value = value.replace(/\\sum_\{\s*([a-zA-Z])\s*=\s*([^}]+)\s*\}\^\{\s*\\infty\s*\}/g, "\\sum_{$1=$2}^{\\infty}");
+  value = value.replace(
+    /\\sum_\{\s*([a-zA-Z])\s*=\s*([^}]+)\s*\}\^\{\s*\\infty\s*\}/g,
+    "\\sum_{$1=$2}^{\\infty}"
+  );
 
   return value;
 }
@@ -587,7 +645,10 @@ function normalizeParsedRun(run) {
   const text = run.text;
   const rStyle = run.rStyle || DEFAULT_RSTYLE;
   const fontName = rStyle[RSTYLE.FONT_NAME] || "";
-  const hasLatexSyntax = /\\[a-zA-Z]+/.test(text) || /[_^]\{?[^\s]/.test(text) || /^\$\$?[\s\S]+\$\$?$/.test(text.trim());
+  const hasLatexSyntax =
+    /\\[a-zA-Z]+/.test(text) ||
+    /[_^]\{?[^\s]/.test(text) ||
+    /^\$\$?[\s\S]+\$\$?$/.test(text.trim());
 
   if (!hasLatexSyntax && !isMathFont(fontName) && !containsMathUnicode(text)) {
     return run;
@@ -1077,7 +1138,10 @@ function parseRunsFromOoxml(ooxmlString) {
 
       if (child.localName === "r" && child.namespaceURI === NS_W) {
         processRunElement(child);
-      } else if ((child.localName === "oMath" || child.localName === "oMathPara") && child.namespaceURI === NS_M) {
+      } else if (
+        (child.localName === "oMath" || child.localName === "oMathPara") &&
+        child.namespaceURI === NS_M
+      ) {
         processMathElement(child);
       } else if (child.localName === "hyperlink") {
         // 超链接内也包含 w:r
@@ -1206,9 +1270,16 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
             let cur = null;
             for (let i = 0; i < allParas.items.length; i++) {
               if (allParas.items[i].tableNestingLevel > 0) {
-                if (!cur) { cur = { start: i, end: i }; } else { cur.end = i; }
+                if (!cur) {
+                  cur = { start: i, end: i };
+                } else {
+                  cur.end = i;
+                }
               } else {
-                if (cur) { allTableParaRanges.push(cur); cur = null; }
+                if (cur) {
+                  allTableParaRanges.push(cur);
+                  cur = null;
+                }
               }
             }
             if (cur) allTableParaRanges.push(cur);
@@ -1221,7 +1292,9 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
           // 解析范围内命中的表格
           for (const tpr of tableParagraphRanges) {
             // 找到此表格段落范围对应的 body.tables 索引
-            const tableIdx = allTableParaRanges.findIndex(r => r.start === tpr.start && r.end === tpr.end);
+            const tableIdx = allTableParaRanges.findIndex(
+              (r) => r.start === tpr.start && r.end === tpr.end
+            );
             if (tableIdx < 0 || tableIdx >= bodyTables.items.length) continue;
 
             const table = bodyTables.items[tableIdx];
@@ -1249,7 +1322,7 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
               rowHeights.push([h, h > 0 ? 1 : 0]);
             }
             await context.sync();
-            if (rowHeights.some(h => h[0] > 0)) {
+            if (rowHeights.some((h) => h[0] > 0)) {
               tableData.rowHeights = rowHeights;
             }
 
@@ -1267,8 +1340,8 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
             try {
               const firstRow = tableRows.items[0];
               if (firstRow && firstRow.cells.items.length > 0) {
-                const columnWidths = firstRow.cells.items.map(c => c.columnWidth || c.width || 0);
-                if (columnWidths.some(w => w > 0)) {
+                const columnWidths = firstRow.cells.items.map((c) => c.columnWidth || c.width || 0);
+                if (columnWidths.some((w) => w > 0)) {
                   tableData.columnWidths = columnWidths;
                 }
               }
@@ -1278,7 +1351,9 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
             for (const row of tableRows.items) {
               for (const cell of row.cells.items) {
                 for (const para of cell.body.paragraphs.items) {
-                  para.load("text,alignment,lineSpacing,firstLineIndent,leftIndent,rightIndent,spaceBefore,spaceAfter");
+                  para.load(
+                    "text,alignment,lineSpacing,firstLineIndent,leftIndent,rightIndent,spaceBefore,spaceAfter"
+                  );
                 }
               }
             }
@@ -1306,7 +1381,9 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
 
                   for (const ir of inlineRanges.items) {
                     ir.load("text");
-                    ir.font.load("name,size,bold,italic,underline,color,highlightColor,strikeThrough,superscript,subscript");
+                    ir.font.load(
+                      "name,size,bold,italic,underline,color,highlightColor,strikeThrough,superscript,subscript"
+                    );
                   }
                   await context.sync();
 
@@ -1330,11 +1407,17 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
                       curRun = {
                         text: t,
                         rStyle: makeRStyle(
-                          font.name || "", font.size || 12,
-                          font.bold === true, font.italic === true,
-                          getUnderlineValue(font.underline), "#000000",
-                          font.color || "#000000", getHighlightValue(font.highlightColor),
-                          font.strikeThrough === true, font.superscript === true, font.subscript === true
+                          font.name || "",
+                          font.size || 12,
+                          font.bold === true,
+                          font.italic === true,
+                          getUnderlineValue(font.underline),
+                          "#000000",
+                          font.color || "#000000",
+                          getHighlightValue(font.highlightColor),
+                          font.strikeThrough === true,
+                          font.superscript === true,
+                          font.subscript === true
                         ),
                       };
                       lastFmtKey = fmtKey;
@@ -1351,10 +1434,14 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
                     paragraphsData.push({
                       text: paraText,
                       pStyle: makePStyle(
-                        getAlignmentName(para.alignment), para.lineSpacing || 0,
-                        para.leftIndent || 0, para.rightIndent || 0,
-                        para.firstLineIndent || 0, para.spaceBefore || 0,
-                        para.spaceAfter || 0, ""
+                        getAlignmentName(para.alignment),
+                        para.lineSpacing || 0,
+                        para.leftIndent || 0,
+                        para.rightIndent || 0,
+                        para.firstLineIndent || 0,
+                        para.spaceBefore || 0,
+                        para.spaceAfter || 0,
+                        ""
                       ),
                       runs: cellRuns,
                     });
@@ -1366,14 +1453,22 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
                 try {
                   if (cellParas.items.length > 0) {
                     const pFont = cellParas.items[0].font;
-                    pFont.load("name,size,bold,italic,underline,color,highlightColor,strikeThrough,superscript,subscript");
+                    pFont.load(
+                      "name,size,bold,italic,underline,color,highlightColor,strikeThrough,superscript,subscript"
+                    );
                     await context.sync();
                     cellRStyle = makeRStyle(
-                      pFont.name || "", pFont.size || 12,
-                      pFont.bold === true, pFont.italic === true,
-                      getUnderlineValue(pFont.underline), "#000000",
-                      pFont.color || "#000000", getHighlightValue(pFont.highlightColor),
-                      pFont.strikeThrough === true, pFont.superscript === true, pFont.subscript === true
+                      pFont.name || "",
+                      pFont.size || 12,
+                      pFont.bold === true,
+                      pFont.italic === true,
+                      getUnderlineValue(pFont.underline),
+                      "#000000",
+                      pFont.color || "#000000",
+                      getHighlightValue(pFont.highlightColor),
+                      pFont.strikeThrough === true,
+                      pFont.superscript === true,
+                      pFont.subscript === true
                     );
                   }
                 } catch (e) {}
@@ -1383,8 +1478,11 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
                   paragraphs: paragraphsData.length > 0 ? paragraphsData : undefined,
                   rStyle: cellRStyle,
                   cStyle: makeCStyle(
-                    1, 1,
-                    getAlignmentName(cellParas.items.length > 0 ? cellParas.items[0].alignment : "Left"),
+                    1,
+                    1,
+                    getAlignmentName(
+                      cellParas.items.length > 0 ? cellParas.items[0].alignment : "Left"
+                    ),
                     getVerticalAlignmentName(cell.verticalAlignment)
                   ),
                 });
@@ -1595,7 +1693,7 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
             const h = row.preferredHeight || 0;
             rowHeights.push([h, h > 0 ? 1 : 0]);
           }
-          if (rowHeights.some(h => h[0] > 0)) {
+          if (rowHeights.some((h) => h[0] > 0)) {
             tableData.rowHeights = rowHeights;
           }
 
@@ -1629,8 +1727,8 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
           try {
             const firstRow = tableRows.items[0];
             if (firstRow && firstRow.cells.items.length > 0) {
-              const columnWidths = firstRow.cells.items.map(c => c.columnWidth || c.width || 0);
-              if (columnWidths.some(w => w > 0)) {
+              const columnWidths = firstRow.cells.items.map((c) => c.columnWidth || c.width || 0);
+              if (columnWidths.some((w) => w > 0)) {
                 tableData.columnWidths = columnWidths;
               }
             }
@@ -1735,7 +1833,9 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
                 if (cellParas.items.length > 0) {
                   const firstPara = cellParas.items[0];
                   const pFont = firstPara.font;
-                  pFont.load("name,size,bold,italic,underline,color,highlightColor,strikeThrough,superscript,subscript");
+                  pFont.load(
+                    "name,size,bold,italic,underline,color,highlightColor,strikeThrough,superscript,subscript"
+                  );
                   await context.sync();
                   cellRStyle = makeRStyle(
                     pFont.name || "",
@@ -2194,7 +2294,9 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection") {
           allParagraphs.items[paraIndex].load("tableNestingLevel");
           await context.sync();
           if (allParagraphs.items[paraIndex].tableNestingLevel > 0) {
-            console.log(`[generateDocxFromJSON] 插入位置(paraIndex=${paraIndex})在表格内部，寻找表格后安全位置`);
+            console.log(
+              `[generateDocxFromJSON] 插入位置(paraIndex=${paraIndex})在表格内部，寻找表格后安全位置`
+            );
             let safeIdx = -1;
             for (let pi = paraIndex + 1; pi < allParagraphs.items.length; pi++) {
               allParagraphs.items[pi].load("tableNestingLevel");
@@ -2210,7 +2312,7 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection") {
             }
           }
         } catch (e) {
-          console.warn('[generateDocxFromJSON] 表格位置检测失败:', e);
+          console.warn("[generateDocxFromJSON] 表格位置检测失败:", e);
         }
       } else if (insertLocation === "end") {
         targetRange = context.document.body;
@@ -2482,24 +2584,37 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection") {
 
                 if (cellData.paragraphs && cellData.paragraphs.length > 0) {
                   // 有多段落数据时，逐段设置段落格式和 run 字符格式
-                  for (let pi = 0; pi < cellData.paragraphs.length && pi < cellBody.paragraphs.items.length; pi++) {
+                  for (
+                    let pi = 0;
+                    pi < cellData.paragraphs.length && pi < cellBody.paragraphs.items.length;
+                    pi++
+                  ) {
                     const paraData = cellData.paragraphs[pi];
                     const cellPara = cellBody.paragraphs.items[pi];
                     const pStyle = resolveStyle(styles, paraData.pStyle, DEFAULT_PSTYLE);
 
                     cellPara.alignment = getAlignmentValue(pStyle[PSTYLE.ALIGNMENT] || "center");
-                    if (pStyle[PSTYLE.INDENT_LEFT]) cellPara.leftIndent = pStyle[PSTYLE.INDENT_LEFT];
-                    if (pStyle[PSTYLE.INDENT_RIGHT]) cellPara.rightIndent = pStyle[PSTYLE.INDENT_RIGHT];
+                    if (pStyle[PSTYLE.INDENT_LEFT])
+                      cellPara.leftIndent = pStyle[PSTYLE.INDENT_LEFT];
+                    if (pStyle[PSTYLE.INDENT_RIGHT])
+                      cellPara.rightIndent = pStyle[PSTYLE.INDENT_RIGHT];
                     cellPara.firstLineIndent = pStyle[PSTYLE.INDENT_FIRST_LINE] || 0;
-                    if (pStyle[PSTYLE.SPACE_BEFORE]) cellPara.spaceBefore = pStyle[PSTYLE.SPACE_BEFORE];
-                    if (pStyle[PSTYLE.SPACE_AFTER]) cellPara.spaceAfter = pStyle[PSTYLE.SPACE_AFTER];
-                    if (pStyle[PSTYLE.LINE_SPACING]) cellPara.lineSpacing = pStyle[PSTYLE.LINE_SPACING];
+                    if (pStyle[PSTYLE.SPACE_BEFORE])
+                      cellPara.spaceBefore = pStyle[PSTYLE.SPACE_BEFORE];
+                    if (pStyle[PSTYLE.SPACE_AFTER])
+                      cellPara.spaceAfter = pStyle[PSTYLE.SPACE_AFTER];
+                    if (pStyle[PSTYLE.LINE_SPACING])
+                      cellPara.lineSpacing = pStyle[PSTYLE.LINE_SPACING];
 
                     // 应用 run 字符格式
                     if (paraData.runs && paraData.runs.length > 0) {
                       if (paraData.runs.length === 1) {
                         // 单 run：直接设置段落字体
-                        const rStyle = resolveStyle(styles, paraData.runs[0].rStyle, DEFAULT_RSTYLE);
+                        const rStyle = resolveStyle(
+                          styles,
+                          paraData.runs[0].rStyle,
+                          DEFAULT_RSTYLE
+                        );
                         applyRunStyle(cellPara.font, rStyle);
                       } else {
                         // 多 run：通过 search 定位设置
@@ -2508,7 +2623,10 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection") {
                           if (!runText) continue;
                           const rStyle = resolveStyle(styles, run.rStyle, DEFAULT_RSTYLE);
                           try {
-                            const searchResults = cellPara.search(runText, { matchCase: true, matchWholeWord: false });
+                            const searchResults = cellPara.search(runText, {
+                              matchCase: true,
+                              matchWholeWord: false,
+                            });
                             searchResults.load("items");
                             await context.sync();
                             if (searchResults.items.length > 0) {

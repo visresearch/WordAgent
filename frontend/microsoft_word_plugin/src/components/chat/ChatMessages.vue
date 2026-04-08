@@ -13,7 +13,7 @@
       <img class="empty-icon" src="/assets/robot.svg" alt="WenCe AI" />
       <div class="empty-text-container">
         <span class="empty-text">我能做什么</span>
-        <a href="https://github.com/riyuexingchennnn/wence_ai" target="_blank" class="help-icon">
+        <a href="https://visresearch.github.io/WordAgent/" target="_blank" class="help-icon">
           <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
             <circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" stroke-width="1.5" />
             <path d="M8 12v-1M8 9V8a1.5 1.5 0 0 1 1-1.415A1.5 1.5 0 1 0 6.5 5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
@@ -45,7 +45,7 @@
           <span
             v-if="msg.role === 'assistant' && !msg.content && !msg.thinking && !msg.statusText && !(msg.contentParts && msg.contentParts.length > 0) && isLoading"
             class="typing"
-          >💭 AI正在思考中</span>
+          >💭 AI正在准备中</span>
           <span v-if="msg.statusText" class="typing">{{ msg.statusText }}</span>
           <!-- Thinking 块 -->
           <div v-if="msg.thinking" class="thinking-block" :class="{ expanded: msg.thinkingExpanded }">

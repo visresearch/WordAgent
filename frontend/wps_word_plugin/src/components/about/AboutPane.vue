@@ -34,7 +34,7 @@
       <div class="links-section">
         <h3>🔗 相关链接</h3>
         <div class="link-list">
-          <a href="https://github.com/riyuexingchennnn/wence_ai" target="_blank" class="link-item">
+          <a href="https://github.com/visresearch/WordAgent" target="_blank" class="link-item">
             <svg
               width="20"
               height="20"
