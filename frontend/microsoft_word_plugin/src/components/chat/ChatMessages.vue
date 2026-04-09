@@ -54,8 +54,7 @@
                 <circle cx="12" cy="12" r="10" />
                 <path d="M12 6v6l4 2" />
               </svg>
-              <span class="thinking-label">深度思考</span>
-              <span v-if="msg.thinkingDuration" class="thinking-duration">{{ msg.thinkingDuration }}</span>
+              <span class="thinking-label">{{ msg.thinkingDone ? '深度思考（已结束）' : '深度思考' }}</span>
               <svg class="thinking-arrow" :class="{ rotated: msg.thinkingExpanded }" width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
                 <path d="M8 10.293L3.854 6.146a.5.5 0 1 1 .708-.707L8 8.879l3.438-3.44a.5.5 0 0 1 .708.708L8 10.293z" />
               </svg>

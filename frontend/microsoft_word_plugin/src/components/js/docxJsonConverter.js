@@ -1616,17 +1616,31 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
       // ========== 常规路径：解析选区或全文 ==========
       const range = scope === "body" ? context.document.body : context.document.getSelection();
 
-      // 加载段落和表格
+      // 加载段落和表格（核心，不可失败）
       const paragraphs = range.paragraphs;
       paragraphs.load("items");
       const tables = range.tables;
       tables.load("items");
-      const inlinePictures = range.inlinePictures;
-      inlinePictures.load("items");
-      const fields = range.fields;
-      fields.load("items");
-
       await context.sync();
+
+      // 分别加载 inlinePictures 和 fields（可选 API，低版本 Word 可能不支持）
+      let inlinePictures = { items: [] };
+      try {
+        inlinePictures = range.inlinePictures;
+        inlinePictures.load("items");
+        await context.sync();
+      } catch (e) {
+        inlinePictures = { items: [] };
+      }
+
+      let fields = { items: [] };
+      try {
+        fields = range.fields;
+        fields.load("items");
+        await context.sync();
+      } catch (e) {
+        fields = { items: [] };
+      }
 
       const result = {
         paragraphs: [],
@@ -2765,13 +2779,23 @@ async function deleteDocxPara(startParaIndex, endParaIndex) {
         return { success: false, deletedCount: 0, message: `endParaIndex ${endParaIndex} 无效` };
       }
 
-      // 从后往前删除，避免索引偏移
-      let deletedCount = 0;
-      for (let idx = endParaIndex; idx >= startParaIndex; idx--) {
-        const para = allParas.items[idx];
-        para.delete();
-        deletedCount++;
+      const deletedCount = endParaIndex - startParaIndex + 1;
+
+      // 整删全部段落：只清空内容（Word 要求至少保留一个空段落）
+      if (startParaIndex === 0 && endParaIndex >= totalParas - 1) {
+        const body = context.document.body;
+        body.clear();
+        await context.sync();
+        return { success: true, deletedCount, message: `成功删除 ${deletedCount} 个段落` };
       }
+
+      // 一次性获取起止段落的范围，合并后整段删除（对标 WPS 的 Range 整段删除）
+      const startPara = allParas.items[startParaIndex];
+      const endPara = allParas.items[endParaIndex];
+      const startRange = startPara.getRange("Start");
+      const endRange = endPara.getRange("End");
+      const fullRange = startRange.expandTo(endRange);
+      fullRange.delete();
       await context.sync();
 
       return { success: true, deletedCount, message: `成功删除 ${deletedCount} 个段落` };
@@ -2786,9 +2810,10 @@ async function deleteDocxPara(startParaIndex, endParaIndex) {
  * @param {number} startParaIndex - 起始段落索引（0-based）
  * @param {number} endParaIndex - 结束段落索引（0-based，含），-1 表示到文档末尾
  * @param {string} text - 批注文本
- * @returns {Promise<{ success: boolean, rangeStart: number, rangeEnd: number }>}
+ * @param {string} mode - 标注模式: 'revision'=批注, 'redblue'=红蓝高亮
+ * @returns {Promise<{ success: boolean, mode: string }>}
  */
-async function addCommentToParas(startParaIndex, endParaIndex, text) {
+async function addCommentToParas(startParaIndex, endParaIndex, text, mode = 'revision') {
   try {
     return await Word.run(async (context) => {
       const allParas = context.document.body.paragraphs;
@@ -2798,6 +2823,16 @@ async function addCommentToParas(startParaIndex, endParaIndex, text) {
       const totalParas = allParas.items.length;
       if (endParaIndex === -1) endParaIndex = totalParas - 1;
 
+      // 边界检查
+      if (startParaIndex < 0 || startParaIndex >= totalParas) {
+        console.warn("[addCommentToParas] startParaIndex 越界:", startParaIndex, "总段落数:", totalParas);
+        return { success: false, error: `startParaIndex ${startParaIndex} 越界` };
+      }
+      if (endParaIndex < startParaIndex || endParaIndex >= totalParas) {
+        console.warn("[addCommentToParas] endParaIndex 无效:", endParaIndex, "总段落数:", totalParas);
+        return { success: false, error: `endParaIndex ${endParaIndex} 无效` };
+      }
+
       const startPara = allParas.items[startParaIndex];
       const endPara = allParas.items[endParaIndex];
 
@@ -2806,11 +2841,39 @@ async function addCommentToParas(startParaIndex, endParaIndex, text) {
       const endRange = endPara.getRange("End");
       const fullRange = startRange.expandTo(endRange);
 
-      // 插入批注
-      fullRange.insertComment(text);
-      await context.sync();
+      const isDelete = text.includes('删除');
 
-      return { success: true };
+      if (mode === 'redblue') {
+        // 红蓝高亮模式：浅红=添加, 浅蓝=删除
+        try {
+          fullRange.font.highlightColor = isDelete ? 'Turquoise' : 'Pink';
+          await context.sync();
+          console.log("[addCommentToParas] 高亮标记成功:", isDelete ? '浅蓝(删除)' : '浅红(添加)', "范围:", startParaIndex, "-", endParaIndex);
+          return { success: true, mode: 'highlight' };
+        } catch (hlErr) {
+          console.error("[addCommentToParas] 高亮失败:", hlErr.message);
+          return { success: false, error: hlErr.message };
+        }
+      }
+
+      // 批注模式（revision）：尝试 insertComment，失败则降级高亮
+      try {
+        fullRange.insertComment(text);
+        await context.sync();
+        console.log("[addCommentToParas] 批注添加成功:", text, "范围:", startParaIndex, "-", endParaIndex);
+        return { success: true, mode: 'comment' };
+      } catch (commentErr) {
+        console.warn("[addCommentToParas] insertComment 不可用，降级高亮:", commentErr.message);
+        try {
+          fullRange.font.highlightColor = isDelete ? 'Turquoise' : 'Pink';
+          await context.sync();
+          console.log("[addCommentToParas] 已降级为高亮");
+          return { success: true, mode: 'highlight' };
+        } catch (hlErr) {
+          console.error("[addCommentToParas] 高亮也失败:", hlErr.message);
+          return { success: false, error: commentErr.message };
+        }
+      }
     });
   } catch (e) {
     console.error("添加批注失败:", e);

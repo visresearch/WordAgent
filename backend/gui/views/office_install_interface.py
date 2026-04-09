@@ -10,7 +10,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import ipaddress
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QFileDialog
 from qfluentwidgets import (
@@ -236,6 +236,7 @@ class OfficeInstallInterface(QWidget):
         layout.addStretch()
 
         self._update_service_status()
+        QTimer.singleShot(0, self._on_start_service)
 
     def _update_service_status(self):
         running = self._server is not None and self._server_thread is not None

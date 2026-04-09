@@ -102,6 +102,39 @@ async function request(url, options = {}) {
   }
 }
 
+/**
+ * 获取当前文档全局元信息（随用户 chat 请求发送给后端）
+ * @returns {Promise<Object|null>}
+ */
+async function getCurrentDocumentMeta() {
+  try {
+    return await Word.run(async (context) => {
+      const paragraphs = context.document.body.paragraphs;
+      paragraphs.load("items");
+      await context.sync();
+
+      let documentName = "";
+      try {
+        const url = Office?.context?.document?.url;
+        if (url) {
+          documentName = decodeURIComponent(url.split("/").pop().split("\\\\").pop() || "");
+        }
+      } catch (e) {}
+
+      return {
+        totalParas: paragraphs.items.length,
+        documentName,
+        pageCount: 0,
+        isReadOnly: false,
+        parsedAt: new Date().toISOString(),
+      };
+    });
+  } catch (error) {
+    console.warn("[Meta] 获取文档元信息失败:", error);
+    return null;
+  }
+}
+
 // ============== WebSocket 管理 ==============
 
 /**
@@ -222,8 +255,7 @@ const wsManager = {
    */
   async _handleDocumentRequest(startParaIndex = 0, endParaIndex = -1) {
     try {
-      // Office.js 版暂不支持按段落范围解析，始终返回全文
-      const docData = await parseDocumentRange();
+      const docData = await parseDocumentRange(startParaIndex, endParaIndex);
 
       if (docData.error) {
         throw new Error(docData.error);
@@ -251,7 +283,7 @@ const wsManager = {
    */
   async _handleQueryRequest(query) {
     try {
-      const docData = await parseDocumentRange();
+      const docData = await parseDocumentRange(0, -1);
 
       if (docData.error) {
         throw new Error(docData.error);
@@ -332,12 +364,16 @@ function chatStream(message, options = {}) {
     try {
       await wsManager.connect();
 
+      // 文档全局元信息：随用户提问发送，不放在 read_document 回包里
+      const documentMeta = await getCurrentDocumentMeta();
+
       await wsManager.send({
         type: "chat",
         message: message.trim(),
         mode,
         model,
         documentRange,
+        documentMeta,
         history,
         files,
         timestamp: Date.now(),
@@ -362,35 +398,17 @@ function chatStream(message, options = {}) {
 
 /**
  * 解析文档（使用 Office.js Word API）
- * 默认解析全文（body）
+ * 不传参数或传 (0, -1) 时解析全文，传入具体索引则解析指定范围
  *
- * @param {string} [scope='body'] - 'body' 解析全文, 'selection' 解析选区
+ * @param {number} [startParaIndex=0] - 起始段落索引（0-based），0 表示文档开头
+ * @param {number} [endParaIndex=-1] - 结束段落索引（0-based），-1 表示文档结尾
  * @returns {Promise<Object>} - 解析结果
  */
-async function parseDocumentRange(scope = "body") {
+async function parseDocumentRange(startParaIndex = 0, endParaIndex = -1) {
   try {
-    const result = await parseDocxToJSON(scope);
-    let totalParas = 0;
-
-    try {
-      totalParas = await Word.run(async (context) => {
-        const paras = context.document.body.paragraphs;
-        paras.load("items");
-        await context.sync();
-        return paras.items.length;
-      });
-    } catch (e) {
-      totalParas = 0;
-    }
-
-    if (!result.error) {
-      result._meta = {
-        isFullDocument: scope === "body",
-        totalParas,
-        parsedAt: new Date().toISOString(),
-      };
-    }
-
+    // read_document / search_documnet 回包仅返回文档内容，不携带全局 meta。
+    // 全局 meta 在 chatStream 中通过 documentMeta 单独发送。
+    const result = await parseDocxToJSON("body", startParaIndex, endParaIndex);
     return result;
   } catch (error) {
     return { error: "解析文档失败: " + error.message };

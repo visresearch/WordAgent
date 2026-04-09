@@ -47,7 +47,7 @@
           <span class="radio-circle"></span>
           <div class="radio-content">
             <span class="radio-title">红蓝模式</span>
-            <span class="radio-desc">使用红色标记删除内容，蓝色标记新增内容</span>
+            <span class="radio-desc">使用浅蓝色标记删除内容，浅红色标记新增内容</span>
           </div>
         </label>
         <label class="radio-item" :class="{ active: localSettings.proofreadMode === 'revision' }">
@@ -149,7 +149,7 @@ export default {
   setup(props, { emit }) {
     const localSettings = ref({
       showPanelOnStart: props.settings.showPanelOnStart ?? true,
-      proofreadMode: props.settings.proofreadMode ?? 'redblue',
+      proofreadMode: props.settings.proofreadMode ?? 'revision',
       proxy: {
         enabled: props.settings.proxy?.enabled ?? false,
         host: props.settings.proxy?.host ?? '',
@@ -159,7 +159,7 @@ export default {
 
     watch(() => props.settings, (newVal) => {
       localSettings.value.showPanelOnStart = newVal.showPanelOnStart ?? true;
-      localSettings.value.proofreadMode = newVal.proofreadMode ?? 'redblue';
+      localSettings.value.proofreadMode = newVal.proofreadMode ?? 'revision';
       localSettings.value.proxy.enabled = newVal.proxy?.enabled ?? false;
       localSettings.value.proxy.host = newVal.proxy?.host ?? '';
       localSettings.value.proxy.port = newVal.proxy?.port ?? 7897;

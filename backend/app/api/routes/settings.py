@@ -46,7 +46,7 @@ class UserSettings(BaseModel):
     providers: list[ProviderConfig] = []
     # 基础设置
     showPanelOnStart: bool = True
-    proofreadMode: str = "redblue"
+    proofreadMode: str = "revision"
     # 代理设置
     proxy: ProxyConfig = ProxyConfig()
     # 个性化设置

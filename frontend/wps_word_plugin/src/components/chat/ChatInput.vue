@@ -346,7 +346,11 @@ export default {
     pendingSummary() {
       const parts = [];
       if (this.pendingDeletes.length > 0) {
-        const totalDeleteParas = this.pendingDeletes.reduce((sum, d) => sum + (d.endParaIndex - d.startParaIndex + 1), 0);
+        const totalDeleteParas = this.pendingDeletes.reduce((sum, d) => {
+          const start = d.origStartParaIndex ?? d.startParaIndex ?? 0;
+          const end = d.origEndParaIndex ?? d.endParaIndex ?? start;
+          return sum + (end - start + 1);
+        }, 0);
         parts.push(`删除 ${totalDeleteParas} 个段落`);
       }
       if (this.pendingDocument) {

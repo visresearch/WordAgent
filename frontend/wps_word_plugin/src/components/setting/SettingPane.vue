@@ -120,6 +120,7 @@
 <script>
 import { ref, reactive, computed, onMounted } from 'vue';
 import api from '../js/api.js';
+import { settingsState } from '../../settingsState.js';
 import GeneralSetting from './GeneralSetting.vue';
 import ModelSetting from './ModelSetting.vue';
 import MCPserverSetting from './MCPserverSetting.vue';
@@ -176,7 +177,7 @@ export default {
 
     const settings = reactive({
       showPanelOnStart: true,
-      proofreadMode: 'redblue',
+      proofreadMode: 'revision',
       proxy: {
         enabled: false,
         host: '',
@@ -240,6 +241,7 @@ export default {
           }
           if (data.proofreadMode !== undefined) {
             settings.proofreadMode = data.proofreadMode;
+            settingsState.proofreadMode = data.proofreadMode;
           }
           if (data.providers) {
             settings.providers = data.providers.map(p => ({
@@ -322,6 +324,7 @@ export default {
     const onGeneralSettingsChange = (newSettings) => {
       settings.showPanelOnStart = newSettings.showPanelOnStart;
       settings.proofreadMode = newSettings.proofreadMode;
+      settingsState.proofreadMode = newSettings.proofreadMode;
       if (newSettings.proxy) {
         settings.proxy.enabled = newSettings.proxy.enabled;
         settings.proxy.host = newSettings.proxy.host;

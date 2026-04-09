@@ -6,7 +6,6 @@
 
 ```bash
 uv sync
-$env:PYTHONUTF8="1" # Windows PowerShell 设置环境变量，解决中文路径编码问题
 uv run python main.py
 ```
 
@@ -47,11 +46,6 @@ LANGSMITH_TRACING=true
 LANGSMITH_ENDPOINT=https://api.smith.langchain.com
 LANGSMITH_API_KEY=your_langsmith_api_key_here
 LANGSMITH_PROJECT="WordAgent"
-
-# LangGraph dev 入口配置
-# multi: 多智能体图（默认）
-# single: 单智能体图
-LANGGRAPH_DEV_MODE=single
 ```
 
 打开Langsmith官网面板：https://smith.langchain.com/

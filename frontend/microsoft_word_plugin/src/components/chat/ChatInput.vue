@@ -146,18 +146,13 @@
             />
             <div class="btn-wrapper">
               <button class="add-selection-btn" title="添加选区" @click="$emit('add-selection')">
-                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor">
-                  <rect x="2" y="2" width="12" height="12" rx="2" stroke-width="1.5" />
-                  <path d="M8 5v6M5 8h6" stroke-width="1.5" stroke-linecap="round" />
-                </svg>
+                <img :src="addIcon" alt="添加选区" class="toolbar-icon" />
               </button>
               <span class="tooltip">添加选区</span>
             </div>
             <div class="btn-wrapper">
               <button v-if="!isLoading" class="send-btn" :disabled="!inputText.trim()" @click="sendMessage">
-                <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
-                  <path d="M1 8L15 1L8 15L7 9L1 8Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
-                </svg>
+                <img :src="sendIcon" alt="发送" class="toolbar-icon" />
               </button>
               <button v-else class="stop-btn" @click="$emit('stop')">
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
@@ -175,10 +170,12 @@
 </template>
 
 <script>
+import addIcon from '../../assets/icons/add.svg';
 import agentIcon from '../../assets/icons/agent.svg';
 import askIcon from '../../assets/icons/ask.svg';
 import fileIcon from '../../assets/icons/file.svg';
 import planIcon from '../../assets/icons/plan.svg';
+import sendIcon from '../../assets/icons/send.svg';
 
 export default {
   name: 'ChatInput',
@@ -199,10 +196,12 @@ export default {
       inputText: '',
       modeDropdownOpen: false,
       modelDropdownOpen: false,
+      addIcon,
       agentIcon,
       askIcon,
       fileIcon,
-      planIcon
+      planIcon,
+      sendIcon
     };
   },
   computed: {
@@ -240,7 +239,11 @@ export default {
     pendingSummary() {
       const parts = [];
       if (this.pendingDeletes.length > 0) {
-        const totalDeleteParas = this.pendingDeletes.reduce((sum, d) => sum + (d.endParaIndex - d.startParaIndex + 1), 0);
+        const totalDeleteParas = this.pendingDeletes.reduce((sum, d) => {
+          const start = d.origStartParaIndex ?? d.startParaIndex ?? 0;
+          const end = d.origEndParaIndex ?? d.endParaIndex ?? start;
+          return sum + (end - start + 1);
+        }, 0);
         parts.push(`删除 ${totalDeleteParas} 个段落`);
       }
       if (this.pendingDocument) {
