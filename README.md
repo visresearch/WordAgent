@@ -70,7 +70,7 @@ The frontend add-in can render before/after changes with different highlight col
 - [x] WPS Word desktop support
 - [x] Windows and Linux support
 - [x] Single-agent mode
-- [ ] Multi-agent mode
+- [x] Multi-agent mode
 - [x] Microsoft Word web and desktop support
 - [ ] Advanced styles (tables, figures, etc.)
 
