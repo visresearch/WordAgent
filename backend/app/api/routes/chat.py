@@ -18,16 +18,24 @@ from app.services.agent.tools.tools import (
     request_stop,
     clear_stop,
 )
+from app.services.multi_agent.agent import (
+    process_writing_request_stream as multi_agent_stream,
+)
+from app.services.multi_agent.tools import (
+    create_tool_request as ma_create_tool_request,
+    cleanup_tool_request as ma_cleanup_tool_request,
+    submit_tool_response as ma_submit_tool_response,
+    request_stop as ma_request_stop,
+    clear_stop as ma_clear_stop,
+)
 
 router = APIRouter()
 
 
 def _normalize_mode(mode: str | None) -> str:
-    """标准化前端传入模式：支持 agent/ask/plan，plan 暂按 agent 处理。"""
+    """标准化前端传入模式：支持 agent/ask/plan。"""
     normalized = (mode or "agent").strip().lower()
-    if normalized == "plan":
-        return "agent"
-    if normalized in {"agent", "ask"}:
+    if normalized in {"agent", "ask", "plan"}:
         return normalized
     return "agent"
 
@@ -63,8 +71,12 @@ async def chat_websocket(websocket: WebSocket):
     chat_id = str(uuid.uuid4())
     print(f"[WebSocket] 连接建立 session={chat_id}")
 
-    # 为此会话创建工具回调队列
+    # 为此会话创建工具回调队列（单智能体 + 多智能体）
     create_tool_request(chat_id)
+    ma_create_tool_request(chat_id)
+
+    # 跟踪当前请求使用的模式（决定 tool 回调转发目标）
+    active_mode: str = "agent"
 
     # 单一接收者：所有 WebSocket 消息通过此队列分发
     # 避免多个协程同时调用 websocket.receive_text() 导致 RuntimeError
@@ -102,10 +114,13 @@ async def chat_websocket(websocket: WebSocket):
                 # 新请求开始前，清理上一次 stop 状态并重建工具队列（丢弃残留消息）
                 clear_stop(chat_id)
                 create_tool_request(chat_id)
+                ma_clear_stop(chat_id)
+                ma_create_tool_request(chat_id)
 
                 # 聊天请求
                 message = data.get("message", "")
                 mode = _normalize_mode(data.get("mode", "agent"))
+                active_mode = mode  # 记录当前活跃模式，用于后续 tool 回调转发
                 model = data.get("model", "auto")
                 document_range = data.get("documentRange")
                 document_meta = data.get("documentMeta") or {}
@@ -162,16 +177,23 @@ async def chat_websocket(websocket: WebSocket):
                         incoming_type = incoming.get("type", "")
                         if incoming_type == "document_response":
                             print(f"[WebSocket] 收到前端回传文档")
-                            await submit_tool_response(chat_id, incoming)
+                            if active_mode == "plan":
+                                await ma_submit_tool_response(chat_id, incoming)
+                            else:
+                                await submit_tool_response(chat_id, incoming)
                         elif incoming_type == "query_response":
                             print(f"[WebSocket] 收到前端回传查询结果")
-                            await submit_tool_response(chat_id, incoming)
+                            if active_mode == "plan":
+                                await ma_submit_tool_response(chat_id, incoming)
+                            else:
+                                await submit_tool_response(chat_id, incoming)
                         elif incoming_type == "delete_response":
                             # delete_document 为非阻塞工具，不再等待前端回传，仅记录日志
                             print(f"[WebSocket] 收到前端删除结果（仅记录）: {incoming}")
                         elif incoming_type == "stop":
                             print(f"[WebSocket] 收到停止请求")
                             request_stop(chat_id)
+                            ma_request_stop(chat_id)
                             stream_task.cancel()
                             try:
                                 await stream_task
@@ -191,15 +213,22 @@ async def chat_websocket(websocket: WebSocket):
 
             elif msg_type == "document_response":
                 # 非流式过程中的文档回传（fallback）
-                await submit_tool_response(chat_id, data)
+                if active_mode == "plan":
+                    await ma_submit_tool_response(chat_id, data)
+                else:
+                    await submit_tool_response(chat_id, data)
 
             elif msg_type == "query_response":
                 # 非流式过程中的查询结果回传（fallback）
-                await submit_tool_response(chat_id, data)
+                if active_mode == "plan":
+                    await ma_submit_tool_response(chat_id, data)
+                else:
+                    await submit_tool_response(chat_id, data)
 
             elif msg_type == "stop":
                 print(f"[WebSocket] 收到停止请求(空闲态)")
                 request_stop(chat_id)
+                ma_request_stop(chat_id)
 
     except WebSocketDisconnect:
         print(f"[WebSocket] 连接断开 session={chat_id}")
@@ -215,6 +244,7 @@ async def chat_websocket(websocket: WebSocket):
     finally:
         recv_task.cancel()
         cleanup_tool_request(chat_id)
+        ma_cleanup_tool_request(chat_id)
         print(f"[WebSocket] 清理完成 session={chat_id}")
 
 
@@ -233,7 +263,10 @@ async def _run_ws_stream(
     try:
         mode = _normalize_mode(mode)
 
-        async for chunk in single_agent_stream(
+        # plan 模式使用多智能体，其他模式使用单智能体
+        stream_fn = multi_agent_stream if mode == "plan" else single_agent_stream
+
+        async for chunk in stream_fn(
             message=message,
             document_range=document_range,
             document_meta=document_meta or {},

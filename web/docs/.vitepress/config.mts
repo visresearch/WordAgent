@@ -36,6 +36,7 @@ export default defineConfig({
             { text: '配置 API Key', link: '/guide/api-config' },
             { text: '个性化配置', link: '/guide/personalization' },
             { text: 'MCP 服务器配置', link: '/guide/mcp' },
+            { text: '数据管理', link: '/guide/data-management' },
             { text: '如何提问', link: '/guide/how-to-ask' },
             { text: '功能按钮说明', link: '/guide/features' },
             { text: '常见问题', link: '/guide/faq' },
