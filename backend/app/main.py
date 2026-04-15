@@ -125,7 +125,7 @@ else:
 @app.get("/publish")
 async def publish():
     """发布页 - WPS 加载项配置页面"""
-    publish_file = Path(__file__).parent / "publish.html"
+    publish_file = Path(__file__).parent.parent / "gui" / "resources" / "publish.html"
     return FileResponse(publish_file, media_type="text/html")
 
 

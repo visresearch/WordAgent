@@ -2,6 +2,9 @@
 
 import asyncio
 import json
+import os
+import sys
+from pathlib import Path
 from typing import Any
 
 from app.core.config import get_user_settings_file
@@ -52,11 +55,22 @@ def _load_mcp_server_configs() -> dict[str, dict[str, Any]]:
                 entry["headers"] = config["headers"]
         elif command:
             entry["command"] = command
-            entry["transport"] = transport or "stdio"
             if isinstance(config.get("args"), list):
                 entry["args"] = config["args"]
-            if isinstance(config.get("env"), dict):
-                entry["env"] = config["env"]
+            print(f"[MCP] 🔧 {name}: command={command} args={entry.get('args')}")
+
+            entry["transport"] = transport or "stdio"
+
+            # 构建 env：从系统环境变量开始，叠加用户自定义 env 和 Python 目录
+            # 必须继承完整的 os.environ，否则子进程缺少 TEMP/SYSTEMROOT 等关键变量
+            merged_env = dict(os.environ)
+            user_env = config.get("env") if isinstance(config.get("env"), dict) else {}
+            if user_env:
+                merged_env.update({str(k): str(v) for k, v in user_env.items()})
+            python_dir = str(Path(sys.executable).parent)
+            if python_dir not in merged_env.get("PATH", "").split(os.pathsep):
+                merged_env["PATH"] = python_dir + os.pathsep + merged_env.get("PATH", "")
+            entry["env"] = merged_env
         else:
             continue
 
@@ -70,8 +84,18 @@ def _wrap_mcp_tool_for_sync(tool, loop: asyncio.AbstractEventLoop):
     from langchain_core.tools import StructuredTool
 
     def sync_fn(**kwargs):
+        import time as _time
+
+        print(f"[MCP] ▶ 调用 {tool.name}，参数: {list(kwargs.keys())}")
+        t0 = _time.time()
         future = asyncio.run_coroutine_threadsafe(tool.ainvoke(kwargs), loop)
-        return future.result(timeout=300)
+        try:
+            result = future.result(timeout=300)
+            print(f"[MCP] ✅ {tool.name} 完成，耗时 {_time.time() - t0:.1f}s")
+            return result
+        except Exception as e:
+            print(f"[MCP] ❌ {tool.name} 失败，耗时 {_time.time() - t0:.1f}s，错误: {e}")
+            raise
 
     return StructuredTool(
         name=tool.name,

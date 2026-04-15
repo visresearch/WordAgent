@@ -133,12 +133,15 @@ import iconMcp from '../../assets/icons/mcp.svg';
 function normalizeServer(server = {}) {
   const name = server.name || '';
   const config = (server.config && typeof server.config === 'object') ? server.config : {};
+  const configSource = typeof server.configSource === 'string'
+    ? server.configSource
+    : JSON.stringify(config, null, 2);
 
   return {
     name,
     config,
     enabled: server.enabled !== false,
-    configSource: JSON.stringify(config, null, 2),
+    configSource,
     expanded: server.expanded ?? false,
     testing: false,
     testSuccess: false,
@@ -174,6 +177,7 @@ export default {
       emit('update:mcp-servers', localServers.value.map((s) => ({
         name: s.name,
         config: s.config,
+        configSource: s.configSource,
         enabled: s.enabled !== false,
         expanded: s.expanded
       })));

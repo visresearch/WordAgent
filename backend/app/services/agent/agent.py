@@ -177,6 +177,7 @@ def _prepare_tools_for_agent(tools: list, mcp_tool_names: set[str]) -> list:
 
                         writer = get_stream_writer()
                         preview = json.dumps(kwargs, ensure_ascii=False)
+                        print(f"[Agent] 🔧 调用 MCP 工具: {tname}({preview})")
                         if len(preview) > 100:
                             preview = preview[:100] + "..."
                         writer({"type": "status", "content": f"🔧 调用 MCP 工具: {tname}({preview})"})
@@ -256,8 +257,9 @@ async def process_writing_request_stream(
         print(f"[Agent] 🧠 模型 {model_name} 支持 thinking 模式，已启用")
 
     # ask 模式禁用 MCP；agent 模式按用户设置加载 MCP 动态工具
+    mcp_clients = []  # 保持 MCP 客户端存活，防止 stdio 子进程被 GC 回收
     if mode == "agent":
-        mcp_tools, _ = await load_mcp_tools()
+        mcp_tools, mcp_clients = await load_mcp_tools()
     else:
         mcp_tools = []
     mcp_tool_names = {t.name for t in mcp_tools}
@@ -536,7 +538,48 @@ async def process_writing_request_stream(
                         except Exception:
                             pass
 
-                    # 其他工具的结果，跳过
+                    # MCP 工具结果：仅将包含图片的内容转发给前端，其他由 LLM 消化
+                    if tool_name in mcp_tool_names:
+                        print(
+                            f"[Agent] MCP 工具 {tool_name} 返回类型: {type(content).__name__}, 内容预览: {str(content)[:200]}"
+                        )
+                        text_content = ""
+                        if isinstance(content, str):
+                            text_content = content.strip()
+                        elif isinstance(content, list):
+                            parts = []
+                            for item in content:
+                                if isinstance(item, dict):
+                                    parts.append(item.get("text", "") or item.get("content", ""))
+                                elif isinstance(item, str):
+                                    parts.append(item)
+                            text_content = "\n".join(p for p in parts if p)
+                        if text_content:
+                            # 检测是否包含图片（URL 或 base64），仅图片内容才转发给前端
+                            _img_exts = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp")
+                            has_image = False
+                            for line in text_content.splitlines():
+                                stripped = line.strip()
+                                if stripped.startswith("data:image/"):
+                                    has_image = True
+                                    break
+                                if (
+                                    stripped.startswith("http")
+                                    and (" " not in stripped)
+                                    and (
+                                        stripped.lower().endswith(_img_exts)
+                                        or "/img/" in stripped
+                                        or "/image/" in stripped
+                                        or "/images/" in stripped
+                                    )
+                                ):
+                                    text_content = text_content.replace(stripped, f"![{tool_name}]({stripped})")
+                                    has_image = True
+                            if "![" in text_content and "](data:image/" in text_content:
+                                has_image = True
+                            if has_image:
+                                _collected_text_parts.append(text_content)
+                                yield f"data: {json.dumps({'type': 'text', 'content': text_content}, ensure_ascii=False)}\n\n"
                     continue
 
                 # 处理结构化 content blocks（兼容 Claude/OpenAI thinking/reasoning）

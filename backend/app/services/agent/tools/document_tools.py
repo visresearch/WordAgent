@@ -164,15 +164,16 @@ def generate_document(document: DocumentOutput) -> dict:
     writer = get_stream_writer()
     doc_dict = document.model_dump()
     para_count = len(doc_dict.get("paragraphs", []))
-    saved_path = _save_generated_document_json(doc_dict)
 
-    if saved_path:
-        writer(
-            {
-                "type": "status",
-                "content": f"💾 生成 JSON 已保存: {saved_path}",
-            }
-        )
+    # saved_path = _save_generated_document_json(doc_dict)
+    # if saved_path:
+    #     writer(
+    #         {
+    #             "type": "status",
+    #             "content": f"💾 生成 JSON 已保存: {saved_path}",
+    #         }
+    #     )
+
     writer({"type": "generate_complete", "content": f"✅ 文档已生成，共 {para_count} 个段落"})
     return doc_dict
 

@@ -109,6 +109,11 @@
         </div>
       </div>
     </div>
+    <!-- 图片右键菜单 -->
+    <div v-if="imgMenuVisible" class="img-context-menu" :style="{ top: imgMenuY + 'px', left: imgMenuX + 'px' }">
+      <div class="img-menu-item" @click="copyImage">复制图片</div>
+      <div class="img-menu-item" @click="saveImage">保存图片</div>
+    </div>
   </div>
 </template>
 
@@ -131,7 +136,73 @@ export default {
     historyLoaded: { type: Boolean, default: false }
   },
   emits: ['load-history', 'insert-to-word', 'copy', 'retry', 'revert', 'toggle-thinking'],
+  data() {
+    return {
+      imgMenuVisible: false,
+      imgMenuX: 0,
+      imgMenuY: 0,
+      _contextImg: null,
+    };
+  },
+  mounted() {
+    this.$refs.messagesContainer?.addEventListener('contextmenu', this.handleImgContextMenu);
+    document.addEventListener('click', this.hideImgMenu);
+  },
+  beforeUnmount() {
+    this.$refs.messagesContainer?.removeEventListener('contextmenu', this.handleImgContextMenu);
+    document.removeEventListener('click', this.hideImgMenu);
+  },
   methods: {
+    handleImgContextMenu(e) {
+      const img = e.target.closest('img');
+      if (!img || !img.closest('.markdown-body')) return;
+      e.preventDefault();
+      this._contextImg = img;
+      const rect = this.$refs.messagesContainer.getBoundingClientRect();
+      this.imgMenuX = e.clientX - rect.left;
+      this.imgMenuY = e.clientY - rect.top;
+      this.imgMenuVisible = true;
+    },
+    hideImgMenu() {
+      this.imgMenuVisible = false;
+    },
+    async copyImage() {
+      this.imgMenuVisible = false;
+      const img = this._contextImg;
+      if (!img) return;
+      try {
+        if (navigator.clipboard && typeof ClipboardItem !== 'undefined') {
+          const canvas = document.createElement('canvas');
+          canvas.width = img.naturalWidth;
+          canvas.height = img.naturalHeight;
+          canvas.getContext('2d').drawImage(img, 0, 0);
+          const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+          await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+          return;
+        }
+      } catch (_) { /* fallback */ }
+      try {
+        const range = document.createRange();
+        range.selectNode(img);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        document.execCommand('copy');
+        sel.removeAllRanges();
+      } catch (e) {
+        console.error('复制图片失败:', e);
+        alert('复制失败，请尝试右键 → 保存图片');
+      }
+    },
+    saveImage() {
+      this.imgMenuVisible = false;
+      const img = this._contextImg;
+      if (!img) return;
+      const a = document.createElement('a');
+      a.href = img.src;
+      a.download = 'chart.png';
+      a.click();
+    },
     renderMarkdown(content) {
       if (!content) return '';
       return md.render(content);
@@ -362,6 +433,12 @@ export default {
   font-size: 12px;
   line-height: 1.6;
 }
+.message-content :deep(.markdown-body) img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+  margin: 8px 0;
+}
 .message-content :deep(.markdown-body) p {
   margin: 0 0 8px 0;
 }
@@ -528,5 +605,28 @@ export default {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.img-context-menu {
+  position: absolute;
+  z-index: 1000;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  padding: 4px 0;
+  min-width: 100px;
+}
+
+.img-menu-item {
+  padding: 6px 16px;
+  font-size: 12px;
+  color: #333;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.img-menu-item:hover {
+  background: #f0f0f0;
 }
 </style>

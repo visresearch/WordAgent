@@ -4,7 +4,7 @@ import os
 import webbrowser
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QIcon
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -80,7 +80,7 @@ class HomeInterface(QWidget):
         title_col = QVBoxLayout()
         title_col.setSpacing(4)
         title = TitleLabel("WenCe AI", self)
-        subtitle = CaptionLabel("智能写作助手，让创作更简单", self)
+        subtitle = CaptionLabel("让写作有策略，让表达更智能", self)
         subtitle.setTextColor(QColor("#888888"), QColor("#aaaaaa"))
         title_col.addWidget(title)
         title_col.addWidget(subtitle)
@@ -89,10 +89,18 @@ class HomeInterface(QWidget):
         button_row.setSpacing(10)
 
         github_button = PushButton("GitHub", self)
+        github_icon_path = os.path.join(os.path.dirname(__file__), "..", "resources", "icon", "github.svg")
+        github_icon_path = os.path.normpath(github_icon_path)
+        if os.path.exists(github_icon_path):
+            github_button.setIcon(QIcon(github_icon_path))
         github_button.clicked.connect(lambda: self._open_url(self.GITHUB_URL))
         button_row.addWidget(github_button)
 
         website_button = PushButton("官网", self)
+        website_icon_path = os.path.join(os.path.dirname(__file__), "..", "resources", "icon", "Web.svg")
+        website_icon_path = os.path.normpath(website_icon_path)
+        if os.path.exists(website_icon_path):
+            website_button.setIcon(QIcon(website_icon_path))
         website_button.clicked.connect(lambda: self._open_url(self.WEBSITE_URL))
         button_row.addWidget(website_button)
         button_row.addStretch(1)

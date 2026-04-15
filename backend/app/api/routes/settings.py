@@ -136,11 +136,24 @@ async def test_mcp_server(payload: MCPServerTestRequest):
 
             try:
                 async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-                    # MCP 服务实际可能不支持 GET；这里只验证网络可达和服务有响应
+                    # 连接测试：2xx 视为成功，4xx/5xx 视为失败
                     resp = await client.get(url, headers=headers)
+                status_code = resp.status_code
+                if 200 <= status_code < 300:
+                    return {
+                        "success": True,
+                        "message": f"{server_name} 连接成功 (HTTP {status_code})",
+                    }
+
+                if status_code == 404:
+                    return {
+                        "success": False,
+                        "message": f"{server_name} 连接失败: 服务器返回 HTTP 404（地址不存在，请检查 URL 路径）",
+                    }
+
                 return {
-                    "success": True,
-                    "message": f"{server_name} 连接成功 (HTTP {resp.status_code})",
+                    "success": False,
+                    "message": f"{server_name} 连接失败 (HTTP {status_code})",
                 }
             except Exception as e:
                 return {

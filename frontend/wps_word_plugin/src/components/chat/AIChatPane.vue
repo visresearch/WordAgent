@@ -1205,7 +1205,9 @@ export default {
           let adjustedInsPos = _insParaIndex;
           for (const ins of this._streamInsertions) {
             const insAt = ins.insertParaIndex;
-            if (insAt === -1 || insAt === null || insAt === undefined) continue;
+            if (insAt === -1 || insAt === null || insAt === undefined) {
+              continue;
+            }
             if (insAt <= adjustedInsPos) {
               adjustedInsPos += ins.count;
             }
@@ -1273,7 +1275,9 @@ export default {
             if (deleteRanges.length > 0) {
               // 先删除批注（从后往前）
               for (const dr of deleteRanges) {
-                try { comments.Item(dr.commentIndex).Delete(); } catch (e) {}
+                try {
+                  comments.Item(dr.commentIndex).Delete(); 
+                } catch (e) {}
               }
               // 再按 start 从大到小排序删除段落范围
               deleteRanges.sort((a, b) => b.start - a.start);
@@ -1282,7 +1286,9 @@ export default {
                 try {
                   let delStart = dr.start;
                   let delEnd = dr.end;
-                  if (delEnd >= docEnd && delStart > 0) delStart -= 1;
+                  if (delEnd >= docEnd && delStart > 0) {
+                    delStart -= 1;
+                  }
                   const range = doc.Range(delStart, delEnd);
                   range.Delete();
                   console.log('[AIChatPane] 已删除范围:', delStart, '-', delEnd);
@@ -1307,10 +1313,14 @@ export default {
               adjEnd = pd.origEndParaIndex;
               for (const ins of this._streamInsertions) {
                 const insAt = ins.insertParaIndex;
-                if (insAt === -1 || insAt === null || insAt === undefined) continue;
+                if (insAt === -1 || insAt === null || insAt === undefined) {
+                  continue;
+                }
                 if (insAt <= adjStart) {
                   adjStart += ins.count;
-                  if (adjEnd !== -1) adjEnd += ins.count;
+                  if (adjEnd !== -1) {
+                    adjEnd += ins.count;
+                  }
                 }
               }
             }
@@ -1430,7 +1440,9 @@ export default {
             }
             if (addRanges.length > 0) {
               for (const ar of addRanges) {
-                try { comments.Item(ar.commentIndex).Delete(); } catch (e) {}
+                try {
+                  comments.Item(ar.commentIndex).Delete(); 
+                } catch (e) {}
               }
               addRanges.sort((a, b) => b.start - a.start);
               for (const ar of addRanges) {
@@ -1508,18 +1520,26 @@ export default {
     async _addDeleteComments() {
       const mode = await this._getProofreadMode();
       const doc = window.Application.ActiveDocument;
-      if (!doc) return;
+      if (!doc) {
+        return;
+      }
 
       for (const pd of this.pendingDeletes) {
-        if (pd._commentAdded) continue;
+        if (pd._commentAdded) {
+          continue;
+        }
         let adjStart = pd.origStartParaIndex;
         let adjEnd = pd.origEndParaIndex;
         for (const ins of this._streamInsertions) {
           const insAt = ins.insertParaIndex;
-          if (insAt === -1 || insAt === null || insAt === undefined) continue;
+          if (insAt === -1 || insAt === null || insAt === undefined) {
+            continue;
+          }
           if (insAt <= adjStart) {
             adjStart += ins.count;
-            if (adjEnd !== -1) adjEnd += ins.count;
+            if (adjEnd !== -1) {
+              adjEnd += ins.count;
+            }
           }
         }
         try {
@@ -1613,11 +1633,17 @@ export default {
     _clearHighlightOnRange(startParaIndex, endParaIndex) {
       try {
         const doc = window.Application.ActiveDocument;
-        if (!doc) return;
+        if (!doc) {
+          return;
+        }
         const totalParas = doc.Paragraphs.Count;
         let endIdx = endParaIndex;
-        if (endIdx === -1) endIdx = totalParas - 1;
-        if (startParaIndex < 0 || startParaIndex >= totalParas || endIdx >= totalParas) return;
+        if (endIdx === -1) {
+          endIdx = totalParas - 1;
+        }
+        if (startParaIndex < 0 || startParaIndex >= totalParas || endIdx >= totalParas) {
+          return;
+        }
         const startPara = doc.Paragraphs.Item(startParaIndex + 1);
         const endPara = doc.Paragraphs.Item(endIdx + 1);
         const range = doc.Range(startPara.Range.Start, endPara.Range.End);

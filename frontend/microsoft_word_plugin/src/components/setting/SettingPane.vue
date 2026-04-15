@@ -265,12 +265,16 @@ export default {
             settings.temperature = data.temperature;
           }
           if (Array.isArray(data.mcpServers)) {
-            settings.mcpServers = data.mcpServers.map(s => ({
-              name: s.name || '',
-              config: (s.config && typeof s.config === 'object') ? s.config : {},
-              enabled: s.enabled !== false,
-              expanded: false
-            }));
+            settings.mcpServers = data.mcpServers.map(s => {
+              const config = (s.config && typeof s.config === 'object') ? s.config : {};
+              return {
+                name: s.name || '',
+                config,
+                configSource: typeof s.configSource === 'string' ? s.configSource : JSON.stringify(config, null, 2),
+                enabled: s.enabled !== false,
+                expanded: false
+              };
+            });
           }
         }
       } catch (error) {
@@ -295,11 +299,15 @@ export default {
             models: p.models,
             enabled: p.enabled
           })),
-          mcpServers: settings.mcpServers.map(s => ({
-            name: s.name,
-            config: (s.config && typeof s.config === 'object') ? s.config : {},
-            enabled: s.enabled !== false
-          })),
+          mcpServers: settings.mcpServers.map(s => {
+            const config = (s.config && typeof s.config === 'object') ? s.config : {};
+            return {
+              name: s.name,
+              config,
+              configSource: typeof s.configSource === 'string' ? s.configSource : JSON.stringify(config, null, 2),
+              enabled: s.enabled !== false
+            };
+          }),
           customPrompt: settings.customPrompt,
           temperature: settings.temperature
         };
@@ -349,12 +357,16 @@ export default {
     };
 
     const onMcpServersChange = (newServers) => {
-      settings.mcpServers = newServers.map(s => ({
-        name: s.name || '',
-        config: (s.config && typeof s.config === 'object') ? s.config : {},
-        enabled: s.enabled !== false,
-        expanded: s.expanded ?? false
-      }));
+      settings.mcpServers = newServers.map(s => {
+        const config = (s.config && typeof s.config === 'object') ? s.config : {};
+        return {
+          name: s.name || '',
+          config,
+          configSource: typeof s.configSource === 'string' ? s.configSource : JSON.stringify(config, null, 2),
+          enabled: s.enabled !== false,
+          expanded: s.expanded ?? false
+        };
+      });
     };
 
     onMounted(() => {
