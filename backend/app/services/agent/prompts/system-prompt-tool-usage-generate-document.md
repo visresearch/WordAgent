@@ -7,11 +7,15 @@
 - For long output, split into multiple calls and keep insertion order stable.
 - When editing existing content, keep original style intent unless the user explicitly requests format changes.
 - If frontend defers delete confirmation to a final global confirm action, still proceed with `generate_document` and complete the planned workflow in the same run.
+- For image-generation tasks, do not only return image links in chat text. Build a `generate_document` payload with `document.images` and insert it into the document.
+- Keep image URLs unchanged (including query parameters). Do not rewrite or strip URL params.
+- Image insertion requires placeholder paragraph(s): add paragraph run text `[图片]` (or `/`) and align each image `paraIndex` to the corresponding placeholder paragraph `paraIndex`.
 
 Pre-call guardrails:
 - Ensure the payload is valid and complete before calling.
 - Ensure style references are internally consistent.
 - Ensure insertion index matches the intended position.
+- Ensure `document.images` entries have usable paths: prefer `url`; if local paths are available, use `tempPath`/`sourcePath`.
 
 Long-content execution pattern:
 - For long articles, plan sections first, then call `generate_document` in batches.

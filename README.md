@@ -18,32 +18,32 @@
 
 ## 1. Overview
 
-This project is an AI-assisted writing system based on single-agent and multi-agent workflows: **WenCe AI (Word Agent)**. After users install the add-in in office suites (such as WPS and Microsoft Word), they can interact with AI in natural language to get writing suggestions, content generation, and structure optimization.
+This project is an AI-assisted writing system built on both single-agent and multi-agent workflows: **WenCe AI (Word Agent)**. After installing the add-in in office suites (such as WPS and Microsoft Word), users can interact with AI in natural language for writing suggestions, content generation, and structure optimization.
 
 > WenCe AI (Word Agent): strategy-driven writing, smarter expression.
 
-The backend is built with FastAPI, and the frontend WPS add-in communicates with the backend through streaming APIs, so users can see LLM outputs in real time for a seamless writing-assistant experience.
+The backend is built with FastAPI, and the frontend WPS add-in communicates with the backend through streaming APIs. This lets users see LLM outputs in real time for a smooth writing-assistant experience.
 
-The frontend is developed with Vue 3 and JavaScript. A key module is the DocxJson bidirectional converter, which transforms formatted Word document content and JSON structures into each other.
+The frontend is developed with Vue 3 and JavaScript. A key module is the DOCX-JSON bidirectional converter, which converts formatted Word content and JSON structures back and forth.
 
-The backend is implemented in Python, using LangChain and LangGraph for agent design and collaboration, ChatOpenAI-compatible APIs for SSE streaming and tool invocation, and a lightweight PySide6 desktop panel for add-in installation and log viewing.
+The backend is implemented in Python, using LangChain and LangGraph for agent design and collaboration, ChatOpenAI-compatible APIs for SSE streaming and tool invocation, and a lightweight PySide6 desktop panel for add-in installation and log inspection.
 
-At its core, this project focuses on **structured Word document generation**. The project defines a JSON schema conceptually similar to HTML and CSS, abstracting paragraph and text-run styles to help agents understand and generate well-formatted documents.
+At its core, this project focuses on **structured Word document generation**. It defines a JSON schema conceptually similar to HTML and CSS, abstracting paragraph and text-run styles to help agents understand and generate well-formatted documents.
 
 Main JSON data structures:
 
-- **paragraphs**: an array of Word paragraphs containing multiple runs; this is the primary editable object for the agent
+- **paragraphs**: an array of Word paragraphs containing multiple runs; this is the main editable object for the agent
   - **pStyle**: paragraph style ID (for example, Heading 1, Heading 2, Body)
   - **runs**: text-run array, the smallest content unit in this project
     - **text**: text content
     - **rStyle**: character style ID (for example, bold, red)
-  - **paraIndex**: paragraph index so the agent can locate and edit a specific paragraph precisely
-- **styles**: style definition dictionary containing all paragraph and character style definitions; the agent references these style IDs when generating content
+  - **paraIndex**: paragraph index, so the agent can locate and edit a specific paragraph precisely
+- **styles**: style-definition dictionary containing all paragraph and character style definitions; the agent references these style IDs when generating content
 
-Compared with common AI writing tools, WenCe AI provides:
+Compared with many AI writing assistants, WenCe AI provides:
 
 1. **Cross-version and cross-platform compatibility**: built on mainstream office software with a Copilot-like add-in UX, lowering the adoption barrier for regular users, with support for both Windows and Linux.
-2. **Native rich-text editing with style and paragraph awareness**: unlike many Word AI assistants, this project understands Word structure, can collect web information autonomously, and can modify both structure and content according to user requirements.
+2. **Native rich-text editing with style and paragraph awareness**: unlike many Word AI assistants, this project understands Word structure, can gather web information autonomously, and can modify both structure and content based on user requirements.
 3. **Efficient editing with multi-agent collaboration**: multiple agents play different expert roles and collaborate to produce deeper long-form writing.
 4. **Open and flexible integration**: users provide their own API keys and can choose from mainstream LLM providers and models.
 
@@ -53,11 +53,11 @@ Compared with common AI writing tools, WenCe AI provides:
 | -- | -- |
 | ![](./docs/wps_addon.png) | ![](./docs/pyQt.png) |
 
-For example, in WPS single-agent mode, a user asks: "Expand my internship objective into five points." The agent first calls `search_document` to locate the target paragraph, then calls `read_document` to read it, analyzes the content, calls `delete_document` to remove the original text, and finally calls `generate_document` to produce the rewritten result. The frontend add-in renders before/after changes with different highlight colors so users can clearly see what the agent modified.
+For example, in WPS single-agent mode, a user asks: "Expand my internship objective into five points." The agent first calls `search_document` to locate the target paragraph, then calls `read_document` to read it, analyzes the content, calls `delete_document` to remove the original text, and finally calls `generate_document` to produce the rewritten result. The frontend add-in renders before/after changes with different highlight colors so users can clearly see what was modified.
 
 ![](./docs/preview2.png)
 
-The generated article conforms to Word document structure and formatting. While generating text, the agent also returns style metadata (for example titles, body text, bold, fonts, indentation, and line spacing). The frontend uses these style definitions to render properly formatted Word content.
+The generated article conforms to Word document structure and formatting. While generating text, the agent also returns style metadata (for example: titles, body text, bold, fonts, indentation, and line spacing). The frontend uses these style definitions to render properly formatted Word content.
 
 In addition, this project supports custom tool integration through MCP server configuration, allowing agents to call third-party APIs. Using **Tavily Search MCP** and a **Visualization Chart MCP Server** as an example: when a user asks for today's Changsha temperature and a one-week temperature table, the agent can call Tavily MCP to fetch weather data, then call `generate_document` to create table content and return it to the frontend for rendering. If the user then asks, "Based on this table, draw a temperature bar chart," the agent calls `read_document` to understand the table and then calls the chart MCP server to generate an image URL, which is rendered in the add-in chat panel.
 
@@ -88,7 +88,7 @@ To better satisfy user needs and improve generation stability and depth, the pro
 
 The frontend WPS add-in converts user requests and selected paragraph ranges into structured JSON and sends them to the backend.
 
-In the backend single-agent architecture, the system follows a standard ReAct loop. In each round, the agent reasons over the user input and current document state, chooses whether to call a tool (for example, web search) or end directly, then reasons again based on tool results and continues until completion.
+In the backend single-agent architecture, the system follows a standard ReAct loop. In each round, the agent reasons over the user input and current document state, chooses whether to call a tool (for example, web search) or finish directly, then reasons again based on tool results and continues until completion.
 
 - **read_document tool**: reads content within `(startPosition, endPosition)` and returns structured JSON to the agent.
 - **generate_document tool**: generates structured JSON content and returns it to the frontend add-in.
@@ -120,8 +120,12 @@ The frontend flow is the same as in single-agent mode. In the backend multi-agen
 ### Build Frontend Add-in
 
 ```bash
-cd frontend/wps_word_plugin       # WPS Word add-in
-cd frontend/microsoft_word_plugin # or Microsoft Word add-in
+# Option A: WPS Word add-in
+cd frontend/wps_word_plugin
+
+# Option B: Microsoft Word add-in
+# cd frontend/microsoft_word_plugin
+
 pnpm install
 pnpm build
 ```

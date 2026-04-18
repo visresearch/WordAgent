@@ -750,6 +750,31 @@ function extractFormulaRunsFromRange(paraRange) {
 
 // ============== 图片处理 ==============
 
+function getImageExportTempDir() {
+  let dir = '';
+
+  try {
+    if (typeof window.__WENCE_TEMP_DIR__ === 'string' && window.__WENCE_TEMP_DIR__.trim()) {
+      dir = window.__WENCE_TEMP_DIR__.trim();
+    }
+  } catch (e) {}
+
+  if (!dir) {
+    try {
+      const cached = localStorage.getItem('wence_temp_dir');
+      if (cached && cached.trim()) {
+        dir = cached.trim();
+      }
+    } catch (e) {}
+  }
+
+  if (!dir) {
+    dir = window.Application.Options.DefaultFilePath(2) || '/tmp';
+  }
+
+  return dir.replace(/\\/g, '/').replace(/[\/]+$/, '');
+}
+
 /**
  * 导出图片到临时文件
  * @param {Object} shape - InlineShape 或 Shape 对象
@@ -760,7 +785,7 @@ function exportImageToTemp(shape) {
     shape.Select();
     window.Application.Selection.Copy();
 
-    const tempDir = window.Application.Options.DefaultFilePath(2) || '/tmp';
+    const tempDir = getImageExportTempDir();
     const timestamp = Date.now();
     const tempPath = `${tempDir}/wps_img_${timestamp}.png`;
 
@@ -1171,6 +1196,65 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex) {
       // 解析范围内的段落起止位置
       const rangeStart = doc.Paragraphs.Item(startParaIndex + 1).Range.Start;
       const rangeEnd = doc.Paragraphs.Item(endParaIndex + 1).Range.End;
+      const requestedRange = doc.Range(rangeStart, rangeEnd);
+
+      // 解析范围内的嵌入式图片
+      try {
+        const inlineShapes = requestedRange.InlineShapes;
+        if (inlineShapes && inlineShapes.Count > 0) {
+          for (let i = 1; i <= inlineShapes.Count; i++) {
+            try {
+              const shape = inlineShapes.Item(i);
+              if (shape.Type === 3 || shape.Type === 1) {
+                const imageInfo = exportImageToTemp(shape);
+                const shapeStart = shape.Range ? shape.Range.Start : 0;
+                result.images.push({
+                  type: 'inline',
+                  width: shape.Width || 100,
+                  height: shape.Height || 100,
+                  paraIndex: paraStartToIndex.get(shapeStart) ?? -1,
+                  altText: shape.AlternativeText || '',
+                  ...imageInfo,
+                  placeholder: '[图片]'
+                });
+              }
+            } catch (e) {}
+          }
+        }
+      } catch (e) {}
+
+      // 解析范围内的浮动图片
+      try {
+        const shapes = requestedRange.ShapeRange;
+        if (shapes && shapes.Count > 0) {
+          for (let i = 1; i <= shapes.Count; i++) {
+            try {
+              const shape = shapes.Item(i);
+              if ([13, 75, 3, 1].includes(shape.Type)) {
+                const imageInfo = exportImageToTemp(shape);
+                let anchorStart = 0;
+                try {
+                  anchorStart = shape.Anchor ? shape.Anchor.Start : 0;
+                } catch (e) {
+                  anchorStart = shape.Range ? shape.Range.Start : 0;
+                }
+                result.images.push({
+                  type: 'floating',
+                  width: shape.Width || 100,
+                  height: shape.Height || 100,
+                  left: shape.Left || 0,
+                  top: shape.Top || 0,
+                  wrapType: getWrapTypeName(shape.WrapFormat ? shape.WrapFormat.Type : 0),
+                  paraIndex: paraStartToIndex.get(anchorStart) ?? -1,
+                  altText: shape.AlternativeText || '',
+                  ...imageInfo,
+                  placeholder: '[图片]'
+                });
+              }
+            } catch (e) {}
+          }
+        }
+      } catch (e) {}
 
       // 解析范围内的表格（表格起始位置落在请求范围内）
       const parsedTableRanges = new Set();
@@ -1438,6 +1522,12 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex) {
             const shape = shapes.Item(i);
             if ([13, 75, 3, 1].includes(shape.Type)) {
               const imageInfo = exportImageToTemp(shape);
+              let anchorStart = 0;
+              try {
+                anchorStart = shape.Anchor ? shape.Anchor.Start : 0;
+              } catch (e) {
+                anchorStart = shape.Range ? shape.Range.Start : 0;
+              }
               result.images.push({
                 type: 'floating',
                 width: shape.Width || 100,
@@ -1445,6 +1535,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex) {
                 left: shape.Left || 0,
                 top: shape.Top || 0,
                 wrapType: getWrapTypeName(shape.WrapFormat ? shape.WrapFormat.Type : 0),
+                paraIndex: paraStartToIndex.get(anchorStart) ?? -1,
                 altText: shape.AlternativeText || '',
                 ...imageInfo,
                 placeholder: '[图片]'

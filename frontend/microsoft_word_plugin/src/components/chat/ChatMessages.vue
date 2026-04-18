@@ -71,6 +71,35 @@
                 <span class="typing">{{ part.content }}</span>
                 <span v-if="part.loading" class="loading-spinner"></span>
               </div>
+              <div v-else-if="part.type === 'mcp'" class="mcp-inline-wrap">
+                <div class="status-line mcp-inline-head">
+                  <button
+                    class="mcp-inline-toggle"
+                    :aria-label="isMcpExpanded(index, partIndex) ? '收起 MCP 详情' : '展开 MCP 详情'"
+                    @click="toggleMcpExpand(index, partIndex)"
+                  >
+                    <svg
+                      class="mcp-toggle-icon"
+                      :class="{ expanded: isMcpExpanded(index, partIndex) }"
+                      width="12"
+                      height="12"
+                      viewBox="0 0 16 16"
+                      fill="currentColor"
+                    >
+                      <path d="M6 3l5 5-5 5V3z" />
+                    </svg>
+                  </button>
+                  <span class="typing" :class="{ 'mcp-error-text': part.isError }">
+                    {{ part.preview || ('🔧 调用 MCP 工具: ' + (part.toolName || 'unknown_tool')) }}
+                  </span>
+                </div>
+                <div v-if="isMcpExpanded(index, partIndex)" class="mcp-inline-detail">
+                  <div class="typing mcp-inline-label">- 🧾 参数:</div>
+                  <pre class="mcp-inline-pre">{{ part.argsText || '无参数' }}</pre>
+                  <div class="typing mcp-inline-label">- 🛠️ 工具输出:</div>
+                  <div class="mcp-inline-output markdown-body" v-html="renderMarkdown(part.outputText || '（无输出）')"></div>
+                </div>
+              </div>
               <!-- eslint-disable-next-line vue/no-v-html -->
               <div v-else-if="part.type === 'text'" class="markdown-body" v-html="renderMarkdown(part.content)"></div>
             </div>
@@ -142,6 +171,7 @@ export default {
       imgMenuX: 0,
       imgMenuY: 0,
       _contextImg: null,
+      mcpExpandedMap: {},
     };
   },
   mounted() {
@@ -206,6 +236,16 @@ export default {
     renderMarkdown(content) {
       if (!content) return '';
       return md.render(content);
+    },
+    _mcpKey(msgIndex, partIndex) {
+      return `${msgIndex}-${partIndex}`;
+    },
+    isMcpExpanded(msgIndex, partIndex) {
+      return !!this.mcpExpandedMap[this._mcpKey(msgIndex, partIndex)];
+    },
+    toggleMcpExpand(msgIndex, partIndex) {
+      const key = this._mcpKey(msgIndex, partIndex);
+      this.mcpExpandedMap[key] = !this.mcpExpandedMap[key];
     },
     scrollToBottom() {
       this.$nextTick(() => {
@@ -390,6 +430,90 @@ export default {
   align-items: center;
   gap: 8px;
 }
+
+.mcp-inline-wrap {
+  margin: 4px 0;
+}
+
+.mcp-inline-head {
+  gap: 6px;
+}
+
+.mcp-inline-toggle {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #888;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.mcp-inline-toggle:hover {
+  color: #666;
+}
+
+.mcp-toggle-icon {
+  transition: transform 0.2s ease;
+}
+
+.mcp-toggle-icon.expanded {
+  transform: rotate(90deg);
+}
+
+.mcp-inline-detail {
+  margin: 2px 0 6px 22px;
+}
+
+.mcp-inline-label {
+  margin: 2px 0;
+}
+
+.mcp-inline-pre {
+  margin: 0;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #888;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 220px;
+  overflow-y: auto;
+  font-family: inherit;
+}
+
+.mcp-inline-output {
+  margin: 0;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #888;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.mcp-inline-output :deep(p) {
+  margin: 0 0 6px 0;
+}
+
+.mcp-inline-output :deep(p:last-child) {
+  margin-bottom: 0;
+}
+
+.mcp-inline-output :deep(img) {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+}
+
+.mcp-error-text {
+  color: #888;
+}
+
 .loading-spinner {
   display: inline-block;
   width: 12px;

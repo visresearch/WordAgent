@@ -1,7 +1,7 @@
 Generate formatted document payload for insertion into the active Word document.
 
 ## Parameters:
-- `document` (object, DocumentOutput): generated content payload for insertion (paragraphs/tables/styles/insert index).
+- `document` (object, DocumentOutput): generated content payload for insertion (paragraphs/tables/images/styles/insert index).
 
 ## When to use:
 - Create new content and insert into document.
@@ -15,6 +15,14 @@ Generate formatted document payload for insertion into the active Word document.
 
 ## Returns:
 - `dict`: echoed generated document object.
+
+## Image Payload Rules:
+- To insert images into Word, put image objects in `document.images`.
+- Use URL field for generated images: `{"url": "https://...png?token=..."}`.
+- Do not modify URL query parameters.
+- For each image, provide a placeholder paragraph in `document.paragraphs` with run text `[图片]` (or `/`).
+- Keep image `paraIndex` aligned with placeholder paragraph `paraIndex`.
+- If unsure, you can omit `paraIndex`; backend will auto-append placeholder paragraphs and anchor images.
 
 ## JSON construction examples:
 
@@ -56,6 +64,37 @@ Replacement payload at a fixed index:
 		"tables": [],
 		"styles": {
 			"pS_3": ["justify", 0, 0, 0, 24, 0, 0, "正文", 1],
+			"rS_2": ["宋体", 12, false, false, 0, "#000000", "#000000", 0, false, false, false]
+		}
+	}
+}
+```
+
+Image insertion payload:
+```json
+{
+	"document": {
+		"insertParaIndex": -1,
+		"paragraphs": [
+			{
+				"paraIndex": 0,
+				"pStyle": "pS_3",
+				"runs": [{ "text": "[图片]", "rStyle": "rS_2" }]
+			}
+		],
+		"tables": [],
+		"images": [
+			{
+				"type": "inline",
+				"paraIndex": 0,
+				"url": "https://example.com/demo.png?Expires=123&Signature=abc",
+				"width": 320,
+				"height": 240,
+				"altText": "示意图"
+			}
+		],
+		"styles": {
+			"pS_3": ["center", 0, 0, 0, 0, 0, 0, "正文", 1],
 			"rS_2": ["宋体", 12, false, false, 0, "#000000", "#000000", 0, false, false, false]
 		}
 	}

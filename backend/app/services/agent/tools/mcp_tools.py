@@ -3,11 +3,193 @@
 import asyncio
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
 from app.core.config import get_user_settings_file
+
+
+def _to_jsonable(value: Any) -> Any:
+    """Best-effort convert objects to JSON-serializable values."""
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if isinstance(value, dict):
+        return {str(k): _to_jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_to_jsonable(v) for v in value]
+    return str(value)
+
+
+def _truncate_text(text: str, max_chars: int = 1200) -> tuple[str, bool]:
+    """Return text as-is; MCP result output should not be auto-truncated."""
+    return text, False
+
+
+_IMG_URL_LINE_PATTERN = re.compile(
+    r"https?://[^\s\)]+\.(?:png|jpe?g|gif|svg|webp)(?:[?\#][^\s\)]*)?",
+    re.IGNORECASE,
+)
+_IMG_EXT_PATTERN = re.compile(r"\.(?:png|jpe?g|gif|svg|webp|bmp|ico|tiff?)(?:$|[?\#])", re.IGNORECASE)
+_IMG_PATH_HINTS = ("/img/", "/image/", "/images/", "/photo/", "/photos/", "/afts/img/")
+_IMAGE_URL_CACHE: dict[str, bool] = {}
+
+
+def _is_image_url(url: str) -> bool:
+    """Check whether a URL likely points to an image resource."""
+    u = (url or "").strip()
+    if not u:
+        return False
+
+    cached = _IMAGE_URL_CACHE.get(u)
+    if cached is not None:
+        return cached
+
+    parsed = urlparse(u)
+    if parsed.scheme not in {"http", "https"}:
+        _IMAGE_URL_CACHE[u] = False
+        return False
+
+    path_lower = (parsed.path or "").lower()
+    if _IMG_EXT_PATTERN.search(path_lower):
+        _IMAGE_URL_CACHE[u] = True
+        return True
+
+    if any(hint in path_lower for hint in _IMG_PATH_HINTS):
+        _IMAGE_URL_CACHE[u] = True
+        return True
+
+    # 对无后缀 URL 进行远端 Content-Type 探测
+    is_img = _probe_image_content_type(u)
+    _IMAGE_URL_CACHE[u] = is_img
+    return is_img
+
+
+def _probe_image_content_type(url: str) -> bool:
+    """Probe remote URL headers/body to determine whether it's an image."""
+    user_agent = "Mozilla/5.0"
+
+    # 优先 HEAD，避免下载正文
+    try:
+        req = Request(url, headers={"User-Agent": user_agent}, method="HEAD")
+        with urlopen(req, timeout=4) as resp:
+            ctype = str(resp.headers.get("Content-Type", "")).lower()
+            if ctype.startswith("image/"):
+                return True
+    except Exception:
+        pass
+
+    # 回退 GET + Range 仅读取极少字节
+    try:
+        req = Request(
+            url,
+            headers={
+                "User-Agent": user_agent,
+                "Range": "bytes=0-0",
+            },
+        )
+        with urlopen(req, timeout=5) as resp:
+            ctype = str(resp.headers.get("Content-Type", "")).lower()
+            if ctype.startswith("image/"):
+                return True
+    except Exception:
+        pass
+
+    return False
+
+
+def _extract_readable_text(value: Any) -> str | None:
+    """Extract human-friendly text from common MCP payload shapes."""
+    if isinstance(value, str):
+        return value
+
+    if isinstance(value, list):
+        parts: list[str] = []
+        for item in value:
+            extracted = _extract_readable_text(item)
+            if extracted:
+                parts.append(extracted)
+        return "\n".join(parts) if parts else None
+
+    if isinstance(value, dict):
+        # 常见文本字段优先
+        for key in ("text", "content", "message", "summary"):
+            v = value.get(key)
+            if isinstance(v, str) and v.strip():
+                return v
+
+        # URL 字段单独处理（图片/资源链接）
+        url = value.get("url")
+        if isinstance(url, str) and url.strip():
+            return url.strip()
+
+        # 常见嵌套字段递归提取
+        for key in ("output", "result", "data", "outputs", "items"):
+            if key in value:
+                extracted = _extract_readable_text(value.get(key))
+                if extracted:
+                    return extracted
+
+    return None
+
+
+def _strip_noise_lines(text: str) -> str:
+    """Remove service metadata lines that are not user-facing content."""
+    kept: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if re.match(r"(?i)^request\s*id\s*:", stripped):
+            continue
+        if re.match(r"(?i)^\*?note\s*:", stripped):
+            continue
+        kept.append(line)
+    cleaned = "\n".join(kept)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
+
+def _convert_image_url_lines_to_markdown(text: str) -> str:
+    """Convert standalone image URL lines to Markdown image syntax for frontend rendering."""
+    converted: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("http") and (" " not in stripped) and _is_image_url(stripped):
+            converted.append(f"![MCP 图片]({stripped})")
+        else:
+            converted.append(line)
+    return "\n".join(converted)
+
+
+def _build_result_preview(result: Any, max_chars: int = 1200) -> tuple[str, int, bool]:
+    """Build readable preview text for arbitrary MCP result payload."""
+    extracted = _extract_readable_text(result)
+    if extracted:
+        raw = _convert_image_url_lines_to_markdown(_strip_noise_lines(extracted))
+    else:
+        # 兜底：没有可读文本时再展示结构化 JSON
+        try:
+            raw = json.dumps(_to_jsonable(result), ensure_ascii=False, indent=2)
+        except Exception:
+            raw = str(result)
+
+    preview, truncated = _truncate_text(raw, max_chars=max_chars)
+    return preview, len(raw), truncated
+
+
+def _emit_stream_event(event: dict[str, Any]) -> None:
+    """Emit stream event if running inside a LangGraph tool context."""
+    try:
+        from langgraph.config import get_stream_writer
+
+        writer = get_stream_writer()
+        if writer:
+            writer(event)
+    except Exception:
+        # 非流式上下文或获取 writer 失败时静默忽略
+        pass
 
 
 def _load_mcp_server_configs() -> dict[str, dict[str, Any]]:
@@ -87,13 +269,44 @@ def _wrap_mcp_tool_for_sync(tool, loop: asyncio.AbstractEventLoop):
         import time as _time
 
         print(f"[MCP] ▶ 调用 {tool.name}，参数: {list(kwargs.keys())}")
+        _emit_stream_event(
+            {
+                "type": "mcp_tool_call",
+                "toolName": tool.name,
+                "args": _to_jsonable(kwargs),
+                "content": f"调用 MCP 工具: {tool.name}",
+            }
+        )
         t0 = _time.time()
         future = asyncio.run_coroutine_threadsafe(tool.ainvoke(kwargs), loop)
         try:
             result = future.result(timeout=300)
+            preview, output_len, truncated = _build_result_preview(result)
+            _emit_stream_event(
+                {
+                    "type": "mcp_tool_result",
+                    "toolName": tool.name,
+                    "outputPreview": preview,
+                    "outputLength": output_len,
+                    "truncated": truncated,
+                    "isError": False,
+                    "content": f"MCP 工具 {tool.name} 已返回结果",
+                }
+            )
             print(f"[MCP] ✅ {tool.name} 完成，耗时 {_time.time() - t0:.1f}s")
             return result
         except Exception as e:
+            _emit_stream_event(
+                {
+                    "type": "mcp_tool_result",
+                    "toolName": tool.name,
+                    "outputPreview": f"工具执行失败: {e}",
+                    "outputLength": 0,
+                    "truncated": False,
+                    "isError": True,
+                    "content": f"MCP 工具 {tool.name} 执行失败",
+                }
+            )
             print(f"[MCP] ❌ {tool.name} 失败，耗时 {_time.time() - t0:.1f}s，错误: {e}")
             raise
 
@@ -105,27 +318,29 @@ def _wrap_mcp_tool_for_sync(tool, loop: asyncio.AbstractEventLoop):
     )
 
 
-async def load_mcp_tools() -> tuple[list, list]:
+async def load_mcp_tools() -> tuple[list, list, list[dict[str, str]]]:
     """
     异步加载所有已配置的 MCP 服务器工具，每个服务器独立加载互不影响。
 
     返回的工具已包装为同步可调用，可在线程中通过 tool.invoke() 使用。
-    返回值: (tools, clients) — clients 列表需在使用期间保持存活。
+    返回值: (tools, clients, failed_servers) — clients 列表需在使用期间保持存活。
+    failed_servers: [{"name": str, "error": str}]，用于前端状态展示。
     """
     config = _load_mcp_server_configs()
     if not config:
         print("[MCP] ℹ️ 未配置 MCP 服务器，跳过加载")
-        return [], []
+        return [], [], []
 
     try:
         from langchain_mcp_adapters.client import MultiServerMCPClient
     except ImportError:
         print("[MCP] ⚠️ langchain-mcp-adapters 未安装，跳过 MCP 工具加载")
-        return [], []
+        return [], [], [{"name": "MCP", "error": "缺少依赖 langchain-mcp-adapters"}]
 
     loop = asyncio.get_running_loop()
     all_tools: list = []
     live_clients: list = []
+    failed_servers: list[dict[str, str]] = []
 
     for name, server_cfg in config.items():
         try:
@@ -135,7 +350,7 @@ async def load_mcp_tools() -> tuple[list, list]:
             all_tools.extend(wrapped)
             live_clients.append(client)
             print(f"[MCP] ✅ {name}: 已加载 {len(wrapped)} 个工具 {[t.name for t in wrapped]}")
-        except Exception:
+        except Exception as e1:
             # SSE 连接失败时，尝试以 streamable_http 重试
             if server_cfg.get("transport") == "sse":
                 try:
@@ -149,18 +364,20 @@ async def load_mcp_tools() -> tuple[list, list]:
                     continue
                 except Exception as e2:
                     print(f"[MCP] ❌ {name}: 加载失败 (含 streamable_http 回退): {e2}")
+                    failed_servers.append({"name": name, "error": str(e2)})
             else:
                 import traceback
 
                 print(f"[MCP] ❌ {name}: 加载失败")
                 traceback.print_exc()
+                failed_servers.append({"name": name, "error": str(e1)})
 
     if all_tools:
         print(f"[MCP] 📊 共加载 {len(all_tools)} 个工具 (来自 {len(live_clients)} 个服务器)")
     else:
         print("[MCP] ⚠️ 所有 MCP 服务器均加载失败，无可用工具")
 
-    return all_tools, live_clients
+    return all_tools, live_clients, failed_servers
 
 
 def build_mcp_tools_prompt(mcp_tools: list) -> str:

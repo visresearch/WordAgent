@@ -13,7 +13,7 @@ import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from app.core.config import get_user_settings_file
+from app.core.config import get_user_settings_file, get_wence_data_dir
 
 router = APIRouter()
 
@@ -198,61 +198,73 @@ async def test_mcp_server(payload: MCPServerTestRequest):
         }
 
 
-# ============== WPS 缓存路径 ==============
+@router.get("/settings/wence-temp-dir")
+async def get_wence_temp_dir():
+    """获取用于前端图片导出的临时目录（wence_data/temp）。"""
+    try:
+        temp_dir = get_wence_data_dir() / "temp"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        return {"dir": str(temp_dir)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取临时目录失败: {str(e)}")
 
 
-def _get_wps_cache_dir() -> Path | None:
-    """获取 WPS 图片缓存目录"""
-    home = Path.home()
+# ============== 图片临时缓存目录（wence_data/temp） ==============
 
-    # Linux WPS 模板目录
-    linux_path = home / ".local/share/Kingsoft/office6/templates/wps/zh_CN"
-    if linux_path.exists():
-        return linux_path
 
-    # Windows WPS 模板目录
-    appdata = os.environ.get("APPDATA", "")
-    if appdata:
-        win_path = Path(appdata) / "kingsoft/wps/templates/wps/zh_CN"
-        if win_path.exists():
-            return win_path
+def _get_temp_cache_dir() -> Path:
+    """获取图片临时缓存目录（固定为 wence_data/temp）"""
+    cache_dir = get_wence_data_dir() / "temp"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir
 
-    return None
+
+def _iter_temp_cache_files(cache_dir: Path) -> list[Path]:
+    """递归收集 temp 目录下所有文件。"""
+    if not cache_dir.exists():
+        return []
+    return [p for p in cache_dir.rglob("*") if p.is_file()]
 
 
 @router.get("/cache/scan")
 async def scan_cache():
-    """扫描 WPS 图片缓存"""
-    cache_dir = _get_wps_cache_dir()
-
-    if not cache_dir or not cache_dir.exists():
-        return {"dir": "", "fileCount": 0, "totalSize": 0}
+    """扫描 wence_data/temp 缓存"""
+    cache_dir = _get_temp_cache_dir()
 
     count = 0
     total_size = 0
-    for f in cache_dir.iterdir():
-        if f.is_file() and f.name.startswith("wps_img_") and f.name.endswith(".png"):
+    for f in _iter_temp_cache_files(cache_dir):
+        try:
             count += 1
             total_size += f.stat().st_size
+        except Exception as e:
+            print(f"读取缓存文件大小失败 {f}: {e}")
 
     return {"dir": str(cache_dir), "fileCount": count, "totalSize": total_size}
 
 
 @router.delete("/cache/clear")
 async def clear_cache():
-    """清除 WPS 图片缓存"""
-    cache_dir = _get_wps_cache_dir()
+    """清除 wence_data/temp 缓存文件"""
+    cache_dir = _get_temp_cache_dir()
 
-    if not cache_dir or not cache_dir.exists():
+    if not cache_dir.exists():
         return {"deleted": 0}
 
     deleted = 0
-    for f in cache_dir.iterdir():
-        if f.is_file() and f.name.startswith("wps_img_") and f.name.endswith(".png"):
+    for f in _iter_temp_cache_files(cache_dir):
+        try:
+            f.unlink()
+            deleted += 1
+        except Exception as e:
+            print(f"删除缓存文件失败 {f.name}: {e}")
+
+    # 尝试清理空目录（忽略失败）
+    for d in sorted(cache_dir.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+        if d.is_dir():
             try:
-                f.unlink()
-                deleted += 1
-            except Exception as e:
-                print(f"删除缓存文件失败 {f.name}: {e}")
+                d.rmdir()
+            except Exception:
+                pass
 
     return {"deleted": deleted}

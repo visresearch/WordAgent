@@ -47,7 +47,7 @@
         <div class="cache-info-box">
           <div class="cache-info-item">
             <span class="cache-label">缓存位置</span>
-            <span class="cache-value">{{ cacheDir || '插件临时文件目录' }}</span>
+            <span class="cache-value">{{ cacheDir || 'wence_data/temp' }}</span>
           </div>
           <div class="cache-info-item">
             <span class="cache-label">缓存大小</span>
@@ -367,7 +367,7 @@ export default {
       if (cacheFileCount.value === 0) {
         return;
       }
-      if (!confirm('确定要清除所有缓存的临时图片文件吗？')) {
+      if (!confirm('确定要清除 wence_data/temp 目录下的所有缓存文件吗？')) {
         return;
       }
 

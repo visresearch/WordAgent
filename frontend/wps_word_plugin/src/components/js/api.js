@@ -750,6 +750,18 @@ async function testMcpServer({ name, config }) {
   return response.data;
 }
 
+/**
+ * 获取前端图片导出目录（wence_data/temp）
+ * @returns {Promise<Object>} { dir: string }
+ */
+async function getWenceTempDir() {
+  const response = await request('/api/settings/wence-temp-dir', { method: 'GET' });
+  if (!response.success) {
+    throw new Error(response.error || '获取临时目录失败');
+  }
+  return response.data;
+}
+
 // ============== 缓存管理 API ==============
 
 /**
@@ -835,6 +847,7 @@ export default {
   getSettings,
   saveSettings,
   testMcpServer,
+  getWenceTempDir,
 
   // 缓存管理 API
   scanCache,
@@ -872,6 +885,7 @@ export {
   getSettings,
   saveSettings,
   testMcpServer,
+  getWenceTempDir,
   scanCache,
   clearCache,
   updateConfig,

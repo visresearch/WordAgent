@@ -115,6 +115,7 @@ export default {
     this.loadModels();
     this.initSessionAndLoadHistory();
     this._loadProofreadMode();
+    this._loadWenceTempDir();
 
     this._onResize = () => {
       this.isWide = window.innerWidth >= 600;
@@ -129,6 +130,86 @@ export default {
     }
   },
   methods: {
+    _formatMcpText(value) {
+      if (value === null || value === undefined) {
+        return "";
+      }
+
+      let raw = "";
+      if (typeof value === "string") {
+        raw = value;
+      } else {
+        try {
+          raw = JSON.stringify(value, null, 2);
+        } catch (e) {
+          raw = String(value);
+        }
+      }
+
+      return raw;
+    },
+
+    _upsertMcpCallPart(msg, toolName, argsPayload = null) {
+      if (!msg.contentParts) {
+        msg.contentParts = [];
+      }
+
+      const safeToolName = toolName || "unknown_tool";
+      const argsText = this._formatMcpText(argsPayload);
+
+      const lastPart = msg.contentParts.length > 0 ? msg.contentParts[msg.contentParts.length - 1] : null;
+      if (
+        lastPart &&
+        lastPart.type === "mcp" &&
+        lastPart.toolName === safeToolName &&
+        !lastPart.completed
+      ) {
+        if (!lastPart.argsText && argsText) {
+          lastPart.argsText = argsText;
+        }
+        return;
+      }
+
+      msg.contentParts.push({
+        type: "mcp",
+        toolName: safeToolName,
+        preview: `🔧 调用 MCP 工具: ${safeToolName}`,
+        argsText: argsText || "无参数",
+        outputText: "等待工具输出...",
+        completed: false,
+        isError: false,
+      });
+    },
+
+    _attachMcpResultPart(msg, toolName, outputPreview, isError = false) {
+      if (!msg.contentParts) {
+        msg.contentParts = [];
+      }
+
+      const safeToolName = toolName || "unknown_tool";
+      const outputText = this._formatMcpText(outputPreview);
+
+      for (let i = msg.contentParts.length - 1; i >= 0; i--) {
+        const part = msg.contentParts[i];
+        if (part.type === "mcp" && part.toolName === safeToolName && !part.completed) {
+          part.outputText = outputText || "（无输出）";
+          part.completed = true;
+          part.isError = !!isError;
+          return;
+        }
+      }
+
+      msg.contentParts.push({
+        type: "mcp",
+        toolName: safeToolName,
+        preview: `🔧 调用 MCP 工具: ${safeToolName}`,
+        argsText: "参数未知",
+        outputText: outputText || "（无输出）",
+        completed: true,
+        isError: !!isError,
+      });
+    },
+
     toggleThinking(index) {
       if (this.messages[index]) {
         this.messages[index].thinkingExpanded = !this.messages[index].thinkingExpanded;
@@ -410,17 +491,43 @@ export default {
       try {
         await Word.run(async (context) => {
           const selection = context.document.getSelection();
-          selection.load('text');
+          selection.load("text");
 
           const selParagraphs = selection.paragraphs;
-          selParagraphs.load('items');
+          selParagraphs.load("items");
+
+          let selectionTables = null;
+          let selectionInlinePictures = null;
+          try {
+            selectionTables = selection.tables;
+            selectionTables.load("items");
+          } catch (e) {
+            selectionTables = null;
+          }
+          try {
+            selectionInlinePictures = selection.inlinePictures;
+            selectionInlinePictures.load("items");
+          } catch (e) {
+            selectionInlinePictures = null;
+          }
 
           const allParagraphs = context.document.body.paragraphs;
-          allParagraphs.load('items');
+          allParagraphs.load("items");
           await context.sync();
 
-          const text = (selection.text || '').trim();
-          if (!text || text.length < 2) return;
+          const text = selection.text || "";
+          const cleanedText = text.replace(/[\r\n\u0007\f]/g, " ").trim();
+          const hasTable = !!(selectionTables && selectionTables.items && selectionTables.items.length > 0);
+          const hasInlineImage = !!(
+            selectionInlinePictures &&
+            selectionInlinePictures.items &&
+            selectionInlinePictures.items.length > 0
+          );
+          const hasNonTextContent = hasTable || hasInlineImage;
+
+          if (!cleanedText && !hasNonTextContent) {
+            return;
+          }
 
           // 计算选区对应的段落索引
           let startParaIndex = 0;
@@ -452,25 +559,37 @@ export default {
           }
 
           const maxPreviewLen = 50;
-          let preview = text;
+          let displayText = cleanedText;
+          if (!displayText) {
+            if (hasInlineImage && hasTable) {
+              displayText = "[图片+表格选区]";
+            } else if (hasInlineImage) {
+              displayText = "[图片选区]";
+            } else if (hasTable) {
+              displayText = "[表格选区]";
+            }
+          }
+
+          let preview = displayText;
           let hasMore = false;
           if (preview.length > maxPreviewLen) {
             preview = preview.substring(0, maxPreviewLen);
             hasMore = true;
           }
 
-          const startText = text.substring(0, Math.min(10, text.length));
-          const endText = text.length > 10 ? text.substring(text.length - 10) : text;
+          const startText = displayText.substring(0, Math.min(10, displayText.length));
+          const endText =
+            displayText.length > 10 ? displayText.substring(displayText.length - 10) : displayText;
 
           this.selections.push({
-            preview: preview + (hasMore ? '...' : ''),
-            startText: startText + (text.length > 10 ? '...' : ''),
-            endText: (text.length > 20 ? '...' : '') + endText,
-            charCount: text.length,
+            preview: preview + (hasMore ? "..." : ""),
+            startText: startText + (displayText.length > 10 ? "..." : ""),
+            endText: (displayText.length > 20 ? "..." : "") + endText,
+            charCount: cleanedText.length || (hasNonTextContent ? 1 : 0),
             hasMore,
             startParaIndex,
             endParaIndex,
-            fullText: text
+            fullText: cleanedText
           });
         });
       } catch (error) {
@@ -811,6 +930,18 @@ export default {
         return;
       }
 
+      if (data.type === "mcp_tool_call") {
+        this._upsertMcpCallPart(msg, data.toolName, data.args);
+        this.scrollToBottom();
+        return;
+      }
+
+      if (data.type === "mcp_tool_result") {
+        this._attachMcpResultPart(msg, data.toolName, data.outputPreview, data.isError);
+        this.scrollToBottom();
+        return;
+      }
+
       // 其他状态消息
       if (data.type === 'thinking' && data.content) {
         if (!msg.thinkingStartTime) {
@@ -823,6 +954,24 @@ export default {
       }
 
       if (data.type === 'status' && data.content) {
+        const mcpCallPattern = /^🔧\s*调用\s*MCP\s*工具:\s*([A-Za-z0-9._:-]+)(?:\((.*)\))?\s*$/s;
+        const mcpMatch = String(data.content).match(mcpCallPattern);
+        if (mcpMatch) {
+          const toolName = mcpMatch[1];
+          const argsRaw = (mcpMatch[2] || "").trim();
+          let argsPayload = argsRaw;
+          if (argsRaw) {
+            try {
+              argsPayload = JSON.parse(argsRaw);
+            } catch (e) {
+              // 保留原始字符串
+            }
+          }
+          this._upsertMcpCallPart(msg, toolName, argsPayload || null);
+          this.scrollToBottom();
+          return;
+        }
+
         msg.contentParts.push({ type: 'status', content: data.content, loading: !!data.loading });
         this.scrollToBottom();
         return;
@@ -845,6 +994,8 @@ export default {
 
         // 计算原始插入位置和段落数
         const _insParaCount = (data.content.paragraphs || []).length;
+        const _insTableCount = (data.content.tables || []).length;
+        const _insShiftCount = _insParaCount + _insTableCount;
         const _insParaIndex = data.content.insertParaIndex ?? -1;
 
         // 根据同一流中之前的插入操作调整当前插入位置
@@ -862,8 +1013,8 @@ export default {
         }
 
         // 用原始索引记录插入意图（供后续 delete_document 偏移计算）
-        if (_insParaCount > 0) {
-          this._streamInsertions.push({ insertParaIndex: _insParaIndex, count: _insParaCount });
+        if (_insShiftCount > 0) {
+          this._streamInsertions.push({ insertParaIndex: _insParaIndex, count: _insShiftCount });
         }
 
         console.log('收到完整JSON，自动输出到文档');
@@ -1253,7 +1404,7 @@ export default {
           }
         }
 
-        if (jsonData && (jsonData.paragraphs || jsonData.tables)) {
+        if (jsonData && (jsonData.paragraphs || jsonData.tables || jsonData.images)) {
           // 统一使用 JSON 中 AI 指定的 insertParaIndex 作为插入位置
           let insertLocation = 'end';
           if (jsonData.insertParaIndex !== null && jsonData.insertParaIndex !== undefined) {
@@ -1314,6 +1465,22 @@ export default {
         }
       } catch (e) {
         console.warn('加载 proofreadMode 失败，使用默认值:', e);
+      }
+    },
+
+    async _loadWenceTempDir() {
+      try {
+        const data = await api.getWenceTempDir();
+        const dir = data && data.dir ? String(data.dir) : "";
+        if (!dir) {
+          return;
+        }
+        window.__WENCE_TEMP_DIR__ = dir;
+        try {
+          localStorage.setItem("wence_temp_dir", dir);
+        } catch (e) {}
+      } catch (e) {
+        console.warn("加载图片临时目录失败:", e);
       }
     },
 

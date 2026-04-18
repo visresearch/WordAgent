@@ -1,9 +1,14 @@
 """Document tools for the agent (read, search, generate, delete)."""
 
 import asyncio
+import base64
 import concurrent.futures
 import json
+import re
 from datetime import datetime
+from pathlib import Path
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
 from langchain_core.tools import tool
 from langgraph.config import get_stream_writer
@@ -15,6 +20,124 @@ from app.core.config import get_wence_data_dir
 
 # 返回给 LLM 的文档 JSON 最大字符数（超过则进入精简模式）
 _MAX_DOC_JSON_CHARS = 80_000
+
+
+def _download_remote_image(url: str) -> str | None:
+    """Download remote image URL to local wence_data/temp and return local path."""
+    try:
+        parsed = urlparse(url)
+        ext = Path(parsed.path).suffix.lower()
+        if ext not in {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp"}:
+            ext = ".png"
+
+        temp_dir = get_wence_data_dir() / "temp"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        filename = f"image_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}{ext}"
+        file_path = temp_dir / filename
+
+        req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urlopen(req, timeout=20) as resp:
+            file_path.write_bytes(resp.read())
+        return str(file_path)
+    except Exception as e:
+        print(f"[generate_document] ⚠️ 下载图片失败: {e}")
+        return None
+
+
+def _save_data_image(data_url: str) -> str | None:
+    """Decode data:image URL to local file path."""
+    try:
+        match = re.match(r"^data:image/([a-zA-Z0-9.+-]+);base64,(.+)$", data_url, flags=re.DOTALL)
+        if not match:
+            return None
+
+        ext_map = {
+            "jpeg": ".jpg",
+            "jpg": ".jpg",
+            "png": ".png",
+            "gif": ".gif",
+            "svg+xml": ".svg",
+            "webp": ".webp",
+            "bmp": ".bmp",
+        }
+        ext = ext_map.get(match.group(1).lower(), ".png")
+
+        temp_dir = get_wence_data_dir() / "temp"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        filename = f"image_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}{ext}"
+        file_path = temp_dir / filename
+
+        raw = base64.b64decode(match.group(2), validate=False)
+        file_path.write_bytes(raw)
+        return str(file_path)
+    except Exception as e:
+        print(f"[generate_document] ⚠️ 保存 base64 图片失败: {e}")
+        return None
+
+
+def _ensure_image_payload_shape(doc_dict: dict) -> None:
+    """Normalize images/paragraphs so frontend can insert images reliably."""
+    images = doc_dict.get("images")
+    if not isinstance(images, list) or not images:
+        return
+
+    paragraphs = doc_dict.get("paragraphs")
+    if not isinstance(paragraphs, list):
+        paragraphs = []
+        doc_dict["paragraphs"] = paragraphs
+
+    styles = doc_dict.get("styles")
+    if not isinstance(styles, dict):
+        styles = {}
+        doc_dict["styles"] = styles
+
+    # 为段落补齐 paraIndex（局部 0-based）
+    for i, para in enumerate(paragraphs):
+        if isinstance(para, dict) and para.get("paraIndex") is None:
+            para["paraIndex"] = i
+
+    # 为图片补齐路径和默认值
+    for img in images:
+        if not isinstance(img, dict):
+            continue
+        img.setdefault("type", "inline")
+        img.setdefault("placeholder", "[图片]")
+
+        if not (img.get("tempPath") or img.get("sourcePath")):
+            url = str(img.get("url") or "").strip()
+            if url.startswith("data:image/"):
+                local_path = _save_data_image(url)
+                if local_path:
+                    img["tempPath"] = local_path
+            elif url.startswith("http://") or url.startswith("https://"):
+                local_path = _download_remote_image(url)
+                if local_path:
+                    img["tempPath"] = local_path
+
+    # 缺少锚点时，自动追加图片占位段落，确保前端可按 paraIndex 插图
+    p_style_id = next((k for k in styles if str(k).startswith("pS_")), None)
+    r_style_id = next((k for k in styles if str(k).startswith("rS_")), None)
+    if p_style_id is None:
+        p_style_id = "pS_auto_img"
+        styles[p_style_id] = ["center", 0, 0, 0, 0, 0, 0, "", 0]
+    if r_style_id is None:
+        r_style_id = "rS_auto_img"
+        styles[r_style_id] = ["宋体", 12, False, False, 0, "#000000", "#000000", 0, False, False, False]
+
+    next_idx = len(paragraphs)
+    for img in images:
+        if not isinstance(img, dict):
+            continue
+        if img.get("paraIndex") is None:
+            img["paraIndex"] = next_idx
+            paragraphs.append(
+                {
+                    "paraIndex": next_idx,
+                    "pStyle": p_style_id,
+                    "runs": [{"text": "[图片]", "rStyle": r_style_id}],
+                }
+            )
+            next_idx += 1
 
 
 def _save_generated_document_json(doc_dict: dict) -> str | None:
@@ -75,6 +198,29 @@ def _compact_doc_json(doc_json: dict) -> str:
             table_compact["cellTexts"] = rows
             compact["tables"].append(table_compact)
 
+    # 保留图片核心信息，避免图片范围在精简模式下丢失
+    if doc_json.get("images"):
+        compact["images"] = []
+        for img in doc_json["images"]:
+            if not isinstance(img, dict):
+                continue
+            compact["images"].append(
+                {
+                    "type": img.get("type"),
+                    "paraIndex": img.get("paraIndex"),
+                    "width": img.get("width"),
+                    "height": img.get("height"),
+                    "left": img.get("left"),
+                    "top": img.get("top"),
+                    "wrapType": img.get("wrapType"),
+                    "altText": img.get("altText"),
+                    "tempPath": img.get("tempPath"),
+                    "sourcePath": img.get("sourcePath"),
+                    "url": img.get("url"),
+                    "placeholder": img.get("placeholder"),
+                }
+            )
+
     result = json.dumps(compact, ensure_ascii=False)
     print(f"[read_document] 📦 文档过大 ({len(full)} chars)，已精简为 {len(result)} chars（纯文本模式）")
     return result
@@ -124,11 +270,16 @@ def read_document(startParaIndex: int = 0, endParaIndex: int = 49) -> str:
                         writer({"type": "status", "content": f"⚠️ 读取文档失败: {err_msg}"})
                         return ""
                     doc_json = result.get("documentJson", {})
-                    has_content = doc_json and (doc_json.get("paragraphs") or doc_json.get("tables"))
+                    has_content = doc_json and (
+                        doc_json.get("paragraphs") or doc_json.get("tables") or doc_json.get("images")
+                    )
                     if has_content:
                         para_count = len(doc_json.get("paragraphs", []))
                         table_count = len(doc_json.get("tables", []))
-                        print(f"[read_document] ✅ 收到文档，段落数: {para_count}，表格数: {table_count}")
+                        image_count = len(doc_json.get("images", []))
+                        print(
+                            f"[read_document] ✅ 收到文档，段落数: {para_count}，表格数: {table_count}，图片数: {image_count}"
+                        )
                         writer(
                             {
                                 "type": "read_complete",
@@ -163,7 +314,9 @@ def generate_document(document: DocumentOutput) -> dict:
     """Generate a formatted document JSON for insertion into the Word document."""
     writer = get_stream_writer()
     doc_dict = document.model_dump()
+    _ensure_image_payload_shape(doc_dict)
     para_count = len(doc_dict.get("paragraphs", []))
+    image_count = len(doc_dict.get("images", []))
 
     # saved_path = _save_generated_document_json(doc_dict)
     # if saved_path:
@@ -174,7 +327,12 @@ def generate_document(document: DocumentOutput) -> dict:
     #         }
     #     )
 
-    writer({"type": "generate_complete", "content": f"✅ 文档已生成，共 {para_count} 个段落"})
+    writer(
+        {
+            "type": "generate_complete",
+            "content": f"✅ 文档已生成，共 {para_count} 个段落{f'，{image_count} 张图片' if image_count else ''}",
+        }
+    )
     return doc_dict
 
 

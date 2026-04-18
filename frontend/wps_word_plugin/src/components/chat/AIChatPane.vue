@@ -116,6 +116,7 @@ export default {
     this.loadModels();
     this.initSessionAndLoadHistory();
     this._loadProofreadMode();
+    this._loadWenceTempDir();
 
     // 监听窗口宽度变化（600px 阈值）
     this._onResize = () => {
@@ -150,6 +151,86 @@ export default {
     }
   },
   methods: {
+    _formatMcpText(value) {
+      if (value === null || value === undefined) {
+        return '';
+      }
+
+      let raw = '';
+      if (typeof value === 'string') {
+        raw = value;
+      } else {
+        try {
+          raw = JSON.stringify(value, null, 2);
+        } catch (e) {
+          raw = String(value);
+        }
+      }
+
+      return raw;
+    },
+
+    _upsertMcpCallPart(msg, toolName, argsPayload = null) {
+      if (!msg.contentParts) {
+        msg.contentParts = [];
+      }
+
+      const safeToolName = toolName || 'unknown_tool';
+      const argsText = this._formatMcpText(argsPayload);
+
+      const lastPart = msg.contentParts.length > 0 ? msg.contentParts[msg.contentParts.length - 1] : null;
+      if (
+        lastPart &&
+        lastPart.type === 'mcp' &&
+        lastPart.toolName === safeToolName &&
+        !lastPart.completed
+      ) {
+        if (!lastPart.argsText && argsText) {
+          lastPart.argsText = argsText;
+        }
+        return;
+      }
+
+      msg.contentParts.push({
+        type: 'mcp',
+        toolName: safeToolName,
+        preview: `🔧 调用 MCP 工具: ${safeToolName}`,
+        argsText: argsText || '无参数',
+        outputText: '等待工具输出...',
+        completed: false,
+        isError: false
+      });
+    },
+
+    _attachMcpResultPart(msg, toolName, outputPreview, isError = false) {
+      if (!msg.contentParts) {
+        msg.contentParts = [];
+      }
+
+      const safeToolName = toolName || 'unknown_tool';
+      const outputText = this._formatMcpText(outputPreview);
+
+      for (let i = msg.contentParts.length - 1; i >= 0; i--) {
+        const part = msg.contentParts[i];
+        if (part.type === 'mcp' && part.toolName === safeToolName && !part.completed) {
+          part.outputText = outputText || '（无输出）';
+          part.completed = true;
+          part.isError = !!isError;
+          return;
+        }
+      }
+
+      msg.contentParts.push({
+        type: 'mcp',
+        toolName: safeToolName,
+        preview: `🔧 调用 MCP 工具: ${safeToolName}`,
+        argsText: '参数未知',
+        outputText: outputText || '（无输出）',
+        completed: true,
+        isError: !!isError
+      });
+    },
+
     /**
      * 切换 thinking 展开/收起
      */
@@ -664,13 +745,28 @@ export default {
         const text = range.Text || '';
         const cleanedText = text.replace(/[\r\n\u0007\f]/g, ' ').trim();
 
-        if (!cleanedText || cleanedText.length < 2) {
+        let hasTable = false;
+        let hasInlineImage = false;
+        let hasFloatingImage = false;
+        try {
+          hasTable = !!(range.Tables && range.Tables.Count > 0);
+        } catch {}
+        try {
+          hasInlineImage = !!(range.InlineShapes && range.InlineShapes.Count > 0);
+        } catch {}
+        try {
+          hasFloatingImage = !!(range.ShapeRange && range.ShapeRange.Count > 0);
+        } catch {}
+
+        const hasNonTextContent = hasTable || hasInlineImage || hasFloatingImage;
+
+        if (!cleanedText && !hasNonTextContent) {
           console.warn('[Selection] 没有选中有效内容');
-          alert('请先在文档中选中文本内容');
+          alert('请先在文档中选中内容（可为文本、图片或表格）');
           return;
         }
 
-        console.log('[Selection] 选中内容长度:', cleanedText.length);
+        console.log('[Selection] 选中内容长度:', cleanedText.length, 'hasTable:', hasTable, 'hasImage:', hasInlineImage || hasFloatingImage);
 
         // 计算选区对应的段落索引
         const doc = window.Application.ActiveDocument;
@@ -690,7 +786,18 @@ export default {
         }
 
         const maxPreviewLen = 50;
-        let preview = cleanedText;
+        let displayText = cleanedText;
+        if (!displayText) {
+          if ((hasInlineImage || hasFloatingImage) && hasTable) {
+            displayText = '[图片+表格选区]';
+          } else if (hasInlineImage || hasFloatingImage) {
+            displayText = '[图片选区]';
+          } else if (hasTable) {
+            displayText = '[表格选区]';
+          }
+        }
+
+        let preview = displayText;
         let hasMore = false;
 
         if (preview.length > maxPreviewLen) {
@@ -698,15 +805,15 @@ export default {
           hasMore = true;
         }
 
-        const startText = cleanedText.substring(0, Math.min(10, cleanedText.length));
+        const startText = displayText.substring(0, Math.min(10, displayText.length));
         const endText =
-          cleanedText.length > 10 ? cleanedText.substring(cleanedText.length - 10) : cleanedText;
+          displayText.length > 10 ? displayText.substring(displayText.length - 10) : displayText;
 
         const selectionInfo = {
           preview: preview + (hasMore ? '...' : ''),
-          startText: startText + (cleanedText.length > 10 ? '...' : ''),
-          endText: (cleanedText.length > 20 ? '...' : '') + endText,
-          charCount: cleanedText.length,
+          startText: startText + (displayText.length > 10 ? '...' : ''),
+          endText: (displayText.length > 20 ? '...' : '') + endText,
+          charCount: cleanedText.length || (hasNonTextContent ? 1 : 0),
           hasMore,
           range: { startParaIndex, endParaIndex }
         };
@@ -1162,6 +1269,23 @@ export default {
         this.scrollToBottom();
         return;
       }
+
+      if (data.type === 'mcp_tool_call') {
+        this._upsertMcpCallPart(msg, data.toolName, data.args);
+        this.scrollToBottom();
+        return;
+      }
+
+      if (data.type === 'mcp_tool_result') {
+        this._attachMcpResultPart(
+          msg,
+          data.toolName,
+          data.outputPreview,
+          data.isError
+        );
+        this.scrollToBottom();
+        return;
+      }
       // 其他消息类型：text, json, status, thinking 等
       if (data.type === 'thinking' && data.content) {
         if (!msg.thinkingStartTime) {
@@ -1174,6 +1298,25 @@ export default {
       }
 
       if (data.type === 'status' && data.content) {
+        // 兼容旧版本：将文本 status 中的 MCP 调用日志转为结构化卡片
+        const mcpCallPattern = /^🔧\s*调用\s*MCP\s*工具:\s*([A-Za-z0-9._:-]+)(?:\((.*)\))?\s*$/s;
+        const mcpMatch = String(data.content).match(mcpCallPattern);
+        if (mcpMatch) {
+          const toolName = mcpMatch[1];
+          const argsRaw = (mcpMatch[2] || '').trim();
+          let argsPayload = argsRaw;
+          if (argsRaw) {
+            try {
+              argsPayload = JSON.parse(argsRaw);
+            } catch (e) {
+              // 保留原始字符串
+            }
+          }
+          this._upsertMcpCallPart(msg, toolName, argsPayload || null);
+          this.scrollToBottom();
+          return;
+        }
+
         msg.contentParts.push({
           type: 'status',
           content: data.content,
@@ -1198,6 +1341,9 @@ export default {
 
         // 计算原始插入位置和段落数
         const _insParaCount = (data.content.paragraphs || []).length;
+        const _insTableCount = (data.content.tables || []).length;
+        // 位移估算：段落 + 表格（至少占用一个段落锚点）
+        const _insShiftCount = _insParaCount + _insTableCount;
         const _insParaIndex = data.content.insertParaIndex ?? -1;
 
         // 根据同一流中之前的插入操作调整当前插入位置
@@ -1216,8 +1362,8 @@ export default {
         }
 
         // 用原始索引记录插入意图（供后续 delete_document 偏移计算）
-        if (_insParaCount > 0) {
-          this._streamInsertions.push({ insertParaIndex: _insParaIndex, count: _insParaCount });
+        if (_insShiftCount > 0) {
+          this._streamInsertions.push({ insertParaIndex: _insParaIndex, count: _insShiftCount });
         }
 
         console.log('收到完整JSON，自动输出到文档');
@@ -1615,6 +1761,25 @@ export default {
     },
 
     /**
+     * 加载后端返回的图片临时目录（wence_data/temp）
+     */
+    async _loadWenceTempDir() {
+      try {
+        const data = await api.getWenceTempDir();
+        const dir = (data && data.dir) ? String(data.dir) : '';
+        if (!dir) {
+          return;
+        }
+        window.__WENCE_TEMP_DIR__ = dir;
+        try {
+          localStorage.setItem('wence_temp_dir', dir);
+        } catch {}
+      } catch (e) {
+        console.warn('加载图片临时目录失败:', e);
+      }
+    },
+
+    /**
      * 获取当前校对模式（确保已加载）
      * @returns {Promise<'revision'|'redblue'>}
      */
@@ -1686,7 +1851,7 @@ export default {
           }
         }
 
-        if (jsonData && (jsonData.paragraphs || jsonData.tables)) {
+        if (jsonData && (jsonData.paragraphs || jsonData.tables || jsonData.images)) {
           console.log('检测到文档 JSON，使用格式化输出');
 
           // 统一使用 JSON 中 AI 指定的 insertParaIndex 作为插入位置

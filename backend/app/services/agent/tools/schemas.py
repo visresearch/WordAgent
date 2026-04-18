@@ -25,6 +25,11 @@ class Paragraph(BaseModel):
         " Use an empty array for blank paragraphs.",
         default_factory=list,
     )
+    paraIndex: int | None = Field(
+        default=None,
+        description="Optional paragraph index used for image placeholder mapping."
+        " For generated content, this can be local 0-based index within this payload.",
+    )
 
     @model_validator(mode="after")
     def validate_empty_paragraph_shape(self):
@@ -91,11 +96,47 @@ class Table(BaseModel):
     )
 
 
+class Image(BaseModel):
+    """Image object for document generation."""
+
+    type: Literal["inline", "floating"] = Field(
+        default="inline", description="Image layout type: inline or floating"
+    )
+    paraIndex: int | None = Field(
+        default=None,
+        description="Optional image anchor paragraph index."
+        " For generated content, use local 0-based index matching placeholder paragraph.",
+    )
+    tempPath: str | None = Field(
+        default=None,
+        description="Local temp file path exported or downloaded by frontend, preferred for insertion.",
+    )
+    sourcePath: str | None = Field(
+        default=None,
+        description="Local source file path fallback for insertion.",
+    )
+    url: str | None = Field(
+        default=None,
+        description="Remote image URL. Frontend may download it and convert to tempPath before insertion.",
+    )
+    width: float | None = Field(default=None, description="Image width in points")
+    height: float | None = Field(default=None, description="Image height in points")
+    left: float | None = Field(default=None, description="Floating image left position")
+    top: float | None = Field(default=None, description="Floating image top position")
+    wrapType: str | None = Field(
+        default=None,
+        description="Floating wrap type: inline/topBottom/square/none/tight/through/behindText/inFrontOfText",
+    )
+    altText: str | None = Field(default=None, description="Alternative text")
+    placeholder: str | None = Field(default="[图片]", description="Placeholder marker")
+
+
 class DocumentOutput(BaseModel):
     """Document output schema. paragraphs and tables are independent top-level fields."""
 
     paragraphs: list[Paragraph] = Field(description="Paragraph array; every item must be a Paragraph object")
     tables: list[Table] = Field(default_factory=list, description="Table array; every item must be a Table object")
+    images: list[Image] = Field(default_factory=list, description="Image array for insertion into document")
     styles: dict[str, list] = Field(
         description="Style dictionary (required). Key is style ID (e.g. pS_1, rS_1, cS_1, tS_1); value is style array."
         " Must include all styles referenced by pStyle/rStyle/cStyle/tStyle.\n"
