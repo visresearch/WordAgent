@@ -50,6 +50,7 @@ from app.services.agent.tools import (
 )
 from app.services.agent.tools.callback import _current_model_name
 from app.services.agent.tools.mcp_tools import load_mcp_tools, build_mcp_tools_prompt
+from app.services.agent.skills import build_skills_prompt
 
 
 # region LangGraph Agent（ReAct）
@@ -280,6 +281,9 @@ async def process_writing_request_stream(
         mcp_prompt = build_mcp_tools_prompt(mcp_tools)
         if mcp_prompt:
             system_parts.append(mcp_prompt)
+    skills_prompt = build_skills_prompt()
+    if skills_prompt:
+        system_parts.append(skills_prompt)
     from app.services.llm_client import get_custom_prompt
 
     custom_prompt = get_custom_prompt()

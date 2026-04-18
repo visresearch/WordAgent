@@ -17,6 +17,7 @@ Use this style unless the user explicitly requests another format.
 - rS_1: heading font (bold)
 - rS_2: body font
 - rS_3: English/number run in headings (Times New Roman, bold)
+- rS_4: English/number run in body text (Times New Roman, regular)
 
 ### Canonical default styles (use as-is for new content)
 When creating new content and user did not request a custom format, use this exact style map:
@@ -30,7 +31,8 @@ When creating new content and user did not request a custom format, use this exa
 	"pS_5": ["center", 0, 0, 0, 0, 0, 0, "正文", 1],
 	"rS_1": ["黑体", 16, true, false, 0, "#000000", "#000000", 0, false, false, false],
 	"rS_2": ["宋体", 12, false, false, 0, "#000000", "#000000", 0, false, false, false],
-	"rS_3": ["Times New Roman", 16, true, false, 0, "#000000", "#000000", 0, false, false, false]
+	"rS_3": ["Times New Roman", 16, true, false, 0, "#000000", "#000000", 0, false, false, false],
+	"rS_4": ["Times New Roman", 12, false, false, 0, "#000000", "#000000", 0, false, false, false]
 }
 ```
 
@@ -47,7 +49,9 @@ When creating new content and user did not request a custom format, use this exa
 
 ### Body rules
 - Body text should use pS_3 + rS_2 by default.
-- Avoid unnecessary font/size/color mixing.
+- English words and numbers in body paragraphs should use rS_4 (Times New Roman).
+- Split mixed content into multiple runs (Chinese runs use rS_2; English/number runs use rS_4).
+- Do not use a single rStyle from beginning to end for the whole article.
 - Table content should use pS_5 (not pS_3).
 
 ### Mandatory defaults for new content
@@ -55,3 +59,4 @@ When creating new content and user did not request a custom format, use this exa
 - Body must use SimSun 12 with first-line indent and 1.5 spacing behavior from pS_3.
 - Table cell content must use pS_5.
 - If heading contains English words or numbering, split into separate run and use rS_3 for that run.
+- If body contains English words or numbers, split into separate run and use rS_4.

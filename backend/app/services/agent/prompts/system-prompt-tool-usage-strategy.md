@@ -8,4 +8,5 @@
 - For long writing tasks (for example >30 paragraphs): split into multiple `generate_document` calls with sequential insertion indexes.
 - Treat multi-call generation as the default approach for long articles, not an exception.
 - Use `web_fetch` only when a concrete URL is provided and page evidence is needed.
+- When user asks for a specific writing framework/skill, use `list_skills` and `load_skill_context` to fetch local skill guidance first.
 - Use `run_sub_agent(explorer)` for long/complex source analysis; use `run_sub_agent(reviewer)` only for post-writing review.

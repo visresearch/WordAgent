@@ -27,7 +27,7 @@ class Paragraph(BaseModel):
     )
     paraIndex: int | None = Field(
         default=None,
-        description="Optional paragraph index used for image placeholder mapping."
+        description="Optional paragraph index for image anchoring."
         " For generated content, this can be local 0-based index within this payload.",
     )
 
@@ -105,7 +105,7 @@ class Image(BaseModel):
     paraIndex: int | None = Field(
         default=None,
         description="Optional image anchor paragraph index."
-        " For generated content, use local 0-based index matching placeholder paragraph.",
+        " For generated content, use local 0-based index within this payload.",
     )
     tempPath: str | None = Field(
         default=None,
@@ -128,7 +128,10 @@ class Image(BaseModel):
         description="Floating wrap type: inline/topBottom/square/none/tight/through/behindText/inFrontOfText",
     )
     altText: str | None = Field(default=None, description="Alternative text")
-    placeholder: str | None = Field(default="[图片]", description="Placeholder marker")
+    placeholder: str | None = Field(
+        default=None,
+        description="Optional legacy placeholder text for anchor paragraph; usually not required.",
+    )
 
 
 class DocumentOutput(BaseModel):

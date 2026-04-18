@@ -13,11 +13,28 @@ from .callback import (
 )
 from .document_tools import delete_document, generate_document, read_document, search_documnet
 from .runSubAgent_tools import run_sub_agent
+from .skill_tools import list_skills, load_skill_context
 from .web_tools import web_fetch
 
 # 基础工具集（不含 MCP 动态工具）
-AGENT_BASE_TOOLS = [read_document, search_documnet, generate_document, delete_document, run_sub_agent, web_fetch]
-ASK_BASE_TOOLS = [read_document, search_documnet, run_sub_agent, web_fetch]
+AGENT_BASE_TOOLS = [
+    list_skills,
+    load_skill_context,
+    read_document,
+    search_documnet,
+    generate_document,
+    delete_document,
+    run_sub_agent,
+    web_fetch,
+]
+ASK_BASE_TOOLS = [
+    list_skills,
+    load_skill_context,
+    read_document,
+    search_documnet,
+    run_sub_agent,
+    web_fetch,
+]
 
 
 def get_base_tools_for_mode(mode: str | None) -> list:
@@ -56,5 +73,7 @@ __all__ = [
     "run_sub_agent",
     "search_documnet",
     "submit_tool_response",
+    "list_skills",
+    "load_skill_context",
     "web_fetch",
 ]

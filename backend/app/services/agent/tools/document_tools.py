@@ -101,7 +101,7 @@ def _ensure_image_payload_shape(doc_dict: dict) -> None:
         if not isinstance(img, dict):
             continue
         img.setdefault("type", "inline")
-        img.setdefault("placeholder", "[图片]")
+        img.setdefault("placeholder", "")
 
         if not (img.get("tempPath") or img.get("sourcePath")):
             url = str(img.get("url") or "").strip()
@@ -114,15 +114,9 @@ def _ensure_image_payload_shape(doc_dict: dict) -> None:
                 if local_path:
                     img["tempPath"] = local_path
 
-    # 缺少锚点时，自动追加图片占位段落，确保前端可按 paraIndex 插图
+    # 缺少锚点时，自动追加图片锚点段落（默认空段落，不插入可见占位文本）
     p_style_id = next((k for k in styles if str(k).startswith("pS_")), None)
     r_style_id = next((k for k in styles if str(k).startswith("rS_")), None)
-    if p_style_id is None:
-        p_style_id = "pS_auto_img"
-        styles[p_style_id] = ["center", 0, 0, 0, 0, 0, 0, "", 0]
-    if r_style_id is None:
-        r_style_id = "rS_auto_img"
-        styles[r_style_id] = ["宋体", 12, False, False, 0, "#000000", "#000000", 0, False, False, False]
 
     next_idx = len(paragraphs)
     for img in images:
@@ -130,13 +124,29 @@ def _ensure_image_payload_shape(doc_dict: dict) -> None:
             continue
         if img.get("paraIndex") is None:
             img["paraIndex"] = next_idx
-            paragraphs.append(
-                {
-                    "paraIndex": next_idx,
-                    "pStyle": p_style_id,
-                    "runs": [{"text": "[图片]", "rStyle": r_style_id}],
-                }
-            )
+            placeholder_text = str(img.get("placeholder") or "").strip()
+            if placeholder_text:
+                if p_style_id is None:
+                    p_style_id = "pS_auto_img"
+                    styles[p_style_id] = ["center", 0, 0, 0, 0, 0, 0, "", 0]
+                if r_style_id is None:
+                    r_style_id = "rS_auto_img"
+                    styles[r_style_id] = ["宋体", 12, False, False, 0, "#000000", "#000000", 0, False, False, False]
+                paragraphs.append(
+                    {
+                        "paraIndex": next_idx,
+                        "pStyle": p_style_id,
+                        "runs": [{"text": placeholder_text, "rStyle": r_style_id}],
+                    }
+                )
+            else:
+                paragraphs.append(
+                    {
+                        "paraIndex": next_idx,
+                        "pStyle": "",
+                        "runs": [],
+                    }
+                )
             next_idx += 1
 
 

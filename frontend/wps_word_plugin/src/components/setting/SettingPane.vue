@@ -96,10 +96,25 @@
         />
       </div>
 
+      <!-- Skill 管理 -->
+      <div v-if="currentTab === 'skill'" class="tab-content">
+        <div class="tab-header">
+          <h2 class="tab-title">
+            Skill 管理
+          </h2>
+          <p class="tab-desc">
+            查看和管理本地已下载 Skill，支持上传压缩包、启用开关和删除
+          </p>
+        </div>
+        <div class="setting-section">
+          <SkillSetting />
+        </div>
+      </div>
+
       <!-- 底部保存按钮（通用、模型和个性化设置需要） -->
       <div class="setting-footer">
         <button
-          v-if="currentTab !== 'data'"
+          v-if="currentTab !== 'data' && currentTab !== 'skill'"
           class="btn btn-save"
           :disabled="saving"
           @click="saveSettings"
@@ -126,11 +141,13 @@ import ModelSetting from './ModelSetting.vue';
 import MCPserverSetting from './MCPserverSetting.vue';
 import PersonalizationPane from './PersonalizationSetting.vue';
 import DataManagementPane from './DataManagementSetting.vue';
+import SkillSetting from './SkillSetting.vue';
 import iconSetting from '../../assets/icons/setting.svg';
 import iconModel from '../../assets/icons/model.svg';
 import iconUser from '../../assets/icons/user.svg';
 import iconMcp from '../../assets/icons/mcp.svg';
 import iconData from '../../assets/icons/data.svg';
+import iconSkill from '../../assets/icons/skill.svg';
 
 export default {
   name: 'SettingPane',
@@ -139,7 +156,8 @@ export default {
     ModelSetting,
     MCPserverSetting,
     PersonalizationPane,
-    DataManagementPane
+    DataManagementPane,
+    SkillSetting
   },
   setup() {
     const currentTab = ref('general');
@@ -167,6 +185,11 @@ export default {
         id: 'mcp',
         name: 'MCP',
         icon: iconMcp
+      },
+      {
+        id: 'skill',
+        name: 'Skill',
+        icon: iconSkill
       },
       {
         id: 'data',

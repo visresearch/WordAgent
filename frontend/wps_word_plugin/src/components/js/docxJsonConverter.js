@@ -2241,15 +2241,6 @@ function generateDocxFromJSON(jsonData, doc, insertParaIndex) {
       }
     }
 
-    const findImageForParagraph = (paraIdx) => {
-      const img = imagesByParaIndex.get(paraIdx);
-      if (img) {
-        imagesByParaIndex.delete(paraIdx);
-        return img;
-      }
-      return null;
-    };
-
     for (let i = 0; i < processedElements.length; i++) {
       const element = processedElements[i];
 
@@ -2257,7 +2248,9 @@ function generateDocxFromJSON(jsonData, doc, insertParaIndex) {
         const para = element.data;
         // 如果没有 text 字段，从 runs 拼接
         const paraText = para.text ? para.text.trim() : (para.runs || []).map(r => r.text || '').join('').trim();
-        const isImagePlaceholder = paraText === '/' || paraText === '[图片]';
+        const isLegacyImagePlaceholder = paraText === '/' || paraText === '[图片]';
+        const hasAnchorImage = para.paraIndex != null && imagesByParaIndex.has(para.paraIndex);
+        const isImageAnchorParagraph = hasAnchorImage && (isLegacyImagePlaceholder || isEmptyParagraph(para));
 
         // 获取段落样式
         const pStyle = resolveStyle(styles, para.pStyle, DEFAULT_PSTYLE);
@@ -2271,10 +2264,11 @@ function generateDocxFromJSON(jsonData, doc, insertParaIndex) {
         const spaceAfter = pStyle[PSTYLE.SPACE_AFTER] || 0;
         const styleName = pStyle[PSTYLE.STYLE_NAME] || '';
 
-        // 处理图片占位符
-        if (isImagePlaceholder && para.paraIndex != null) {
-          const img = findImageForParagraph(para.paraIndex);
+        // 处理图片锚点段落（兼容旧占位符和新空段落锚点）
+        if (isImageAnchorParagraph && para.paraIndex != null) {
+          const img = imagesByParaIndex.get(para.paraIndex);
           if (img) {
+            imagesByParaIndex.delete(para.paraIndex);
             const paraStartPos = currentPos;
             const charAdded = insertImage(doc, img, currentPos);
             currentPos += charAdded;

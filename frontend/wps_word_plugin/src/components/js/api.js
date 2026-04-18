@@ -815,6 +815,81 @@ async function clearCache() {
   return response.data;
 }
 
+// ============== Skill 管理 API ==============
+
+/**
+ * 获取已下载 skill 列表
+ * @returns {Promise<Array>} skills
+ */
+async function getSkills() {
+  const response = await request('/api/skills', { method: 'GET' });
+  if (!response.success) {
+    throw new Error(response.data?.detail || response.error || '获取 skill 列表失败');
+  }
+  return Array.isArray(response.data?.skills) ? response.data.skills : [];
+}
+
+/**
+ * 上传 skill 压缩包（zip）
+ * @param {File} file
+ * @returns {Promise<Object>}
+ */
+async function uploadSkillPackage(file) {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const response = await fetch(`${CONFIG.baseURL}/api/skills/upload`, {
+    method: 'POST',
+    body: formData
+  });
+
+  let data;
+  try {
+    data = await response.json();
+  } catch (_) {
+    data = null;
+  }
+
+  if (!response.ok) {
+    const detail = data?.detail || `HTTP ${response.status}`;
+    throw new Error(detail);
+  }
+
+  return data;
+}
+
+/**
+ * 设置 skill 启用状态
+ * @param {string} folder
+ * @param {boolean} enabled
+ * @returns {Promise<Object>}
+ */
+async function setSkillEnabled(folder, enabled) {
+  const response = await request(`/api/skills/${encodeURIComponent(folder)}/enabled`, {
+    method: 'PUT',
+    body: { enabled: !!enabled }
+  });
+  if (!response.success) {
+    throw new Error(response.data?.detail || response.error || '更新 skill 状态失败');
+  }
+  return response.data;
+}
+
+/**
+ * 删除 skill
+ * @param {string} folder
+ * @returns {Promise<Object>}
+ */
+async function deleteSkill(folder) {
+  const response = await request(`/api/skills/${encodeURIComponent(folder)}`, {
+    method: 'DELETE'
+  });
+  if (!response.success) {
+    throw new Error(response.data?.detail || response.error || '删除 skill 失败');
+  }
+  return response.data;
+}
+
 // ============== 导出 ==============
 
 export default {
@@ -853,6 +928,12 @@ export default {
   scanCache,
   clearCache,
 
+  // Skill 管理 API
+  getSkills,
+  uploadSkillPackage,
+  setSkillEnabled,
+  deleteSkill,
+
   // 配置方法
   updateConfig,
   getConfig,
@@ -888,6 +969,10 @@ export {
   getWenceTempDir,
   scanCache,
   clearCache,
+  getSkills,
+  uploadSkillPackage,
+  setSkillEnabled,
+  deleteSkill,
   updateConfig,
   getConfig,
   request
