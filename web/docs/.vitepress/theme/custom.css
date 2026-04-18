@@ -32,3 +32,37 @@
   transform: translateY(-4px);
   box-shadow: 0 8px 24px rgba(102, 126, 234, 0.12);
 }
+
+/* 文档页：放宽整体布局与正文宽度（含“快速开始”） */
+:root {
+  --vp-layout-max-width: 1680px;
+  --vp-doc-max-width: 760px;
+}
+
+@media (min-width: 1280px) {
+  :root {
+    --vp-doc-max-width: 860px;
+  }
+
+  .VPDoc .content-container {
+    max-width: 860px !important;
+  }
+
+  .VPDoc.has-aside .content-container {
+    max-width: 860px !important;
+  }
+}
+
+@media (min-width: 1440px) {
+  :root {
+    --vp-doc-max-width: 920px;
+  }
+
+  .VPDoc .content-container {
+    max-width: 920px !important;
+  }
+
+  .VPDoc.has-aside .content-container {
+    max-width: 920px !important;
+  }
+}
