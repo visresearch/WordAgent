@@ -1,6 +1,6 @@
-# Word Agent
+﻿# Word Agent
 
-![](./docs/WenceAI_small.png)
+![](./web/docs/public/WenceAI_small.png)
 
 <p align="center">
   <a href="backend/pyproject.toml"><img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white" alt="Python" /></a>
@@ -18,50 +18,50 @@
 
 ## 1. Overview
 
-This project is an AI-assisted writing system built on both single-agent and multi-agent workflows: **WenCe AI (Word Agent)**. After installing the add-in in office suites (such as WPS and Microsoft Word), users can interact with AI in natural language for writing suggestions, content generation, and structure optimization.
+This project is an AI-assisted writing system based on (multi-)agent workflows: **WenCe AI (Word Agent)**. After users install the add-in in office suites (such as WPS and Microsoft Word), they can interact with AI through natural language to get **writing suggestions**, **content generation**, and **structure optimization**.
 
 > WenCe AI (Word Agent): strategy-driven writing, smarter expression.
 
-The backend is built with FastAPI, and the frontend WPS add-in communicates with the backend through streaming APIs. This lets users see LLM outputs in real time for a smooth writing-assistant experience.
+The backend is built with FastAPI. The frontend WPS add-in communicates with the backend via streaming APIs, so users can see LLM outputs in real time for a smooth writing-assistant experience.
 
-The frontend is developed with Vue 3 and JavaScript. A key module is the DOCX-JSON bidirectional converter, which converts formatted Word content and JSON structures back and forth.
+The frontend uses Vue 3 and JavaScript. A key module is the DocxJson bidirectional converter, which converts formatted Word content and JSON structures back and forth.
 
-The backend is implemented in Python, using LangChain and LangGraph for agent design and collaboration, ChatOpenAI-compatible APIs for SSE streaming and tool invocation, and a lightweight PySide6 desktop panel for add-in installation and log inspection.
+The backend is implemented in Python, using LangChain and LangGraph for agent design and collaboration, ChatOpenAI-compatible APIs for SSE streaming and tool calling, and a lightweight PySide6 desktop panel for add-in installation and terminal log inspection.
 
-At its core, this project focuses on **structured Word document generation**. It defines a JSON schema conceptually similar to HTML and CSS, abstracting paragraph and text-run styles to help agents understand and generate well-formatted documents.
+At its core, this project focuses on **structured Word document generation**. The project defines a JSON schema conceptually similar to HTML and CSS, abstracting paragraph and text-run style attributes so the agent can better understand and generate well-formatted Word content.
 
 Main JSON data structures:
 
-- **paragraphs**: an array of Word paragraphs containing multiple runs; this is the main editable object for the agent
+- **paragraphs**: an array of Word paragraphs containing multiple runs; this is the primary editable object for the agent
   - **pStyle**: paragraph style ID (for example, Heading 1, Heading 2, Body)
   - **runs**: text-run array, the smallest content unit in this project
     - **text**: text content
     - **rStyle**: character style ID (for example, bold, red)
-  - **paraIndex**: paragraph index, so the agent can locate and edit a specific paragraph precisely
-- **styles**: style-definition dictionary containing all paragraph and character style definitions; the agent references these style IDs when generating content
+  - **paraIndex**: paragraph index, used by the agent to locate and edit a specific paragraph precisely
+- **styles**: style-definition dictionary that contains all paragraph and character style definitions; the agent references these style IDs to preserve formatting correctness
 
-Compared with many AI writing assistants, WenCe AI provides:
+Compared with many AI writing assistants on the market, WenCe AI provides:
 
-1. **Cross-version and cross-platform compatibility**: built on mainstream office software with a Copilot-like add-in UX, lowering the adoption barrier for regular users, with support for both Windows and Linux.
-2. **Native rich-text editing with style and paragraph awareness**: unlike many Word AI assistants, this project understands Word structure, can gather web information autonomously, and can modify both structure and content based on user requirements.
-3. **Efficient editing with multi-agent collaboration**: multiple agents play different expert roles and collaborate to produce deeper long-form writing.
-4. **Open and flexible integration**: users provide their own API keys and can choose from mainstream LLM providers and models.
+1. **Cross-version and cross-platform support**: built on mainstream office software with a Copilot-like Word add-in UX, lowering the barrier for general users, and supporting both Windows and Linux.
+2. **Native rich-text editing with style and paragraph awareness**: unlike many Word AI tools, this project can understand Word document structure, autonomously gather online information, and modify both structure and content based on user requirements.
+3. **Efficient editing with multi-agent collaboration**: multiple agents take different **expert roles** and collaborate to produce in-depth long-form writing.
+4. **Open and flexible integration**: supports user-provided API keys and is compatible with most mainstream LLM providers and models.
 
 ## 2. Project Preview
 
 | WPS Add-in UI | Backend Qt UI |
 | -- | -- |
-| ![](./docs/wps_addon.png) | ![](./docs/pyQt.png) |
+| ![](./web/docs/public/wps_addon.png) | ![](./web/docs/public/pyQt.png) |
 
-For example, in WPS single-agent mode, a user asks: "Expand my internship objective into five points." The agent first calls `search_document` to locate the target paragraph, then calls `read_document` to read it, analyzes the content, calls `delete_document` to remove the original text, and finally calls `generate_document` to produce the rewritten result. The frontend add-in renders before/after changes with different highlight colors so users can clearly see what was modified.
+For example, in WPS single-agent mode, if the user asks: "Expand my internship objective into five points," the agent first calls `search_document` to locate the paragraph, then calls `read_document` to fetch the content, analyzes it, calls `delete_document` to remove the original text, and finally calls `generate_document` to produce the rewritten result. The frontend add-in renders before/after changes with different highlight colors, so users can clearly see what was modified.
 
-![](./docs/preview2.png)
+![](./web/docs/public/preview2.png)
 
-The generated article conforms to Word document structure and formatting. While generating text, the agent also returns style metadata (for example: titles, body text, bold, fonts, indentation, and line spacing). The frontend uses these style definitions to render properly formatted Word content.
+The generated article conforms to Word document structure and formatting. While generating text, the agent also returns style metadata (such as titles, body text, bold, font, indentation, and line spacing). The frontend add-in then renders content into properly formatted Word output based on these style definitions.
 
-In addition, this project supports custom tool integration through MCP server configuration, allowing agents to call third-party APIs. Using **Tavily Search MCP** and a **Visualization Chart MCP Server** as an example: when a user asks for today's Changsha temperature and a one-week temperature table, the agent can call Tavily MCP to fetch weather data, then call `generate_document` to create table content and return it to the frontend for rendering. If the user then asks, "Based on this table, draw a temperature bar chart," the agent calls `read_document` to understand the table and then calls the chart MCP server to generate an image URL, which is rendered in the add-in chat panel.
+In addition, this project supports custom tool integration. Users can configure MCP servers to let the agent call third-party APIs and extend capabilities. Taking **Amap Maps MCP** and **Visualization Chart MCP Server** as examples: when a user asks, "Query Changsha's weather for the next five days, draw a temperature line chart, and write a weather report," the agent can call the Amap MCP server to retrieve temperature data, then call the chart MCP server to generate an image URL and render it in the add-in chat panel.
 
-![](./docs/mcp_example.png)
+![](./web/docs/public/mcp_example.png)
 
 ## 3. Development Plan
 
@@ -84,28 +84,28 @@ To better satisfy user needs and improve generation stability and depth, the pro
 
 #### Architecture Diagram
 
-![](./docs/single_agent_loop.png)
+![](./web/docs/public/single_agent_loop.png)
 
-The frontend WPS add-in converts user requests and selected paragraph ranges into structured JSON and sends them to the backend.
+The frontend WPS add-in converts the user's request and selected document range into structured JSON and sends it to the backend.
 
-In the backend single-agent architecture, the system follows a standard ReAct loop. In each round, the agent reasons over the user input and current document state, chooses whether to call a tool (for example, web search) or finish directly, then reasons again based on tool results and continues until completion.
+In the backend single-agent architecture, the system follows a standard ReAct loop. In each round, the agent reasons over user input and current document state, chooses whether to call a tool (such as web search) or finish directly, and continues this tool-use/reasoning loop until completion.
 
-- **read_document tool**: reads content within `(startPosition, endPosition)` and returns structured JSON to the agent.
-- **generate_document tool**: generates structured JSON content and returns it to the frontend add-in.
-- **search_document tool**: locates paragraphs by format or text criteria and returns positions to the agent.
-- **web_fetch tool**: fetches information from websites provided by the user.
+- **read_document tool**: reads content in the `(startPosition, endPosition)` range and returns structured JSON to the agent.
+- **generate_document tool**: generates structured JSON document content and returns it to the frontend add-in.
+- **search_document tool**: locates paragraph positions by format or text criteria and returns positions to the agent.
+- **web_fetch tool**: fetches information from user-provided links.
 
 ### 4.2 Multi-Agent Architecture
 
 #### Architecture Diagram
 
-![](./docs/multi_agent.png)
+![](./web/docs/public/multi_agent.png)
 
-The frontend flow is the same as in single-agent mode. In the backend multi-agent workflow, a **planner agent** orchestrates and schedules multiple specialized agents.
+The frontend flow is the same as in single-agent mode. In the backend multi-agent workflow, a **planner agent** orchestrates and schedules several specialized agents.
 
-- **research agent**: collects external references
-- **outline agent**: generates an article outline from references and requirements
-- **writer agent**: writes content based on references and requirements
+- **research agent**: collects online reference information
+- **outline agent**: generates an outline based on references and user requirements
+- **writer agent**: writes content based on references and user requirements
 - **reviewer agent**: reviews generated content and provides revision suggestions
 
 ## 5. Quick Start
@@ -139,9 +139,9 @@ uv run python main.py
 
 ### Use LangSmith Tracing
 
-The project also supports LangSmith for tracing and analyzing agent behavior. See [backend/README.md](backend/README.md) for configuration details.
+The project also supports LangSmith for tracing and analyzing agent behavior. For setup details, see [backend/README.md](backend/README.md).
 
-![](./docs/Langsmith.png)
+![](./web/docs/public/Langsmith.png)
 
 ### Package the Desktop App
 
@@ -152,7 +152,7 @@ uv run pyinstaller wence.spec
 
 The packaged executable is generated in `backend/deploy/dist`.
 
-If you do not want to package it yourself, you can download prebuilt archives from Releases and run the executable directly.
+If you do not want to package it yourself, you can directly download the packaged archive from Releases and run the executable after extraction.
 
 ### Download
 
@@ -160,13 +160,13 @@ Packaged release files: [Release](https://github.com/visresearch/WordAgent/relea
 
 ### Run the App
 
-After downloading, extract and run the executable. Start the backend service (`wence_word_plugin -> Install`), open Word, trust the add-in, and start using the system.
+After downloading, run the executable, start the backend service (`wence_word_plugin -> Install`), open Word, trust the add-in, and start using the system.
 
 You need to configure an LLM API. This project is currently tested with Alibaba Bailian Qwen3.5-Plus APIs.
 
 ## 6. LLM API Compatibility
 
-The project has tested part of the mainstream LLM APIs in China, and compatibility is still being expanded:
+The project has tested part of the mainstream LLM APIs in China, and compatibility is still expanding:
 
 - [x] Qwen 3.5 Plus (stable)
 - [x] Qwen3 Max (stable)

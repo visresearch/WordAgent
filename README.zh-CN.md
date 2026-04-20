@@ -1,6 +1,6 @@
 # Word Agent
 
-![](./docs/WenceAI_small.png)
+![](./web/docs/public/WenceAI_small.png)
 
 <p align="center">
   <a href="backend/pyproject.toml"><img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white" alt="Python" /></a>
@@ -49,17 +49,17 @@
 
 |WPS加载项界面|后端服务QT界面|
 |--|--|
-|![](./docs/wps_addon.png)|![](./docs/pyQt.png)|
+|![](./web/docs/public/wps_addon.png)|![](./web/docs/public/pyQt.png)|
 
 举个例子，以WPS为例，使用单智能体agent模式，用户在WPS加载项界面中输入“帮我把实习目的扩写成5点”，智能体会先调用search_document工具查询到实习目的所在段落的位置，然后调用read_document工具读取这个段落的内容并返回给智能体，智能体在获取到这个段落的内容后进行分析和理解，然后调用delete_document工具删除原来实习目的段落的内容，调用generate_document工具生成新的扩写后的内容。前端加载项会根据智能体返回用不同颜色批注渲染出修改前和修改后的内容，用户就可以清晰地看到智能体对文档所做的修改了。
 
-![](./docs/preview2.png)
+![](./web/docs/public/preview2.png)
 
 注意这个生成的文章是符合Word文档结构与格式的，智能体在生成文字内容的同时还会生成内容对应的样式信息(如标题、正文、加粗、字体、缩进、行距等)，前端加载项会根据这些样式信息将内容渲染成对应格式的Word文档呈现给用户。
 
 除此之外，本项目还支持用户自定义工具的接入，用户可以通过配置MCP服务器的方式让智能体调用第三方API来增强智能体的能力。以**高德地图**和**可视化图表-MCP-Server**为例，用户输入“查询长沙未来五天的天气，绘制一各气温折线统计图，写一份天气预报文章”。智能体会调用高德地图MCP服务器进行查询长沙最近几天的气温数据，然后智能体会调用可视化图表-MCP-Server这个MCP服务器生成一个折线统计图的图片URL，把这张图片渲染在前端加载项界面中。
 
-![](./docs/mcp_example.png)
+![](./web/docs/public/mcp_example.png)
 
 ## 三、开发计划
 
@@ -82,7 +82,7 @@
 
 #### 整体架构图
 
-![](./docs/single_agent_loop.png)
+![](./web/docs/public/single_agent_loop.png)
 
 前端设计的WPS加载项将用户的提问和当前用户选择的文章段落转化成特定json格式发送给后端。
 
@@ -97,7 +97,7 @@
 
 #### 整体架构图
 
-![](./docs/multi_agent.png)
+![](./web/docs/public/multi_agent.png)
 
 前端部分和单智能体架构相同，后端多智能体协作框架中设计了一个 **planner agent** 负责编排和调度其他多个专家智能体的工作流。
 
@@ -135,7 +135,7 @@ uv run python main.py
 
 另外，本项目还支持使用Langsmith进行智能体行为跟踪和分析，配置方法参考[后端README](backend/README.md)中的说明。
 
-![](./docs/Langsmith.png)
+![](./web/docs/public/Langsmith.png)
 
 ### 项目软件打包
 

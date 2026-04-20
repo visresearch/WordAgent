@@ -31,11 +31,12 @@ export default defineConfig({
         {
           text: '使用说明',
           items: [
-            { text: '安装 WPS 加载项', link: '/guide/wps-plugin' },
+            { text: '安装 WPS Word 加载项', link: '/guide/wps-plugin' },
             { text: '启动 Microsoft Word 加载项', link: '/guide/msword-plugin' },
             { text: '配置 API Key', link: '/guide/api-config' },
             { text: '个性化配置', link: '/guide/personalization' },
             { text: 'MCP 服务器配置', link: '/guide/mcp' },
+            { text: 'Skill 配置', link: '/guide/skills' },
             { text: '数据管理', link: '/guide/data-management' },
             { text: '如何提问', link: '/guide/how-to-ask' },
             { text: '功能按钮说明', link: '/guide/features' },
