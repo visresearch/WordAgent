@@ -185,6 +185,6 @@ Note: part of development used free quotas from [Alibaba Bailian](https://bailia
 
 Contact: https://cmcblog.netlify.app/about/
 
-## 8. Open-Source License
+## 8. License
 
-This project is released under the Apache License 2.0.
+Apache License 2.0.
