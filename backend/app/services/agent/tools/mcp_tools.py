@@ -1,6 +1,7 @@
 """MCP 工具加载器 — 从用户设置中读取 MCP 服务器配置并加载为 LangChain 工具。"""
 
 import asyncio
+import concurrent.futures
 import json
 import os
 import re
@@ -11,6 +12,22 @@ from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 from app.core.config import get_user_settings_file
+
+
+def _get_env_int(name: str, default: int) -> int:
+    """Read positive integer from env with fallback."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = int(str(raw).strip())
+        return value if value > 0 else default
+    except Exception:
+        return default
+
+
+_MCP_PREVIEW_MAX_CHARS = _get_env_int("WORDAGENT_MCP_PREVIEW_MAX_CHARS", 4000)
+_MCP_MODEL_MAX_CHARS = _get_env_int("WORDAGENT_MCP_MODEL_MAX_CHARS", 12000)
 
 
 def _to_jsonable(value: Any) -> Any:
@@ -25,8 +42,17 @@ def _to_jsonable(value: Any) -> Any:
 
 
 def _truncate_text(text: str, max_chars: int = 1200) -> tuple[str, bool]:
-    """Return text as-is; MCP result output should not be auto-truncated."""
-    return text, False
+    """Truncate oversized text to keep UI/model payload bounded."""
+    if not text:
+        return "", False
+    if max_chars <= 0 or len(text) <= max_chars:
+        return text, False
+
+    # 保留头部信息，末尾追加截断提示，避免上下文无限膨胀。
+    keep = max(0, max_chars - 80)
+    omitted = max(0, len(text) - keep)
+    truncated = f"{text[:keep]}\n\n...[内容过长，已截断 {omitted} 个字符]"
+    return truncated, True
 
 
 _IMG_URL_LINE_PATTERN = re.compile(
@@ -34,6 +60,7 @@ _IMG_URL_LINE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _IMG_EXT_PATTERN = re.compile(r"\.(?:png|jpe?g|gif|svg|webp|bmp|ico|tiff?)(?:$|[?\#])", re.IGNORECASE)
+_RELATIVE_MD_IMAGE_PATTERN = re.compile(r"!\[[^\]]*\]\((?!https?://)([^)]+)\)", re.IGNORECASE)
 _IMG_PATH_HINTS = ("/img/", "/image/", "/images/", "/photo/", "/photos/", "/afts/img/")
 _IMAGE_URL_CACHE: dict[str, bool] = {}
 
@@ -163,8 +190,18 @@ def _convert_image_url_lines_to_markdown(text: str) -> str:
     return "\n".join(converted)
 
 
-def _build_result_preview(result: Any, max_chars: int = 1200) -> tuple[str, int, bool]:
-    """Build readable preview text for arbitrary MCP result payload."""
+def _strip_relative_markdown_images(text: str) -> str:
+    """Replace relative Markdown image links to avoid local 404 requests in frontend rendering."""
+
+    def _repl(match: re.Match[str]) -> str:
+        url = (match.group(1) or "").strip()
+        return f"[图片链接已省略: {url}]" if url else "[图片链接已省略]"
+
+    return _RELATIVE_MD_IMAGE_PATTERN.sub(_repl, text)
+
+
+def _serialize_mcp_result_text(result: Any) -> str:
+    """Serialize MCP result into readable text for preview/model context."""
     extracted = _extract_readable_text(result)
     if extracted:
         raw = _convert_image_url_lines_to_markdown(_strip_noise_lines(extracted))
@@ -175,8 +212,22 @@ def _build_result_preview(result: Any, max_chars: int = 1200) -> tuple[str, int,
         except Exception:
             raw = str(result)
 
+    return _strip_relative_markdown_images(raw)
+
+
+def _build_result_preview(result: Any, max_chars: int = 1200) -> tuple[str, int, bool]:
+    """Build readable preview text for arbitrary MCP result payload."""
+    raw = _serialize_mcp_result_text(result)
+
     preview, truncated = _truncate_text(raw, max_chars=max_chars)
     return preview, len(raw), truncated
+
+
+def _build_result_for_model(result: Any, max_chars: int = 12000) -> str:
+    """Build compact MCP output text injected back to the model as tool result."""
+    raw = _serialize_mcp_result_text(result)
+    compact, _ = _truncate_text(raw, max_chars=max_chars)
+    return compact
 
 
 def _emit_stream_event(event: dict[str, Any]) -> None:
@@ -190,6 +241,17 @@ def _emit_stream_event(event: dict[str, Any]) -> None:
     except Exception:
         # 非流式上下文或获取 writer 失败时静默忽略
         pass
+
+
+def _format_mcp_exception(exc: Exception) -> str:
+    """Format exceptions (including ExceptionGroup) into a compact readable message."""
+    base = str(exc).strip() or exc.__class__.__name__
+    sub_errors = getattr(exc, "exceptions", None)
+    if isinstance(sub_errors, (list, tuple)) and sub_errors:
+        first = sub_errors[0]
+        first_text = str(first).strip() or first.__class__.__name__
+        return f"{base}; first sub-error: {first_text}"
+    return base
 
 
 def _load_mcp_server_configs() -> dict[str, dict[str, Any]]:
@@ -261,7 +323,7 @@ def _load_mcp_server_configs() -> dict[str, dict[str, Any]]:
     return client_config
 
 
-def _wrap_mcp_tool_for_sync(tool, loop: asyncio.AbstractEventLoop):
+def _wrap_mcp_tool_for_sync(tool, loop: asyncio.AbstractEventLoop, call_timeout_seconds: int = 90):
     """将异步 MCP 工具包装为同步可调用，通过主事件循环分派执行。"""
     from langchain_core.tools import StructuredTool
 
@@ -280,8 +342,9 @@ def _wrap_mcp_tool_for_sync(tool, loop: asyncio.AbstractEventLoop):
         t0 = _time.time()
         future = asyncio.run_coroutine_threadsafe(tool.ainvoke(kwargs), loop)
         try:
-            result = future.result(timeout=300)
-            preview, output_len, truncated = _build_result_preview(result)
+            result = future.result(timeout=call_timeout_seconds)
+            preview, output_len, truncated = _build_result_preview(result, max_chars=_MCP_PREVIEW_MAX_CHARS)
+            model_output = _build_result_for_model(result, max_chars=_MCP_MODEL_MAX_CHARS)
             _emit_stream_event(
                 {
                     "type": "mcp_tool_result",
@@ -294,20 +357,37 @@ def _wrap_mcp_tool_for_sync(tool, loop: asyncio.AbstractEventLoop):
                 }
             )
             print(f"[MCP] ✅ {tool.name} 完成，耗时 {_time.time() - t0:.1f}s")
-            return result
-        except Exception as e:
+            return model_output
+        except concurrent.futures.TimeoutError:
+            future.cancel()
+            timeout_msg = f"MCP tool {tool.name} timed out after {call_timeout_seconds}s"
             _emit_stream_event(
                 {
                     "type": "mcp_tool_result",
                     "toolName": tool.name,
-                    "outputPreview": f"工具执行失败: {e}",
+                    "outputPreview": f"工具执行超时: {timeout_msg}",
+                    "outputLength": 0,
+                    "truncated": False,
+                    "isError": True,
+                    "content": f"MCP 工具 {tool.name} 执行超时",
+                }
+            )
+            print(f"[MCP] ❌ {tool.name} 超时，耗时 {_time.time() - t0:.1f}s")
+            raise TimeoutError(timeout_msg)
+        except Exception as e:
+            err_text = _format_mcp_exception(e)
+            _emit_stream_event(
+                {
+                    "type": "mcp_tool_result",
+                    "toolName": tool.name,
+                    "outputPreview": f"工具执行失败: {err_text}",
                     "outputLength": 0,
                     "truncated": False,
                     "isError": True,
                     "content": f"MCP 工具 {tool.name} 执行失败",
                 }
             )
-            print(f"[MCP] ❌ {tool.name} 失败，耗时 {_time.time() - t0:.1f}s，错误: {e}")
+            print(f"[MCP] ❌ {tool.name} 失败，耗时 {_time.time() - t0:.1f}s，错误: {err_text}")
             raise
 
     return StructuredTool(

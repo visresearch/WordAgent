@@ -13,6 +13,10 @@ _stop_requested_sessions: set[str] = set()
 _current_chat_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("_current_chat_id", default=None)
 # 当前线程使用的模型名（供子智能体继承主智能体的模型）
 _current_model_name: contextvars.ContextVar[str | None] = contextvars.ContextVar("_current_model_name", default=None)
+# 当前线程请求上下文（供工具获取文档元信息/范围等）
+_current_request_context: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
+    "_current_request_context", default=None
+)
 
 
 def create_tool_request(chat_id: str) -> asyncio.Queue:

@@ -104,6 +104,7 @@ const CSTYLE = {
 const DEFAULT_PSTYLE = ['left', 0, 0, 0, 0, 0, 0, '', 0];
 const DEFAULT_RSTYLE = ['', 12, false, false, 0, '#000000', '#000000', 0, false, false, false];
 const DEFAULT_CSTYLE = [1, 1, 'left', 'center'];
+const DEFAULT_IMAGE_PSTYLE = ['center', 0, 0, 0, 0, 0, 0, '', 0];
 
 function isEmptyParagraph(para) {
   return !!(para && Array.isArray(para.runs) && para.runs.length === 0);
@@ -409,6 +410,76 @@ function cleanCellText(text) {
     return '';
   }
   return text.replace(/[\r\n\u0007\u0001]+$/g, '');
+}
+
+function getDocumentUsableWidth(doc) {
+  let pageWidth = 425;
+  try {
+    const pageSetup = doc && doc.PageSetup;
+    if (pageSetup) {
+      const rawPageWidth = Number(pageSetup.PageWidth) || 0;
+      const leftMargin = Number(pageSetup.LeftMargin) || 0;
+      const rightMargin = Number(pageSetup.RightMargin) || 0;
+      const usableWidth = rawPageWidth - leftMargin - rightMargin;
+      if (usableWidth > 0) {
+        pageWidth = usableWidth;
+      }
+    }
+  } catch (e) {}
+  return pageWidth;
+}
+
+function normalizeImageSizeByMaxWidth(img, maxWidth) {
+  const normalized = {};
+  const width = Number(img && img.width);
+  const height = Number(img && img.height);
+  const hasWidth = Number.isFinite(width) && width > 0;
+  const hasHeight = Number.isFinite(height) && height > 0;
+  const safeMaxWidth = Number.isFinite(maxWidth) && maxWidth > 0 ? maxWidth : 425;
+
+  if (!hasWidth && !hasHeight) {
+    return normalized;
+  }
+
+  if (hasWidth && width > safeMaxWidth) {
+    const ratio = safeMaxWidth / width;
+    normalized.width = safeMaxWidth;
+    if (hasHeight) {
+      normalized.height = Math.max(1, Math.round(height * ratio));
+    }
+    return normalized;
+  }
+
+  if (hasWidth) {
+    normalized.width = width;
+  }
+  if (hasHeight) {
+    normalized.height = height;
+  }
+
+  return normalized;
+}
+
+function getImageParagraphStyle(img, styles) {
+  const pStyle = resolveStyle(styles, img && img.pStyle, DEFAULT_IMAGE_PSTYLE);
+  const normalized = Array.isArray(pStyle) ? [...pStyle] : [...DEFAULT_IMAGE_PSTYLE];
+
+  normalized[PSTYLE.ALIGNMENT] = normalized[PSTYLE.ALIGNMENT] || 'center';
+  normalized[PSTYLE.INDENT_LEFT] = Number(normalized[PSTYLE.INDENT_LEFT]) || 0;
+  normalized[PSTYLE.INDENT_RIGHT] = Number(normalized[PSTYLE.INDENT_RIGHT]) || 0;
+  normalized[PSTYLE.INDENT_FIRST_LINE] = Number(normalized[PSTYLE.INDENT_FIRST_LINE]) || 0;
+  normalized[PSTYLE.SPACE_BEFORE] = Number(normalized[PSTYLE.SPACE_BEFORE]) || 0;
+  normalized[PSTYLE.SPACE_AFTER] = Number(normalized[PSTYLE.SPACE_AFTER]) || 0;
+
+  return normalized;
+}
+
+function isMeaningfulEmptyParagraph(element, imageParaIndexSet) {
+  if (!element || element.type !== 'paragraph' || !isEmptyParagraph(element.data)) {
+    return false;
+  }
+  const paraIndex = element.data ? element.data.paraIndex : null;
+  return !(paraIndex != null && imageParaIndexSet.has(paraIndex));
 }
 
 const MATH_FONT_KEYWORDS = ['cambria math', 'dejavu math', 'tex gyre', 'stix', 'latin modern math'];
@@ -1785,23 +1856,24 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex) {
  * @param {number} insertPos - 插入位置
  * @returns {number} - 插入后增加的字符数
  */
-function insertImage(doc, img, insertPos) {
+function insertImage(doc, img, insertPos, maxWidth) {
   try {
-    const imagePath = img.tempPath || img.sourcePath;
+    const imagePath = img.tempPath || img.sourcePath || img.url;
     if (!imagePath) {
       return 0;
     }
 
     const insertRange = doc.Range(insertPos, insertPos);
+    const constrainedSize = normalizeImageSizeByMaxWidth(img, maxWidth);
 
     if (img.type === 'inline') {
       try {
         const inlineShape = doc.InlineShapes.AddPicture(imagePath, false, true, insertRange);
-        if (img.width) {
-          inlineShape.Width = img.width;
+        if (constrainedSize.width) {
+          inlineShape.Width = constrainedSize.width;
         }
-        if (img.height) {
-          inlineShape.Height = img.height;
+        if (constrainedSize.height) {
+          inlineShape.Height = constrainedSize.height;
         }
         if (img.altText) {
           inlineShape.AlternativeText = img.altText;
@@ -1815,11 +1887,11 @@ function insertImage(doc, img, insertPos) {
       try {
         const inlineShape = doc.InlineShapes.AddPicture(imagePath, false, true, insertRange);
         const shape = inlineShape.ConvertToShape();
-        if (img.width) {
-          shape.Width = img.width;
+        if (constrainedSize.width) {
+          shape.Width = constrainedSize.width;
         }
-        if (img.height) {
-          shape.Height = img.height;
+        if (constrainedSize.height) {
+          shape.Height = constrainedSize.height;
         }
         if (img.left !== undefined) {
           shape.Left = img.left;
@@ -2141,6 +2213,15 @@ function generateDocxFromJSON(jsonData, doc, insertParaIndex) {
 
     // 合并段落和表格，按位置排序
     const elements = [];
+    const imageParaIndexSet = new Set();
+
+    if (jsonData.images && jsonData.images.length > 0) {
+      for (const img of jsonData.images) {
+        if (img.paraIndex != null) {
+          imageParaIndexSet.add(img.paraIndex);
+        }
+      }
+    }
 
     if (jsonData.paragraphs) {
       jsonData.paragraphs.forEach((para, index) => {
@@ -2166,14 +2247,34 @@ function generateDocxFromJSON(jsonData, doc, insertParaIndex) {
 
     for (const element of elements) {
       if (element.type === 'paragraph' && isEmptyParagraph(element.data)) {
+        const paraIndex = element.data ? element.data.paraIndex : null;
+        const isImageAnchor = paraIndex != null && imageParaIndexSet.has(paraIndex);
+        if (isImageAnchor) {
+          consecutiveEmptyCount = 0;
+          processedElements.push(element);
+          continue;
+        }
+
+        if (processedElements.length === 0) {
+          continue;
+        }
+
         consecutiveEmptyCount++;
-        if (consecutiveEmptyCount <= 2) {
+        if (consecutiveEmptyCount <= 1) {
           processedElements.push(element);
         }
       } else {
         consecutiveEmptyCount = 0;
         processedElements.push(element);
       }
+    }
+
+    while (processedElements.length > 0) {
+      const lastElement = processedElements[processedElements.length - 1];
+      if (!isMeaningfulEmptyParagraph(lastElement, imageParaIndexSet)) {
+        break;
+      }
+      processedElements.pop();
     }
 
     // 确定插入起始位置
@@ -2230,13 +2331,20 @@ function generateDocxFromJSON(jsonData, doc, insertParaIndex) {
 
     const insertStartPos = currentPos;  // 记录插入起始位置
     let paraIndex = 0;
+    const docUsableWidth = getDocumentUsableWidth(doc);
 
     // 图片段落索引映射
     const imagesByParaIndex = new Map();
+    const imagesWithoutParaIndex = [];
     if (jsonData.images && jsonData.images.length > 0) {
       for (const img of jsonData.images) {
         if (img.paraIndex != null) {
-          imagesByParaIndex.set(img.paraIndex, img);
+          if (!imagesByParaIndex.has(img.paraIndex)) {
+            imagesByParaIndex.set(img.paraIndex, []);
+          }
+          imagesByParaIndex.get(img.paraIndex).push(img);
+        } else {
+          imagesWithoutParaIndex.push(img);
         }
       }
     }
@@ -2246,11 +2354,9 @@ function generateDocxFromJSON(jsonData, doc, insertParaIndex) {
 
       if (element.type === 'paragraph') {
         const para = element.data;
-        // 如果没有 text 字段，从 runs 拼接
-        const paraText = para.text ? para.text.trim() : (para.runs || []).map(r => r.text || '').join('').trim();
-        const isLegacyImagePlaceholder = paraText === '/' || paraText === '[图片]';
-        const hasAnchorImage = para.paraIndex != null && imagesByParaIndex.has(para.paraIndex);
-        const isImageAnchorParagraph = hasAnchorImage && (isLegacyImagePlaceholder || isEmptyParagraph(para));
+        const anchorImages = para.paraIndex != null ? imagesByParaIndex.get(para.paraIndex) : null;
+        const hasAnchorImage = !!(anchorImages && anchorImages.length > 0);
+        const isImageAnchorParagraph = hasAnchorImage;
 
         // 获取段落样式
         const pStyle = resolveStyle(styles, para.pStyle, DEFAULT_PSTYLE);
@@ -2266,12 +2372,28 @@ function generateDocxFromJSON(jsonData, doc, insertParaIndex) {
 
         // 处理图片锚点段落（兼容旧占位符和新空段落锚点）
         if (isImageAnchorParagraph && para.paraIndex != null) {
-          const img = imagesByParaIndex.get(para.paraIndex);
-          if (img) {
-            imagesByParaIndex.delete(para.paraIndex);
+          const imageList = imagesByParaIndex.get(para.paraIndex) || [];
+          if (imageList.length > 0) {
+            const anchorPStyle = getImageParagraphStyle(imageList[0], styles);
+            const imageIndentLeft = anchorPStyle[PSTYLE.INDENT_LEFT] || 0;
+            const imageIndentRight = anchorPStyle[PSTYLE.INDENT_RIGHT] || 0;
+            const imageMaxWidth = Math.max(120, docUsableWidth - imageIndentLeft - imageIndentRight);
             const paraStartPos = currentPos;
-            const charAdded = insertImage(doc, img, currentPos);
-            currentPos += charAdded;
+            let hasInsertedImage = false;
+
+            for (const img of imageList) {
+              const charAdded = insertImage(doc, img, currentPos, imageMaxWidth);
+              if (charAdded > 0) {
+                currentPos += charAdded;
+                hasInsertedImage = true;
+              }
+            }
+
+            imagesByParaIndex.delete(para.paraIndex);
+
+            if (!hasInsertedImage) {
+              continue;
+            }
 
             const range = doc.Range(currentPos, currentPos);
             range.Text = '\r';
@@ -2281,7 +2403,12 @@ function generateDocxFromJSON(jsonData, doc, insertParaIndex) {
               const imgRange = doc.Range(paraStartPos, paraStartPos + 1);
               const imgPara = imgRange.Paragraphs.Item(1);
               if (imgPara && imgPara.Format) {
-                imgPara.Format.Alignment = getAlignmentValue(alignment || 'center');
+                imgPara.Format.Alignment = getAlignmentValue(anchorPStyle[PSTYLE.ALIGNMENT] || alignment || 'center');
+                imgPara.Format.LeftIndent = imageIndentLeft;
+                imgPara.Format.RightIndent = imageIndentRight;
+                imgPara.Format.FirstLineIndent = anchorPStyle[PSTYLE.INDENT_FIRST_LINE] || 0;
+                imgPara.Format.SpaceBefore = anchorPStyle[PSTYLE.SPACE_BEFORE] || 0;
+                imgPara.Format.SpaceAfter = anchorPStyle[PSTYLE.SPACE_AFTER] || 0;
               }
             } catch (e) {}
 
@@ -2478,6 +2605,48 @@ function generateDocxFromJSON(jsonData, doc, insertParaIndex) {
             currentPos += 1;
           }
         }
+      }
+    }
+
+    const trailingImages = [...imagesWithoutParaIndex];
+    if (imagesByParaIndex.size > 0) {
+      for (const imageList of imagesByParaIndex.values()) {
+        if (Array.isArray(imageList) && imageList.length > 0) {
+          trailingImages.push(...imageList);
+        }
+      }
+    }
+
+    if (trailingImages.length > 0) {
+      for (const img of trailingImages) {
+        const imagePStyle = getImageParagraphStyle(img, styles);
+        const imageIndentLeft = imagePStyle[PSTYLE.INDENT_LEFT] || 0;
+        const imageIndentRight = imagePStyle[PSTYLE.INDENT_RIGHT] || 0;
+        const imageMaxWidth = Math.max(120, docUsableWidth - imageIndentLeft - imageIndentRight);
+        const paraStartPos = currentPos;
+        const charAdded = insertImage(doc, img, currentPos, imageMaxWidth);
+        if (charAdded <= 0) {
+          continue;
+        }
+
+        currentPos += charAdded;
+
+        const range = doc.Range(currentPos, currentPos);
+        range.Text = '\r';
+        currentPos += 1;
+
+        try {
+          const imgRange = doc.Range(paraStartPos, paraStartPos + 1);
+          const imgPara = imgRange.Paragraphs.Item(1);
+          if (imgPara && imgPara.Format) {
+            imgPara.Format.Alignment = getAlignmentValue(imagePStyle[PSTYLE.ALIGNMENT] || 'center');
+            imgPara.Format.LeftIndent = imageIndentLeft;
+            imgPara.Format.RightIndent = imageIndentRight;
+            imgPara.Format.FirstLineIndent = imagePStyle[PSTYLE.INDENT_FIRST_LINE] || 0;
+            imgPara.Format.SpaceBefore = imagePStyle[PSTYLE.SPACE_BEFORE] || 0;
+            imgPara.Format.SpaceAfter = imagePStyle[PSTYLE.SPACE_AFTER] || 0;
+          }
+        } catch (e) {}
       }
     }
 

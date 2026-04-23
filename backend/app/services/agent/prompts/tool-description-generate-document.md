@@ -23,12 +23,21 @@ Generate formatted document payload for insertion into the active Word document.
 - No visible placeholder text is required.
 - If you provide `paraIndex`, align it to an existing paragraph index in this payload.
 - If unsure, you can omit `paraIndex`; backend will auto-append empty anchor paragraphs for image insertion.
+- Recommend `images[].pStyle` centered with zero left/right indent, for example `["center", 0, 0, 0, 0, 0, 0, "正文", 1]`.
+- Keep image width within printable page width; if uncertain, use moderate width or omit explicit width.
 
 ## Typography rules for runs:
 - Do not use one `rStyle` for the entire document.
 - Split mixed text into multiple runs when needed.
 - Chinese body text should use a Chinese body style (for example `rS_2`/SimSun).
 - English words and numbers should use a Times New Roman run style (for example `rS_4` in body, `rS_3` in headings).
+- Do not insert extra spaces around English/number runs only to separate them from adjacent Chinese text.
+
+## Figure/Chart caption rules:
+- If a figure/chart is generated, add one caption paragraph directly below it.
+- Caption format: `图X，<brief description>`.
+- Caption paragraph should use `pS_6` (centered, style name `题图`).
+- Caption run should use a dedicated bold black-5th-size style (for example `rS_5`: `"黑体", 10.5`).
 
 ## JSON construction examples:
 
@@ -119,6 +128,7 @@ Hard requirements:
 3) Include a complete styles map in every call that covers all pStyle/rStyle/cStyle/tStyle references.
 4) Never use \n in run.text. One line = one paragraph object.
 5) Use empty paragraph objects for blank lines: {"pStyle":"","runs":[]}.
+6) Avoid consecutive empty paragraphs; keep at most one blank line unless user explicitly requires more.
 
 Style strategy (learned from benchmark document):
 - Keep a strict hierarchy: title -> chapter -> section -> subsection -> body.
@@ -126,12 +136,16 @@ Style strategy (learned from benchmark document):
 - Do run-level mixed typography:
 	- Chinese runs -> Chinese body font style.
 	- English words and numbers -> Times New Roman run style.
+	- Do not add extra spaces around English/number runs when adjacent to Chinese.
 	- Do not use one rStyle from start to end.
 
 Image strategy:
 - Put images in document.images.
 - No visible placeholder text is required.
 - If paraIndex is uncertain, omit paraIndex and let backend auto-anchor.
+- Prefer `images[].pStyle` centered and left/right indent = 0.
+- Ensure image width is not larger than printable page width.
+- If there is a figure/chart, add a caption paragraph directly below it using `图X，描述`, with `pS_6` (centered, `题图`) and a dedicated caption run style (`rS_5`, 黑体五号).
 
 Output process:
 Step A: build style map for this batch.

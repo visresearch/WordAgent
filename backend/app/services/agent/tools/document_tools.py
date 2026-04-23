@@ -92,9 +92,20 @@ def _ensure_image_payload_shape(doc_dict: dict) -> None:
         doc_dict["styles"] = styles
 
     # 为段落补齐 paraIndex（局部 0-based）
+    existing_para_indices: set[int] = set()
+    para_by_index: dict[int, dict] = {}
     for i, para in enumerate(paragraphs):
-        if isinstance(para, dict) and para.get("paraIndex") is None:
+        if not isinstance(para, dict):
+            continue
+        if para.get("paraIndex") is None:
             para["paraIndex"] = i
+        try:
+            para_idx = int(para.get("paraIndex"))
+            para["paraIndex"] = para_idx
+            existing_para_indices.add(para_idx)
+            para_by_index[para_idx] = para
+        except (TypeError, ValueError):
+            continue
 
     # 为图片补齐路径和默认值
     for img in images:
@@ -114,40 +125,57 @@ def _ensure_image_payload_shape(doc_dict: dict) -> None:
                 if local_path:
                     img["tempPath"] = local_path
 
-    # 缺少锚点时，自动追加图片锚点段落（默认空段落，不插入可见占位文本）
+    # 缺少锚点时，自动追加图片锚点段落（使用 "/" 作为统一占位符）
     p_style_id = next((k for k in styles if str(k).startswith("pS_")), None)
     r_style_id = next((k for k in styles if str(k).startswith("rS_")), None)
 
-    next_idx = len(paragraphs)
+    if p_style_id is None:
+        p_style_id = "pS_auto_img"
+        styles[p_style_id] = ["center", 0, 0, 0, 0, 0, 0, "", 0]
+    if r_style_id is None:
+        r_style_id = "rS_auto_img"
+        styles[r_style_id] = ["宋体", 12, False, False, 0, "#000000", "#000000", 0, False, False, False]
+
+    anchor_placeholder_run = [{"text": "/", "rStyle": r_style_id}]
+
+    next_idx = (max(existing_para_indices) + 1) if existing_para_indices else len(paragraphs)
     for img in images:
         if not isinstance(img, dict):
             continue
-        if img.get("paraIndex") is None:
-            img["paraIndex"] = next_idx
-            placeholder_text = str(img.get("placeholder") or "").strip()
-            if placeholder_text:
-                if p_style_id is None:
-                    p_style_id = "pS_auto_img"
-                    styles[p_style_id] = ["center", 0, 0, 0, 0, 0, 0, "", 0]
-                if r_style_id is None:
-                    r_style_id = "rS_auto_img"
-                    styles[r_style_id] = ["宋体", 12, False, False, 0, "#000000", "#000000", 0, False, False, False]
-                paragraphs.append(
-                    {
-                        "paraIndex": next_idx,
-                        "pStyle": p_style_id,
-                        "runs": [{"text": placeholder_text, "rStyle": r_style_id}],
-                    }
-                )
-            else:
-                paragraphs.append(
-                    {
-                        "paraIndex": next_idx,
-                        "pStyle": "",
-                        "runs": [],
-                    }
-                )
+
+        raw_para_index = img.get("paraIndex")
+        try:
+            para_index = int(raw_para_index) if raw_para_index is not None else None
+        except (TypeError, ValueError):
+            para_index = None
+
+        has_valid_anchor = para_index is not None and para_index in existing_para_indices
+        if not has_valid_anchor:
+            para_index = next_idx
             next_idx += 1
+            img["paraIndex"] = para_index
+            existing_para_indices.add(para_index)
+            paragraphs.append(
+                {
+                    "paraIndex": para_index,
+                    "pStyle": p_style_id,
+                    "runs": anchor_placeholder_run,
+                }
+            )
+            para_by_index[para_index] = paragraphs[-1]
+        else:
+            img["paraIndex"] = para_index
+
+            anchor_para = para_by_index.get(para_index)
+            if isinstance(anchor_para, dict):
+                # 直接覆盖锚点段落为统一占位符，不做占位文本扫描
+                anchor_para["runs"] = anchor_placeholder_run
+                anchor_para["pStyle"] = p_style_id
+
+        if not (img.get("tempPath") or img.get("sourcePath")) and img.get("url"):
+            print(
+                f"[generate_document] ⚠️ 图片未获取到本地路径，可能插入失败: paraIndex={img.get('paraIndex')}, url={img.get('url')}"
+            )
 
 
 def _save_generated_document_json(doc_dict: dict) -> str | None:

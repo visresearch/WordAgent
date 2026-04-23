@@ -3,6 +3,7 @@
 from .callback import (
     _current_chat_id,
     _current_model_name,
+    _current_request_context,
     clear_stop,
     cleanup_tool_request,
     create_tool_request,
@@ -60,6 +61,7 @@ __all__ = [
     "BASE_TOOLS",
     "TOOL_MAP",
     "_current_chat_id",
+    "_current_request_context",
     "clear_stop",
     "cleanup_tool_request",
     "create_tool_request",

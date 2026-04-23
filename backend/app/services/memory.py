@@ -11,9 +11,10 @@
 
 from __future__ import annotations
 
+import os
 import time
 import warnings
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 # 屏蔽 langchain_classic 的弃用警告（功能正常，仅提示迁移）
 warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"langchain_classic")
@@ -31,6 +32,38 @@ SHORT_TERM_K = 5  # 短期记忆保留最近 k 轮 (user+assistant 为一轮)
 LONG_TERM_TOP_K = 3  # RAG 检索返回 top-k 条
 # 临时开关：默认关闭长期记忆（RAG）注入与存储
 ENABLE_LONG_TERM_MEMORY = False
+
+
+def _get_env_int(name: str, default: int) -> int:
+    """Read positive int env value with fallback."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        val = int(str(raw).strip())
+        return val if val > 0 else default
+    except Exception:
+        return default
+
+
+# 上下文预算控制（可通过环境变量覆盖）
+# 当记忆消息估算 token 超过该阈值时，自动压缩旧消息。
+MAX_CONTEXT_TOKENS = _get_env_int("WORDAGENT_MAX_CONTEXT_TOKENS", 50000)
+# 预留给当前用户输入 + 系统提示 + 模型输出，记忆消息预算更保守。
+MEMORY_TOKEN_BUDGET = _get_env_int("WORDAGENT_MEMORY_TOKEN_BUDGET", 36000)
+# 单条消息的最大字符数（防止单条异常长消息撑爆上下文）。
+MAX_MESSAGE_CHARS = _get_env_int("WORDAGENT_MAX_MESSAGE_CHARS", 4000)
+# 是否启用 LLMChainExtractor 压缩（默认开启）
+ENABLE_LLM_CHAIN_EXTRACTOR = os.environ.get("WORDAGENT_ENABLE_LLM_CHAIN_EXTRACTOR", "true").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+# 使用 LLMChainExtractor 时保留末尾原始对话条数（最新消息不压缩）
+EXTRACTOR_KEEP_RECENT_MESSAGES = _get_env_int("WORDAGENT_EXTRACTOR_KEEP_RECENT_MESSAGES", 4)
+# 为防止压缩调用过慢，限制进入提取器的旧消息条数
+EXTRACTOR_MAX_SOURCE_MESSAGES = _get_env_int("WORDAGENT_EXTRACTOR_MAX_SOURCE_MESSAGES", 16)
 
 # FAISS 向量库持久化目录
 _FAISS_INDEX_DIR = get_data_dir() / "memory_faiss_index"
@@ -281,6 +314,245 @@ def _pair_history(history: list[dict]) -> list[tuple[str, str]]:
     return pairs
 
 
+def _extract_message_text(content) -> str:
+    """Extract plain text from message content (str/dict/list)."""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, dict):
+        text = content.get("text")
+        if isinstance(text, str):
+            return text
+        fallback = content.get("content")
+        return fallback if isinstance(fallback, str) else ""
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            item_text = _extract_message_text(item)
+            if item_text:
+                parts.append(item_text)
+        return "".join(parts)
+    return str(content)
+
+
+def _estimate_token_count(text: str) -> int:
+    """Estimate token count with tiktoken when available, fallback to char heuristic."""
+    if not text:
+        return 0
+
+    try:
+        import tiktoken
+
+        enc = tiktoken.get_encoding("cl100k_base")
+        return len(enc.encode(text))
+    except Exception:
+        # CJK 场景下按 1.7 字符/Token 近似，取更保守上界
+        return max(1, int(len(text) / 1.7))
+
+
+def _estimate_messages_tokens(messages: list[SystemMessage | HumanMessage | AIMessage]) -> int:
+    """Estimate total token count of a message list."""
+    total = 0
+    for msg in messages:
+        role = "system" if isinstance(msg, SystemMessage) else "user" if isinstance(msg, HumanMessage) else "assistant"
+        text = _extract_message_text(getattr(msg, "content", ""))
+        # 为角色与消息结构预留固定开销
+        total += 6 + _estimate_token_count(role) + _estimate_token_count(text)
+    return total
+
+
+def _truncate_text(text: str, max_chars: int) -> str:
+    """Truncate text by chars with a readable suffix."""
+    if len(text) <= max_chars:
+        return text
+    keep = max(0, max_chars - 48)
+    omitted = len(text) - keep
+    return f"{text[:keep]}\n[内容过长，已截断 {omitted} 字符]"
+
+
+def _truncate_message(msg: SystemMessage | HumanMessage | AIMessage, max_chars: int):
+    """Return same message type with truncated content if needed."""
+    content = _extract_message_text(getattr(msg, "content", ""))
+    new_text = _truncate_text(content, max_chars)
+
+    if isinstance(msg, HumanMessage):
+        return HumanMessage(content=new_text)
+    if isinstance(msg, AIMessage):
+        return AIMessage(content=new_text)
+    return SystemMessage(content=new_text)
+
+
+def _message_role(msg: SystemMessage | HumanMessage | AIMessage) -> str:
+    """Return normalized role name for a message object."""
+    if isinstance(msg, HumanMessage):
+        return "user"
+    if isinstance(msg, AIMessage):
+        return "assistant"
+    return "system"
+
+
+def _compress_with_llm_chain_extractor(
+    messages: list[SystemMessage | HumanMessage | AIMessage],
+    llm: "ChatOpenAI | None",
+    query: str,
+) -> list[SystemMessage | HumanMessage | AIMessage]:
+    """Use LLMChainExtractor to keep only query-relevant parts of older dialogue."""
+    if not ENABLE_LLM_CHAIN_EXTRACTOR or llm is None:
+        return messages
+
+    convo_msgs = [m for m in messages if not isinstance(m, SystemMessage)]
+    if len(convo_msgs) <= EXTRACTOR_KEEP_RECENT_MESSAGES:
+        return messages
+
+    try:
+        from langchain_core.documents import Document
+        from langchain_classic.retrievers.document_compressors import LLMChainExtractor
+    except Exception as e:
+        print(f"[Memory] ⚠️ LLMChainExtractor 不可用，跳过抽取压缩: {e}")
+        return messages
+
+    system_msgs = [m for m in messages if isinstance(m, SystemMessage)]
+    keep_recent = max(1, EXTRACTOR_KEEP_RECENT_MESSAGES)
+    tail_msgs = convo_msgs[-keep_recent:]
+    old_msgs = convo_msgs[:-keep_recent]
+
+    if EXTRACTOR_MAX_SOURCE_MESSAGES > 0 and len(old_msgs) > EXTRACTOR_MAX_SOURCE_MESSAGES:
+        old_msgs = old_msgs[-EXTRACTOR_MAX_SOURCE_MESSAGES:]
+
+    docs = []
+    for i, msg in enumerate(old_msgs):
+        text = _extract_message_text(getattr(msg, "content", "")).strip()
+        if not text:
+            continue
+        role = _message_role(msg)
+        docs.append(Document(page_content=f"[{role}] {text}", metadata={"role": role, "idx": i}))
+
+    if not docs:
+        return messages
+
+    question = (query or "").strip() or "请提取与当前任务最相关的上下文信息。"
+
+    try:
+        extractor = LLMChainExtractor.from_llm(llm)
+        compressed_docs = extractor.compress_documents(docs, query=question)
+    except Exception as e:
+        print(f"[Memory] ⚠️ LLMChainExtractor 压缩失败，回退常规裁剪: {e}")
+        return messages
+
+    if not compressed_docs:
+        return system_msgs + tail_msgs
+
+    parts: list[str] = []
+    for d in compressed_docs:
+        content = (d.page_content or "").strip()
+        if not content:
+            continue
+        role = str(d.metadata.get("role", "context"))
+        parts.append(f"[{role}] {content}")
+
+    if not parts:
+        return system_msgs + tail_msgs
+
+    compressed_context = (
+        "以下为经 LLMChainExtractor 压缩后的较早历史上下文（仅保留与当前请求相关的信息）：\n"
+        + "\n---\n".join(parts)
+    )
+
+    return system_msgs + [SystemMessage(content=compressed_context)] + tail_msgs
+
+
+def _fit_memory_messages_to_budget(
+    messages: list[SystemMessage | HumanMessage | AIMessage],
+    llm: "ChatOpenAI | None" = None,
+    query: str = "",
+    max_context_tokens: int = MAX_CONTEXT_TOKENS,
+    memory_budget_tokens: int = MEMORY_TOKEN_BUDGET,
+) -> tuple[list[SystemMessage | HumanMessage | AIMessage], dict[str, Any]]:
+    """Compress memory messages when token estimate exceeds configured budget."""
+    meta: dict[str, Any] = {
+        "triggered": False,
+        "strategy": "none",
+        "before_tokens_est": 0,
+        "after_tokens_est": 0,
+        "hard_budget": 0,
+        "dropped_messages": 0,
+    }
+
+    if not messages:
+        return messages, meta
+
+    # 先做单条上限裁剪，避免极端大消息
+    clipped = [_truncate_message(m, MAX_MESSAGE_CHARS) for m in messages]
+    est_tokens = _estimate_messages_tokens(clipped)
+    meta["before_tokens_est"] = est_tokens
+
+    # 记忆预算不能超过全局上下文上限
+    hard_budget = min(max_context_tokens, memory_budget_tokens)
+    meta["hard_budget"] = hard_budget
+    if est_tokens <= hard_budget:
+        meta["after_tokens_est"] = est_tokens
+        return clipped, meta
+
+    meta["triggered"] = True
+
+    # 优先使用 LLMChainExtractor 做“保语义”的压缩
+    extracted = _compress_with_llm_chain_extractor(clipped, llm=llm, query=query)
+    extracted_tokens = _estimate_messages_tokens(extracted)
+    if extracted_tokens <= hard_budget:
+        meta["strategy"] = "llm_chain_extractor"
+        meta["after_tokens_est"] = extracted_tokens
+        return extracted, meta
+
+    # 若提取后仍超预算，则继续走保底裁剪
+    clipped = extracted
+
+    system_msgs = [m for m in clipped if isinstance(m, SystemMessage)]
+    convo_msgs = [m for m in clipped if not isinstance(m, SystemMessage)]
+
+    selected_rev: list[HumanMessage | AIMessage] = []
+    used = _estimate_messages_tokens(system_msgs)
+
+    # 从最近消息向前保留，确保最新上下文优先
+    for msg in reversed(convo_msgs):
+        msg_tokens = _estimate_messages_tokens([msg])
+        if used + msg_tokens <= hard_budget:
+            selected_rev.append(msg)
+            used += msg_tokens
+            continue
+
+        # 如果一条都还没保住，至少塞入一条裁剪版最近消息
+        if not selected_rev and used < hard_budget:
+            compact = _truncate_message(msg, max(200, int(MAX_MESSAGE_CHARS * 0.35)))
+            compact_tokens = _estimate_messages_tokens([compact])
+            if used + compact_tokens <= hard_budget:
+                selected_rev.append(compact)
+                used += compact_tokens
+        break
+
+    selected = list(reversed(selected_rev))
+    dropped = len(convo_msgs) - len(selected)
+    meta["dropped_messages"] = max(0, dropped)
+
+    if dropped > 0:
+        note = SystemMessage(
+            content=(
+                f"上下文压缩提示：为控制 token 预算，已压缩并省略较早的 {dropped} 条历史消息，"
+                "优先保留最近对话。"
+            )
+        )
+        if _estimate_messages_tokens(system_msgs + [note] + selected) <= hard_budget:
+            final_msgs = system_msgs + [note] + selected
+            meta["strategy"] = "recent_keep_with_note"
+            meta["after_tokens_est"] = _estimate_messages_tokens(final_msgs)
+            return final_msgs, meta
+
+    final_msgs = system_msgs + selected
+    meta["strategy"] = "recent_keep"
+    meta["after_tokens_est"] = _estimate_messages_tokens(final_msgs)
+    return final_msgs, meta
+
+
 # ============== 统一记忆注入接口 ==============
 
 
@@ -291,7 +563,8 @@ def build_memory_messages(
     session_id: str | None = None,
     enable_summary: bool = True,
     enable_long_term: bool = False,
-) -> list[SystemMessage | HumanMessage | AIMessage]:
+    return_meta: bool = False,
+) -> list[SystemMessage | HumanMessage | AIMessage] | tuple[list[SystemMessage | HumanMessage | AIMessage], dict[str, Any]]:
     """
     构建包含三层记忆的消息列表，供 Agent 注入。
 
@@ -347,7 +620,31 @@ def build_memory_messages(
             result_messages.extend(short_term)
             print(f"[Memory] 注入 {len(short_term)} 条短期记忆")
 
-    return result_messages
+    compressed, compression_meta = _fit_memory_messages_to_budget(
+        result_messages,
+        llm=llm,
+        query=current_message,
+    )
+    if compression_meta.get("triggered"):
+        print(
+            "[Memory] 上下文压缩触发:",
+            {
+                "before_messages": len(result_messages),
+                "after_messages": len(compressed),
+                "before_tokens_est": compression_meta.get("before_tokens_est", 0),
+                "after_tokens_est": compression_meta.get("after_tokens_est", 0),
+                "hard_budget": compression_meta.get("hard_budget", 0),
+                "strategy": compression_meta.get("strategy", "none"),
+                "dropped_messages": compression_meta.get("dropped_messages", 0),
+                "max_context_tokens": MAX_CONTEXT_TOKENS,
+                "memory_budget_tokens": MEMORY_TOKEN_BUDGET,
+                "extractor_enabled": ENABLE_LLM_CHAIN_EXTRACTOR,
+            },
+        )
+
+    if return_meta:
+        return compressed, compression_meta
+    return compressed
 
 
 def store_conversation_to_long_term(

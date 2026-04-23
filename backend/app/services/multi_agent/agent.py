@@ -8,6 +8,7 @@ import asyncio
 import concurrent.futures
 import json
 import os
+import sys
 import traceback
 from collections.abc import AsyncGenerator
 
@@ -21,9 +22,28 @@ def _try_init_langsmith():
         from pathlib import Path
         from dotenv import load_dotenv
 
-        env_path = Path(__file__).resolve().parent.parent.parent.parent / ".env"
-        if env_path.exists():
-            load_dotenv(env_path, override=False)
+        candidates: list[Path] = []
+        if getattr(sys, "frozen", False):
+            candidates.append(Path(sys.executable).parent / ".env")
+            meipass = getattr(sys, "_MEIPASS", None)
+            if meipass:
+                candidates.append(Path(meipass) / ".env")
+
+        candidates.append(Path(__file__).resolve().parent.parent.parent.parent / ".env")
+        candidates.append(Path.cwd() / ".env")
+
+        seen: set[Path] = set()
+        for env_path in candidates:
+            try:
+                resolved = env_path.resolve()
+            except Exception:
+                resolved = env_path
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            if resolved.exists():
+                load_dotenv(resolved, override=False)
+
         if os.environ.get("LANGSMITH_TRACING", "").lower() == "true" and os.environ.get("LANGSMITH_API_KEY"):
             print("[LangSmith] ✅ 多智能体已启用 tracing，project =", os.environ.get("LANGSMITH_PROJECT", "default"))
             return True
@@ -712,14 +732,16 @@ async def process_writing_request_stream(
             try:
                 from app.services.memory import build_memory_messages
 
-                memory_msgs = build_memory_messages(
+                memory_result = build_memory_messages(
                     history=history,
                     current_message=message,
                     llm=llm,
                     session_id=chat_id,
                     enable_long_term=True,
                     enable_summary=True,
+                    return_meta=True,
                 )
+                memory_msgs, memory_meta = memory_result
                 if memory_msgs:
                     # 将记忆消息转为文本上下文，供 planner 使用
                     parts = []
@@ -732,6 +754,17 @@ async def process_writing_request_stream(
                             parts.append(f"[助手] {m.content}")
                     memory_context = "\n\n".join(parts)
                     print(f"[MultiAgent] 构建记忆上下文: {len(memory_context)} 字")
+                if isinstance(memory_meta, dict) and memory_meta.get("triggered"):
+                    before_tokens = int(memory_meta.get("before_tokens_est", 0) or 0)
+                    after_tokens = int(memory_meta.get("after_tokens_est", 0) or 0)
+                    strategy = str(memory_meta.get("strategy", "none"))
+                    dropped = int(memory_meta.get("dropped_messages", 0) or 0)
+                    status_text = (
+                        f"🗜️ 上下文压缩完成（{before_tokens} -> {after_tokens} tokens, "
+                        f"strategy={strategy}, dropped={dropped}）"
+                    )
+                    print(f"[MultiAgent] {status_text}")
+                    yield f"data: {json.dumps({'type': 'status', 'content': status_text}, ensure_ascii=False)}\n\n"
             except Exception as mem_err:
                 print(f"[MultiAgent] ⚠️ 构建记忆失败: {mem_err}")
 

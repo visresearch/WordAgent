@@ -83,6 +83,30 @@ def parse_tool_args_with_repair(raw_args: Any) -> dict | None:
     return None
 
 
+def _normalize_blank_paragraph_shape(document: dict) -> dict:
+    """Normalize blank paragraph shape for generate_document payload.
+
+    Rule: when runs is an empty list, pStyle must be an empty string.
+    """
+    paragraphs = document.get("paragraphs")
+    if not isinstance(paragraphs, list):
+        return document
+
+    normalized_paragraphs: list[Any] = []
+    for para in paragraphs:
+        if not isinstance(para, dict):
+            normalized_paragraphs.append(para)
+            continue
+
+        runs = para.get("runs")
+        if isinstance(runs, list) and len(runs) == 0 and para.get("pStyle") != "":
+            para = {**para, "pStyle": ""}
+
+        normalized_paragraphs.append(para)
+
+    return {**document, "paragraphs": normalized_paragraphs}
+
+
 def normalize_tool_args(tool_name: str, raw_args: Any) -> dict:
     """归一化工具参数，修复常见的模型参数形态偏差。"""
     args = parse_tool_args_with_repair(raw_args)
@@ -113,6 +137,8 @@ def normalize_tool_args(tool_name: str, raw_args: Any) -> dict:
                     "generate_document.document 解析失败。请传对象(dict)而非字符串；"
                     "若为 JSON 字符串请确保内部引号已正确转义。"
                 )
-            args = {**args, "document": parsed_document}
+            args = {**args, "document": _normalize_blank_paragraph_shape(parsed_document)}
+        elif isinstance(document, dict):
+            args = {**args, "document": _normalize_blank_paragraph_shape(document)}
 
     return args

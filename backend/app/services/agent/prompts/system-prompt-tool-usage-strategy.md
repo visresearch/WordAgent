@@ -10,3 +10,4 @@
 - Use `web_fetch` only when a concrete URL is provided and page evidence is needed.
 - When user asks for a specific writing framework/skill, use `list_skills` and `load_skill_context` to fetch local skill guidance first.
 - Use `run_sub_agent(explorer)` for long/complex source analysis; use `run_sub_agent(reviewer)` only for post-writing review.
+- If document context is empty (for example totalParas <= 1 and no specific read ranges), avoid `run_sub_agent(explorer)`.

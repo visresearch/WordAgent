@@ -137,7 +137,11 @@
                         <path d="M6 3l5 5-5 5V3z" />
                       </svg>
                     </button>
-                    <span class="typing" :class="{ 'mcp-error-text': part.isError }">
+                    <span
+                      class="typing mcp-inline-text-toggle"
+                      :class="{ 'mcp-error-text': part.isError }"
+                      @click="toggleMcpExpand(index, partIndex)"
+                    >
                       {{ part.preview || ('🔧 调用 MCP 工具: ' + (part.toolName || 'unknown_tool')) }}
                     </span>
                   </div>
@@ -623,6 +627,10 @@ export default {
 
 .mcp-inline-head {
   gap: 6px;
+}
+
+.mcp-inline-text-toggle {
+  cursor: pointer;
 }
 
 .mcp-inline-toggle {

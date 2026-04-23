@@ -11,6 +11,8 @@
 - Keep image URLs unchanged (including query parameters). Do not rewrite or strip URL params.
 - Image insertion does not require visible placeholder text; omit placeholder paragraphs unless user explicitly asks.
 - If `paraIndex` is not clear, omit it and let backend create empty anchor paragraphs automatically.
+- Prefer setting `images[].pStyle` to centered with zero horizontal indent (for example `["center", 0, 0, 0, 0, 0, 0, "正文", 1]`).
+- Keep image `width` within printable page width. If uncertain, use conservative width (for example 320-420) or omit width and keep aspect ratio.
 - For mixed-language text, split runs and use multiple `rStyle` values; do not use one `rStyle` for the whole document.
 
 Pre-call guardrails:
@@ -72,11 +74,14 @@ Use a profile similar to the benchmark sample rather than one-style-for-all outp
 - Never use `\n` inside `run.text`.
 - One visual line = one paragraph item.
 - Blank lines use empty paragraph object: `{ "pStyle": "", "runs": [] }`.
+- Avoid repeated empty paragraphs. Keep at most one blank line between sections unless user explicitly asks for larger spacing.
 
 ### Image insertion rules
 - Prefer `document.images` with `url`/`tempPath`.
 - No visible placeholder text required.
 - If exact `paraIndex` is unclear, omit it and let backend append empty anchor paragraphs.
+- Recommend `images[].pStyle` centered with left/right indent = 0.
+- Ensure image width does not exceed page printable width.
 
 ### Suggested execution prompt (internal)
 Before calling `generate_document`, follow this checklist:

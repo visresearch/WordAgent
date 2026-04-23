@@ -11,6 +11,48 @@ import os
 from pathlib import Path
 
 
+def _load_runtime_env() -> None:
+    """加载运行时 .env（优先可执行文件同目录），兼容 PyInstaller 与开发环境。"""
+    try:
+        from dotenv import load_dotenv
+    except Exception:
+        return
+
+    candidates: list[Path] = []
+
+    # 优先：可执行文件同目录（打包后推荐放置可编辑 .env）
+    if getattr(sys, "frozen", False):
+        candidates.append(Path(sys.executable).parent / ".env")
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            candidates.append(Path(meipass) / ".env")
+    else:
+        # 开发环境：backend/.env
+        candidates.append(Path(__file__).resolve().parent / ".env")
+
+    # 通用兜底：当前工作目录 .env
+    candidates.append(Path.cwd() / ".env")
+
+    loaded = False
+    seen: set[Path] = set()
+    for env_path in candidates:
+        try:
+            resolved = env_path.resolve()
+        except Exception:
+            resolved = env_path
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+
+        if resolved.exists():
+            load_dotenv(resolved, override=False)
+            loaded = True
+            print(f"[Env] 已加载配置: {resolved}")
+
+    if not loaded:
+        print("[Env] 未找到 .env，继续使用系统环境变量")
+
+
 def get_base_path():
     """获取基础路径，支持 PyInstaller 打包后运行"""
     if getattr(sys, "frozen", False):
@@ -56,6 +98,8 @@ def start_gui():
 
 
 if __name__ == "__main__":
+
+    _load_runtime_env()
 
     def signal_handler(sig, frame):
         print("\n正在安全关闭服务...")

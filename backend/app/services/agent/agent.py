@@ -6,9 +6,27 @@ import asyncio
 import concurrent.futures
 import json
 import os
+import sys
 import time
 import traceback
 from collections.abc import AsyncGenerator
+
+
+def _get_env_int(name: str, default: int) -> int:
+    """Read positive int env var with fallback."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = int(str(raw).strip())
+        return value if value > 0 else default
+    except Exception:
+        return default
+
+
+_AGENT_RECURSION_LIMIT = _get_env_int("WORDAGENT_AGENT_RECURSION_LIMIT", 12)
+_MAX_TOOL_CALLS_PER_REQUEST = _get_env_int("WORDAGENT_MAX_TOOL_CALLS_PER_REQUEST", 10)
+_MAX_MCP_CALLS_PER_REQUEST = _get_env_int("WORDAGENT_MAX_MCP_CALLS_PER_REQUEST", 4)
 
 
 # region LangSmith（可选，不影响正常运行）
@@ -20,9 +38,28 @@ def _try_init_langsmith():
         from pathlib import Path
         from dotenv import load_dotenv
 
-        env_path = Path(__file__).resolve().parent.parent.parent.parent / ".env"
-        if env_path.exists():
-            load_dotenv(env_path, override=False)
+        candidates: list[Path] = []
+        if getattr(sys, "frozen", False):
+            candidates.append(Path(sys.executable).parent / ".env")
+            meipass = getattr(sys, "_MEIPASS", None)
+            if meipass:
+                candidates.append(Path(meipass) / ".env")
+
+        candidates.append(Path(__file__).resolve().parent.parent.parent.parent / ".env")
+        candidates.append(Path.cwd() / ".env")
+
+        seen: set[Path] = set()
+        for env_path in candidates:
+            try:
+                resolved = env_path.resolve()
+            except Exception:
+                resolved = env_path
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            if resolved.exists():
+                load_dotenv(resolved, override=False)
+
         # 只有同时存在 key 和 tracing=true 时才视为可用
         if os.environ.get("LANGSMITH_TRACING", "").lower() == "true" and os.environ.get("LANGSMITH_API_KEY"):
             print("[LangSmith] ✅ 已启用 tracing，project =", os.environ.get("LANGSMITH_PROJECT", "default"))
@@ -45,6 +82,7 @@ from app.services.utils import normalize_tool_args
 from app.services.agent.tools import (
     get_base_tools_for_mode,
     _current_chat_id,
+    _current_request_context,
     register_loop,
     is_stop_requested,
 )
@@ -171,6 +209,28 @@ def _prepare_tools_for_agent(tools: list, mcp_tool_names: set[str]) -> list:
                 if is_stop_requested(chat_id):
                     return "Operation cancelled by user"
 
+                # 每请求调用预算限制（防止 agent 在工具调用中打转）
+                request_ctx = _current_request_context.get(None)
+                if isinstance(request_ctx, dict):
+                    total_calls = int(request_ctx.get("_tool_call_count", 0)) + 1
+                    max_tool_calls = int(request_ctx.get("_max_tool_calls", _MAX_TOOL_CALLS_PER_REQUEST))
+                    if total_calls > max_tool_calls:
+                        return (
+                            f"Tool call budget exceeded ({max_tool_calls}) for this request. "
+                            "Stop calling tools and provide the best possible final answer with available evidence."
+                        )
+                    request_ctx["_tool_call_count"] = total_calls
+
+                    if mcp:
+                        mcp_calls = int(request_ctx.get("_mcp_call_count", 0)) + 1
+                        max_mcp_calls = int(request_ctx.get("_max_mcp_calls", _MAX_MCP_CALLS_PER_REQUEST))
+                        if mcp_calls > max_mcp_calls:
+                            return (
+                                f"MCP call budget exceeded ({max_mcp_calls}) for this request. "
+                                "Do not call MCP tools again; continue with current evidence and complete the task."
+                            )
+                        request_ctx["_mcp_call_count"] = mcp_calls
+
                 # MCP 工具状态输出
                 if mcp:
                     try:
@@ -187,21 +247,54 @@ def _prepare_tools_for_agent(tools: list, mcp_tool_names: set[str]) -> list:
 
                 # 参数标准化
                 normalized = normalize_tool_args(tname, kwargs)
+                required_fields: list[str] = []
+                if mcp:
+                    if isinstance(args_schema, dict):
+                        required = args_schema.get("required")
+                        if isinstance(required, list):
+                            required_fields = [str(x) for x in required]
+                    else:
+                        # 兼容 pydantic v2 / v1 schema
+                        model_fields = getattr(args_schema, "model_fields", None)
+                        if isinstance(model_fields, dict):
+                            for name, field in model_fields.items():
+                                is_required = False
+                                try:
+                                    is_required = bool(field.is_required())
+                                except Exception:
+                                    is_required = False
+                                if is_required:
+                                    required_fields.append(str(name))
+                        else:
+                            legacy_fields = getattr(args_schema, "__fields__", None)
+                            if isinstance(legacy_fields, dict):
+                                for name, field in legacy_fields.items():
+                                    if getattr(field, "required", False):
+                                        required_fields.append(str(name))
+
+                    missing_fields = [
+                        field
+                        for field in required_fields
+                        if field not in normalized or normalized.get(field) in (None, "")
+                    ]
+                    if missing_fields:
+                        provided_keys = sorted(list(normalized.keys())) if isinstance(normalized, dict) else []
+                        return (
+                            f"MCP tool {tname} argument validation failed: missing required params {missing_fields}. "
+                            f"Required params: {required_fields}. Provided params: {provided_keys}. "
+                            "Do not retry this tool with the same arguments; rebuild arguments from the tool schema first."
+                        )
+
                 try:
                     return orig_fn(**normalized)
                 except Exception as e:
                     if mcp:
-                        required_fields: list[str] = []
-                        if isinstance(args_schema, dict):
-                            required = args_schema.get("required")
-                            if isinstance(required, list):
-                                required_fields = [str(x) for x in required]
                         required_hint = f"Required params: {required_fields}. " if required_fields else ""
                         provided_keys = sorted(list(normalized.keys())) if isinstance(normalized, dict) else []
                         return (
                             f"MCP tool {tname} call failed: {e}. "
                             f"{required_hint}Provided params: {provided_keys}. "
-                            "Please rebuild arguments strictly according to the tool schema and retry once."
+                            "Rebuild arguments strictly according to the tool schema before retrying."
                         )
                     raise
 
@@ -249,6 +342,14 @@ async def process_writing_request_stream(
 
     print("[Agent] 开始处理请求")
     print(f"[Agent] 模式: {mode}")
+    print(
+        "[Agent] 预算配置:",
+        {
+            "recursion_limit": _AGENT_RECURSION_LIMIT,
+            "max_tool_calls": _MAX_TOOL_CALLS_PER_REQUEST,
+            "max_mcp_calls": _MAX_MCP_CALLS_PER_REQUEST,
+        },
+    )
 
     model_name = resolve_model(model or "auto")
     _thinking_enabled = supports_thinking(model_name)
@@ -311,16 +412,29 @@ async def process_writing_request_stream(
         # 注入记忆（当前默认：摘要 + 短期；长期 RAG 暂停）
         from app.services.memory import build_memory_messages
 
-        memory_msgs = build_memory_messages(
+        memory_result = build_memory_messages(
             history=history,
             current_message=message,
             llm=llm,
             session_id=chat_id,
             enable_long_term=False,
+            return_meta=True,
         )
+        memory_msgs, memory_meta = memory_result
         if memory_msgs:
             messages.extend(memory_msgs)
             print(f"[Agent] 注入 {len(memory_msgs)} 条记忆消息")
+        if isinstance(memory_meta, dict) and memory_meta.get("triggered"):
+            before_tokens = int(memory_meta.get("before_tokens_est", 0) or 0)
+            after_tokens = int(memory_meta.get("after_tokens_est", 0) or 0)
+            strategy = str(memory_meta.get("strategy", "none"))
+            dropped = int(memory_meta.get("dropped_messages", 0) or 0)
+            status_text = (
+                f"🗜️ 上下文压缩完成（{before_tokens} -> {after_tokens} tokens, "
+                f"strategy={strategy}, dropped={dropped}）"
+            )
+            print(f"[Agent] {status_text}")
+            yield f"data: {json.dumps({'type': 'status', 'content': status_text}, ensure_ascii=False)}\n\n"
 
         # 构建用户消息
         user_content = message
@@ -442,11 +556,26 @@ async def process_writing_request_stream(
                 if chat_id:
                     _current_chat_id.set(chat_id)
                 _current_model_name.set(model_name)
+                _current_request_context.set(
+                    {
+                        "document_meta": document_meta,
+                        "document_range": document_range,
+                        "mode": mode,
+                        "has_attached_files": bool(attached_files),
+                        "_tool_call_count": 0,
+                        "_mcp_call_count": 0,
+                        "_max_tool_calls": _MAX_TOOL_CALLS_PER_REQUEST,
+                        "_max_mcp_calls": _MAX_MCP_CALLS_PER_REQUEST,
+                    }
+                )
 
                 import uuid as _uuid
 
                 _thread_id = str(_uuid.uuid4())
-                _config = {"configurable": {"thread_id": _thread_id}}
+                _config = {
+                    "configurable": {"thread_id": _thread_id},
+                    "recursion_limit": _AGENT_RECURSION_LIMIT,
+                }
                 if langsmith_config:
                     _config.update(langsmith_config)
 
