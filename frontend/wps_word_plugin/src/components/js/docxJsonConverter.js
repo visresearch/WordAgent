@@ -18,7 +18,8 @@
  *       spaceAfter,            // [6] 段后间距
  *       styleName              // [7] 样式名称
  *     ],
- *     runs: [{                 // 格式块数组
+ *     runs: [{                 // 格式块数组（文本或图片）
+ *       // 文本 run:
  *       text: string,          // 文字内容
  *       rStyle: [              // 字符样式数组（按顺序）
  *         fontName,            // [0] 字体名称
@@ -33,6 +34,11 @@
  *         superscript,         // [9] 上标
  *         subscript            // [10] 下标
  *       ]
+ *       // 或图片 run（没有 text 字段）:
+ *       // url/tempPath/sourcePath: 图片路径（三选一）
+ *       // width/height: 图片尺寸
+ *       // left/top/wrapType: 浮动图片属性
+ *       // altText: 替代文本
  *     }]
  *   }],
  *   tables: [{                 // 表格数组
@@ -49,7 +55,6 @@
  *       ]
  *     }]]
  *   }],
- *   images: [{...}],          // 图片数组（保持不变）
  *   fields: [],               // 域代码数组
  *   hasTOC: boolean,          // 是否包含目录
  *   styles: {                 // 样式字典（去重）
@@ -59,6 +64,9 @@
  *     tS_1: [...]             // 表格样式，键名 tS_N
  *   }
  * }
+ *
+ * 图片现在作为 inline runs 嵌入段落中，没有独立的 images 数组。
+ * 文本 run 有 text 字段，图片 run 没有 text 字段但有 url/tempPath 等。
  *
  * 段落/run/单元格中的 pStyle/rStyle/cStyle/tStyle 为字符串引用（如 "pS_1"），
  * 指向 styles 字典中的完整样式数组，以去重节约 token。
@@ -472,14 +480,6 @@ function getImageParagraphStyle(img, styles) {
   normalized[PSTYLE.SPACE_AFTER] = Number(normalized[PSTYLE.SPACE_AFTER]) || 0;
 
   return normalized;
-}
-
-function isMeaningfulEmptyParagraph(element, imageParaIndexSet) {
-  if (!element || element.type !== 'paragraph' || !isEmptyParagraph(element.data)) {
-    return false;
-  }
-  const paraIndex = element.data ? element.data.paraIndex : null;
-  return !(paraIndex != null && imageParaIndexSet.has(paraIndex));
 }
 
 const MATH_FONT_KEYWORDS = ['cambria math', 'dejavu math', 'tex gyre', 'stix', 'latin modern math'];
@@ -1262,70 +1262,12 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex) {
         paraStartsSorted.push(ps);
       }
 
-      const result = { paragraphs: [], tables: [], fields: [], images: [] };
+      const result = { paragraphs: [], tables: [], fields: [] };
 
       // 解析范围内的段落起止位置
       const rangeStart = doc.Paragraphs.Item(startParaIndex + 1).Range.Start;
       const rangeEnd = doc.Paragraphs.Item(endParaIndex + 1).Range.End;
       const requestedRange = doc.Range(rangeStart, rangeEnd);
-
-      // 解析范围内的嵌入式图片
-      try {
-        const inlineShapes = requestedRange.InlineShapes;
-        if (inlineShapes && inlineShapes.Count > 0) {
-          for (let i = 1; i <= inlineShapes.Count; i++) {
-            try {
-              const shape = inlineShapes.Item(i);
-              if (shape.Type === 3 || shape.Type === 1) {
-                const imageInfo = exportImageToTemp(shape);
-                const shapeStart = shape.Range ? shape.Range.Start : 0;
-                result.images.push({
-                  type: 'inline',
-                  width: shape.Width || 100,
-                  height: shape.Height || 100,
-                  paraIndex: paraStartToIndex.get(shapeStart) ?? -1,
-                  altText: shape.AlternativeText || '',
-                  ...imageInfo,
-                  placeholder: '[图片]'
-                });
-              }
-            } catch (e) {}
-          }
-        }
-      } catch (e) {}
-
-      // 解析范围内的浮动图片
-      try {
-        const shapes = requestedRange.ShapeRange;
-        if (shapes && shapes.Count > 0) {
-          for (let i = 1; i <= shapes.Count; i++) {
-            try {
-              const shape = shapes.Item(i);
-              if ([13, 75, 3, 1].includes(shape.Type)) {
-                const imageInfo = exportImageToTemp(shape);
-                let anchorStart = 0;
-                try {
-                  anchorStart = shape.Anchor ? shape.Anchor.Start : 0;
-                } catch (e) {
-                  anchorStart = shape.Range ? shape.Range.Start : 0;
-                }
-                result.images.push({
-                  type: 'floating',
-                  width: shape.Width || 100,
-                  height: shape.Height || 100,
-                  left: shape.Left || 0,
-                  top: shape.Top || 0,
-                  wrapType: getWrapTypeName(shape.WrapFormat ? shape.WrapFormat.Type : 0),
-                  paraIndex: paraStartToIndex.get(anchorStart) ?? -1,
-                  altText: shape.AlternativeText || '',
-                  ...imageInfo,
-                  placeholder: '[图片]'
-                });
-              }
-            } catch (e) {}
-          }
-        }
-      } catch (e) {}
 
       // 解析范围内的表格（表格起始位置落在请求范围内）
       const parsedTableRanges = new Set();
@@ -1341,6 +1283,101 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex) {
           } catch (e) {}
         }
       }
+
+      // 解析段落范围内的嵌入式图片
+      function getInlineShapesInRange(paraRange) {
+        const shapes = [];
+        try {
+          const inlineShapes = paraRange.InlineShapes;
+          if (inlineShapes && inlineShapes.Count > 0) {
+            for (let i = 1; i <= inlineShapes.Count; i++) {
+              try {
+                const shape = inlineShapes.Item(i);
+                if (shape.Type === 3 || shape.Type === 1) {
+                  shapes.push(shape);
+                }
+              } catch (e) {}
+            }
+          }
+        } catch (e) {}
+        return shapes;
+      }
+
+      // 解析段落范围内的浮动图片
+      function getFloatingShapesInRange(paraRange) {
+        const shapes = [];
+        try {
+          const shapes2 = paraRange.ShapeRange;
+          if (shapes2 && shapes2.Count > 0) {
+            for (let i = 1; i <= shapes2.Count; i++) {
+              try {
+                const shape = shapes2.Item(i);
+                if ([13, 75, 3, 1].includes(shape.Type)) {
+                  shapes.push(shape);
+                }
+              } catch (e) {}
+            }
+          }
+        } catch (e) {}
+        return shapes;
+      }
+
+      // 解析范围内的图片并收集到临时数组
+      const inlineImages = [];
+      const floatingImages = [];
+      try {
+        const allInlineShapes = requestedRange.InlineShapes;
+        if (allInlineShapes && allInlineShapes.Count > 0) {
+          for (let i = 1; i <= allInlineShapes.Count; i++) {
+            try {
+              const shape = allInlineShapes.Item(i);
+              if (shape.Type === 3 || shape.Type === 1) {
+                const imageInfo = exportImageToTemp(shape);
+                inlineImages.push({
+                  shape,
+                  width: shape.Width || 100,
+                  height: shape.Height || 100,
+                  altText: shape.AlternativeText || '',
+                  rangeStart: shape.Range ? shape.Range.Start : 0,
+                  rangeEnd: shape.Range ? shape.Range.End : 0,
+                  ...imageInfo
+                });
+              }
+            } catch (e) {}
+          }
+        }
+      } catch (e) {}
+      try {
+        const allShapes = requestedRange.ShapeRange;
+        if (allShapes && allShapes.Count > 0) {
+          for (let i = 1; i <= allShapes.Count; i++) {
+            try {
+              const shape = allShapes.Item(i);
+              if ([13, 75, 3, 1].includes(shape.Type)) {
+                const imageInfo = exportImageToTemp(shape);
+                let anchorStart = 0;
+                try {
+                  anchorStart = shape.Anchor ? shape.Anchor.Start : 0;
+                } catch (e) {
+                  anchorStart = shape.Range ? shape.Range.Start : 0;
+                }
+                floatingImages.push({
+                  shape,
+                  type: 'floating',
+                  width: shape.Width || 100,
+                  height: shape.Height || 100,
+                  left: shape.Left || 0,
+                  top: shape.Top || 0,
+                  wrapType: getWrapTypeName(shape.WrapFormat ? shape.WrapFormat.Type : 0),
+                  altText: shape.AlternativeText || '',
+                  anchorStart,
+                  ...imageInfo
+                });
+              }
+            } catch (e) {}
+          }
+        }
+      } catch (e) {}
 
       for (let idx = startParaIndex; idx <= endParaIndex; idx++) {
         const para = doc.Paragraphs.Item(idx + 1); // WPS 1-based
@@ -1360,11 +1397,34 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex) {
           continue;
         }
 
+        // 收集落在此段落范围内的图片
+        const paraInlineImages = [];
+        for (let i = inlineImages.length - 1; i >= 0; i--) {
+          const img = inlineImages[i];
+          if (img.rangeStart >= paraStart && img.rangeEnd <= paraEnd) {
+            paraInlineImages.push(inlineImages.splice(i, 1)[0]);
+          }
+        }
+        const paraFloatingImages = [];
+        for (let i = floatingImages.length - 1; i >= 0; i--) {
+          const img = floatingImages[i];
+          if (img.anchorStart >= paraStart && img.anchorStart < paraEnd) {
+            paraFloatingImages.push(floatingImages.splice(i, 1)[0]);
+          }
+        }
+
         const paraText = cleanText(paraRange.Text || '');
 
-        // 空段落
+        // 空段落但有图片
+        if ((!paraText || paraText.match(/^[\r\n\f\u0007]*$/)) && (paraInlineImages.length > 0 || paraFloatingImages.length > 0)) {
+          result.paragraphs.push({ pStyle: DEFAULT_IMAGE_PSTYLE, runs: [], paraIndex: idx });
+        }
+
+        // 如果是空段落且没有图片
         if (!paraText || paraText.match(/^[\r\n\f\u0007]*$/)) {
-          result.paragraphs.push({ pStyle: '', runs: [], paraIndex: idx });
+          if (paraInlineImages.length === 0 && paraFloatingImages.length === 0) {
+            result.paragraphs.push({ pStyle: '', runs: [], paraIndex: idx });
+          }
           continue;
         }
 
@@ -1478,9 +1538,65 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex) {
           }
         }
 
+        // 在段落末尾添加 inline 图片 runs
+        for (const img of paraInlineImages) {
+          paragraphData.runs.push({
+            width: img.width,
+            height: img.height,
+            altText: img.altText,
+            tempPath: img.tempPath,
+            sourcePath: img.sourcePath
+          });
+        }
+        for (const img of paraFloatingImages) {
+          paragraphData.runs.push({
+            type: img.type,
+            width: img.width,
+            height: img.height,
+            left: img.left,
+            top: img.top,
+            wrapType: img.wrapType,
+            altText: img.altText,
+            tempPath: img.tempPath,
+            sourcePath: img.sourcePath
+          });
+        }
+
         if (paragraphData.runs.length > 0) {
           result.paragraphs.push(paragraphData);
         }
+      }
+
+      // 将剩余未分配的图片作为独立段落添加（理论上不应该发生）
+      for (const img of inlineImages) {
+        result.paragraphs.push({
+          pStyle: DEFAULT_IMAGE_PSTYLE,
+          runs: [{
+            width: img.width,
+            height: img.height,
+            altText: img.altText,
+            tempPath: img.tempPath,
+            sourcePath: img.sourcePath
+          }],
+          paraIndex: -1
+        });
+      }
+      for (const img of floatingImages) {
+        result.paragraphs.push({
+          pStyle: DEFAULT_IMAGE_PSTYLE,
+          runs: [{
+            type: img.type,
+            width: img.width,
+            height: img.height,
+            left: img.left,
+            top: img.top,
+            wrapType: img.wrapType,
+            altText: img.altText,
+            tempPath: img.tempPath,
+            sourcePath: img.sourcePath
+          }],
+          paraIndex: -1
+        });
       }
 
       return deduplicateStyles(result);
@@ -1501,8 +1617,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex) {
     const result = {
       paragraphs: [],
       tables: [],
-      fields: [],
-      images: []
+      fields: []
     };
 
     // 解析域代码（检测目录等）
@@ -1559,7 +1674,9 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex) {
       }
     }
 
-    // 解析嵌入式图片
+    // 收集所有图片到临时数组
+    const inlineImages = [];
+    const floatingImages = [];
     try {
       const inlineShapes = range.InlineShapes;
       if (inlineShapes && inlineShapes.Count > 0) {
@@ -1568,23 +1685,20 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex) {
             const shape = inlineShapes.Item(i);
             if (shape.Type === 3 || shape.Type === 1) {
               const imageInfo = exportImageToTemp(shape);
-              const shapeStart = shape.Range ? shape.Range.Start : 0;
-              result.images.push({
-                type: 'inline',
+              inlineImages.push({
+                shape,
                 width: shape.Width || 100,
                 height: shape.Height || 100,
-                paraIndex: paraStartToIndex.get(shapeStart) ?? -1,
                 altText: shape.AlternativeText || '',
-                ...imageInfo,
-                placeholder: '[图片]'
+                rangeStart: shape.Range ? shape.Range.Start : 0,
+                rangeEnd: shape.Range ? shape.Range.End : 0,
+                ...imageInfo
               });
             }
           } catch (e) {}
         }
       }
     } catch (e) {}
-
-    // 解析浮动图片
     try {
       const shapes = range.ShapeRange;
       if (shapes && shapes.Count > 0) {
@@ -1599,17 +1713,17 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex) {
               } catch (e) {
                 anchorStart = shape.Range ? shape.Range.Start : 0;
               }
-              result.images.push({
+              floatingImages.push({
+                shape,
                 type: 'floating',
                 width: shape.Width || 100,
                 height: shape.Height || 100,
                 left: shape.Left || 0,
                 top: shape.Top || 0,
                 wrapType: getWrapTypeName(shape.WrapFormat ? shape.WrapFormat.Type : 0),
-                paraIndex: paraStartToIndex.get(anchorStart) ?? -1,
                 altText: shape.AlternativeText || '',
-                ...imageInfo,
-                placeholder: '[图片]'
+                anchorStart,
+                ...imageInfo
               });
             }
           } catch (e) {}
@@ -1700,15 +1814,38 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex) {
           continue;
         }
 
+        // 收集落在此段落范围内的图片
+        const paraInlineImages = [];
+        for (let i = inlineImages.length - 1; i >= 0; i--) {
+          const img = inlineImages[i];
+          if (img.rangeStart >= paraStart && img.rangeEnd <= paraEnd) {
+            paraInlineImages.push(inlineImages.splice(i, 1)[0]);
+          }
+        }
+        const paraFloatingImages = [];
+        for (let i = floatingImages.length - 1; i >= 0; i--) {
+          const img = floatingImages[i];
+          if (img.anchorStart >= paraStart && img.anchorStart < paraEnd) {
+            paraFloatingImages.push(floatingImages.splice(i, 1)[0]);
+          }
+        }
+
         const paraText = para.Range.Text || '';
 
-        // 空段落
+        // 空段落但有图片
+        if ((!paraText || paraText.match(/^[\r\n\f\u0007]*$/)) && (paraInlineImages.length > 0 || paraFloatingImages.length > 0)) {
+          result.paragraphs.push({ pStyle: DEFAULT_IMAGE_PSTYLE, runs: [], paraIndex: paraStartToIndex.get(paraStart) ?? -1 });
+        }
+
+        // 空段落且没有图片
         if (paraText.match(/^[\r\n\f\u0007]*$/)) {
-          result.paragraphs.push({
-            pStyle: '',
-            runs: [],
-            paraIndex: paraStartToIndex.get(paraStart) ?? -1
-          });
+          if (paraInlineImages.length === 0 && paraFloatingImages.length === 0) {
+            result.paragraphs.push({
+              pStyle: '',
+              runs: [],
+              paraIndex: paraStartToIndex.get(paraStart) ?? -1
+            });
+          }
           continue;
         }
 
@@ -1835,10 +1972,66 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex) {
           }
         }
 
-        if (paragraphData.runs.length > 0 || paragraphData.text) {
+        // 在段落末尾添加 inline 图片 runs
+        for (const img of paraInlineImages) {
+          paragraphData.runs.push({
+            width: img.width,
+            height: img.height,
+            altText: img.altText,
+            tempPath: img.tempPath,
+            sourcePath: img.sourcePath
+          });
+        }
+        for (const img of paraFloatingImages) {
+          paragraphData.runs.push({
+            type: img.type,
+            width: img.width,
+            height: img.height,
+            left: img.left,
+            top: img.top,
+            wrapType: img.wrapType,
+            altText: img.altText,
+            tempPath: img.tempPath,
+            sourcePath: img.sourcePath
+          });
+        }
+
+        if (paragraphData.runs.length > 0) {
           result.paragraphs.push(paragraphData);
         }
       }
+    }
+
+    // 将剩余未分配的图片作为独立段落添加
+    for (const img of inlineImages) {
+      result.paragraphs.push({
+        pStyle: DEFAULT_IMAGE_PSTYLE,
+        runs: [{
+          width: img.width,
+          height: img.height,
+          altText: img.altText,
+          tempPath: img.tempPath,
+          sourcePath: img.sourcePath
+        }],
+        paraIndex: -1
+      });
+    }
+    for (const img of floatingImages) {
+      result.paragraphs.push({
+        pStyle: DEFAULT_IMAGE_PSTYLE,
+        runs: [{
+          type: img.type,
+          width: img.width,
+          height: img.height,
+          left: img.left,
+          top: img.top,
+          wrapType: img.wrapType,
+          altText: img.altText,
+          tempPath: img.tempPath,
+          sourcePath: img.sourcePath
+        }],
+        paraIndex: -1
+      });
     }
 
     return deduplicateStyles(result);
@@ -2213,15 +2406,6 @@ function generateDocxFromJSON(jsonData, doc, insertParaIndex) {
 
     // 合并段落和表格，按位置排序
     const elements = [];
-    const imageParaIndexSet = new Set();
-
-    if (jsonData.images && jsonData.images.length > 0) {
-      for (const img of jsonData.images) {
-        if (img.paraIndex != null) {
-          imageParaIndexSet.add(img.paraIndex);
-        }
-      }
-    }
 
     if (jsonData.paragraphs) {
       jsonData.paragraphs.forEach((para, index) => {
@@ -2247,18 +2431,9 @@ function generateDocxFromJSON(jsonData, doc, insertParaIndex) {
 
     for (const element of elements) {
       if (element.type === 'paragraph' && isEmptyParagraph(element.data)) {
-        const paraIndex = element.data ? element.data.paraIndex : null;
-        const isImageAnchor = paraIndex != null && imageParaIndexSet.has(paraIndex);
-        if (isImageAnchor) {
-          consecutiveEmptyCount = 0;
-          processedElements.push(element);
-          continue;
-        }
-
         if (processedElements.length === 0) {
           continue;
         }
-
         consecutiveEmptyCount++;
         if (consecutiveEmptyCount <= 1) {
           processedElements.push(element);
@@ -2267,14 +2442,6 @@ function generateDocxFromJSON(jsonData, doc, insertParaIndex) {
         consecutiveEmptyCount = 0;
         processedElements.push(element);
       }
-    }
-
-    while (processedElements.length > 0) {
-      const lastElement = processedElements[processedElements.length - 1];
-      if (!isMeaningfulEmptyParagraph(lastElement, imageParaIndexSet)) {
-        break;
-      }
-      processedElements.pop();
     }
 
     // 确定插入起始位置
@@ -2333,30 +2500,11 @@ function generateDocxFromJSON(jsonData, doc, insertParaIndex) {
     let paraIndex = 0;
     const docUsableWidth = getDocumentUsableWidth(doc);
 
-    // 图片段落索引映射
-    const imagesByParaIndex = new Map();
-    const imagesWithoutParaIndex = [];
-    if (jsonData.images && jsonData.images.length > 0) {
-      for (const img of jsonData.images) {
-        if (img.paraIndex != null) {
-          if (!imagesByParaIndex.has(img.paraIndex)) {
-            imagesByParaIndex.set(img.paraIndex, []);
-          }
-          imagesByParaIndex.get(img.paraIndex).push(img);
-        } else {
-          imagesWithoutParaIndex.push(img);
-        }
-      }
-    }
-
     for (let i = 0; i < processedElements.length; i++) {
       const element = processedElements[i];
 
       if (element.type === 'paragraph') {
         const para = element.data;
-        const anchorImages = para.paraIndex != null ? imagesByParaIndex.get(para.paraIndex) : null;
-        const hasAnchorImage = !!(anchorImages && anchorImages.length > 0);
-        const isImageAnchorParagraph = hasAnchorImage;
 
         // 获取段落样式
         const pStyle = resolveStyle(styles, para.pStyle, DEFAULT_PSTYLE);
@@ -2369,53 +2517,6 @@ function generateDocxFromJSON(jsonData, doc, insertParaIndex) {
         const spaceBefore = pStyle[PSTYLE.SPACE_BEFORE] || 0;
         const spaceAfter = pStyle[PSTYLE.SPACE_AFTER] || 0;
         const styleName = pStyle[PSTYLE.STYLE_NAME] || '';
-
-        // 处理图片锚点段落（兼容旧占位符和新空段落锚点）
-        if (isImageAnchorParagraph && para.paraIndex != null) {
-          const imageList = imagesByParaIndex.get(para.paraIndex) || [];
-          if (imageList.length > 0) {
-            const anchorPStyle = getImageParagraphStyle(imageList[0], styles);
-            const imageIndentLeft = anchorPStyle[PSTYLE.INDENT_LEFT] || 0;
-            const imageIndentRight = anchorPStyle[PSTYLE.INDENT_RIGHT] || 0;
-            const imageMaxWidth = Math.max(120, docUsableWidth - imageIndentLeft - imageIndentRight);
-            const paraStartPos = currentPos;
-            let hasInsertedImage = false;
-
-            for (const img of imageList) {
-              const charAdded = insertImage(doc, img, currentPos, imageMaxWidth);
-              if (charAdded > 0) {
-                currentPos += charAdded;
-                hasInsertedImage = true;
-              }
-            }
-
-            imagesByParaIndex.delete(para.paraIndex);
-
-            if (!hasInsertedImage) {
-              continue;
-            }
-
-            const range = doc.Range(currentPos, currentPos);
-            range.Text = '\r';
-            currentPos += 1;
-
-            try {
-              const imgRange = doc.Range(paraStartPos, paraStartPos + 1);
-              const imgPara = imgRange.Paragraphs.Item(1);
-              if (imgPara && imgPara.Format) {
-                imgPara.Format.Alignment = getAlignmentValue(anchorPStyle[PSTYLE.ALIGNMENT] || alignment || 'center');
-                imgPara.Format.LeftIndent = imageIndentLeft;
-                imgPara.Format.RightIndent = imageIndentRight;
-                imgPara.Format.FirstLineIndent = anchorPStyle[PSTYLE.INDENT_FIRST_LINE] || 0;
-                imgPara.Format.SpaceBefore = anchorPStyle[PSTYLE.SPACE_BEFORE] || 0;
-                imgPara.Format.SpaceAfter = anchorPStyle[PSTYLE.SPACE_AFTER] || 0;
-              }
-            } catch (e) {}
-
-            paraIndex++;
-            continue;
-          }
-        }
 
         // 处理空段落
         if (isEmptyParagraph(para)) {
@@ -2447,10 +2548,22 @@ function generateDocxFromJSON(jsonData, doc, insertParaIndex) {
         }
 
         // 处理普通段落
-        const paraStartPos = currentPos;  // 记录段落开始位置（移到外面避免未定义）
+        const paraStartPos = currentPos;
 
         if (para.runs && para.runs.length > 0) {
           for (const run of para.runs) {
+            // 检查是否是图片 run（没有 text 字段）
+            const isImageRun = !run.text && (run.url || run.tempPath || run.sourcePath);
+            if (isImageRun) {
+              const imageMaxWidth = Math.max(120, docUsableWidth - indentLeft - indentRight);
+              const charAdded = insertImage(doc, run, currentPos, imageMaxWidth);
+              if (charAdded > 0) {
+                currentPos += charAdded;
+              }
+              continue;
+            }
+
+            // 文本 run
             let runText = run.text || '';
             if (!runText) {
               continue;
@@ -2605,48 +2718,6 @@ function generateDocxFromJSON(jsonData, doc, insertParaIndex) {
             currentPos += 1;
           }
         }
-      }
-    }
-
-    const trailingImages = [...imagesWithoutParaIndex];
-    if (imagesByParaIndex.size > 0) {
-      for (const imageList of imagesByParaIndex.values()) {
-        if (Array.isArray(imageList) && imageList.length > 0) {
-          trailingImages.push(...imageList);
-        }
-      }
-    }
-
-    if (trailingImages.length > 0) {
-      for (const img of trailingImages) {
-        const imagePStyle = getImageParagraphStyle(img, styles);
-        const imageIndentLeft = imagePStyle[PSTYLE.INDENT_LEFT] || 0;
-        const imageIndentRight = imagePStyle[PSTYLE.INDENT_RIGHT] || 0;
-        const imageMaxWidth = Math.max(120, docUsableWidth - imageIndentLeft - imageIndentRight);
-        const paraStartPos = currentPos;
-        const charAdded = insertImage(doc, img, currentPos, imageMaxWidth);
-        if (charAdded <= 0) {
-          continue;
-        }
-
-        currentPos += charAdded;
-
-        const range = doc.Range(currentPos, currentPos);
-        range.Text = '\r';
-        currentPos += 1;
-
-        try {
-          const imgRange = doc.Range(paraStartPos, paraStartPos + 1);
-          const imgPara = imgRange.Paragraphs.Item(1);
-          if (imgPara && imgPara.Format) {
-            imgPara.Format.Alignment = getAlignmentValue(imagePStyle[PSTYLE.ALIGNMENT] || 'center');
-            imgPara.Format.LeftIndent = imageIndentLeft;
-            imgPara.Format.RightIndent = imageIndentRight;
-            imgPara.Format.FirstLineIndent = imagePStyle[PSTYLE.INDENT_FIRST_LINE] || 0;
-            imgPara.Format.SpaceBefore = imagePStyle[PSTYLE.SPACE_BEFORE] || 0;
-            imgPara.Format.SpaceAfter = imagePStyle[PSTYLE.SPACE_AFTER] || 0;
-          }
-        } catch (e) {}
       }
     }
 

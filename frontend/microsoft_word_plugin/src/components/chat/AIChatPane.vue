@@ -977,6 +977,17 @@ export default {
         return;
       }
 
+      // 处理 tool 输出压缩信息
+      if (data.type === 'tool_compress') {
+        msg.contentParts.push({
+          type: 'tool_compress',
+          content: data.content,
+          detail: data.detail || {},
+        });
+        this.scrollToBottom();
+        return;
+      }
+
       if (data.type === 'text' && data.content) {
         const content = data.content;
         msg.content += content;

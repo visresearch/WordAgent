@@ -98,7 +98,6 @@ def start_gui():
 
 
 if __name__ == "__main__":
-
     _load_runtime_env()
 
     def signal_handler(sig, frame):

@@ -52,9 +52,7 @@ def run_sub_agent(
     if context_lines:
         context_block = "\n".join(context_lines)
         sub_prompt = (
-            f"{prompt}\n\n"
-            "The following context is injected by main agent runtime; use it if relevant:\n"
-            f"{context_block}"
+            f"{prompt}\n\nThe following context is injected by main agent runtime; use it if relevant:\n{context_block}"
         )
 
     return run_sub_agent_task(

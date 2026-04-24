@@ -6,10 +6,31 @@ from pydantic import BaseModel, Field, model_validator
 
 
 class Run(BaseModel):
-    """A text run with uniform character formatting."""
+    """A run can be either a text run or an inline image.
 
-    text: str = Field(description="Text content")
-    rStyle: str = Field(description='Character style reference ID, e.g. "rS_1", mapped to document.styles["rS_1"]')
+    Text run: {text: "...", rStyle: "..."}  (has text field)
+    Image run: {url: "...", width: 380, ...}  (no text field)
+    """
+
+    # Text run fields (if text is present, this is a text run)
+    text: str | None = Field(default=None, description="Text content (omit this field for image run)")
+    rStyle: str | None = Field(
+        default=None,
+        description='Character style reference ID, e.g. "rS_1", mapped to document.styles["rS_1"]',
+    )
+    # Image run fields (if text is absent, this is an image run)
+    url: str | None = Field(default=None, description="Remote image URL")
+    tempPath: str | None = Field(default=None, description="Local temp file path")
+    sourcePath: str | None = Field(default=None, description="Local source file path")
+    width: float | None = Field(default=None, description="Image width in points")
+    height: float | None = Field(default=None, description="Image height in points")
+    left: float | None = Field(default=None, description="Floating image left position")
+    top: float | None = Field(default=None, description="Floating image top position")
+    wrapType: str | None = Field(
+        default=None,
+        description="Floating wrap type: inline/topBottom/square/none/tight/through/behindText/inFrontOfText",
+    )
+    altText: str | None = Field(default=None, description="Alternative text")
 
 
 class Paragraph(BaseModel):
@@ -21,6 +42,7 @@ class Paragraph(BaseModel):
     )
     runs: list[Run] = Field(
         description="Array of runs. A paragraph can contain multiple runs with different formatting."
+        " Each run is either a text run {text:'...', rStyle:'...'} or an image run {url:'...', width:...}."
         " Do not use \\n for line breaks in text; create new paragraphs instead."
         " Use an empty array for blank paragraphs.",
         default_factory=list,
@@ -96,50 +118,11 @@ class Table(BaseModel):
     )
 
 
-class Image(BaseModel):
-    """Image object for document generation."""
-
-    type: Literal["inline", "floating"] = Field(
-        default="inline", description="Image layout type: inline or floating"
-    )
-    paraIndex: int | None = Field(
-        default=None,
-        description="Optional image anchor paragraph index."
-        " For generated content, use local 0-based index within this payload.",
-    )
-    tempPath: str | None = Field(
-        default=None,
-        description="Local temp file path exported or downloaded by frontend, preferred for insertion.",
-    )
-    sourcePath: str | None = Field(
-        default=None,
-        description="Local source file path fallback for insertion.",
-    )
-    url: str | None = Field(
-        default=None,
-        description="Remote image URL. Frontend may download it and convert to tempPath before insertion.",
-    )
-    width: float | None = Field(default=None, description="Image width in points")
-    height: float | None = Field(default=None, description="Image height in points")
-    left: float | None = Field(default=None, description="Floating image left position")
-    top: float | None = Field(default=None, description="Floating image top position")
-    wrapType: str | None = Field(
-        default=None,
-        description="Floating wrap type: inline/topBottom/square/none/tight/through/behindText/inFrontOfText",
-    )
-    altText: str | None = Field(default=None, description="Alternative text")
-    placeholder: str | None = Field(
-        default=None,
-        description="Optional legacy placeholder text for anchor paragraph; usually not required.",
-    )
-
-
 class DocumentOutput(BaseModel):
     """Document output schema. paragraphs and tables are independent top-level fields."""
 
     paragraphs: list[Paragraph] = Field(description="Paragraph array; every item must be a Paragraph object")
     tables: list[Table] = Field(default_factory=list, description="Table array; every item must be a Table object")
-    images: list[Image] = Field(default_factory=list, description="Image array for insertion into document")
     styles: dict[str, list] = Field(
         description="Style dictionary (required). Key is style ID (e.g. pS_1, rS_1, cS_1, tS_1); value is style array."
         " Must include all styles referenced by pStyle/rStyle/cStyle/tStyle.\n"
@@ -187,7 +170,7 @@ class DocumentOutput(BaseModel):
             if para.pStyle not in style_keys:
                 missing.add(para.pStyle)
             for run in para.runs:
-                if run.rStyle not in style_keys:
+                if run.rStyle and run.rStyle not in style_keys:
                     missing.add(run.rStyle)
 
         for table in self.tables:
@@ -204,7 +187,7 @@ class DocumentOutput(BaseModel):
                             if cp.pStyle and cp.pStyle not in style_keys:
                                 missing.add(cp.pStyle)
                             for run in cp.runs:
-                                if run.rStyle not in style_keys:
+                                if run.rStyle and run.rStyle not in style_keys:
                                     missing.add(run.rStyle)
 
         if missing:

@@ -14,6 +14,34 @@ from urllib.request import Request, urlopen
 from app.core.config import get_user_settings_file
 
 
+def _apply_proxy_to_environ() -> None:
+    """将用户代理配置写入 os.environ，供 httpx / curl_cffi / 子进程使用。"""
+    try:
+        settings_path = get_user_settings_file()
+        if settings_path and settings_path.exists():
+            import json as _json
+
+            data = _json.loads(settings_path.read_text(encoding="utf-8"))
+        else:
+            data = {}
+    except Exception:
+        data = {}
+
+    proxy = data.get("proxy", {})
+    enabled = proxy.get("enabled", False)
+    host = str(proxy.get("host") or "").strip()
+    port = proxy.get("port")
+
+    if enabled and host and port:
+        proxy_url = f"http://{host}:{port}"
+        for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+            os.environ[key] = proxy_url
+    else:
+        # 未启用时清除代理环境变量
+        for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+            os.environ.pop(key, None)
+
+
 def _get_env_int(name: str, default: int) -> int:
     """Read positive integer from env with fallback."""
     raw = os.environ.get(name)
@@ -406,6 +434,9 @@ async def load_mcp_tools() -> tuple[list, list, list[dict[str, str]]]:
     返回值: (tools, clients, failed_servers) — clients 列表需在使用期间保持存活。
     failed_servers: [{"name": str, "error": str}]，用于前端状态展示。
     """
+    # 根据用户配置设置代理环境变量，确保 MCP HTTP 请求也走代理
+    _apply_proxy_to_environ()
+
     config = _load_mcp_server_configs()
     if not config:
         print("[MCP] ℹ️ 未配置 MCP 服务器，跳过加载")

@@ -13,8 +13,8 @@ Use this style unless the user explicitly requests another format.
 - pS_2: section heading (Heading 1, 1.5 line spacing)
 - pS_4: subsection heading (Heading 2, 1.5 line spacing)
 - pS_3: body text (justified, first-line indent, 1.5 line spacing)
-- pS_5: table cell text (centered, no first-line indent)
-- pS_6: figure/chart caption paragraph (centered, 题图)
+- pS_5: table cell text (centered, no first-line indent, single line spacing)
+- pS_6: figure/chart caption paragraph (centered, single line spacing, style name `正文`)
 - rS_1: heading font (bold)
 - rS_2: body font
 - rS_3: English/number run in headings (Times New Roman, bold)
@@ -31,7 +31,7 @@ When creating new content and user did not request a custom format, use this exa
 	"pS_4": ["left", 0, 0, 0, 0, 6, 3, "标题 2", 1],
 	"pS_3": ["justify", 0, 0, 0, 24, 0, 0, "正文", 1],
 	"pS_5": ["center", 0, 0, 0, 0, 0, 0, "正文", 1],
-	"pS_6": ["center", 0, 0, 0, 0, 0, 0, "题图", 1],
+	"pS_6": ["center", 0, 0, 0, 0, 0, 0, "正文", 1],
 	"rS_1": ["黑体", 16, true, false, 0, "#000000", "#000000", 0, false, false, false],
 	"rS_2": ["宋体", 12, false, false, 0, "#000000", "#000000", 0, false, false, false],
 	"rS_3": ["Times New Roman", 16, true, false, 0, "#000000", "#000000", 0, false, false, false],
@@ -61,8 +61,8 @@ When creating new content and user did not request a custom format, use this exa
 
 ### Figure/Chart caption rules
 - If a figure or chart is generated, add one caption paragraph directly below it.
-- Caption pattern: `图X，<brief description>` (for example: `图1 销售趋势对比图`).
-- Caption paragraph should use `pS_6` (centered, style name `题图`).
+- Caption pattern: `图X <brief description>` (for example: `图1 销售趋势对比图`).
+- Caption paragraph should use `pS_6` (centered, single line spacing, style name `正文`).
 - Use a dedicated caption run style `rS_5` (黑体, 五号) for the caption text.
 
 ### Mandatory defaults for new content

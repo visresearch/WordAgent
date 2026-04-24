@@ -1,22 +1,17 @@
 """
 对话记忆管理模块
 
-提供三层记忆机制，注入到 Agent 的 messages 中：
+提供两层记忆机制，注入到 Agent 的 messages 中：
 1. 短期记忆 (Short-term)   — ConversationBufferWindowMemory(k=5)，保留最近 k 轮对话原文
 2. 总结记忆 (Summary)      — ConversationSummaryMemory，对更早的对话做 LLM 滚动摘要
-3. 长期记忆 (Long-term/RAG) — FAISS 向量库语义检索
-
-当前默认配置：长期记忆已临时关闭（见 ENABLE_LONG_TERM_MEMORY）。
 """
 
 from __future__ import annotations
 
 import os
-import time
 import warnings
 from typing import TYPE_CHECKING, Any
 
-# 屏蔽 langchain_classic 的弃用警告（功能正常，仅提示迁移）
 warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"langchain_classic")
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -24,14 +19,11 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 if TYPE_CHECKING:
     from langchain_openai import ChatOpenAI
 
-from app.core.config import get_data_dir
-
 # ============== 配置常量 ==============
 
 SHORT_TERM_K = 5  # 短期记忆保留最近 k 轮 (user+assistant 为一轮)
-LONG_TERM_TOP_K = 3  # RAG 检索返回 top-k 条
-# 临时开关：默认关闭长期记忆（RAG）注入与存储
-ENABLE_LONG_TERM_MEMORY = False
+
+# 已移除：LONG_TERM_TOP_K 和 ENABLE_LONG_TERM_MEMORY
 
 
 def _get_env_int(name: str, default: int) -> int:
@@ -46,96 +38,26 @@ def _get_env_int(name: str, default: int) -> int:
         return default
 
 
-# 上下文预算控制（可通过环境变量覆盖）
-# 当记忆消息估算 token 超过该阈值时，自动压缩旧消息。
-MAX_CONTEXT_TOKENS = _get_env_int("WORDAGENT_MAX_CONTEXT_TOKENS", 50000)
-# 预留给当前用户输入 + 系统提示 + 模型输出，记忆消息预算更保守。
-MEMORY_TOKEN_BUDGET = _get_env_int("WORDAGENT_MEMORY_TOKEN_BUDGET", 36000)
-# 单条消息的最大字符数（防止单条异常长消息撑爆上下文）。
-MAX_MESSAGE_CHARS = _get_env_int("WORDAGENT_MAX_MESSAGE_CHARS", 4000)
-# 是否启用 LLMChainExtractor 压缩（默认开启）
+# 上下文预算控制（可通过环境变量覆盖，默认200k）
+MAX_CONTEXT_TOKENS = _get_env_int("WORDAGENT_MAX_CONTEXT_TOKENS", 200000)
+
+# LLMChainExtractor 压缩配置
 ENABLE_LLM_CHAIN_EXTRACTOR = os.environ.get("WORDAGENT_ENABLE_LLM_CHAIN_EXTRACTOR", "true").strip().lower() in {
     "1",
     "true",
     "yes",
     "on",
 }
-# 使用 LLMChainExtractor 时保留末尾原始对话条数（最新消息不压缩）
 EXTRACTOR_KEEP_RECENT_MESSAGES = _get_env_int("WORDAGENT_EXTRACTOR_KEEP_RECENT_MESSAGES", 4)
-# 为防止压缩调用过慢，限制进入提取器的旧消息条数
 EXTRACTOR_MAX_SOURCE_MESSAGES = _get_env_int("WORDAGENT_EXTRACTOR_MAX_SOURCE_MESSAGES", 16)
 
-# FAISS 向量库持久化目录
-_FAISS_INDEX_DIR = get_data_dir() / "memory_faiss_index"
-_FAISS_PKL_FILE = _FAISS_INDEX_DIR / "index.pkl"  # 用 Python 序列化，规避中文路径问题
-
-# ============== 向量库单例 ==============
-
-_vectorstore = None
-_embedding_fn = None
-
-
-def _get_embedding_fn():
-    """
-    获取嵌入函数。
-    当前直接使用 FakeEmbeddings（无需外部 embedding 服务）。
-    """
-    global _embedding_fn
-    if _embedding_fn is not None:
-        return _embedding_fn
-
-    _embedding_fn = _make_fake_embeddings()
-    return _embedding_fn
-
-
-def _make_fake_embeddings():
-    """创建 FakeEmbeddings 作为回退方案。"""
-    from langchain_core.embeddings import FakeEmbeddings
-
-    print("[Memory] 使用 langchain FakeEmbeddings（无语义能力，仅基础向量存储）")
-    return FakeEmbeddings(size=128)
-
-
-def _get_vectorstore():
-    """获取/初始化 FAISS 向量库"""
-    global _vectorstore, _embedding_fn
-    if _vectorstore is not None:
-        return _vectorstore
-
-    try:
-        from langchain_community.vectorstores import FAISS
-
-        embedding = _get_embedding_fn()
-
-        if _FAISS_PKL_FILE.exists():
-            # 用 Python 原生文件 I/O 读取，规避 FAISS C++ 不支持中文路径的问题
-            data = _FAISS_PKL_FILE.read_bytes()
-            _vectorstore = FAISS.deserialize_from_bytes(data, embedding, allow_dangerous_deserialization=True)
-            print(f"[Memory] FAISS 向量库已从磁盘加载: {_FAISS_PKL_FILE}")
-        else:
-            _FAISS_INDEX_DIR.mkdir(parents=True, exist_ok=True)
-            _vectorstore = FAISS.from_texts(
-                ["[系统初始化] WenCe AI Writing Assistant 长期记忆库已创建"],
-                embedding,
-                metadatas=[{"session_id": "system", "role": "system", "timestamp": time.time()}],
-            )
-            _save_vectorstore(_vectorstore)
-            print(f"[Memory] FAISS 向量库已初始化: {_FAISS_PKL_FILE}")
-
-        return _vectorstore
-    except Exception as e:
-        print(f"[Memory] ⚠️ FAISS 向量库初始化失败: {e}")
-        return None
-
-
-def _save_vectorstore(store):
-    """用 Python 原生文件 I/O 持久化 FAISS 索引（支持中文路径）。"""
-    try:
-        _FAISS_INDEX_DIR.mkdir(parents=True, exist_ok=True)
-        data = store.serialize_to_bytes()
-        _FAISS_PKL_FILE.write_bytes(data)
-    except Exception as e:
-        print(f"[Memory] ⚠️ FAISS 向量库持久化失败: {e}")
+# ============ [新增] Tool 输出压缩配置 ============
+# 当 tool 输出超过此 token 数时触发压缩
+TOOL_OUTPUT_COMPRESS_THRESHOLD_TOKENS = _get_env_int("WORDAGENT_TOOL_OUTPUT_COMPRESS_THRESHOLD", 50000)
+# Tool 输出压缩后保留的关键信息条数上限
+TOOL_OUTPUT_MAX_KEY_POINTS = _get_env_int("WORDAGENT_TOOL_OUTPUT_MAX_KEY_POINTS", 10)
+# Tool 输出压缩后最大字符数（硬截断）
+TOOL_OUTPUT_COMPRESSED_MAX_CHARS = _get_env_int("WORDAGENT_TOOL_OUTPUT_COMPRESSED_MAX_CHARS", 8000)
 
 
 # ============== 短期记忆 (ConversationBufferWindowMemory) ==============
@@ -147,13 +69,6 @@ def build_short_term_messages(
 ) -> list[HumanMessage | AIMessage]:
     """
     使用 ConversationBufferWindowMemory 提取最近 k 轮对话。
-
-    Args:
-        history: 前端传入的 [{role, content}, ...] 列表
-        k: 保留的最近轮数（1 轮 = 1 user + 1 assistant）
-
-    Returns:
-        LangChain 消息列表
     """
     if not history:
         return []
@@ -161,8 +76,6 @@ def build_short_term_messages(
     from langchain_classic.memory import ConversationBufferWindowMemory
 
     memory = ConversationBufferWindowMemory(k=k, return_messages=True)
-
-    # save_context 需要 input/output 对，自动只保留最近 k 轮
     pairs = _pair_history(history)
     for user_msg, ai_msg in pairs:
         memory.save_context({"input": user_msg}, {"output": ai_msg})
@@ -181,24 +94,14 @@ def build_summary_memory(
 ) -> str:
     """
     使用 ConversationSummaryMemory 对短期记忆之前的对话生成渐进式摘要。
-
-    Args:
-        history: 完整历史消息列表
-        llm: LLM 实例（用于生成摘要）
-        k: 短期记忆保留轮数（之前的消息做摘要）
-
-    Returns:
-        摘要文本，如果无需摘要则返回空字符串
     """
     if not history:
         return ""
 
     pairs = _pair_history(history)
     if len(pairs) <= k:
-        # 总对话不超过短期记忆容量，无需摘要
         return ""
 
-    # 取短期记忆之前的对话对
     older_pairs = pairs[: len(pairs) - k]
     if not older_pairs:
         return ""
@@ -207,8 +110,6 @@ def build_summary_memory(
         from langchain_classic.memory import ConversationSummaryMemory
 
         summary_memory = ConversationSummaryMemory(llm=llm)
-
-        # 逐对加载，ConversationSummaryMemory 自动做渐进式摘要
         for user_msg, ai_msg in older_pairs:
             summary_memory.save_context({"input": user_msg}, {"output": ai_msg})
 
@@ -221,83 +122,11 @@ def build_summary_memory(
         return ""
 
 
-# ============== 长期记忆 (RAG) ==============
-
-
-def store_to_long_term(
-    session_id: str,
-    role: str,
-    content: str,
-    metadata: dict | None = None,
-):
-    """将一条消息存入 FAISS 长期向量记忆。"""
-    if not ENABLE_LONG_TERM_MEMORY:
-        return
-
-    store = _get_vectorstore()
-    if store is None:
-        return
-
-    # 跳过过短的消息
-    if len(content.strip()) < 10:
-        return
-
-    doc_metadata = {
-        "session_id": str(session_id),
-        "role": role,
-        "timestamp": time.time(),
-    }
-    if metadata:
-        doc_metadata.update(metadata)
-
-    try:
-        store.add_texts(texts=[content], metadatas=[doc_metadata])
-        # 持久化到磁盘
-        _save_vectorstore(store)
-    except Exception as e:
-        print(f"[Memory] ⚠️ 存入长期记忆失败: {e}")
-
-
-def retrieve_from_long_term(
-    query: str,
-    top_k: int = LONG_TERM_TOP_K,
-) -> list[dict]:
-    """从 FAISS 长期记忆中检索与 query 语义相关的历史消息。"""
-    if not ENABLE_LONG_TERM_MEMORY:
-        return []
-
-    store = _get_vectorstore()
-    if store is None:
-        return []
-
-    try:
-        results = store.similarity_search_with_score(query, k=top_k)
-
-        retrieved = []
-        for doc, score in results:
-            retrieved.append(
-                {
-                    "content": doc.page_content,
-                    "role": doc.metadata.get("role", "unknown"),
-                    "session_id": doc.metadata.get("session_id", ""),
-                    "score": float(score),
-                }
-            )
-        return retrieved
-    except Exception as e:
-        print(f"[Memory] ⚠️ 长期记忆检索失败: {e}")
-        return []
-
-
 # ============== 工具函数 ==============
 
 
 def _pair_history(history: list[dict]) -> list[tuple[str, str]]:
-    """
-    将 history 列表配对为 (user_msg, assistant_msg) 元组列表。
-    ConversationBufferWindowMemory / ConversationSummaryMemory 的
-    save_context 需要 input/output 对。
-    """
+    """将 history 列表配对为 (user_msg, assistant_msg) 元组列表。"""
     pairs = []
     i = 0
     valid = [
@@ -305,6 +134,7 @@ def _pair_history(history: list[dict]) -> list[tuple[str, str]]:
         for h in history
         if h.get("content") and isinstance(h["content"], str) and h.get("role") in ("user", "assistant")
     ]
+    print(f"[Memory] _pair_history: 原始 history={len(history)}, 过滤后 valid={len(valid)}")
     while i < len(valid) - 1:
         if valid[i]["role"] == "user" and valid[i + 1]["role"] == "assistant":
             pairs.append((valid[i]["content"], valid[i + 1]["content"]))
@@ -337,7 +167,10 @@ def _extract_message_text(content) -> str:
 
 
 def _estimate_token_count(text: str) -> int:
-    """Estimate token count with tiktoken when available, fallback to char heuristic."""
+    """
+    Estimate token count with tiktoken (cl100k_base), fallback to char heuristic.
+    使用 tiktoken 计算 token 数，避免使用字符串长度估算。
+    """
     if not text:
         return 0
 
@@ -347,7 +180,7 @@ def _estimate_token_count(text: str) -> int:
         enc = tiktoken.get_encoding("cl100k_base")
         return len(enc.encode(text))
     except Exception:
-        # CJK 场景下按 1.7 字符/Token 近似，取更保守上界
+        # CJK fallback: 1.7 chars/token, use conservative upper bound
         return max(1, int(len(text) / 1.7))
 
 
@@ -357,7 +190,7 @@ def _estimate_messages_tokens(messages: list[SystemMessage | HumanMessage | AIMe
     for msg in messages:
         role = "system" if isinstance(msg, SystemMessage) else "user" if isinstance(msg, HumanMessage) else "assistant"
         text = _extract_message_text(getattr(msg, "content", ""))
-        # 为角色与消息结构预留固定开销
+        # Reserve fixed overhead for role and message structure
         total += 6 + _estimate_token_count(role) + _estimate_token_count(text)
     return total
 
@@ -455,8 +288,7 @@ def _compress_with_llm_chain_extractor(
         return system_msgs + tail_msgs
 
     compressed_context = (
-        "以下为经 LLMChainExtractor 压缩后的较早历史上下文（仅保留与当前请求相关的信息）：\n"
-        + "\n---\n".join(parts)
+        "以下为经 LLMChainExtractor 压缩后的较早历史上下文（仅保留与当前请求相关的信息）：\n" + "\n---\n".join(parts)
     )
 
     return system_msgs + [SystemMessage(content=compressed_context)] + tail_msgs
@@ -467,7 +299,6 @@ def _fit_memory_messages_to_budget(
     llm: "ChatOpenAI | None" = None,
     query: str = "",
     max_context_tokens: int = MAX_CONTEXT_TOKENS,
-    memory_budget_tokens: int = MEMORY_TOKEN_BUDGET,
 ) -> tuple[list[SystemMessage | HumanMessage | AIMessage], dict[str, Any]]:
     """Compress memory messages when token estimate exceeds configured budget."""
     meta: dict[str, Any] = {
@@ -482,38 +313,35 @@ def _fit_memory_messages_to_budget(
     if not messages:
         return messages, meta
 
-    # 先做单条上限裁剪，避免极端大消息
-    clipped = [_truncate_message(m, MAX_MESSAGE_CHARS) for m in messages]
-    est_tokens = _estimate_messages_tokens(clipped)
+    # Estimate tokens without single message truncation
+    est_tokens = _estimate_messages_tokens(messages)
     meta["before_tokens_est"] = est_tokens
 
-    # 记忆预算不能超过全局上下文上限
-    hard_budget = min(max_context_tokens, memory_budget_tokens)
+    hard_budget = max_context_tokens
     meta["hard_budget"] = hard_budget
     if est_tokens <= hard_budget:
         meta["after_tokens_est"] = est_tokens
-        return clipped, meta
+        return messages, meta
 
     meta["triggered"] = True
 
-    # 优先使用 LLMChainExtractor 做“保语义”的压缩
-    extracted = _compress_with_llm_chain_extractor(clipped, llm=llm, query=query)
+    # Prefer LLMChainExtractor for semantic-preserving compression
+    extracted = _compress_with_llm_chain_extractor(messages, llm=llm, query=query)
     extracted_tokens = _estimate_messages_tokens(extracted)
     if extracted_tokens <= hard_budget:
         meta["strategy"] = "llm_chain_extractor"
         meta["after_tokens_est"] = extracted_tokens
         return extracted, meta
 
-    # 若提取后仍超预算，则继续走保底裁剪
+    # Fallback to truncation if extraction still exceeds budget
     clipped = extracted
-
     system_msgs = [m for m in clipped if isinstance(m, SystemMessage)]
     convo_msgs = [m for m in clipped if not isinstance(m, SystemMessage)]
 
     selected_rev: list[HumanMessage | AIMessage] = []
     used = _estimate_messages_tokens(system_msgs)
 
-    # 从最近消息向前保留，确保最新上下文优先
+    # Keep from most recent message, ensuring latest context is prioritized
     for msg in reversed(convo_msgs):
         msg_tokens = _estimate_messages_tokens([msg])
         if used + msg_tokens <= hard_budget:
@@ -521,9 +349,10 @@ def _fit_memory_messages_to_budget(
             used += msg_tokens
             continue
 
-        # 如果一条都还没保住，至少塞入一条裁剪版最近消息
         if not selected_rev and used < hard_budget:
-            compact = _truncate_message(msg, max(200, int(MAX_MESSAGE_CHARS * 0.35)))
+            # Truncate message to 35% of budget if single message exceeds
+            max_chars = int(hard_budget * 2)  # rough estimate: 2 chars per token
+            compact = _truncate_message(msg, max(200, min(max_chars, 4000)))
             compact_tokens = _estimate_messages_tokens([compact])
             if used + compact_tokens <= hard_budget:
                 selected_rev.append(compact)
@@ -534,12 +363,11 @@ def _fit_memory_messages_to_budget(
     dropped = len(convo_msgs) - len(selected)
     meta["dropped_messages"] = max(0, dropped)
 
+    print(f"[Memory] 压缩调试: convo_msgs={len(convo_msgs)}, selected={len(selected)}, dropped={dropped}, system_msgs={len(system_msgs)}")
+
     if dropped > 0:
         note = SystemMessage(
-            content=(
-                f"上下文压缩提示：为控制 token 预算，已压缩并省略较早的 {dropped} 条历史消息，"
-                "优先保留最近对话。"
-            )
+            content=(f"上下文压缩提示：为控制 token 预算，已压缩并省略较早的 {dropped} 条历史消息，优先保留最近对话。")
         )
         if _estimate_messages_tokens(system_msgs + [note] + selected) <= hard_budget:
             final_msgs = system_msgs + [note] + selected
@@ -553,6 +381,274 @@ def _fit_memory_messages_to_budget(
     return final_msgs, meta
 
 
+# ============ [新增] 实时上下文压缩（ReAct 循环中调用） ============
+
+
+def compress_conversation_history_if_needed(
+    messages: list,
+    llm: "ChatOpenAI | None" = None,
+    query: str = "",
+    max_context_tokens: int = MAX_CONTEXT_TOKENS,
+) -> tuple[list, dict[str, Any]]:
+    """
+    检测消息列表 token 数是否超过上限，超过则压缩。
+    返回 (压缩后消息, 元数据)。
+    元数据包含 triggered=True 时表示触发了压缩。
+    """
+    from langchain_core.messages import HumanMessage
+
+    # 转换：如果传入的是普通 list（非 langchain message 类型），转为 HumanMessage
+    converted = []
+    for m in messages:
+        if isinstance(m, (SystemMessage, HumanMessage, AIMessage)):
+            converted.append(m)
+        elif isinstance(m, dict):
+            role = m.get("role", "user")
+            content = m.get("content", "")
+            if role == "system":
+                converted.append(SystemMessage(content=content))
+            elif role == "user":
+                converted.append(HumanMessage(content=content))
+            else:
+                converted.append(AIMessage(content=content))
+        else:
+            converted.append(HumanMessage(content=str(m)))
+
+    return _fit_memory_messages_to_budget(converted, llm=llm, query=query, max_context_tokens=max_context_tokens)
+
+
+# ============ [新增] Tool 输出压缩逻辑 ============
+
+
+def compress_tool_output_if_needed(
+    tool_output: str,
+    llm: "ChatOpenAI | None" = None,
+    tool_name: str = "unknown",
+) -> tuple[str, dict | None]:
+    """
+    如果 tool 输出超过阈值 token 数，则进行压缩。
+
+    压缩策略：
+    1. 使用 LLMChainExtractor 提取关键信息
+    2. 如果提取失败，则总结为关键信息点（5~10条）
+
+    此函数应在 tool observation 写入上下文之前调用。
+
+    Args:
+        tool_output: 原始 tool 输出内容
+        llm: LLM 实例（用于压缩）
+        tool_name: 工具名称（用于日志）
+
+    Returns:
+        tuple[str, dict | None]: (压缩后的内容, 压缩信息字典)
+        - 如果不需要压缩: (原内容, None)
+        - 如果需要压缩: (压缩后内容, {"tool_name": ..., "original_tokens": ..., "compressed_tokens": ..., "strategy": ...})
+    """
+    if not tool_output:
+        return tool_output, None
+
+    estimated_tokens = _estimate_token_count(tool_output)
+
+    # 如果未超过阈值，直接返回原内容
+    if estimated_tokens <= TOOL_OUTPUT_COMPRESS_THRESHOLD_TOKENS:
+        return tool_output, None
+
+    print(
+        f"[Memory] Tool '{tool_name}' 输出过长 ({estimated_tokens} tokens > {TOOL_OUTPUT_COMPRESS_THRESHOLD_TOKENS} 阈值)，开始压缩..."
+    )
+
+    compression_info = {
+        "tool_name": tool_name,
+        "original_tokens": estimated_tokens,
+        "original_chars": len(tool_output),
+        "strategy": "unknown",
+        "compressed_tokens": 0,
+        "compressed_chars": 0,
+    }
+
+    # 尝试使用 LLMChainExtractor 压缩
+    if llm and ENABLE_LLM_CHAIN_EXTRACTOR:
+        try:
+            compressed = _compress_tool_output_with_extractor(tool_output, llm, tool_name)
+            if compressed:
+                new_tokens = _estimate_token_count(compressed)
+                compression_info["compressed_tokens"] = new_tokens
+                compression_info["compressed_chars"] = len(compressed)
+                compression_info["strategy"] = "LLMChainExtractor"
+                print(
+                    f"[Memory] Tool '{tool_name}' LLMChainExtractor 压缩完成: {estimated_tokens} -> {new_tokens} tokens"
+                )
+                return compressed, compression_info
+        except Exception as e:
+            print(f"[Memory] Tool '{tool_name}' LLMChainExtractor 压缩失败: {e}")
+
+    # 回退策略：使用总结式压缩
+    compressed = _compress_tool_output_with_summary(tool_output, llm, tool_name)
+    new_tokens = _estimate_token_count(compressed)
+    compression_info["compressed_tokens"] = new_tokens
+    compression_info["compressed_chars"] = len(compressed)
+    compression_info["strategy"] = "summary"
+    print(f"[Memory] Tool '{tool_name}' 总结压缩完成: {estimated_tokens} -> {new_tokens} tokens")
+    return compressed, compression_info
+
+
+def _compress_tool_output_with_extractor(
+    text: str,
+    llm: "ChatOpenAI",
+    tool_name: str,
+) -> str | None:
+    """使用 LLMChainExtractor 压缩 tool 输出。"""
+    try:
+        from langchain_core.documents import Document
+        from langchain_classic.retrievers.document_compressors import LLMChainExtractor
+
+        # 将文本切分为多个文档
+        # 按段落或行切分，保持每块合理大小
+        lines = text.split("\n")
+        chunks: list[Document] = []
+        current_chunk = ""
+        current_size = 0
+        chunk_size_limit = 2000  # 字符
+
+        for line in lines:
+            if current_size + len(line) > chunk_size_limit and current_chunk:
+                chunks.append(Document(page_content=current_chunk.strip(), metadata={"source": tool_name}))
+                current_chunk = ""
+                current_size = 0
+            current_chunk += line + "\n"
+            current_size += len(line)
+
+        if current_chunk.strip():
+            chunks.append(Document(page_content=current_chunk.strip(), metadata={"source": tool_name}))
+
+        if not chunks:
+            return None
+
+        # 使用 LLMChainExtractor 压缩
+        extractor = LLMChainExtractor.from_llm(llm)
+        query = "提取与任务相关的关键信息，包括：事实数据、关键结论、重要引用、相关细节"
+
+        compressed_docs = extractor.compress_documents(chunks, query=query)
+
+        if not compressed_docs:
+            return None
+
+        # 合并压缩后的文档
+        parts = []
+        for doc in compressed_docs:
+            content = doc.page_content.strip()
+            if content:
+                parts.append(content)
+
+        if not parts:
+            return None
+
+        result = "\n---\n".join(parts)
+
+        # 硬截断保护
+        if len(result) > TOOL_OUTPUT_COMPRESSED_MAX_CHARS:
+            result = result[:TOOL_OUTPUT_COMPRESSED_MAX_CHARS] + "\n[已截断]"
+
+        return result
+
+    except Exception as e:
+        print(f"[Memory] _compress_tool_output_with_extractor 失败: {e}")
+        return None
+
+
+def _compress_tool_output_with_summary(
+    text: str,
+    llm: "ChatOpenAI | None",
+    tool_name: str,
+) -> str:
+    """
+    使用总结方式压缩 tool 输出。
+
+    如果没有 LLM，回退为简单的关键信息提取（按行/段落提取）。
+    """
+    if llm:
+        try:
+            # 使用 LLM 生成关键信息摘要
+            summary_prompt = f"""以下是从工具 '{tool_name}' 获取的输出。请提取其中最关键的 {TOOL_OUTPUT_MAX_KEY_POINTS} 条信息，
+保留所有事实性数据和重要结论。用简洁的条目形式输出，每条不超过50字。
+
+工具输出：
+{text[:15000]}{"..." if len(text) > 15000 else ""}
+
+关键信息："""
+
+            response = llm.invoke(summary_prompt)
+            summary_text = response.content if hasattr(response, "content") else str(response)
+
+            # 限制输出长度
+            if len(summary_text) > TOOL_OUTPUT_COMPRESSED_MAX_CHARS:
+                summary_text = summary_text[:TOOL_OUTPUT_COMPRESSED_MAX_CHARS] + "\n[已截断]"
+
+            header = f"[以下为工具 '{tool_name}' 输出的压缩摘要，原始内容已压缩]"
+            return f"{header}\n\n{summary_text}"
+
+        except Exception as e:
+            print(f"[Memory] LLM 总结压缩失败: {e}")
+
+    # 无 LLM 回退：简单提取关键段落
+    return _simple_key_point_extraction(text, tool_name)
+
+
+def _simple_key_point_extraction(text: str, tool_name: str) -> str:
+    """
+    简单关键信息提取（无 LLM 时的回退方案）。
+
+    策略：
+    1. 保留包含数字、日期、名称的行
+    2. 保留标题行
+    3. 每 N 行保留 1 行
+    """
+    lines = text.split("\n")
+    key_lines: list[str] = []
+
+    # 关键词模式：包含数字、引用、冒号开头的行通常包含关键信息
+    priority_patterns = [
+        r"\d+",  # 数字
+        r"^[①②③④⑤]",  # 中文序号
+        r"^\d+[\.、：:]",  # 数字序号
+        r'^["""\'\'\']',  # 引用开始
+        r"^\*\*",  # Markdown 标题
+        r"^#",  # 井号标题
+        r"https?://",  # URL
+        r"^[\u4e00-\u9fa5]{2,10}：",  # 中文标题格式
+    ]
+
+    import re
+
+    for i, line in enumerate(lines):
+        line = line.strip()
+        if not line:
+            continue
+
+        # 检查是否匹配优先级模式
+        is_priority = any(re.search(p, line) for p in priority_patterns)
+
+        if is_priority:
+            key_lines.append(line)
+        elif i % 10 == 0:  # 每10行保留1行
+            key_lines.append(line)
+
+        # 限制总行数
+        if len(key_lines) >= TOOL_OUTPUT_MAX_KEY_POINTS * 3:
+            break
+
+    # 合并并截断
+    result = "\n".join(key_lines[: TOOL_OUTPUT_MAX_KEY_POINTS * 2])
+
+    header = f"[以下为工具 '{tool_name}' 输出的关键信息提取，原内容已大幅压缩]"
+
+    # 硬截断
+    if len(result) > TOOL_OUTPUT_COMPRESSED_MAX_CHARS:
+        result = result[:TOOL_OUTPUT_COMPRESSED_MAX_CHARS] + "\n[已截断]"
+
+    return f"{header}\n\n{result}"
+
+
 # ============== 统一记忆注入接口 ==============
 
 
@@ -562,49 +658,35 @@ def build_memory_messages(
     llm: "ChatOpenAI | None" = None,
     session_id: str | None = None,
     enable_summary: bool = True,
-    enable_long_term: bool = False,
+    enable_long_term: bool = False,  # 已废弃参数，保留接口兼容
     return_meta: bool = False,
-) -> list[SystemMessage | HumanMessage | AIMessage] | tuple[list[SystemMessage | HumanMessage | AIMessage], dict[str, Any]]:
+) -> (
+    list[SystemMessage | HumanMessage | AIMessage]
+    | tuple[list[SystemMessage | HumanMessage | AIMessage], dict[str, Any]]
+):
     """
-    构建包含三层记忆的消息列表，供 Agent 注入。
+    构建包含两层记忆的消息列表，供 Agent 注入。
 
-    返回的消息应插入到 system prompt 之后、当前用户消息之前。
+    已移除：长期记忆 (RAG/FAISS) 注入
 
     Args:
         history: 前端传入的历史消息列表
-        current_message: 当前用户消息（用于 RAG 检索）
-        llm: LLM 实例（用于生成摘要，None 时跳过摘要）
-        session_id: 会话 ID（用于长期记忆检索）
+        current_message: 当前用户消息（用于压缩参考）
+        llm: LLM 实例（用于生成摘要和压缩）
+        session_id: 会话 ID（已废弃，仅保留接口兼容）
         enable_summary: 是否启用总结记忆
-        enable_long_term: 是否启用长期记忆（受 ENABLE_LONG_TERM_MEMORY 总开关控制）
+        enable_long_term: 已废弃参数（长期记忆已移除），传入无效
+        return_meta: 是否返回压缩元数据
 
     Returns:
-        按顺序排列的消息列表: [长期记忆上下文, 摘要上下文, 短期对话历史]
+        按顺序排列的消息列表: [摘要上下文, 短期对话历史]
     """
     result_messages: list[SystemMessage | HumanMessage | AIMessage] = []
 
-    # 1) 长期记忆 (RAG) — 最先注入，作为背景知识
-    if ENABLE_LONG_TERM_MEMORY and enable_long_term and current_message:
-        try:
-            retrieved = retrieve_from_long_term(query=current_message)
-            if retrieved:
-                rag_parts = []
-                for item in retrieved:
-                    rag_parts.append(f"[{item['role']}] {item['content']}")
-                rag_context = "\n---\n".join(rag_parts)
-                result_messages.append(
-                    SystemMessage(
-                        content=(
-                            "以下是从历史对话中检索到的相关记忆片段，可作为参考背景（不一定与当前请求直接相关）：\n"
-                            f"{rag_context}"
-                        )
-                    )
-                )
-                print(f"[Memory] 注入 {len(retrieved)} 条长期记忆")
-        except Exception as e:
-            print(f"[Memory] ⚠️ 长期记忆注入失败: {e}")
+    # [已移除] 长期记忆 (RAG) 注入段
+    # 之前的代码：retrieve_from_long_term() → 不再执行
 
-    # 2) 总结记忆 — 对短期记忆之前的对话做摘要
+    # 1) 总结记忆 — 对短期记忆之前的对话做摘要
     if enable_summary and history and llm:
         try:
             summary = build_summary_memory(history, llm)
@@ -613,13 +695,14 @@ def build_memory_messages(
         except Exception as e:
             print(f"[Memory] ⚠️ 摘要记忆注入失败: {e}")
 
-    # 3) 短期记忆 — 最近 k 轮原文
+    # 2) 短期记忆 — 最近 k 轮原文
     if history:
         short_term = build_short_term_messages(history, k=SHORT_TERM_K)
         if short_term:
             result_messages.extend(short_term)
             print(f"[Memory] 注入 {len(short_term)} 条短期记忆")
 
+    # 上下文预算压缩
     compressed, compression_meta = _fit_memory_messages_to_budget(
         result_messages,
         llm=llm,
@@ -637,7 +720,6 @@ def build_memory_messages(
                 "strategy": compression_meta.get("strategy", "none"),
                 "dropped_messages": compression_meta.get("dropped_messages", 0),
                 "max_context_tokens": MAX_CONTEXT_TOKENS,
-                "memory_budget_tokens": MEMORY_TOKEN_BUDGET,
                 "extractor_enabled": ENABLE_LLM_CHAIN_EXTRACTOR,
             },
         )
@@ -645,6 +727,11 @@ def build_memory_messages(
     if return_meta:
         return compressed, compression_meta
     return compressed
+
+
+# ============== [已废弃] 长期记忆存储接口 ==============
+# 以下函数已删除：store_conversation_to_long_term()
+# 如有其他模块依赖，请使用 stub 函数保持兼容
 
 
 def store_conversation_to_long_term(
@@ -655,21 +742,39 @@ def store_conversation_to_long_term(
     mode: str | None = None,
 ):
     """
-    将一轮对话（user + assistant）存入长期记忆。
-    应在 Agent 完成响应后调用。
+    [已废弃] 长期记忆存储功能已移除。
 
-    Args:
-        session_id: 会话 ID
-        user_message: 用户消息
-        assistant_message: AI 回复
-        model: 使用的模型
-        mode: 使用的模式
+    此函数保留为 stub 以避免破坏依赖此接口的代码。
+    调用此函数将无任何效果。
     """
-    meta = {}
-    if model:
-        meta["model"] = model
-    if mode:
-        meta["mode"] = mode
+    # 已移除 FAISS 长期记忆存储逻辑
+    # 如需对话历史管理，请依赖 build_memory_messages 中的短期/总结记忆
+    pass
 
-    store_to_long_term(session_id, "user", user_message, metadata=meta)
-    store_to_long_term(session_id, "assistant", assistant_message, metadata=meta)
+
+def retrieve_from_long_term(
+    query: str,
+    top_k: int = 3,
+) -> list[dict]:
+    """
+    [已废弃] 长期记忆检索功能已移除。
+
+    此函数保留为 stub 以避免破坏依赖此接口的代码。
+    始终返回空列表。
+    """
+    return []
+
+
+def store_to_long_term(
+    session_id: str,
+    role: str,
+    content: str,
+    metadata: dict | None = None,
+) -> None:
+    """
+    [已废弃] 长期记忆存储功能已移除。
+
+    此函数保留为 stub 以避免破坏依赖此接口的代码。
+    调用此函数将无任何效果。
+    """
+    pass

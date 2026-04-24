@@ -63,7 +63,7 @@ def _validate_folder_key(folder: str) -> str:
         raise ValueError("invalid folder")
     if Path(folder_key).name != folder_key:
         raise ValueError("invalid folder")
-    if any(ch in folder_key for ch in "<>:\"/\\|?*"):
+    if any(ch in folder_key for ch in '<>:"/\\|?*'):
         raise ValueError("invalid folder")
     return folder_key
 

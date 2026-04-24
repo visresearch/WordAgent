@@ -1,7 +1,7 @@
 Generate formatted document payload for insertion into the active Word document.
 
 ## Parameters:
-- `document` (object, DocumentOutput): generated content payload for insertion (paragraphs/tables/images/styles/insert index).
+- `document` (object, DocumentOutput): generated content payload for insertion (paragraphs/tables/styles/insert index).
 
 ## When to use:
 - Create new content and insert into document.
@@ -17,14 +17,13 @@ Generate formatted document payload for insertion into the active Word document.
 - `dict`: echoed generated document object.
 
 ## Image Payload Rules:
-- To insert images into Word, put image objects in `document.images`.
-- Use URL field for generated images: `{"url": "https://...png?token=..."}`.
-- Do not modify URL query parameters.
-- No visible placeholder text is required.
-- If you provide `paraIndex`, align it to an existing paragraph index in this payload.
-- If unsure, you can omit `paraIndex`; backend will auto-append empty anchor paragraphs for image insertion.
-- Recommend `images[].pStyle` centered with zero left/right indent, for example `["center", 0, 0, 0, 0, 0, 0, "正文", 1]`.
-- Keep image width within printable page width; if uncertain, use moderate width or omit explicit width.
+- Images are inline runs inside paragraphs. A run without `text` field is an image.
+- Text run: `{"text": "...", "rStyle": "rS_1"}`
+- Image run: `{"url": "...", "width": 320, "height": 240, "altText": "..."}` (no text field)
+- Keep image URL unchanged (including query parameters). Do not strip URL params.
+- Image runs can be mixed with text runs in the same paragraph.
+- Recommend `pStyle` centered with zero left/right indent, for example `["center", 0, 0, 0, 0, 0, 0, "正文", 1]`.
+- Keep image width within printable page width; if uncertain, use moderate width (320-420) or omit explicit width.
 
 ## Typography rules for runs:
 - Do not use one `rStyle` for the entire document.
@@ -90,17 +89,17 @@ Image insertion payload:
 {
 	"document": {
 		"insertParaIndex": -1,
-		"paragraphs": [],
-		"tables": [],
-		"images": [
+		"paragraphs": [
 			{
-				"type": "inline",
-				"url": "https://example.com/demo.png?Expires=123&Signature=abc",
-				"width": 320,
-				"height": 240,
-				"altText": "示意图"
+				"pStyle": "pS_3",
+				"runs": [
+					{ "text": "以下是一张示例图片：", "rStyle": "rS_2" },
+					{ "url": "https://example.com/demo.png?Expires=123&Signature=abc", "width": 320, "height": 240, "altText": "示意图" },
+					{ "text": "，请参考。", "rStyle": "rS_2" }
+				]
 			}
 		],
+		"tables": [],
 		"styles": {
 			"pS_3": ["center", 0, 0, 0, 0, 0, 0, "正文", 1],
 			"rS_2": ["宋体", 12, false, false, 0, "#000000", "#000000", 0, false, false, false]
@@ -140,10 +139,10 @@ Style strategy (learned from benchmark document):
 	- Do not use one rStyle from start to end.
 
 Image strategy:
-- Put images in document.images.
-- No visible placeholder text is required.
-- If paraIndex is uncertain, omit paraIndex and let backend auto-anchor.
-- Prefer `images[].pStyle` centered and left/right indent = 0.
+- Images are inline runs inside paragraphs. A run without `text` field is an image.
+- Example: `{"url": "...", "width": 320, "height": 240, "altText": "..."}`
+- Image runs can be mixed with text runs in the same paragraph.
+- Prefer `pStyle` centered and left/right indent = 0.
 - Ensure image width is not larger than printable page width.
 - If there is a figure/chart, add a caption paragraph directly below it using `图X，描述`, with `pS_6` (centered, `题图`) and a dedicated caption run style (`rS_5`, 黑体五号).
 

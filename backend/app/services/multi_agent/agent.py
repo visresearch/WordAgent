@@ -437,6 +437,34 @@ def _run_sub_agent(
                     else:
                         content = str(result)
 
+                    # ========== [新增] Tool 输出压缩逻辑 ==========
+                    # 在 tool observation 写入上下文之前，检查是否需要压缩
+                    # 压缩阈值：TOOL_OUTPUT_COMPRESS_THRESHOLD_TOKENS (默认 50k tokens)
+                    from app.services.memory import compress_tool_output_if_needed
+
+                    content, compression_info = compress_tool_output_if_needed(
+                        tool_output=content,
+                        llm=llm,  # 传递 LLM 用于压缩
+                        tool_name=tool_name,
+                    )
+                    # 如果发生了压缩，通过 stream writer 通知前端显示
+                    if compression_info:
+                        try:
+                            from langgraph.config import get_stream_writer
+
+                            writer = get_stream_writer()
+                            compression_summary = (
+                                f"📦 [{compression_info['tool_name']}] 输出压缩: "
+                                f"{compression_info['original_tokens']} tokens → {compression_info['compressed_tokens']} tokens "
+                                f"(策略: {compression_info['strategy']})"
+                            )
+                            writer(
+                                {"type": "tool_compress", "content": compression_summary, "detail": compression_info}
+                            )
+                        except Exception:
+                            pass  # 非关键路径，忽略 writer 异常
+                    # ==============================================
+
                     messages.append(ToolMessage(content=content, tool_call_id=tc["id"], name=tool_name))
 
                     # 收集文档搜索工具的调用结果（位置信息），供下游 agent 共享
@@ -861,21 +889,9 @@ async def process_writing_request_stream(
                 else:
                     yield f"data: {json.dumps({'type': 'status', 'content': str(chunk)}, ensure_ascii=False)}\n\n"
 
-        # 将本轮对话存入长期记忆
-        assistant_text = "".join(_collected_text_parts)
-        if assistant_text:
-            try:
-                from app.services.memory import store_conversation_to_long_term
-
-                store_conversation_to_long_term(
-                    session_id=chat_id or "",
-                    user_message=message,
-                    assistant_message=assistant_text or "[已执行多智能体工作流]",
-                    model=model,
-                    mode=mode,
-                )
-            except Exception as mem_err:
-                print(f"[MultiAgent] ⚠️ 存入长期记忆失败: {mem_err}")
+        # [已移除] 长期记忆存储
+        # 之前代码：store_conversation_to_long_term() → 已移除
+        # 对话历史现在通过短期记忆 + 总结记忆机制管理
 
         yield "data: [DONE]\n\n"
 

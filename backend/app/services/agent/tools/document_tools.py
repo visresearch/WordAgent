@@ -76,106 +76,42 @@ def _save_data_image(data_url: str) -> str | None:
 
 
 def _ensure_image_payload_shape(doc_dict: dict) -> None:
-    """Normalize images/paragraphs so frontend can insert images reliably."""
-    images = doc_dict.get("images")
-    if not isinstance(images, list) or not images:
-        return
-
+    """Normalize inline image runs in paragraphs: download URLs, resolve data images."""
     paragraphs = doc_dict.get("paragraphs")
     if not isinstance(paragraphs, list):
-        paragraphs = []
-        doc_dict["paragraphs"] = paragraphs
+        return
 
-    styles = doc_dict.get("styles")
-    if not isinstance(styles, dict):
-        styles = {}
-        doc_dict["styles"] = styles
-
-    # 为段落补齐 paraIndex（局部 0-based）
-    existing_para_indices: set[int] = set()
-    para_by_index: dict[int, dict] = {}
-    for i, para in enumerate(paragraphs):
+    for para in paragraphs:
         if not isinstance(para, dict):
             continue
-        if para.get("paraIndex") is None:
-            para["paraIndex"] = i
-        try:
-            para_idx = int(para.get("paraIndex"))
-            para["paraIndex"] = para_idx
-            existing_para_indices.add(para_idx)
-            para_by_index[para_idx] = para
-        except (TypeError, ValueError):
+        runs = para.get("runs")
+        if not isinstance(runs, list):
             continue
 
-    # 为图片补齐路径和默认值
-    for img in images:
-        if not isinstance(img, dict):
-            continue
-        img.setdefault("type", "inline")
-        img.setdefault("placeholder", "")
+        for run in runs:
+            if not isinstance(run, dict):
+                continue
+            # Skip text runs
+            if run.get("text") is not None:
+                continue
 
-        if not (img.get("tempPath") or img.get("sourcePath")):
-            url = str(img.get("url") or "").strip()
-            if url.startswith("data:image/"):
-                local_path = _save_data_image(url)
-                if local_path:
-                    img["tempPath"] = local_path
-            elif url.startswith("http://") or url.startswith("https://"):
-                local_path = _download_remote_image(url)
-                if local_path:
-                    img["tempPath"] = local_path
+            # This is an image run (no text field)
+            run.setdefault("type", "inline")
 
-    # 缺少锚点时，自动追加图片锚点段落（使用 "/" 作为统一占位符）
-    p_style_id = next((k for k in styles if str(k).startswith("pS_")), None)
-    r_style_id = next((k for k in styles if str(k).startswith("rS_")), None)
+            # Download remote images or decode data images
+            if not (run.get("tempPath") or run.get("sourcePath")):
+                url = str(run.get("url") or "").strip()
+                if url.startswith("data:image/"):
+                    local_path = _save_data_image(url)
+                    if local_path:
+                        run["tempPath"] = local_path
+                elif url.startswith("http://") or url.startswith("https://"):
+                    local_path = _download_remote_image(url)
+                    if local_path:
+                        run["tempPath"] = local_path
 
-    if p_style_id is None:
-        p_style_id = "pS_auto_img"
-        styles[p_style_id] = ["center", 0, 0, 0, 0, 0, 0, "", 0]
-    if r_style_id is None:
-        r_style_id = "rS_auto_img"
-        styles[r_style_id] = ["宋体", 12, False, False, 0, "#000000", "#000000", 0, False, False, False]
-
-    anchor_placeholder_run = [{"text": "/", "rStyle": r_style_id}]
-
-    next_idx = (max(existing_para_indices) + 1) if existing_para_indices else len(paragraphs)
-    for img in images:
-        if not isinstance(img, dict):
-            continue
-
-        raw_para_index = img.get("paraIndex")
-        try:
-            para_index = int(raw_para_index) if raw_para_index is not None else None
-        except (TypeError, ValueError):
-            para_index = None
-
-        has_valid_anchor = para_index is not None and para_index in existing_para_indices
-        if not has_valid_anchor:
-            para_index = next_idx
-            next_idx += 1
-            img["paraIndex"] = para_index
-            existing_para_indices.add(para_index)
-            paragraphs.append(
-                {
-                    "paraIndex": para_index,
-                    "pStyle": p_style_id,
-                    "runs": anchor_placeholder_run,
-                }
-            )
-            para_by_index[para_index] = paragraphs[-1]
-        else:
-            img["paraIndex"] = para_index
-
-            anchor_para = para_by_index.get(para_index)
-            if isinstance(anchor_para, dict):
-                # 直接覆盖锚点段落为统一占位符，不做占位文本扫描
-                anchor_para["runs"] = anchor_placeholder_run
-                anchor_para["pStyle"] = p_style_id
-
-        if not (img.get("tempPath") or img.get("sourcePath")) and img.get("url"):
-            print(
-                f"[generate_document] ⚠️ 图片未获取到本地路径，可能插入失败: paraIndex={img.get('paraIndex')}, url={img.get('url')}"
-            )
+            if not (run.get("tempPath") or run.get("sourcePath")) and run.get("url"):
+                print(f"[generate_document] ⚠️ 图片未获取到本地路径，可能插入失败: url={run.get('url')}")
 
 
 def _save_generated_document_json(doc_dict: dict) -> str | None:
@@ -202,16 +138,46 @@ def _compact_doc_json(doc_json: dict) -> str:
     if len(full) <= _MAX_DOC_JSON_CHARS:
         return full
 
-    # 精简模式：只保留段落文本和索引
+    # 精简模式：保留段落文本和图片信息（inline image runs）
     compact = {"paragraphs": [], "_compacted": True}
     for p in doc_json.get("paragraphs", []):
-        text = "".join(r.get("text", "") if isinstance(r, dict) else str(r) for r in p.get("runs", []))
-        compact["paragraphs"].append({"paraIndex": p.get("paraIndex"), "text": text})
+        if not isinstance(p, dict):
+            continue
+        para_compact = {"paraIndex": p.get("paraIndex"), "runs": []}
+        for r in p.get("runs", []):
+            if isinstance(r, dict):
+                # 文本 run: 只保留核心文本
+                if r.get("text") is not None:
+                    para_compact["runs"].append({"text": r.get("text", ""), "rStyle": r.get("rStyle")})
+                # 图片 run: 保留完整信息
+                else:
+                    img_info = {
+                        k: v
+                        for k, v in r.items()
+                        if k
+                        in (
+                            "url",
+                            "tempPath",
+                            "sourcePath",
+                            "width",
+                            "height",
+                            "left",
+                            "top",
+                            "wrapType",
+                            "altText",
+                        )
+                        and v is not None
+                    }
+                    if img_info:
+                        para_compact["runs"].append(img_info)
+        compact["paragraphs"].append(para_compact)
 
     # 保留表格文本信息
     if doc_json.get("tables"):
         compact["tables"] = []
-        for t in doc_json["tables"]:
+        for t in doc_json.get("tables", []):
+            if not isinstance(t, dict):
+                continue
             table_compact = {
                 "paraIndex": t.get("paraIndex"),
                 "endParaIndex": t.get("endParaIndex"),
@@ -235,29 +201,6 @@ def _compact_doc_json(doc_json: dict) -> str:
                 rows.append(cells)
             table_compact["cellTexts"] = rows
             compact["tables"].append(table_compact)
-
-    # 保留图片核心信息，避免图片范围在精简模式下丢失
-    if doc_json.get("images"):
-        compact["images"] = []
-        for img in doc_json["images"]:
-            if not isinstance(img, dict):
-                continue
-            compact["images"].append(
-                {
-                    "type": img.get("type"),
-                    "paraIndex": img.get("paraIndex"),
-                    "width": img.get("width"),
-                    "height": img.get("height"),
-                    "left": img.get("left"),
-                    "top": img.get("top"),
-                    "wrapType": img.get("wrapType"),
-                    "altText": img.get("altText"),
-                    "tempPath": img.get("tempPath"),
-                    "sourcePath": img.get("sourcePath"),
-                    "url": img.get("url"),
-                    "placeholder": img.get("placeholder"),
-                }
-            )
 
     result = json.dumps(compact, ensure_ascii=False)
     print(f"[read_document] 📦 文档过大 ({len(full)} chars)，已精简为 {len(result)} chars（纯文本模式）")
@@ -308,13 +251,21 @@ def read_document(startParaIndex: int = 0, endParaIndex: int = 49) -> str:
                         writer({"type": "status", "content": f"⚠️ 读取文档失败: {err_msg}"})
                         return ""
                     doc_json = result.get("documentJson", {})
-                    has_content = doc_json and (
-                        doc_json.get("paragraphs") or doc_json.get("tables") or doc_json.get("images")
-                    )
+
+                    # 统计 inline image runs（图片在 paragraphs[].runs[] 中，没有 text 字段的 run）
+                    def count_inline_images(doc):
+                        count = 0
+                        for p in doc.get("paragraphs", []):
+                            for r in p.get("runs", []):
+                                if isinstance(r, dict) and r.get("text") is None:
+                                    count += 1
+                        return count
+
+                    image_count = count_inline_images(doc_json)
+                    has_content = doc_json and (doc_json.get("paragraphs") or doc_json.get("tables"))
                     if has_content:
                         para_count = len(doc_json.get("paragraphs", []))
                         table_count = len(doc_json.get("tables", []))
-                        image_count = len(doc_json.get("images", []))
                         print(
                             f"[read_document] ✅ 收到文档，段落数: {para_count}，表格数: {table_count}，图片数: {image_count}"
                         )
@@ -354,16 +305,12 @@ def generate_document(document: DocumentOutput) -> dict:
     doc_dict = document.model_dump()
     _ensure_image_payload_shape(doc_dict)
     para_count = len(doc_dict.get("paragraphs", []))
-    image_count = len(doc_dict.get("images", []))
-
-    # saved_path = _save_generated_document_json(doc_dict)
-    # if saved_path:
-    #     writer(
-    #         {
-    #             "type": "status",
-    #             "content": f"💾 生成 JSON 已保存: {saved_path}",
-    #         }
-    #     )
+    # 统计 inline image runs
+    image_count = 0
+    for p in doc_dict.get("paragraphs", []):
+        for r in p.get("runs", []):
+            if isinstance(r, dict) and r.get("text") is None:
+                image_count += 1
 
     writer(
         {

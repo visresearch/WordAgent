@@ -7,11 +7,10 @@
 - For long output, split into multiple calls and keep insertion order stable.
 - When editing existing content, keep original style intent unless the user explicitly requests format changes.
 - If frontend defers delete confirmation to a final global confirm action, still proceed with `generate_document` and complete the planned workflow in the same run.
-- For image-generation tasks, do not only return image links in chat text. Build a `generate_document` payload with `document.images` and insert it into the document.
+- For image-generation tasks, embed images as inline runs inside paragraphs. A run without `text` field is an image: `{"url": "...", "width": 320, "height": 240}`.
 - Keep image URLs unchanged (including query parameters). Do not rewrite or strip URL params.
-- Image insertion does not require visible placeholder text; omit placeholder paragraphs unless user explicitly asks.
-- If `paraIndex` is not clear, omit it and let backend create empty anchor paragraphs automatically.
-- Prefer setting `images[].pStyle` to centered with zero horizontal indent (for example `["center", 0, 0, 0, 0, 0, 0, "正文", 1]`).
+- Image runs can be mixed with text runs in the same paragraph.
+- Prefer `pStyle` centered with zero horizontal indent (for example `["center", 0, 0, 0, 0, 0, 0, "正文", 1]`).
 - Keep image `width` within printable page width. If uncertain, use conservative width (for example 320-420) or omit width and keep aspect ratio.
 - For mixed-language text, split runs and use multiple `rStyle` values; do not use one `rStyle` for the whole document.
 
@@ -19,7 +18,7 @@ Pre-call guardrails:
 - Ensure the payload is valid and complete before calling.
 - Ensure style references are internally consistent.
 - Ensure insertion index matches the intended position.
-- Ensure `document.images` entries have usable paths: prefer `url`; if local paths are available, use `tempPath`/`sourcePath`.
+- Ensure image runs have usable paths: prefer `url`; if local paths are available, use `tempPath`/`sourcePath`.
 
 Long-content execution pattern:
 - For long articles, plan sections first, then call `generate_document` in batches.
@@ -37,7 +36,6 @@ Use the following strategy when user asks for a formal report/thesis-like articl
 	- `insertParaIndex`
 	- `paragraphs`
 	- `tables` (can be `[]`)
-	- `images` (can be `[]`)
 	- complete `styles` map that covers all referenced style IDs in that batch
 
 ### Recommended batch plan
@@ -77,10 +75,10 @@ Use a profile similar to the benchmark sample rather than one-style-for-all outp
 - Avoid repeated empty paragraphs. Keep at most one blank line between sections unless user explicitly asks for larger spacing.
 
 ### Image insertion rules
-- Prefer `document.images` with `url`/`tempPath`.
-- No visible placeholder text required.
-- If exact `paraIndex` is unclear, omit it and let backend append empty anchor paragraphs.
-- Recommend `images[].pStyle` centered with left/right indent = 0.
+- Images are inline runs inside paragraphs. A run without `text` field is an image.
+- Example: `{"url": "...", "width": 320, "height": 240, "altText": "..."}`
+- Image runs can be mixed with text runs in the same paragraph.
+- Prefer `pStyle` centered with left/right indent = 0.
 - Ensure image width does not exceed page printable width.
 
 ### Suggested execution prompt (internal)

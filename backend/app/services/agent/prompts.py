@@ -18,7 +18,6 @@ _COMMON_PROMPT_FILES = [
     "system-prompt-tool-usage-read-document.md",
     "system-prompt-tool-usage-search-document.md",
     "system-prompt-tool-usage-subagent-guidance.md",
-    "system-prompt-tool-usage-web-fetch.md",
 ]
 
 # 仅 agent 模式注入：写作修改相关工具提示
@@ -64,7 +63,6 @@ _TOOL_DESCRIPTION_FILES = {
     "delete_document": "tool-description-delete-document.md",
     "search_document": "tool-description-search-document.md",
     "run_sub_agent": "tool-description-run-subagent.md",
-    "web_fetch": "tool-description-web-fetch.md",
 }
 
 

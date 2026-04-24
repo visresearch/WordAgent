@@ -100,6 +100,11 @@
                   <div class="mcp-inline-output markdown-body" v-html="renderMarkdown(part.outputText || '（无输出）')"></div>
                 </div>
               </div>
+              <!-- Tool 输出压缩信息 -->
+              <div v-else-if="part.type === 'tool_compress'" class="tool-compress-line">
+                <span class="tool-compress-icon">📦</span>
+                <span class="tool-compress-text">{{ part.content }}</span>
+              </div>
               <!-- eslint-disable-next-line vue/no-v-html -->
               <div v-else-if="part.type === 'text'" class="markdown-body" v-html="renderMarkdown(part.content)"></div>
             </div>
@@ -752,5 +757,29 @@ export default {
 
 .img-menu-item:hover {
   background: #f0f0f0;
+}
+
+/* Tool output compression display */
+.tool-compress-line {
+  margin: 4px 0;
+  padding: 4px 8px;
+  background: linear-gradient(135deg, #fff9e6 0%, #fff3cd 100%);
+  border: 1px solid #ffc107;
+  border-radius: 6px;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 11px;
+  color: #856404;
+}
+
+.tool-compress-icon {
+  flex-shrink: 0;
+  font-size: 12px;
+}
+
+.tool-compress-text {
+  word-break: break-word;
+  line-height: 1.4;
 }
 </style>

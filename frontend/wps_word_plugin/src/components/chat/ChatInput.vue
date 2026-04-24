@@ -186,6 +186,35 @@
             </div>
           </div>
           <div class="toolbar-right">
+            <div class="btn-wrapper token-ring-wrapper">
+              <div class="token-ring">
+                <svg viewBox="0 0 12 12" class="token-ring-svg">
+                  <circle
+                    cx="6"
+                    cy="6"
+                    r="4"
+                    fill="none"
+                    stroke="#e0e0e0"
+                    stroke-width="2"
+                  />
+                  <circle
+                    cx="6"
+                    cy="6"
+                    r="4"
+                    fill="none"
+                    :stroke="tokenRingColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-dasharray="25.13"
+                    :stroke-dashoffset="tokenRingOffset"
+                    transform="rotate(-90 6 6)"
+                  />
+                </svg>
+              </div>
+              <div class="token-ring-tooltip">
+                {{ tokenRingTitle }}
+              </div>
+            </div>
             <div class="btn-wrapper">
               <button class="add-selection-btn" title="添加文件" @click="triggerFilePicker">
                 <img :src="fileIcon" alt="添加文件" class="toolbar-icon" />
@@ -295,6 +324,10 @@ export default {
     pendingDeletes: {
       type: Array,
       default: () => []
+    },
+    tokenStats: {
+      type: Object,
+      default: () => ({ current: 0, max: 200000 })
     }
   },
   emits: ['send', 'stop', 'add-selection', 'remove-selection', 'add-files', 'remove-file', 'update:mode', 'update:selectedModel', 'refresh-models', 'confirm-pending', 'cancel-pending'],
@@ -357,6 +390,31 @@ export default {
         parts.push(this.pendingDocument.preview);
       }
       return 'AI 操作：' + parts.join('，');
+    },
+    tokenRingOffset() {
+      const max = this.tokenStats.max || 200000;
+      const percentage = max > 0 ? Math.min(100, (this.tokenStats.current || 0) / max * 100) : 0;
+      const circumference = 25.13; // 2 * PI * 4
+      return circumference * (1 - percentage / 100);
+    },
+    tokenRingColor() {
+      const max = this.tokenStats.max || 200000;
+      const percentage = max > 0 ? Math.min(100, (this.tokenStats.current || 0) / max * 100) : 0;
+      if (percentage >= 90) {
+        return '#e74c3c';
+      }
+      if (percentage >= 70) {
+        return '#f39c12';
+      }
+      return '#667eea';
+    },
+    tokenRingTitle() {
+      const current = this.tokenStats.current || 0;
+      const max = this.tokenStats.max || 200000;
+      const currentK = (current / 1000).toFixed(1);
+      const maxK = (max / 1000).toFixed(0);
+      const percentage = max > 0 ? Math.min(100, Math.round(current / max * 100)) : 0;
+      return `上下文：${currentK}k / ${maxK}k tokens（${percentage}%）`;
     }
   },
   mounted() {
@@ -903,5 +961,56 @@ export default {
 .stop-btn:hover {
   background: #fef0ef;
   color: #c0392b;
+}
+
+/* Token 环样式 */
+.token-ring-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+  width: 12px;
+  height: 12px;
+}
+
+.token-ring {
+  width: 12px;
+  height: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.token-ring-svg {
+  width: 100%;
+  height: 100%;
+}
+
+.token-ring-wrapper:hover .token-ring-tooltip {
+  opacity: 1;
+  visibility: visible;
+}
+
+.token-ring-tooltip {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 3px 6px;
+  background: white;
+  color: #333;
+  font-size: 10px;
+  border-radius: 4px;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 0.2s,
+    visibility 0.2s;
+  pointer-events: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  border: 1px solid #e0e0e0;
+  margin-bottom: 4px;
 }
 </style>

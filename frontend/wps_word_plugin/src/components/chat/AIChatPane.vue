@@ -27,6 +27,7 @@
         :uploaded-files="uploadedFiles"
         :pending-document="pendingDocument"
         :pending-deletes="pendingDeletes"
+        :token-stats="tokenStats"
         @update:mode="mode = $event"
         @update:selected-model="selectedModel = $event"
         @send="handleSend"
@@ -92,6 +93,7 @@ export default {
       _streamingSessionId: null,   // 正在流式生成的 session ID
       _streamingCache: {},         // {sessionId: messages[]} 流式生成期间切走时缓存消息
       isWide: false,
+      tokenStats: { current: 0, max: 200000, percentage: 0 },
       _proofreadModeInitialized: false,
       _proofreadModeLoadPromise: null
     };
@@ -1100,6 +1102,15 @@ export default {
         }
       }
 
+      // 处理 token 统计信息
+      if (data.type === 'token_stats') {
+        this.tokenStats = {
+          current: data.current_tokens || 0,
+          max: data.max_tokens || 200000,
+        };
+        return;
+      }
+
       // 后端请求读取文档：委托 api.js 解析文档并回传
       if (data.type === 'read_document') {
         console.log('[AIChatPane] 后端请求读取文档, startParaIndex:', data.startParaIndex, 'endParaIndex:', data.endParaIndex);
@@ -1324,7 +1335,20 @@ export default {
         });
         this.scrollToBottom();
         return;
-      } else if (data.type === 'text' && data.content) {
+      }
+
+      // 处理 tool 输出压缩信息
+      if (data.type === 'tool_compress') {
+        msg.contentParts.push({
+          type: 'tool_compress',
+          content: data.content,
+          detail: data.detail || {}
+        });
+        this.scrollToBottom();
+        return;
+      }
+
+      if (data.type === 'text' && data.content) {
         const content = data.content;
         msg.content += content;
 

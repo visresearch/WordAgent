@@ -24,9 +24,7 @@ def _get_env_int(name: str, default: int) -> int:
         return default
 
 
-_AGENT_RECURSION_LIMIT = _get_env_int("WORDAGENT_AGENT_RECURSION_LIMIT", 12)
-_MAX_TOOL_CALLS_PER_REQUEST = _get_env_int("WORDAGENT_MAX_TOOL_CALLS_PER_REQUEST", 10)
-_MAX_MCP_CALLS_PER_REQUEST = _get_env_int("WORDAGENT_MAX_MCP_CALLS_PER_REQUEST", 4)
+_AGENT_RECURSION_LIMIT = _get_env_int("WORDAGENT_AGENT_RECURSION_LIMIT", 20)  # Agent 总轮次上限（默认 20）
 
 
 # region LangSmith（可选，不影响正常运行）
@@ -71,7 +69,7 @@ def _try_init_langsmith():
 
 _langsmith_enabled = _try_init_langsmith()
 
-from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain.agents import create_agent
 from langchain.chat_models import init_chat_model
 from langgraph.checkpoint.memory import InMemorySaver
@@ -82,7 +80,6 @@ from app.services.utils import normalize_tool_args
 from app.services.agent.tools import (
     get_base_tools_for_mode,
     _current_chat_id,
-    _current_request_context,
     register_loop,
     is_stop_requested,
 )
@@ -209,41 +206,10 @@ def _prepare_tools_for_agent(tools: list, mcp_tool_names: set[str]) -> list:
                 if is_stop_requested(chat_id):
                     return "Operation cancelled by user"
 
-                # 每请求调用预算限制（防止 agent 在工具调用中打转）
-                request_ctx = _current_request_context.get(None)
-                if isinstance(request_ctx, dict):
-                    total_calls = int(request_ctx.get("_tool_call_count", 0)) + 1
-                    max_tool_calls = int(request_ctx.get("_max_tool_calls", _MAX_TOOL_CALLS_PER_REQUEST))
-                    if total_calls > max_tool_calls:
-                        return (
-                            f"Tool call budget exceeded ({max_tool_calls}) for this request. "
-                            "Stop calling tools and provide the best possible final answer with available evidence."
-                        )
-                    request_ctx["_tool_call_count"] = total_calls
-
-                    if mcp:
-                        mcp_calls = int(request_ctx.get("_mcp_call_count", 0)) + 1
-                        max_mcp_calls = int(request_ctx.get("_max_mcp_calls", _MAX_MCP_CALLS_PER_REQUEST))
-                        if mcp_calls > max_mcp_calls:
-                            return (
-                                f"MCP call budget exceeded ({max_mcp_calls}) for this request. "
-                                "Do not call MCP tools again; continue with current evidence and complete the task."
-                            )
-                        request_ctx["_mcp_call_count"] = mcp_calls
-
-                # MCP 工具状态输出
+                # MCP 工具状态输出（仅打印日志，不发往前端）
                 if mcp:
-                    try:
-                        from langgraph.config import get_stream_writer
-
-                        writer = get_stream_writer()
-                        preview = json.dumps(kwargs, ensure_ascii=False)
-                        print(f"[Agent] 🔧 调用 MCP 工具: {tname}({preview})")
-                        if len(preview) > 100:
-                            preview = preview[:100] + "..."
-                        writer({"type": "status", "content": f"🔧 调用 MCP 工具: {tname}({preview})"})
-                    except Exception:
-                        pass
+                    preview = json.dumps(kwargs, ensure_ascii=False)
+                    print(f"[Agent] 调用 MCP 工具: {tname}({preview[:200]})")
 
                 # 参数标准化
                 normalized = normalize_tool_args(tname, kwargs)
@@ -342,14 +308,7 @@ async def process_writing_request_stream(
 
     print("[Agent] 开始处理请求")
     print(f"[Agent] 模式: {mode}")
-    print(
-        "[Agent] 预算配置:",
-        {
-            "recursion_limit": _AGENT_RECURSION_LIMIT,
-            "max_tool_calls": _MAX_TOOL_CALLS_PER_REQUEST,
-            "max_mcp_calls": _MAX_MCP_CALLS_PER_REQUEST,
-        },
-    )
+    print("[Agent] 配置: recursion_limit =", _AGENT_RECURSION_LIMIT)
 
     model_name = resolve_model(model or "auto")
     _thinking_enabled = supports_thinking(model_name)
@@ -410,7 +369,7 @@ async def process_writing_request_stream(
         messages = []
 
         # 注入记忆（当前默认：摘要 + 短期；长期 RAG 暂停）
-        from app.services.memory import build_memory_messages
+        from app.services.memory import build_memory_messages, _estimate_messages_tokens
 
         memory_result = build_memory_messages(
             history=history,
@@ -430,8 +389,7 @@ async def process_writing_request_stream(
             strategy = str(memory_meta.get("strategy", "none"))
             dropped = int(memory_meta.get("dropped_messages", 0) or 0)
             status_text = (
-                f"🗜️ 上下文压缩完成（{before_tokens} -> {after_tokens} tokens, "
-                f"strategy={strategy}, dropped={dropped}）"
+                f"🗜️ 上下文压缩完成（{before_tokens} -> {after_tokens} tokens, strategy={strategy}, dropped={dropped}）"
             )
             print(f"[Agent] {status_text}")
             yield f"data: {json.dumps({'type': 'status', 'content': status_text}, ensure_ascii=False)}\n\n"
@@ -531,6 +489,10 @@ async def process_writing_request_stream(
         queue: asyncio.Queue = asyncio.Queue()
         has_tool_result = False
         _collected_text_parts: list[str] = []  # 收集 AI 回复文本，用于存入长期记忆
+        _agent_turn_count = 0  # ReAct 循环轮次计数
+        # 跟踪对话历史以估算动态 token
+        _conversation_history: list = list(messages)
+
         # 构建 LangSmith tracing config（可选）
         langsmith_config = None
         if _langsmith_enabled:
@@ -556,18 +518,6 @@ async def process_writing_request_stream(
                 if chat_id:
                     _current_chat_id.set(chat_id)
                 _current_model_name.set(model_name)
-                _current_request_context.set(
-                    {
-                        "document_meta": document_meta,
-                        "document_range": document_range,
-                        "mode": mode,
-                        "has_attached_files": bool(attached_files),
-                        "_tool_call_count": 0,
-                        "_mcp_call_count": 0,
-                        "_max_tool_calls": _MAX_TOOL_CALLS_PER_REQUEST,
-                        "_max_mcp_calls": _MAX_MCP_CALLS_PER_REQUEST,
-                    }
-                )
 
                 import uuid as _uuid
 
@@ -615,6 +565,15 @@ async def process_writing_request_stream(
         executor.submit(run_stream)
 
         # 从队列中消费流式数据
+        # 发送初始 token 统计（对话开始时）
+        try:
+            from app.services.memory import _estimate_messages_tokens, MAX_CONTEXT_TOKENS
+
+            initial_tokens = _estimate_messages_tokens(_conversation_history)
+            yield f"data: {json.dumps({'type': 'token_stats', 'current_tokens': initial_tokens, 'max_tokens': MAX_CONTEXT_TOKENS}, ensure_ascii=False)}\n\n"
+        except Exception:
+            pass
+
         while True:
             stream_item = await queue.get()
 
@@ -634,6 +593,53 @@ async def process_writing_request_stream(
                     continue
                 msg = chunk[0]
                 content = msg.content
+
+                # 跟踪对话历史
+                if isinstance(msg, AIMessage):
+                    _conversation_history.append(msg)
+                elif isinstance(msg, ToolMessage):
+                    # 将 ToolMessage 加入对话历史
+                    _conversation_history.append(msg)
+                    _agent_turn_count += 1
+                    try:
+                        from app.services.memory import _estimate_messages_tokens, MAX_CONTEXT_TOKENS
+
+                        current_tokens = _estimate_messages_tokens(_conversation_history)
+                        tokens_k = current_tokens / 1000
+                        max_tokens_k = MAX_CONTEXT_TOKENS / 1000
+                        print(f"[Agent] 轮次 {_agent_turn_count} | 当前上下文: {tokens_k:.1f}k tokens")
+                        # 发送 token 统计给前端
+                        yield f"data: {json.dumps({'type': 'token_stats', 'current_tokens': current_tokens, 'max_tokens': MAX_CONTEXT_TOKENS}, ensure_ascii=False)}\n\n"
+
+                        # 检测到上下文超过上限，立即触发压缩
+                        if current_tokens > MAX_CONTEXT_TOKENS:
+                            print(f"[Agent] ⚠️ 上下文超限 ({tokens_k:.1f}k > {max_tokens_k:.1f}k)，开始压缩...")
+                            yield f"data: {json.dumps({'type': 'status', 'content': f'⚠️ 上下文超限 ({tokens_k:.1f}k > {max_tokens_k:.1f}k tokens)，开始压缩...'}, ensure_ascii=False)}\n\n"
+                            try:
+                                from app.services.memory import compress_conversation_history_if_needed
+                                print(f"[Agent] 压缩前 _conversation_history 消息数: {len(_conversation_history)}, token 估算: {current_tokens}")
+                                compressed, meta = compress_conversation_history_if_needed(
+                                    _conversation_history,
+                                    llm=llm,
+                                    query=message,
+                                )
+                                print(f"[Agent] 压缩后消息数: {len(compressed)}")
+                                before = meta.get("before_tokens_est", 0)
+                                after = meta.get("after_tokens_est", 0)
+                                strategy = meta.get("strategy", "none")
+                                dropped = meta.get("dropped_messages", 0)
+                                # 更新对话历史为压缩后的版本
+                                _conversation_history.clear()
+                                _conversation_history.extend(compressed)
+                                after_tokens_k = after / 1000
+                                print(f"[Agent] 🗜️ 上下文压缩完成: {before/1000:.1f}k → {after_tokens_k:.1f}k tokens, strategy={strategy}, dropped={dropped}")
+                                # 压缩完成后发 token_stats 刷新前端环
+                                yield f"data: {json.dumps({'type': 'token_stats', 'current_tokens': after, 'max_tokens': MAX_CONTEXT_TOKENS}, ensure_ascii=False)}\n\n"
+                                yield f"data: {json.dumps({'type': 'status', 'content': f'🗜️ 上下文压缩完成: {before/1000:.1f}k → {after_tokens_k:.1f}k tokens (strategy={strategy}, 丢弃{dropped}条消息)'}, ensure_ascii=False)}\n\n"
+                            except Exception as ce:
+                                print(f"[Agent] ⚠️ 上下文压缩失败: {ce}")
+                    except Exception as e:
+                        print(f"[Agent] 轮次 {_agent_turn_count} | 当前上下文: (token 估算失败) {e}")
 
                 if isinstance(msg, ToolMessage):
                     # 根据工具名称决定是否转发给前端
@@ -725,21 +731,9 @@ async def process_writing_request_stream(
         if mode == "agent" and not has_tool_result and document_range:
             yield f"data: {json.dumps({'type': 'status', 'content': '⚠️ 没有检测到调用工具，模型可能不支持'}, ensure_ascii=False)}\n\n"
 
-        # 将本轮对话存入长期记忆
-        assistant_text = "".join(_collected_text_parts)
-        if assistant_text or has_tool_result:
-            try:
-                from app.services.memory import store_conversation_to_long_term
-
-                store_conversation_to_long_term(
-                    session_id=chat_id or "",
-                    user_message=message,
-                    assistant_message=assistant_text or "[Tool calls executed]",
-                    model=model,
-                    mode=mode,
-                )
-            except Exception as mem_err:
-                print(f"[Agent] ⚠️ 存入长期记忆失败: {mem_err}")
+        # [已移除] 长期记忆存储
+        # store_conversation_to_long_term() 现为 stub 函数，无实际效果
+        # 对话历史通过 build_memory_messages 中的短期/总结记忆机制管理
 
         yield "data: [DONE]\n\n"
 
