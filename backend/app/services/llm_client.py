@@ -13,6 +13,85 @@ from openai import AsyncOpenAI
 
 from app.core.config import get_user_settings_file
 
+from langchain_openai import ChatOpenAI as _BaseChatOpenAI
+from langchain_core.outputs import ChatGenerationChunk
+
+
+class ChatOpenAI(_BaseChatOpenAI):
+    """支持 reasoning_content 的 ChatOpenAI 子类。
+
+    LangChain 底层不映射 reasoning_content 到 additional_kwargs，
+    这个子类在流式处理时从原始 chunk 中提取 reasoning_content，
+    注入到 AIMessageChunk.additional_kwargs["reasoning_content"] 中，
+    使其可以被 agent 流式处理代码正确获取。
+    """
+
+    def _convert_chunk_to_generation_chunk(
+        self, chunk, default_chunk_class, base_generation_info=None
+    ):
+        generation_chunk = super()._convert_chunk_to_generation_chunk(
+            chunk, default_chunk_class, base_generation_info
+        )
+        if generation_chunk is None:
+            return None
+
+        # 从原始 chunk 中提取 reasoning_content
+        choices = chunk.get("choices", []) or chunk.get("chunk", {}).get("choices", [])
+        if choices:
+            delta = choices[0].get("delta", {})
+            reasoning_content = delta.get("reasoning_content")
+            if reasoning_content:
+                msg = generation_chunk.message
+                if hasattr(msg, "additional_kwargs"):
+                    msg.additional_kwargs["reasoning_content"] = reasoning_content
+
+        return generation_chunk
+
+
+def init_chat_model_with_reasoning(model_name: str, enable_thinking: bool = False):
+    """
+    创建支持 reasoning_content 的 ChatOpenAI 实例。
+
+    等价于 langchain.chat_models.init_chat_model，但使用自定义的
+    ChatOpenAI 子类，能在流式处理中正确提取 reasoning_content。
+    仅用于 OpenAI 兼容接口。Anthropic 模型走 init_chat_model。
+    """
+    kwargs = get_llm_init_kwargs(model_name, enable_thinking=enable_thinking)
+    model_provider = kwargs.pop("model_provider", None)
+
+    # Anthropic 模型走标准 init_chat_model（内部会路由到 ChatAnthropic）
+    if model_provider == "anthropic":
+        return _init_chat_model_fallback(model_name, kwargs, enable_thinking)
+
+    # OpenAI 兼容接口：thinking 需要从顶层移到 extra_body
+    if "thinking" in kwargs:
+        thinking_cfg = kwargs.pop("thinking")
+        extra_body = kwargs.get("extra_body") or {}
+        extra_body["thinking"] = thinking_cfg
+        kwargs["extra_body"] = extra_body
+
+    return ChatOpenAI(**kwargs)
+
+
+def _init_chat_model_fallback(model_name: str, kwargs: dict, enable_thinking: bool):
+    """Anthropic 模型走 init_chat_model，不做额外处理"""
+    from langchain.chat_models import init_chat_model as _init_chat_model
+
+    return _init_chat_model(
+        model=kwargs.pop("model"),
+        model_provider="anthropic",
+        api_key=kwargs.pop("api_key"),
+        base_url=kwargs.pop("base_url", None) or None,
+        temperature=kwargs.pop("temperature"),
+        max_tokens=kwargs.pop("max_tokens"),
+        streaming=kwargs.pop("streaming"),
+        http_client=kwargs.pop("http_client", None),
+        http_async_client=kwargs.pop("http_async_client", None),
+        thinking=kwargs.pop("thinking", None) if enable_thinking else None,
+        # 剩余参数透传
+        **kwargs,
+    )
+
 # ============== 配置文件路径 ==============
 
 SETTINGS_FILE = get_user_settings_file()
@@ -206,26 +285,23 @@ def get_httpx_proxy_url() -> str | None:
     return get_proxy_url()
 
 
-def get_thinking_config(model_name: str) -> dict | None:
-    """根据模型名称返回 thinking 配置，不支持则返回 None。"""
-    lowered = (model_name or "").lower()
-    if not lowered.startswith("claude"):
-        return None
-    # Claude Opus 4 系列
-    if "opus-4" in lowered:
-        return {"type": "enabled", "budget_tokens": 10000}
-    # Claude Sonnet 4 系列（含 4.5）
-    if "sonnet-4" in lowered:
-        return {"type": "enabled", "budget_tokens": 8000}
-    # Claude 3.5 Sonnet v2 (20241022+)
-    if "3-5-sonnet" in lowered:
-        return {"type": "enabled", "budget_tokens": 8000}
-    return None
+def get_reasoning_extra_body(model_name: str) -> dict | None:
+    """
+    返回 OpenAI 兼容模型的 reasoning/thinking extra_body 参数。
+
+    通用的 thinking 注入参数，适用于任意 OpenAI 兼容 API
+    （Qwen、DeepSeek、vLLM、OneAPI 等均支持）。
+    API 不支持该参数时会忽略，不影响正常调用。
+    """
+    return {"thinking": {"type": "enabled", "parameters": {"effort": "high"}}}
 
 
 def supports_thinking(model_name: str) -> bool:
-    """检查模型是否支持 thinking 模式。"""
-    return get_thinking_config(resolve_model(model_name)) is not None
+    """
+    检查模型是否支持 thinking 模式。
+    目前对所有模型返回 True，因为 API 不支持时会自动忽略，不影响正常调用。
+    """
+    return True
 
 
 def _resolve_llm_params(model_name: str, enable_thinking: bool = False) -> dict:
@@ -262,11 +338,19 @@ def _resolve_llm_params(model_name: str, enable_thinking: bool = False) -> dict:
         if proxy_url:
             kwargs["anthropic_proxy"] = proxy_url
         if enable_thinking:
-            thinking_config = get_thinking_config(actual_model_name)
-            if thinking_config:
-                kwargs["thinking"] = thinking_config
-                kwargs["temperature"] = 1  # Anthropic thinking 要求 temperature=1
-                print(f"[LLM] 🧠 已启用 thinking 模式: {thinking_config}")
+            lowered = actual_model_name.lower()
+            if "opus-4" in lowered:
+                kwargs["thinking"] = {"type": "enabled", "budget_tokens": 10000}
+                kwargs["temperature"] = 1
+                print(f"[LLM] 🧠 Anthropic thinking (opus-4): budget=10000")
+            elif "sonnet-4" in lowered:
+                kwargs["thinking"] = {"type": "enabled", "budget_tokens": 8000}
+                kwargs["temperature"] = 1
+                print(f"[LLM] 🧠 Anthropic thinking (sonnet-4): budget=8000")
+            elif "3-5-sonnet" in lowered:
+                kwargs["thinking"] = {"type": "enabled", "budget_tokens": 8000}
+                kwargs["temperature"] = 1
+                print(f"[LLM] 🧠 Anthropic thinking (3.5-sonnet): budget=8000")
     else:
         kwargs["model_provider"] = "openai"
         kwargs["base_url"] = provider_info.base_url
@@ -275,6 +359,9 @@ def _resolve_llm_params(model_name: str, enable_thinking: bool = False) -> dict:
 
             kwargs["http_client"] = httpx.Client(proxy=proxy_url)
             kwargs["http_async_client"] = httpx.AsyncClient(proxy=proxy_url)
+        if enable_thinking:
+            kwargs["extra_body"] = get_reasoning_extra_body(actual_model_name)
+            print(f"[LLM] 🧠 已注入 thinking extra_body（模型不支持则自动忽略）")
 
     return kwargs
 

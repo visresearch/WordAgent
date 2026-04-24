@@ -81,9 +81,8 @@ def run_sub_agent_task(
 ) -> str:
     """运行子智能体并返回最终文本或统计信息。"""
     from app.services.agent.tools.callback import _current_chat_id, _current_model_name, is_stop_requested
-    from app.services.llm_client import get_llm_init_kwargs, resolve_model
+    from app.services.llm_client import resolve_model, init_chat_model_with_reasoning
     from langchain.agents import create_agent
-    from langchain.chat_models import init_chat_model
     from langchain_core.messages import HumanMessage
 
     writer = get_stream_writer()
@@ -97,7 +96,7 @@ def run_sub_agent_task(
     tools, _ = resolve_sub_agent_tools(agent_type)
 
     model_name = _current_model_name.get(None) or resolve_model("auto")
-    llm = init_chat_model(**get_llm_init_kwargs(model_name))
+    llm = init_chat_model_with_reasoning(model_name)
     print(f"[SubAgent] 使用模型: {model_name}")
 
     system_prompt = build_sub_agent_system_prompt(agent_type)

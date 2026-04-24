@@ -124,9 +124,8 @@ class MultiAgentState(BaseModel):
 
 
 def _create_llm(model_name: str):
-    """创建 LLM 实例"""
-    from app.services.llm_client import get_temperature, get_https_proxy_url, get_http_proxy_url
-    from langchain_openai import ChatOpenAI
+    """创建 LLM 实例（支持 reasoning_content）"""
+    from app.services.llm_client import get_temperature, get_https_proxy_url, get_http_proxy_url, ChatOpenAI
 
     provider_info = LLMClientManager.get_provider_info(model_name)
     proxy_url = get_https_proxy_url() or get_http_proxy_url()
@@ -436,34 +435,6 @@ def _run_sub_agent(
                             pass
                     else:
                         content = str(result)
-
-                    # ========== [新增] Tool 输出压缩逻辑 ==========
-                    # 在 tool observation 写入上下文之前，检查是否需要压缩
-                    # 压缩阈值：TOOL_OUTPUT_COMPRESS_THRESHOLD_TOKENS (默认 50k tokens)
-                    from app.services.memory import compress_tool_output_if_needed
-
-                    content, compression_info = compress_tool_output_if_needed(
-                        tool_output=content,
-                        llm=llm,  # 传递 LLM 用于压缩
-                        tool_name=tool_name,
-                    )
-                    # 如果发生了压缩，通过 stream writer 通知前端显示
-                    if compression_info:
-                        try:
-                            from langgraph.config import get_stream_writer
-
-                            writer = get_stream_writer()
-                            compression_summary = (
-                                f"📦 [{compression_info['tool_name']}] 输出压缩: "
-                                f"{compression_info['original_tokens']} tokens → {compression_info['compressed_tokens']} tokens "
-                                f"(策略: {compression_info['strategy']})"
-                            )
-                            writer(
-                                {"type": "tool_compress", "content": compression_summary, "detail": compression_info}
-                            )
-                        except Exception:
-                            pass  # 非关键路径，忽略 writer 异常
-                    # ==============================================
 
                     messages.append(ToolMessage(content=content, tool_call_id=tc["id"], name=tool_name))
 
@@ -874,6 +845,11 @@ async def process_writing_request_stream(
                 if not chunk or len(chunk) == 0:
                     continue
                 msg = chunk[0]
+                # 处理 OpenAI/DeepSeek reasoning 模型的 reasoning_content
+                if isinstance(msg, AIMessageChunk):
+                    reasoning_content = getattr(msg, "additional_kwargs", {}).get("reasoning_content")
+                    if reasoning_content:
+                        yield f"data: {json.dumps({'type': 'thinking', 'content': reasoning_content}, ensure_ascii=False)}\n\n"
                 # 只转发非 writer agent 的 AI 文字 token
                 if isinstance(msg, AIMessageChunk) and msg.content and current_agent not in _SUPPRESS_STREAM:
                     _collected_text_parts.append(msg.content)

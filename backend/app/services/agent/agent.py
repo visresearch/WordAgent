@@ -69,12 +69,11 @@ def _try_init_langsmith():
 
 _langsmith_enabled = _try_init_langsmith()
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, SystemMessage, ToolMessage
 from langchain.agents import create_agent
-from langchain.chat_models import init_chat_model
 from langgraph.checkpoint.memory import InMemorySaver
 
-from app.services.llm_client import resolve_model, supports_thinking, get_llm_init_kwargs
+from app.services.llm_client import resolve_model, supports_thinking, init_chat_model_with_reasoning
 from app.services.agent.prompts import get_core_prompts
 from app.services.utils import normalize_tool_args
 from app.services.agent.tools import (
@@ -312,8 +311,7 @@ async def process_writing_request_stream(
 
     model_name = resolve_model(model or "auto")
     _thinking_enabled = supports_thinking(model_name)
-    llm_kwargs = get_llm_init_kwargs(model_name, enable_thinking=_thinking_enabled)
-    llm = init_chat_model(**llm_kwargs)
+    llm = init_chat_model_with_reasoning(model_name, enable_thinking=_thinking_enabled)
     if _thinking_enabled:
         print(f"[Agent] 🧠 模型 {model_name} 支持 thinking 模式，已启用")
 
@@ -593,6 +591,12 @@ async def process_writing_request_stream(
                     continue
                 msg = chunk[0]
                 content = msg.content
+
+                # 处理 OpenAI/DeepSeek reasoning 模型的 reasoning_content（LangChain 已修复，会保留在 additional_kwargs）
+                if isinstance(msg, AIMessageChunk):
+                    reasoning_content = getattr(msg, "additional_kwargs", {}).get("reasoning_content")
+                    if reasoning_content:
+                        yield f"data: {json.dumps({'type': 'thinking', 'content': reasoning_content}, ensure_ascii=False)}\n\n"
 
                 # 跟踪对话历史
                 if isinstance(msg, AIMessage):

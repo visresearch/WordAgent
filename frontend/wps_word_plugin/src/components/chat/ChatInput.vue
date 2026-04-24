@@ -914,6 +914,26 @@ export default {
   user-select: none;
 }
 
+.thinking-mode-icon {
+  font-size: 12px;
+  line-height: 1;
+  display: block;
+  cursor: pointer;
+  transition: transform 0.2s;
+}
+.thinking-mode-icon:hover {
+  transform: scale(1.2);
+}
+.thinking-mode-icon.auto {
+  color: #999;
+}
+.thinking-mode-icon.expanded {
+  color: #667eea;
+}
+.thinking-mode-icon.collapsed {
+  color: #f39c12;
+}
+
 .file-input-hidden {
   display: none;
 }
