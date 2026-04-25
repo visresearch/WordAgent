@@ -32,15 +32,6 @@ for src, dst in optional_dirs:
     if os.path.exists(src_path):
         datas.append((src, dst))
 
-# 可选配置文件（存在则打包）
-optional_files = [
-    ('../.env', '.'),
-]
-for src, dst in optional_files:
-    src_path = os.path.abspath(os.path.join(os.path.dirname(SPEC), src))
-    if os.path.exists(src_path):
-        datas.append((src, dst))
-
 # 收集隐藏导入（LangChain 和依赖库的所有模块）
 hiddenimports = [
     'uvicorn.logging',

@@ -104,6 +104,7 @@ async function request(url, options = {}) {
 
 /**
  * 获取当前文档全局元信息（随用户 chat 请求发送给后端）
+ * 注意：Word.run 返回 Promise，需在 chatStream 调用处 await
  * @returns {Promise<Object|null>}
  */
 async function getCurrentDocumentMeta() {

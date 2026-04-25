@@ -66,9 +66,10 @@
 - [x] 支持单智能体模式
 - [x] 支持多智能体模式
 - [x] 支持远程MCP服务器工具接入
-- [ ] 支持本地MCP服务器和Skill工具接入
-- [ ] 支持表格、插图、公式等复杂样式编辑
-  
+- [x] 支持本地MCP服务器和Skill工具接入
+- [x] 支持上下文压缩
+- [x] 支持表格、插图、公式等复杂样式编辑(公式可读但是不能生成)
+
 #### 本项目支持的办公软件
 
 - WPS Office（Windows、Linux）版本 12.1.25225及以上
@@ -166,7 +167,7 @@ uv run pyinstaller wence.spec
 - [x] MiniMax M2.5运行稳定
 - [x] Step 3.5 Flash运行稳定
 - [x] DeepSeek v3.2运行稳定
-- [x] Claude Sonnet 4.6生成文档工具会出现问题
+- [x] Claude Sonnet/Opus 运行稳定
 - [x] Kimi K2.5容易出现工具调用死循环
 - [ ] Gemini 3.1 Pro
 

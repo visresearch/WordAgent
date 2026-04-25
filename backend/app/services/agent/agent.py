@@ -24,7 +24,18 @@ def _get_env_int(name: str, default: int) -> int:
         return default
 
 
-_AGENT_RECURSION_LIMIT = _get_env_int("WORDAGENT_AGENT_RECURSION_LIMIT", 20)  # Agent 总轮次上限（默认 20）
+_AGENT_RECURSION_LIMIT = _get_env_int("WORDAGENT_AGENT_RECURSION_LIMIT", 25)
+
+
+class ContextOverflowError(Exception):
+    """
+    上下文超限异常：携带压缩后的对话历史，
+    通知调用方（chat.py）用压缩后的历史重试请求。
+    """
+
+    def __init__(self, message: str, compressed_history: list):
+        super().__init__(message)
+        self.compressed_history = compressed_history
 
 
 # region LangSmith（可选，不影响正常运行）
@@ -185,6 +196,13 @@ def _is_transient_stream_error(exc: Exception) -> bool:
         "remoteprotocolerror",
     ]
     return any(sig in text for sig in transient_signals)
+
+
+def _is_context_overflow_error(exc: Exception) -> bool:
+    """判断是否是上下文超限错误（413 等）。"""
+    text = str(exc).lower()
+    overflow_signals = ["413", "context_length", "too many tokens", "maximum context", "exceeds context", "token limit"]
+    return any(sig in text for sig in overflow_signals)
 
 
 def _prepare_tools_for_agent(tools: list, mcp_tool_names: set[str]) -> list:
@@ -386,11 +404,16 @@ async def process_writing_request_stream(
             after_tokens = int(memory_meta.get("after_tokens_est", 0) or 0)
             strategy = str(memory_meta.get("strategy", "none"))
             dropped = int(memory_meta.get("dropped_messages", 0) or 0)
-            status_text = (
-                f"🗜️ 上下文压缩完成（{before_tokens} -> {after_tokens} tokens, strategy={strategy}, dropped={dropped}）"
-            )
-            print(f"[Agent] {status_text}")
-            yield f"data: {json.dumps({'type': 'status', 'content': status_text}, ensure_ascii=False)}\n\n"
+            if strategy != "none":
+                strategy_label = {
+                    "llm_chain_extractor": "LLMChainExtractor",
+                    "recent_keep_with_note": "截断保留",
+                    "recent_keep": "截断保留",
+                }.get(strategy, strategy)
+                print(
+                    f"[Agent] 🗜️ 启动压缩（{strategy_label}）: {before_tokens} -> {after_tokens} tokens, dropped={dropped}"
+                )
+            # 启动阶段不往前端发压缩状态，避免干扰首轮交互
 
         # 构建用户消息
         user_content = message
@@ -488,6 +511,7 @@ async def process_writing_request_stream(
         has_tool_result = False
         _collected_text_parts: list[str] = []  # 收集 AI 回复文本，用于存入长期记忆
         _agent_turn_count = 0  # ReAct 循环轮次计数
+        _last_input_tokens = 0  # 最近一次 API 响应的真实 input_tokens（优先于本地估算）
         # 跟踪对话历史以估算动态 token
         _conversation_history: list = list(messages)
 
@@ -549,6 +573,11 @@ async def process_writing_request_stream(
                         asyncio.run_coroutine_threadsafe(queue.put(None), loop)
                         return
                     except Exception as e:
+                        # 上下文超限：通知主循环触发重量重压缩，抛出异常让流退出
+                        if _is_context_overflow_error(e):
+                            print(f"[Agent] ⚠️ 上下文超限错误（{e}），触发被动重量重压缩")
+                            asyncio.run_coroutine_threadsafe(queue.put(("context_overflow", str(e))), loop)
+                            raise
                         # 仅在“首包前失败 + 可重试网络错误”时自动重试一次，避免重复输出
                         if attempt < max_attempts and (not has_any_stream_item) and _is_transient_stream_error(e):
                             print(f"[Agent] ⚠️ 流式连接异常（第 {attempt} 次）: {e}，准备重试")
@@ -563,14 +592,6 @@ async def process_writing_request_stream(
         executor.submit(run_stream)
 
         # 从队列中消费流式数据
-        # 发送初始 token 统计（对话开始时）
-        try:
-            from app.services.memory import _estimate_messages_tokens, MAX_CONTEXT_TOKENS
-
-            initial_tokens = _estimate_messages_tokens(_conversation_history)
-            yield f"data: {json.dumps({'type': 'token_stats', 'current_tokens': initial_tokens, 'max_tokens': MAX_CONTEXT_TOKENS}, ensure_ascii=False)}\n\n"
-        except Exception:
-            pass
 
         while True:
             stream_item = await queue.get()
@@ -580,6 +601,47 @@ async def process_writing_request_stream(
 
             if isinstance(stream_item, tuple) and stream_item[0] == "error":
                 raise Exception(stream_item[1])
+
+            # 上下文超限被动重压缩：收到 signal 后执行重量压缩，抛异常让 chat.py 重试
+            if isinstance(stream_item, tuple) and stream_item[0] == "context_overflow":
+                print(f"[Agent] ⚠️ 收到上下文超限信号，触发被动重量重压缩")
+                from app.services.memory import compress_conversation_history_if_needed
+
+                current_tokens = _estimate_messages_tokens(_conversation_history)
+                compressed, meta = compress_conversation_history_if_needed(
+                    _conversation_history,
+                    llm=llm,
+                    query=message,
+                    history=history,
+                    compact_level="heavy",
+                )
+                heavy_meta = meta.get("heavy_compact", {})
+                if heavy_meta.get("heavy_compact_triggered"):
+                    before = heavy_meta.get("before_tokens", current_tokens)
+                    after = heavy_meta.get("after_tokens", 0)
+                    print(f"[Agent] 🗜️ 被动重量重压缩完成: {before} -> {after} tokens")
+                    # 将压缩后的 LangChain 消息转回 dict 列表，供 chat.py 更新 history 重试
+                    updated_history = []
+                    for m in compressed:
+                        role = {"HumanMessage": "user", "AIMessage": "assistant", "SystemMessage": "system"}.get(
+                            type(m).__name__, "assistant"
+                        )
+                        content_val = getattr(m, "content", "")
+                        # 处理多模态内容
+                        if hasattr(content_val, "__iter__") and not isinstance(content_val, str):
+                            text_content = "".join(
+                                part.get("text", "")
+                                if isinstance(part, dict)
+                                else (part if isinstance(part, str) else "")
+                                for part in content_val
+                            )
+                            content_val = text_content
+                        if isinstance(m, (HumanMessage, AIMessage, SystemMessage)):
+                            updated_history.append({"role": role, "content": str(content_val)})
+                    raise ContextOverflowError("上下文超限，已触发重量重压缩", updated_history)
+                else:
+                    print("[Agent] ⚠️ 被动重量重压缩失败，无法生成摘要")
+                    raise Exception("上下文超限但重量重压缩失败，请手动减少对话历史")
 
             if not isinstance(stream_item, tuple):
                 continue
@@ -598,52 +660,124 @@ async def process_writing_request_stream(
                     if reasoning_content:
                         yield f"data: {json.dumps({'type': 'thinking', 'content': reasoning_content}, ensure_ascii=False)}\n\n"
 
-                # 跟踪对话历史
+                # 跟踪对话历史，记录最近一次 API 响应的真实 input_tokens
+                # 注意：AIMessageChunk 是流式中间块，不追加到 _conversation_history
+                # （避免本地估算不断膨胀），只从完整的 AIMessage 取 usage_metadata
                 if isinstance(msg, AIMessage):
                     _conversation_history.append(msg)
+                    # AIMessage 通常是完整响应，尝试从中获取 usage_metadata
+                    usage = getattr(msg, "usage_metadata", None)
+                    if isinstance(usage, dict) and "input_tokens" in usage and usage.get("input_tokens", 0) > 0:
+                        _last_input_tokens = int(usage.get("input_tokens", 0))
+                        # 发送更新后的 token 统计（让前端始终看到最新值）
+                        from app.services.memory import MAX_CONTEXT_TOKENS
+
+                        tokens_k = _last_input_tokens / 1000
+                        max_tokens_k = MAX_CONTEXT_TOKENS / 1000
+                        print(f"[Agent] 当前上下文: {tokens_k:.1f}k tokens")
+                        yield f"data: {json.dumps({'type': 'token_stats', 'current_tokens': _last_input_tokens, 'max_tokens': MAX_CONTEXT_TOKENS}, ensure_ascii=False)}\n\n"
+                elif isinstance(msg, AIMessageChunk):
+                    # 只收集文本内容用于流式输出，不追加到 _conversation_history
+                    normalized = _extract_text_content(msg.content)
+                    if normalized:
+                        _collected_text_parts.append(normalized)
+                    # 从流式 chunk 的 usage_metadata 获取真实 input_tokens
+                    usage = getattr(msg, "usage_metadata", None)
+                    if isinstance(usage, dict) and "input_tokens" in usage and usage.get("input_tokens", 0) > 0:
+                        _last_input_tokens = int(usage.get("input_tokens", 0))
+                        # 发送更新后的 token 统计（让前端始终看到最新值）
+                        from app.services.memory import MAX_CONTEXT_TOKENS
+
+                        tokens_k = _last_input_tokens / 1000
+                        max_tokens_k = MAX_CONTEXT_TOKENS / 1000
+                        print(f"[Agent] 当前上下文: {tokens_k:.1f}k tokens")
+                        yield f"data: {json.dumps({'type': 'token_stats', 'current_tokens': _last_input_tokens, 'max_tokens': MAX_CONTEXT_TOKENS}, ensure_ascii=False)}\n\n"
                 elif isinstance(msg, ToolMessage):
                     # 将 ToolMessage 加入对话历史
                     _conversation_history.append(msg)
                     _agent_turn_count += 1
                     try:
-                        from app.services.memory import _estimate_messages_tokens, MAX_CONTEXT_TOKENS
+                        from app.services.memory import MAX_CONTEXT_TOKENS
 
-                        current_tokens = _estimate_messages_tokens(_conversation_history)
+                        # 优先使用 API 真实 input_tokens，ToolMessage 本身很小可忽略
+                        # 若真实值尚未拿到（首轮之前），回退到本地估算
+                        current_tokens = (
+                            _last_input_tokens
+                            if _last_input_tokens > 0
+                            else _estimate_messages_tokens(_conversation_history)
+                        )
                         tokens_k = current_tokens / 1000
                         max_tokens_k = MAX_CONTEXT_TOKENS / 1000
                         print(f"[Agent] 轮次 {_agent_turn_count} | 当前上下文: {tokens_k:.1f}k tokens")
                         # 发送 token 统计给前端
                         yield f"data: {json.dumps({'type': 'token_stats', 'current_tokens': current_tokens, 'max_tokens': MAX_CONTEXT_TOKENS}, ensure_ascii=False)}\n\n"
 
-                        # 检测到上下文超过上限，立即触发压缩
-                        if current_tokens > MAX_CONTEXT_TOKENS:
-                            print(f"[Agent] ⚠️ 上下文超限 ({tokens_k:.1f}k > {max_tokens_k:.1f}k)，开始压缩...")
-                            yield f"data: {json.dumps({'type': 'status', 'content': f'⚠️ 上下文超限 ({tokens_k:.1f}k > {max_tokens_k:.1f}k tokens)，开始压缩...'}, ensure_ascii=False)}\n\n"
-                            try:
-                                from app.services.memory import compress_conversation_history_if_needed
-                                print(f"[Agent] 压缩前 _conversation_history 消息数: {len(_conversation_history)}, token 估算: {current_tokens}")
-                                compressed, meta = compress_conversation_history_if_needed(
-                                    _conversation_history,
-                                    llm=llm,
-                                    query=message,
-                                )
-                                print(f"[Agent] 压缩后消息数: {len(compressed)}")
-                                before = meta.get("before_tokens_est", 0)
-                                after = meta.get("after_tokens_est", 0)
-                                strategy = meta.get("strategy", "none")
-                                dropped = meta.get("dropped_messages", 0)
-                                # 更新对话历史为压缩后的版本
-                                _conversation_history.clear()
-                                _conversation_history.extend(compressed)
-                                after_tokens_k = after / 1000
-                                print(f"[Agent] 🗜️ 上下文压缩完成: {before/1000:.1f}k → {after_tokens_k:.1f}k tokens, strategy={strategy}, dropped={dropped}")
-                                # 压缩完成后发 token_stats 刷新前端环
-                                yield f"data: {json.dumps({'type': 'token_stats', 'current_tokens': after, 'max_tokens': MAX_CONTEXT_TOKENS}, ensure_ascii=False)}\n\n"
-                                yield f"data: {json.dumps({'type': 'status', 'content': f'🗜️ 上下文压缩完成: {before/1000:.1f}k → {after_tokens_k:.1f}k tokens (strategy={strategy}, 丢弃{dropped}条消息)'}, ensure_ascii=False)}\n\n"
-                            except Exception as ce:
-                                print(f"[Agent] ⚠️ 上下文压缩失败: {ce}")
+                        # 使用 API 真实 input_tokens，压缩判断也以此为准（比本地估算更准确）
+                        from app.services.memory import (
+                            compress_conversation_history_if_needed,
+                            _estimate_messages_tokens,
+                        )
+
+                        print(
+                            f"[Agent] 压缩前 input_tokens: {_last_input_tokens}, _conversation_history 消息数: {len(_conversation_history)}"
+                        )
+                        compressed, meta = compress_conversation_history_if_needed(
+                            _conversation_history,
+                            llm=llm,
+                            query=message,
+                            history=history,  # 传原始 history 让 heavy compact 生成正确摘要
+                            current_input_tokens=_last_input_tokens,
+                        )
+                        print(f"[Agent] 压缩后消息数: {len(compressed)}, meta={meta}")
+
+                        # 提取压缩信息
+                        light_meta = meta.get("light_compact", {})
+                        heavy_meta = meta.get("heavy_compact", {})
+                        hard_meta = meta.get("hard_truncate", {})
+
+                        # 确定使用的策略
+                        if light_meta.get("light_compact_triggered"):
+                            strategy = "light_compact"
+                            before = current_tokens
+                            after = _estimate_messages_tokens(compressed)
+                            dropped = light_meta.get("cleared_tool_results", 0)
+                        elif heavy_meta.get("heavy_compact_triggered"):
+                            strategy = "heavy_compact"
+                            before = heavy_meta.get("before_tokens", current_tokens)
+                            after = heavy_meta.get("after_tokens", 0)
+                            dropped = 0
+                        elif hard_meta.get("triggered"):
+                            strategy = hard_meta.get("strategy", "hard_truncate")
+                            before = hard_meta.get("before_tokens_est", 0)
+                            after = hard_meta.get("after_tokens_est", 0)
+                            dropped = hard_meta.get("dropped_messages", 0)
+                        else:
+                            strategy = "none"
+                            before = 0
+                            after = 0
+                            dropped = 0
+
+                        # 只有实际触发了压缩才打印；strategy=none 时跳过
+                        if strategy != "none":
+                            after_tokens_k = after / 1000
+                            strategy_label = "轻量压缩" if strategy == "light_compact" else "重量压缩"
+                            print(
+                                f"[Agent] 🗜️ {strategy_label}完成: {before / 1000:.1f}k → {after_tokens_k:.1f}k tokens, dropped={dropped}"
+                            )
+                            # 重量压缩/Hard truncate 发前端（仅完成通知），轻量压缩仅后端 log
+                            if strategy != "light_compact":
+                                try:
+                                    yield f"data: {json.dumps({'type': 'status', 'content': '🗜️ 上下文压缩完成'}, ensure_ascii=False)}\n\n"
+                                except Exception:
+                                    pass  # WebSocket 已断开，不影响主流程
+                        else:
+                            print("[Agent] 上下文压缩跳过（未超过阈值）")
+
+                        # 无论是否压缩，都更新对话历史
+                        _conversation_history.clear()
+                        _conversation_history.extend(compressed)
                     except Exception as e:
-                        print(f"[Agent] 轮次 {_agent_turn_count} | 当前上下文: (token 估算失败) {e}")
+                        print(f"[Agent] ⚠️ 上下文压缩失败: {e}")
 
                 if isinstance(msg, ToolMessage):
                     # 根据工具名称决定是否转发给前端

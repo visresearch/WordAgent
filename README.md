@@ -68,8 +68,9 @@ In addition, this project supports custom tool integration. Users can configure 
 - [x] Single-agent mode
 - [x] Multi-agent mode
 - [x] Remote MCP server integration
-- [ ] Local MCP server and Skill tool integration
-- [ ] Advanced style editing (tables, illustrations, equations, etc.)
+- [x] Local MCP server and Skill tool integration
+- [x] Context compression support
+- [x] Advanced style editing (tables, illustrations, equations, etc.) — equations are readable but cannot be generated
 
 #### Supported Office Suites
 
@@ -120,12 +121,8 @@ The frontend flow is the same as in single-agent mode. In the backend multi-agen
 ### Build Frontend Add-in
 
 ```bash
-# Option A: WPS Word add-in
-cd frontend/wps_word_plugin
-
-# Option B: Microsoft Word add-in
-# cd frontend/microsoft_word_plugin
-
+cd frontend/wps_word_plugin       # WPS Word add-in
+cd frontend/microsoft_word_plugin # Or Microsoft Word add-in
 pnpm install
 pnpm build
 ```
@@ -175,8 +172,8 @@ The project has tested part of the mainstream LLM APIs in China, and compatibili
 - [x] MiniMax M2.5 (stable)
 - [x] Step 3.5 Flash (stable)
 - [x] DeepSeek v3.2 (stable)
-- [x] Claude Sonnet 4.6 (issues with document-generation tool calls)
-- [x] Kimi K2.5 (can fall into tool-call loops)
+- [x] Claude Sonnet/Opus (stable)
+- [x] Kimi K2.5 (prone to tool-call loops)
 - [ ] Gemini 3.1 Pro
 
 Note: part of development used free quotas from [Alibaba Bailian](https://bailian.console.aliyun.com/) and [OpenRouter](https://openrouter.ai/models?q=free).

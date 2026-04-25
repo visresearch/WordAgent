@@ -26,12 +26,8 @@ class ChatOpenAI(_BaseChatOpenAI):
     使其可以被 agent 流式处理代码正确获取。
     """
 
-    def _convert_chunk_to_generation_chunk(
-        self, chunk, default_chunk_class, base_generation_info=None
-    ):
-        generation_chunk = super()._convert_chunk_to_generation_chunk(
-            chunk, default_chunk_class, base_generation_info
-        )
+    def _convert_chunk_to_generation_chunk(self, chunk, default_chunk_class, base_generation_info=None):
+        generation_chunk = super()._convert_chunk_to_generation_chunk(chunk, default_chunk_class, base_generation_info)
         if generation_chunk is None:
             return None
 
@@ -91,6 +87,7 @@ def _init_chat_model_fallback(model_name: str, kwargs: dict, enable_thinking: bo
         # 剩余参数透传
         **kwargs,
     )
+
 
 # ============== 配置文件路径 ==============
 

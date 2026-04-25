@@ -9,6 +9,7 @@ import uuid
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.services.agent.agent import (
+    ContextOverflowError,
     process_writing_request_stream as single_agent_stream,
 )
 from app.services.agent.tools.tools import (
@@ -248,6 +249,9 @@ async def chat_websocket(websocket: WebSocket):
         print(f"[WebSocket] 清理完成 session={chat_id}")
 
 
+from app.services.agent.agent import ContextOverflowError
+
+
 async def _run_ws_stream(
     websocket: WebSocket,
     chat_id: str,
@@ -259,39 +263,49 @@ async def _run_ws_stream(
     history: list,
     attached_files: list | None = None,
 ):
-    """在 WebSocket 上运行流式处理"""
-    try:
-        mode = _normalize_mode(mode)
+    """在 WebSocket 上运行流式处理，支持上下文超限时自动重试"""
+    mode = _normalize_mode(mode)
+    stream_fn = multi_agent_stream if mode == "plan" else single_agent_stream
 
-        # plan 模式使用多智能体，其他模式使用单智能体
-        stream_fn = multi_agent_stream if mode == "plan" else single_agent_stream
-
-        async for chunk in stream_fn(
-            message=message,
-            document_range=document_range,
-            document_meta=document_meta or {},
-            history=history,
-            model=model,
-            mode=mode,
-            chat_id=chat_id,
-            attached_files=attached_files or [],
-        ):
-            # chunk 格式: "data: {...}\n\n" 或 "data: [DONE]\n\n"
-            # 解析 SSE 格式，转为 WebSocket JSON
-            if chunk.startswith("data: "):
-                payload = chunk[6:].strip()
-                if payload == "[DONE]":
-                    await websocket.send_text(json.dumps({"type": "done"}, ensure_ascii=False))
-                else:
-                    # 直接转发 JSON 数据
-                    await websocket.send_text(payload)
-    except Exception as e:
-        print(f"[WebSocket Stream] 错误: {e}")
-        import traceback
-
-        traceback.print_exc()
+    max_retries = 2
+    for attempt in range(max_retries):
         try:
-            await websocket.send_text(json.dumps({"type": "error", "content": str(e)}, ensure_ascii=False))
-            await websocket.send_text(json.dumps({"type": "done"}, ensure_ascii=False))
-        except Exception:
-            pass
+            async for chunk in stream_fn(
+                message=message,
+                document_range=document_range,
+                document_meta=document_meta or {},
+                history=history,
+                model=model,
+                mode=mode,
+                chat_id=chat_id,
+                attached_files=attached_files or [],
+            ):
+                if chunk.startswith("data: "):
+                    payload = chunk[6:].strip()
+                    if payload == "[DONE]":
+                        await websocket.send_text(json.dumps({"type": "done"}, ensure_ascii=False))
+                    else:
+                        await websocket.send_text(payload)
+            return  # 正常结束
+        except ContextOverflowError as e:
+            print(
+                f"[WebSocket] 上下文超限，尝试重试（{attempt + 1}/{max_retries}），压缩后 {len(e.compressed_history)} 条历史"
+            )
+            history = e.compressed_history  # 更新 history，用压缩后的历史重试
+            # 发一条前端通知
+            try:
+                await websocket.send_text(
+                    json.dumps({"type": "status", "content": "🗜️ 上下文压缩完成，正在重试…"}, ensure_ascii=False)
+                )
+            except Exception:
+                pass
+            continue
+        except Exception as e:
+            print(f"[WebSocket Stream] 错误: {e}")
+            traceback.print_exc()
+            try:
+                await websocket.send_text(json.dumps({"type": "error", "content": str(e)}, ensure_ascii=False))
+                await websocket.send_text(json.dumps({"type": "done"}, ensure_ascii=False))
+            except Exception:
+                pass
+            return

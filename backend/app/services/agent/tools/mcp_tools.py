@@ -54,8 +54,8 @@ def _get_env_int(name: str, default: int) -> int:
         return default
 
 
-_MCP_PREVIEW_MAX_CHARS = _get_env_int("WORDAGENT_MCP_PREVIEW_MAX_CHARS", 4000)
-_MCP_MODEL_MAX_CHARS = _get_env_int("WORDAGENT_MCP_MODEL_MAX_CHARS", 12000)
+_MCP_PREVIEW_MAX_CHARS = _get_env_int("WORDAGENT_MCP_PREVIEW_MAX_CHARS", 100000)
+_MCP_MODEL_MAX_CHARS = _get_env_int("WORDAGENT_MCP_MODEL_MAX_CHARS", 100000)
 
 
 def _to_jsonable(value: Any) -> Any:

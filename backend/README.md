@@ -50,6 +50,8 @@ LANGSMITH_PROJECT="WordAgent"
 
 打开Langsmith官网面板：https://smith.langchain.com/
 
+> .env.example中的参数均为调试好的默认参数
+
 ## LangGraph Dev
 
 本项目还集成了langsmith studio的LangGraph Dev功能，可以可视化调试Agent的执行流程，查看每一步的输入输出和调用的工具。

@@ -9,8 +9,60 @@ import concurrent.futures
 import json
 import os
 import sys
+import time
 import traceback
 from collections.abc import AsyncGenerator
+
+
+def _get_env_int(name: str, default: int) -> int:
+    """Read positive int env var with fallback."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = int(str(raw).strip())
+        return value if value > 0 else default
+    except Exception:
+        return default
+
+
+class ContextOverflowError(Exception):
+    """
+    上下文超限异常：携带压缩后的对话历史，
+    通知调用方（chat.py）用压缩后的历史重试请求。
+    """
+
+    def __init__(self, message: str, compressed_history: list):
+        super().__init__(message)
+        self.compressed_history = compressed_history
+
+
+def _is_transient_stream_error(exc: Exception) -> bool:
+    """判断是否是可重试的流式网络错误。"""
+    text = str(exc).lower()
+    transient_signals = [
+        "incomplete chunked read",
+        "peer closed connection",
+        "server disconnected",
+        "connection reset",
+        "read timeout",
+        "remoteprotocolerror",
+    ]
+    return any(sig in text for sig in transient_signals)
+
+
+def _is_context_overflow_error(exc: Exception) -> bool:
+    """判断是否是上下文超限错误（413 等）。"""
+    text = str(exc).lower()
+    overflow_signals = [
+        "413",
+        "context_length",
+        "too many tokens",
+        "maximum context",
+        "exceeds context",
+        "token limit",
+    ]
+    return any(sig in text for sig in overflow_signals)
 
 
 # region LangSmith（可选，不影响正常运行）
@@ -53,6 +105,7 @@ def _try_init_langsmith():
 
 
 _langsmith_enabled = _try_init_langsmith()
+_AGENT_RECURSION_LIMIT = _get_env_int("WORDAGENT_AGENT_RECURSION_LIMIT", 25)
 
 from langchain_core.messages import (
     AIMessage,
@@ -82,6 +135,7 @@ from app.services.multi_agent.tools import (
     web_fetch,
     search_documnet,
 )
+from app.services.agent.tools.callback import _current_model_name
 
 # 所有多智能体工具的映射（含新增工具）
 _ALL_TOOL_MAP = {
@@ -172,10 +226,11 @@ def _run_sub_agent(
     task: str,
     tools: list,
     context: str = "",
-    max_iterations: int = 10,
+    max_iterations: int | None = None,
 ) -> tuple[str, dict | None, list[dict]]:
     """
     运行一个 sub-agent 的 ReAct 循环（同步，在线程中运行）。
+    max_iterations 默认为 _AGENT_RECURSION_LIMIT，可覆盖。
 
     Returns:
         (text_output, tool_result_json | None, tool_data)
@@ -213,6 +268,9 @@ def _run_sub_agent(
     _retry_count = 0  # 无效 tool call 重试计数
 
     chat_id = _current_chat_id.get(None)
+    if max_iterations is None:
+        max_iterations = _AGENT_RECURSION_LIMIT
+    print(f"[MultiAgent] {agent_name} 子智能体 max_iterations={max_iterations}")
 
     def _should_stop() -> bool:
         if is_stop_requested(chat_id):
@@ -781,6 +839,8 @@ async def process_writing_request_stream(
         _SUPPRESS_STREAM = {"writer"}
         current_agent = "planner"
         _collected_text_parts: list[str] = []  # 收集 AI 回复文本，用于存入长期记忆
+        _last_input_tokens = 0  # 最近一次 API 响应的真实 input_tokens（优先于本地估算）
+        _conversation_history: list = []
 
         # 构建 LangSmith tracing config（可选）
         langsmith_config = None
@@ -806,6 +866,7 @@ async def process_writing_request_stream(
             try:
                 if chat_id:
                     _current_chat_id.set(chat_id)
+                _current_model_name.set(model_name)
 
                 stream_kwargs = {
                     "input": initial_state.model_dump(),
@@ -814,13 +875,29 @@ async def process_writing_request_stream(
                 if langsmith_config:
                     stream_kwargs["config"] = langsmith_config
 
-                response = app.stream(**stream_kwargs)
-                for stream_item in response:
-                    if chat_id and is_stop_requested(chat_id):
-                        print(f"[MultiAgent] ⛔ 检测到停止信号，结束流式处理 (session={chat_id})")
-                        break
-                    asyncio.run_coroutine_threadsafe(queue.put(stream_item), loop)
-                asyncio.run_coroutine_threadsafe(queue.put(None), loop)
+                max_attempts = 2
+                for attempt in range(1, max_attempts + 1):
+                    has_any_stream_item = False
+                    try:
+                        response = app.stream(**stream_kwargs)
+                        for stream_item in response:
+                            if chat_id and is_stop_requested(chat_id):
+                                print(f"[MultiAgent] ⛔ 检测到停止信号，结束流式处理 (session={chat_id})")
+                                break
+                            asyncio.run_coroutine_threadsafe(queue.put(stream_item), loop)
+                        asyncio.run_coroutine_threadsafe(queue.put(None), loop)
+                        return
+                    except Exception as e:
+                        # 上下文超限：通知主循环触发重量重压缩
+                        if _is_context_overflow_error(e):
+                            print(f"[MultiAgent] ⚠️ 上下文超限错误（{e}），触发被动重量重压缩")
+                            asyncio.run_coroutine_threadsafe(queue.put(("context_overflow", str(e))), loop)
+                            raise
+                        if attempt < max_attempts and (not has_any_stream_item) and _is_transient_stream_error(e):
+                            print(f"[MultiAgent] ⚠️ 流式连接异常（第 {attempt} 次）: {e}，准备重试")
+                            time.sleep(0.5)
+                            continue
+                        raise
             except Exception as e:
                 asyncio.run_coroutine_threadsafe(queue.put(("error", str(e))), loop)
 
@@ -836,6 +913,50 @@ async def process_writing_request_stream(
             if isinstance(stream_item, tuple) and stream_item[0] == "error":
                 raise Exception(stream_item[1])
 
+            # 上下文超限被动重压缩
+            if isinstance(stream_item, tuple) and stream_item[0] == "context_overflow":
+                print(f"[MultiAgent] ⚠️ 收到上下文超限信号，触发被动重量重压缩")
+                from app.services.memory import (
+                    compress_conversation_history_if_needed,
+                    _estimate_messages_tokens,
+                    MAX_CONTEXT_TOKENS,
+                )
+
+                current_tokens = _estimate_messages_tokens(_conversation_history)
+                compressed, meta = compress_conversation_history_if_needed(
+                    _conversation_history,
+                    llm=llm,
+                    query=message,
+                    history=history,
+                    compact_level="heavy",
+                    current_input_tokens=_last_input_tokens,
+                )
+                heavy_meta = meta.get("heavy_compact", {})
+                if heavy_meta.get("heavy_compact_triggered"):
+                    before = heavy_meta.get("before_tokens", current_tokens)
+                    after = heavy_meta.get("after_tokens", 0)
+                    print(f"[MultiAgent] 🗜️ 被动重量重压缩完成: {before} -> {after} tokens")
+                    updated_history = []
+                    for m in compressed:
+                        role = {"HumanMessage": "user", "AIMessage": "assistant", "SystemMessage": "system"}.get(
+                            type(m).__name__, "assistant"
+                        )
+                        content_val = getattr(m, "content", "")
+                        if hasattr(content_val, "__iter__") and not isinstance(content_val, str):
+                            text_content = "".join(
+                                part.get("text", "")
+                                if isinstance(part, dict)
+                                else (part if isinstance(part, str) else "")
+                                for part in content_val
+                            )
+                            content_val = text_content
+                        if isinstance(m, (HumanMessage, AIMessage, SystemMessage)):
+                            updated_history.append({"role": role, "content": str(content_val)})
+                    raise ContextOverflowError("上下文超限，已触发重量重压缩", updated_history)
+                else:
+                    print("[MultiAgent] ⚠️ 被动重量重压缩失败，无法生成摘要")
+                    raise Exception("上下文超限但重量重压缩失败，请手动减少对话历史")
+
             if not isinstance(stream_item, tuple):
                 continue
 
@@ -845,6 +966,49 @@ async def process_writing_request_stream(
                 if not chunk or len(chunk) == 0:
                     continue
                 msg = chunk[0]
+
+                # 跟踪对话历史，记录最近一次 API 响应的真实 input_tokens
+                # 注意：AIMessageChunk 是流式中间块，不追加到 _conversation_history
+                if isinstance(msg, AIMessage):
+                    _conversation_history.append(msg)
+                    usage = getattr(msg, "usage_metadata", None)
+                    if isinstance(usage, dict) and "input_tokens" in usage and usage.get("input_tokens", 0) > 0:
+                        _last_input_tokens = int(usage.get("input_tokens", 0))
+                elif isinstance(msg, AIMessageChunk):
+                    # 只收集文本内容用于流式输出，不追加到 _conversation_history
+                    from app.services.agent.agent import _extract_text_content
+
+                    normalized = _extract_text_content(msg.content)
+                    if normalized:
+                        _collected_text_parts.append(normalized)
+                    # 从流式 chunk 的 usage_metadata 获取真实 input_tokens
+                    usage = getattr(msg, "usage_metadata", None)
+                    if isinstance(usage, dict) and "input_tokens" in usage and usage.get("input_tokens", 0) > 0:
+                        _last_input_tokens = int(usage.get("input_tokens", 0))
+                        # 发送更新后的 token 统计（让前端始终看到最新值）
+                        from app.services.memory import MAX_CONTEXT_TOKENS
+
+                        print(f"[MultiAgent] 当前上下文: {_last_input_tokens / 1000:.1f}k tokens")
+                        yield f"data: {json.dumps({'type': 'token_stats', 'current_tokens': _last_input_tokens, 'max_tokens': MAX_CONTEXT_TOKENS}, ensure_ascii=False)}\n\n"
+
+                # 发送 token 统计（优先使用 API 真实 input_tokens）
+                if isinstance(msg, (AIMessage, ToolMessage)):
+                    try:
+                        from app.services.memory import MAX_CONTEXT_TOKENS
+
+                        # 优先使用 API 真实 input_tokens，ToolMessage 本身很小可忽略
+                        current_tokens = (
+                            _last_input_tokens
+                            if _last_input_tokens > 0
+                            else _estimate_messages_tokens(_conversation_history)
+                        )
+                        tokens_k = current_tokens / 1000
+                        max_tokens_k = MAX_CONTEXT_TOKENS / 1000
+                        print(f"[MultiAgent] 当前上下文: {tokens_k:.1f}k tokens")
+                        yield f"data: {json.dumps({'type': 'token_stats', 'current_tokens': current_tokens, 'max_tokens': MAX_CONTEXT_TOKENS}, ensure_ascii=False)}\n\n"
+                    except Exception:
+                        pass
+
                 # 处理 OpenAI/DeepSeek reasoning 模型的 reasoning_content
                 if isinstance(msg, AIMessageChunk):
                     reasoning_content = getattr(msg, "additional_kwargs", {}).get("reasoning_content")
@@ -852,8 +1016,9 @@ async def process_writing_request_stream(
                         yield f"data: {json.dumps({'type': 'thinking', 'content': reasoning_content}, ensure_ascii=False)}\n\n"
                 # 只转发非 writer agent 的 AI 文字 token
                 if isinstance(msg, AIMessageChunk) and msg.content and current_agent not in _SUPPRESS_STREAM:
-                    _collected_text_parts.append(msg.content)
-                    yield f"data: {json.dumps({'type': 'text', 'content': msg.content}, ensure_ascii=False)}\n\n"
+                    normalized = _extract_text_content(msg.content)
+                    if normalized:
+                        yield f"data: {json.dumps({'type': 'text', 'content': normalized}, ensure_ascii=False)}\n\n"
 
             elif input_type == "custom" and chunk:
                 if isinstance(chunk, dict):

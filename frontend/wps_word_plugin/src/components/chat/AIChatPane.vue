@@ -31,7 +31,7 @@
         :thinking-display-mode="thinkingDisplayMode"
         @update:mode="mode = $event"
         @update:selected-model="selectedModel = $event"
-        @update:thinkingDisplayMode="thinkingDisplayMode = $event"
+        @update:thinking-display-mode="thinkingDisplayMode = $event"
         @send="handleSend"
         @stop="stopGeneration"
         @add-selection="addSelectionManually"
@@ -1108,7 +1108,7 @@ export default {
       if (data.type === 'token_stats') {
         this.tokenStats = {
           current: data.current_tokens || 0,
-          max: data.max_tokens || 200000,
+          max: data.max_tokens || 200000
         };
         return;
       }
