@@ -454,7 +454,7 @@ def read_document(startParaIndex: int = 0, endParaIndex: int = 49) -> str:
                         writer(
                             {
                                 "type": "read_complete",
-                                "content": f"✅ 文档读取完成(段落 {startParaIndex} - {endParaIndex})",
+                                "content": f"📑 文档读取完成(段落 {startParaIndex} - {endParaIndex})",
                             }
                         )
                         return _compact_doc_json(doc_json)
@@ -544,7 +544,7 @@ def generate_document(document: DocumentOutput) -> dict:
     writer = get_stream_writer()
     doc_dict = document.model_dump()
     para_count = len(doc_dict.get("paragraphs", []))
-    writer({"type": "generate_complete", "content": f"✅ 文档已生成，共 {para_count} 个段落"})
+    writer({"type": "generate_complete", "content": f"📝 文档已生成，共 {para_count} 个段落"})
 
     # # 保存生成的文档 JSON 到 example 文件夹
     # try:

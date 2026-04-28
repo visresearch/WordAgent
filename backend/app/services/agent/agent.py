@@ -785,7 +785,6 @@ async def process_writing_request_stream(
                     has_tool_result = True
 
                     if tool_name == "read_document":
-                        # read_document 结果是中间数据，不发给前端
                         print(f"[Agent] ⏭️ 跳过 read_document 工具返回值")
                         continue
 

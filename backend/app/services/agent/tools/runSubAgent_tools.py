@@ -6,7 +6,6 @@ from typing import Literal
 from langchain_core.tools import tool
 
 from app.services.agent.prompts import get_tool_description
-from app.services.agent.subAgent import run_sub_agent_task
 from app.services.agent.tools.callback import _current_request_context
 
 
@@ -19,15 +18,25 @@ from app.services.agent.tools.callback import _current_request_context
 def run_sub_agent(
     description: str,
     prompt: str,
-    agent_type: Literal["reviewer", "explorer"],
+    agent_type: Literal["reviewer", "explore", "plan", "general-purpose"] = "reviewer",
 ) -> str:
-    """创建并运行子智能体来完成专项任务。"""
+    """创建并运行子智能体来完成专项任务。
+
+    可用的子智能体类型：
+    - reviewer: 专业文档评审专家，提供修改建议
+    - explore: 文档搜索和探索专家，快速定位内容
+    - plan: 架构师和规划专家，设计实现方案
+    - general-purpose: 通用目的智能体，执行复杂任务
+    """
+    # 延迟导入避免循环依赖
+    from app.services.agent.subAgents import run_sub_agent_task
+
     context = _current_request_context.get(None) or {}
     document_meta = context.get("document_meta") if isinstance(context, dict) else None
     document_range = context.get("document_range") if isinstance(context, dict) else None
 
-    # 文档明确为空时，避免无意义地启动 explorer（仅靠 read/search 文档无法带来有效增益）
-    if agent_type == "explorer" and isinstance(document_meta, dict):
+    # 文档明确为空时，避免无意义地启动 explore
+    if agent_type == "explore" and isinstance(document_meta, dict):
         total_paras = document_meta.get("totalParas")
         try:
             total_paras = int(total_paras)
@@ -36,7 +45,7 @@ def run_sub_agent(
         has_ranges = isinstance(document_range, list) and len(document_range) > 0
         if total_paras is not None and total_paras <= 1 and not has_ranges:
             return (
-                "Skipped explorer sub-agent: document is empty (totalParas<=1 and no document ranges). "
+                "Skipped explore sub-agent: document is empty (totalParas<=1 and no document ranges). "
                 "Please proceed directly in main agent or provide concrete source ranges/files."
             )
 

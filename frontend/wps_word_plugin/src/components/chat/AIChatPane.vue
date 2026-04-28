@@ -1177,7 +1177,7 @@ export default {
             console.log('[AIChatPane] 找到 loading 状态，索引:', i, '内容:', parts[i].content);
             parts.splice(i, 1, {
               type: 'status',
-              content: data.content || '✅ 文档读取完成',
+              content: data.content || '📑 文档读取完成',
               loading: false
             });
             found = true;
@@ -1188,7 +1188,7 @@ export default {
           console.warn('[AIChatPane] 未找到 loading 状态的 read_document，直接追加');
           parts.push({
             type: 'status',
-            content: data.content || '✅ 文档读取完成',
+            content: data.content || '📑 文档读取完成',
             loading: false
           });
         }
@@ -1264,7 +1264,7 @@ export default {
             console.log('[AIChatPane] 找到 loading 状态，索引:', i, '内容:', parts[i].content);
             parts.splice(i, 1, {
               type: 'status',
-              content: data.content || '✅ 文档已生成',
+              content: data.content || '📝 文档已生成',
               loading: false
             });
             found = true;
@@ -1275,7 +1275,7 @@ export default {
           console.warn('[AIChatPane] 未找到 loading 状态的 generate_document，直接追加');
           parts.push({
             type: 'status',
-            content: data.content || '✅ 文档已生成',
+            content: data.content || '📝 文档已生成',
             loading: false
           });
         }

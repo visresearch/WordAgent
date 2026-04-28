@@ -840,7 +840,7 @@ export default {
           if (parts[i].type === 'status' && parts[i].loading) {
             parts.splice(i, 1, {
               type: 'status',
-              content: data.content || '✅ 文档读取完成',
+              content: data.content || '📑 文档读取完成',
               loading: false
             });
             found = true;
@@ -848,7 +848,7 @@ export default {
           }
         }
         if (!found) {
-          parts.push({ type: 'status', content: data.content || '✅ 文档读取完成', loading: false });
+          parts.push({ type: 'status', content: data.content || '📑 文档读取完成', loading: false });
         }
         this.scrollToBottom();
         return;
@@ -916,7 +916,7 @@ export default {
           if (parts[i].type === 'status' && parts[i].loading) {
             parts.splice(i, 1, {
               type: 'status',
-              content: data.content || '✅ 文档已生成',
+              content: data.content || '📝 文档已生成',
               loading: false
             });
             found = true;
@@ -924,7 +924,7 @@ export default {
           }
         }
         if (!found) {
-          parts.push({ type: 'status', content: data.content || '✅ 文档已生成', loading: false });
+          parts.push({ type: 'status', content: data.content || '📝 文档已生成', loading: false });
         }
         this.scrollToBottom();
         return;

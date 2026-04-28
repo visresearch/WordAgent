@@ -73,7 +73,7 @@
         <div class="selection-bar-info">
           <span class="selection-bar-preview">{{ pendingSummary }}</span>
         </div>
-        <div class="pending-actions">
+        <div v-if="!isLoading" class="pending-actions">
           <button class="pending-btn confirm-btn" :class="{ 'delete-confirm-btn': pendingDeletes.length > 0 && !pendingDocument }" @click="$emit('confirm-pending')">
             确定
           </button>

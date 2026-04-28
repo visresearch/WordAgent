@@ -12,6 +12,7 @@ from urllib.request import Request, urlopen
 
 from langchain_core.tools import tool
 from langgraph.config import get_stream_writer
+from typing import Any
 
 from .callback import _current_chat_id, _pending_loops, _pending_tool_requests, is_stop_requested
 from .schemas import DocumentOutput, DocumentQuery
@@ -19,7 +20,7 @@ from app.services.agent.prompts import get_tool_description
 from app.core.config import get_wence_data_dir
 
 # 返回给 LLM 的文档 JSON 最大字符数（超过则进入精简模式）
-_MAX_DOC_JSON_CHARS = 80_000
+_MAX_DOC_JSON_CHARS = 100_000
 
 
 def _download_remote_image(url: str) -> str | None:
@@ -211,14 +212,15 @@ def _compact_doc_json(doc_json: dict) -> str:
 def read_document(startParaIndex: int = 0, endParaIndex: int = 49) -> str:
     """Read document content. Requests the frontend to parse and return the specified paragraph range via WebSocket."""
     writer = get_stream_writer()
-    writer(
-        {
-            "type": "read_document",
-            "content": f"📑 正在读取文档（段落 {startParaIndex} - {endParaIndex}）",
-            "startParaIndex": startParaIndex,
-            "endParaIndex": endParaIndex,
-        }
-    )
+    if writer:
+        writer(
+            {
+                "type": "read_document",
+                "content": f"📑 正在读取文档（段落 {startParaIndex} - {endParaIndex}）",
+                "startParaIndex": startParaIndex,
+                "endParaIndex": endParaIndex,
+            }
+        )
     print(f"[read_document] 请求前端发送文档 (startParaIndex={startParaIndex}, endParaIndex={endParaIndex})")
 
     chat_id = _current_chat_id.get(None)
@@ -248,7 +250,8 @@ def read_document(startParaIndex: int = 0, endParaIndex: int = 49) -> str:
                     if result.get("error"):
                         err_msg = result.get("error")
                         print(f"[read_document] ⚠️ 前端读取失败: {err_msg}")
-                        writer({"type": "status", "content": f"⚠️ 读取文档失败: {err_msg}"})
+                        if writer:
+                            writer({"type": "status", "content": f"⚠️ 读取文档失败: {err_msg}"})
                         return ""
                     doc_json = result.get("documentJson", {})
 
@@ -269,22 +272,25 @@ def read_document(startParaIndex: int = 0, endParaIndex: int = 49) -> str:
                         print(
                             f"[read_document] ✅ 收到文档，段落数: {para_count}，表格数: {table_count}，图片数: {image_count}"
                         )
-                        writer(
-                            {
-                                "type": "read_complete",
-                                "content": f"✅ 文档读取完成（段落 {startParaIndex} - {endParaIndex}）",
-                            }
-                        )
+                        if writer:
+                            writer(
+                                {
+                                    "type": "read_complete",
+                                    "content": f"📑 文档读取完成（段落 {startParaIndex} - {endParaIndex}）",
+                                }
+                            )
                         return _compact_doc_json(doc_json)
                     print(
                         "[read_document] ⚠️ 收到空文档 "
                         f"(documentJson keys={list(doc_json.keys()) if isinstance(doc_json, dict) else type(doc_json).__name__})"
                     )
-                    writer({"type": "status", "content": "⚠️ 文档为空"})
+                    if writer:
+                        writer({"type": "status", "content": "⚠️ 文档为空"})
                     return ""
                 except (TimeoutError, concurrent.futures.TimeoutError):
                     print("[read_document] ⏰ 等待文档超时")
-                    writer({"type": "status", "content": "⏰ 等待文档超时"})
+                    if writer:
+                        writer({"type": "status", "content": "⏰ 等待文档超时"})
                     return ""
                 except Exception as e:
                     print(f"[read_document] ❌ 等待文档出错: {repr(e)}")
@@ -301,7 +307,6 @@ def read_document(startParaIndex: int = 0, endParaIndex: int = 49) -> str:
 @tool(description=get_tool_description("generate_document"))
 def generate_document(document: DocumentOutput) -> dict:
     """Generate a formatted document JSON for insertion into the Word document."""
-    writer = get_stream_writer()
     doc_dict = document.model_dump()
     _ensure_image_payload_shape(doc_dict)
     para_count = len(doc_dict.get("paragraphs", []))
@@ -312,31 +317,33 @@ def generate_document(document: DocumentOutput) -> dict:
             if isinstance(r, dict) and r.get("text") is None:
                 image_count += 1
 
-    writer(
-        {
-            "type": "generate_complete",
-            "content": f"✅ 文档已生成，共 {para_count} 个段落{f'，{image_count} 张图片' if image_count else ''}",
-        }
-    )
+    writer = get_stream_writer()
+    if writer:
+        writer(
+            {
+                "type": "generate_complete",
+                "content": f"📝 文档已生成，共 {para_count} 个段落{f'，{image_count} 张图片' if image_count else ''}",
+            }
+        )
     return doc_dict
 
 
 @tool(description=get_tool_description("search_document"))
 def search_documnet(query: DocumentQuery) -> str:
-    """Search document content — search for matching content in the frontend document by text or style criteria."""
-    writer = get_stream_writer()
-
+    """Search document content. Requests the frontend to search for matching content by text or style criteria."""
     query_dict = query.model_dump(exclude_none=True)
     query_type = query_dict.get("type", "run")
     filters = query_dict.get("filters", {})
     filter_desc = ", ".join(f"{k}={v}" for k, v in filters.items())
-    writer(
-        {
-            "type": "search_documnet",
-            "content": f"🔍 正在搜索文档: {filter_desc}",
-            "query": query_dict,
-        }
-    )
+    writer = get_stream_writer()
+    if writer:
+        writer(
+            {
+                "type": "search_document",
+                "content": f"🔍 正在搜索文档: {filter_desc}",
+                "query": query_dict,
+            }
+        )
     print(f"[search_documnet] 请求前端搜索文档 (type={query_type}, filters={filters})")
 
     chat_id = _current_chat_id.get(None)
@@ -377,12 +384,13 @@ def search_documnet(query: DocumentQuery) -> str:
 
                     if match_count > 0:
                         print(f"[search_documnet] ✅ 查询完成，匹配 {match_count} 项，涉及段落 {matched_para_indices}")
-                        writer(
-                            {
-                                "type": "query_complete",
-                                "content": f"✅ 搜索完成，找到 {match_count} 处匹配（涉及 {len(matched_para_indices)} 个段落）",
-                            }
-                        )
+                        if writer:
+                            writer(
+                                {
+                                    "type": "query_complete",
+                                    "content": f"✅ 搜索完成，找到 {match_count} 处匹配（涉及 {len(matched_para_indices)} 个段落）",
+                                }
+                            )
                         return json.dumps(
                             {
                                 "matches": matches,
@@ -395,7 +403,8 @@ def search_documnet(query: DocumentQuery) -> str:
                         )
 
                     print("[search_documnet] ⚠️ 未找到匹配项")
-                    writer({"type": "query_complete", "content": "⚠️ 未找到匹配内容，建议更换关键词重试"})
+                    if writer:
+                        writer({"type": "query_complete", "content": "⚠️ 未找到匹配内容，建议更换关键词重试"})
                     return json.dumps(
                         {
                             "matches": [],
@@ -409,7 +418,8 @@ def search_documnet(query: DocumentQuery) -> str:
                     )
                 except (TimeoutError, concurrent.futures.TimeoutError):
                     print("[search_documnet] ⏰ 等待查询结果超时")
-                    writer({"type": "status", "content": "⏰ 搜索超时"})
+                    if writer:
+                        writer({"type": "status", "content": "⏰ 搜索超时"})
                     return '{"matches": [], "matchCount": 0, "error": "timeout"}'
                 except Exception as e:
                     print(f"[search_documnet] ❌ 等待查询结果出错: {e}")
@@ -423,13 +433,14 @@ def search_documnet(query: DocumentQuery) -> str:
 def delete_document(startParaIndex: int = 0, endParaIndex: int = -1) -> str:
     """Delete a specified range of paragraphs from the document."""
     writer = get_stream_writer()
-    writer(
-        {
-            "type": "delete_document",
-            "content": f"🗑️ 准备删除文档段落（{startParaIndex} - {endParaIndex}）",
-            "startParaIndex": startParaIndex,
-            "endParaIndex": endParaIndex,
-        }
-    )
+    if writer:
+        writer(
+            {
+                "type": "delete_document",
+                "content": f"🗑️ 准备删除文档段落（{startParaIndex} - {endParaIndex}）",
+                "startParaIndex": startParaIndex,
+                "endParaIndex": endParaIndex,
+            }
+        )
     print(f"[delete_document] 请求前端删除文档段落 (startParaIndex={startParaIndex}, endParaIndex={endParaIndex})")
     return f"Frontend notified to mark paragraphs {startParaIndex} - {endParaIndex} for deletion, awaiting user confirmation"
