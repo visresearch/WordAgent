@@ -96,7 +96,7 @@ def _try_init_langsmith():
             if resolved.exists():
                 load_dotenv(resolved, override=False)
 
-        if os.environ.get("LANGSMITH_TRACING", "").lower() == "true" and os.environ.get("LANGSMITH_API_KEY"):
+        if os.environ.get("LANGSMITH_API_KEY") and os.environ.get("LANGSMITH_PROJECT"):
             print("[LangSmith] ✅ 多智能体已启用 tracing，project =", os.environ.get("LANGSMITH_PROJECT", "default"))
             return True
     except Exception:

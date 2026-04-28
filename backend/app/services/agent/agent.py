@@ -69,8 +69,8 @@ def _try_init_langsmith():
             if resolved.exists():
                 load_dotenv(resolved, override=False)
 
-        # 只有同时存在 key 和 tracing=true 时才视为可用
-        if os.environ.get("LANGSMITH_TRACING", "").lower() == "true" and os.environ.get("LANGSMITH_API_KEY"):
+        # 有 API_KEY 时自动启用 LangSmith tracing
+        if os.environ.get("LANGSMITH_API_KEY") and os.environ.get("LANGSMITH_PROJECT"):
             print("[LangSmith] ✅ 已启用 tracing，project =", os.environ.get("LANGSMITH_PROJECT", "default"))
             return True
     except Exception:

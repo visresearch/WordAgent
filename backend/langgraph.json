@@ -1,9 +1,0 @@
-{
-  "dependencies": [
-    "."
-  ],
-  "graphs": {
-    "wordagent-dev": "./app/langgraph_dev_entry.py:graph"
-  },
-  "env": ".env"
-}

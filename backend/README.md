@@ -42,7 +42,6 @@ uv run pyinstaller wence.spec
 
 ```bash
 # LangSmith 监控配置（可选，不配置不影响项目运行）
-LANGSMITH_TRACING=true
 LANGSMITH_ENDPOINT=https://api.smith.langchain.com
 LANGSMITH_API_KEY=your_langsmith_api_key_here
 LANGSMITH_PROJECT="WordAgent"
