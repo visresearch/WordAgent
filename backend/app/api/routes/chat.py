@@ -122,7 +122,8 @@ async def chat_websocket(websocket: WebSocket):
                 message = data.get("message", "")
                 mode = _normalize_mode(data.get("mode", "agent"))
                 active_mode = mode  # 记录当前活跃模式，用于后续 tool 回调转发
-                model = data.get("model", "auto")
+                model = data.get("model", "")
+                provider = data.get("provider", "")
                 document_range = data.get("documentRange")
                 document_meta = data.get("documentMeta") or {}
                 history = data.get("history", [])
@@ -156,6 +157,7 @@ async def chat_websocket(websocket: WebSocket):
                         message,
                         mode,
                         model,
+                        provider,
                         document_range,
                         document_meta,
                         history,
@@ -258,6 +260,7 @@ async def _run_ws_stream(
     message: str,
     mode: str,
     model: str,
+    provider: str,
     document_range: list | None,
     document_meta: dict | None,
     history: list,
@@ -276,6 +279,7 @@ async def _run_ws_stream(
                 document_meta=document_meta or {},
                 history=history,
                 model=model,
+                provider=provider,
                 mode=mode,
                 chat_id=chat_id,
                 attached_files=attached_files or [],

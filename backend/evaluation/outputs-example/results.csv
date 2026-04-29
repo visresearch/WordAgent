@@ -1,0 +1,17 @@
+example_id,model,task_success,correctness,faithfulness,relevance,clarity,conciseness,tool_usage
+128bc0ea-72c0-4ee1-981a-5abe1d2c565a,qwen3.6-plus-2026-04-02,1,4,4,5,5,5,2
+140354b7-73ca-4353-8176-fbc0aafe00e4,qwen3.6-plus-2026-04-02,1,4,5,5,5,4,2
+2a650476-c1a2-49cc-919b-816c2a5c7690,qwen3.6-plus-2026-04-02,1,4,4,5,5,5,1
+2d91447c-d81d-4931-895b-bd1e4690b121,gpt-5.4,1,4,5,5,5,4,2
+36b95f80-fb76-4e8d-bf24-e2f4bb880107,qwen3.6-plus-2026-04-02,1,4,4,5,5,4,2
+aedb0b87-b48d-4138-8a5f-5f9d9fd81ef3,gpt-5.4,1,3,4,5,4,4,2
+b198b684-4e07-49d2-9464-b15d2d4efb49,qwen3.6-plus-2026-04-02,1,4,4,5,5,4,2
+5a0bff43-fb38-4a1d-ab30-acd28d56bfb7,gpt-5.4,1,4,4,5,5,5,2
+999bcab3-e638-460e-b0f8-095e3640bb38,gpt-5.4,0,3,3,5,4,3,1
+bb0a2273-aa43-47f8-90ad-8634908f9b43,qwen3.6-plus-2026-04-02,1,4,4,5,5,5,2
+cff800bb-ac37-4b0e-a615-845f2edc6c53,gpt-5.4,1,5,5,5,5,5,2
+d3871618-ac3f-4be8-aa07-19ecba9e0a46,gpt-5.4,1,4,5,5,5,4,2
+d9faedba-7227-428a-a40a-051ad6f18cf1,gpt-5.4,1,5,5,5,5,5,2
+e867f95a-9e71-489c-9aa0-3e17613c2f4c,gpt-5.4,1,5,5,5,5,5,2
+f369ea1c-715b-45c8-ae1c-b1cc278ffc63,qwen3.6-plus-2026-04-02,1,4,4,5,5,5,1
+fd0dec4d-76a1-414a-9876-66ed16221fdd,gpt-5.4,1,4,4,5,5,4,2

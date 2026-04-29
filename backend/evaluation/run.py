@@ -1,40 +1,47 @@
-"""
-LangSmith Evaluation for WordAgent - Writing Quality Metrics
-
-This script evaluates AI-generated writing using LLM-based evaluation without tools.
-Metrics: task_completion, clarity, naturalness, conciseness, redundancy
-"""
-
 import os
 import csv
 import asyncio
-from typing import Dict, List
-from dataclasses import dataclass
+import json
+import sys
+from typing import List
+from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
-from langsmith import Client as LangSmithClient
+from langsmith import Client as LangSmithClient, traceable
+from tqdm import tqdm
+
+# 添加项目根目录到 path，以便导入 utils
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
+
+# 导入绘图工具
+from evaluation.utils import plot_task_success, plot_quality_with_tool_usage, plot_radar_chart
 
 load_dotenv()
 
-# Configuration
-LANGSMITH_API_KEY = os.getenv("LANGSMITH_API_KEY")
+# Configuration（必须在设置 tracing 环境变量之前定义）
+LANGSMITH_API_KEY = os.getenv("LANGSMITH_API_KEY") or os.getenv("LANGCHAIN_API_KEY")
+LANGSMITH_PROJECT = os.getenv("LANGSMITH_EVALUATION_PROJECT") or "WordAgent_evaluation"
 DATASET_NAME = os.getenv("LANGSMITH_DATASET_NAME") or "WordAgent_test"
-EVAL_OPENAI_MODEL = os.getenv("EVAL_OPENAI_MODEL") or "gpt-5.5"
-EVAL_OPENAI_API_KEY = os.getenv("EVAL_OPENAI_API_KEY") or None
-EVAL_OPENAI_BASE_URL = os.getenv("EVAL_OPENAI_BASE_URL") or None
+
+# 启用 LangChain/LangSmith tracing（必须在使用 LANGSMITH_PROJECT 之后）
+os.environ["LANGCHAIN_TRACING_V2"] = "true"
+os.environ["LANGCHAIN_PROJECT"] = LANGSMITH_PROJECT
+
+# 使用百炼的 API（OpenAI 兼容端点）
+EVAL_OPENAI_MODEL = os.getenv("EVAL_OPENAI_MODEL")
+EVAL_OPENAI_API_KEY = os.getenv("EVAL_OPENAI_API_KEY")
+EVAL_OPENAI_BASE_URL = os.getenv("EVAL_OPENAI_BASE_URL")
+
 EVAL_CONCURRENCY = int(os.getenv("EVAL_CONCURRENCY") or "5")
 
-# Output directory
-OUTPUT_BASE_DIR = Path(__file__).parent / "output"
-
-# Prompt file path
+OUTPUT_BASE_DIR = Path(__file__).parent / "outputs"
 PROMPT_FILE = Path(__file__).parent / "evaluator_prompt.md"
 
 
 def load_evaluator_prompt() -> str:
-    """Load evaluator prompt template from file."""
     if PROMPT_FILE.exists():
         return PROMPT_FILE.read_text(encoding="utf-8")
     raise FileNotFoundError(f"Evaluator prompt file not found: {PROMPT_FILE}")
@@ -45,17 +52,41 @@ EVALUATOR_PROMPT_TEMPLATE = load_evaluator_prompt()
 
 @dataclass
 class EvaluationMetrics:
-    """Writing quality evaluation metrics."""
-    task_completion: int = 0
+    """评估指标
+
+    一级指标:
+    - task_success: 任务完成度 (0-1)
+
+    核心质量:
+    - correctness: 正确性 (0-5)
+    - faithfulness: 忠诚度 (0-5)
+    - relevance: 相关性 (0-5)
+
+    表达质量:
+    - clarity: 清晰度 (0-5)
+    - conciseness: 简洁性 (0-5)
+
+    Agent能力:
+    - tool_usage: 工具使用 (0-2)
+    """
+    task_success: int = 0
+    correctness: int = 0
+    faithfulness: int = 0
+    relevance: int = 0
     clarity: int = 0
-    naturalness: int = 0
     conciseness: int = 0
-    redundancy: int = 0
+    tool_usage: int = 1
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    def quality_score(self) -> float:
+        """计算综合质量分数（核心质量 + 表达质量）"""
+        return (self.correctness + self.faithfulness + self.relevance + self.clarity + self.conciseness) / 5
 
 
 @dataclass
 class EvaluationResult:
-    """Result of a single evaluation."""
     example_id: str
     model_name: str
     user_input: str
@@ -64,287 +95,251 @@ class EvaluationResult:
 
 
 class LLMEvaluator:
-    """LLM-based evaluator using the specified rubric."""
-
-    def __init__(self, model_name: str = None, api_key: str = None, base_url: str = None):
+    def __init__(self):
         from openai import AsyncOpenAI
-        if model_name is None:
-            model_name = EVAL_OPENAI_MODEL
-        self.model_name = model_name
-
-        effective_api_key = api_key or EVAL_OPENAI_API_KEY
-        effective_base_url = base_url or EVAL_OPENAI_BASE_URL
 
         self.client = AsyncOpenAI(
-            api_key=effective_api_key,
-            base_url=effective_base_url if effective_base_url else None,
+            api_key=EVAL_OPENAI_API_KEY,
+            base_url=EVAL_OPENAI_BASE_URL,
         )
 
+    @traceable(name="llm_evaluation_call", project_name=LANGSMITH_PROJECT)
     async def _call_llm(self, prompt: str) -> str:
-        """Call LLM API directly with raw client."""
-        response = await self.client.chat.completions.create(
-            model=self.model_name,
+        resp = await self.client.chat.completions.create(
+            model=EVAL_OPENAI_MODEL,
             messages=[{"role": "user", "content": prompt}],
             temperature=0,
-            max_tokens=4096,
-            stream=False,
+            max_tokens=1024,
         )
+        return resp.choices[0].message.content
 
-        if isinstance(response, str):
-            return response
+    @traceable(name="evaluate_example", project_name=LANGSMITH_PROJECT)
+    async def evaluate(self, user_request: str, agent_trace: str) -> EvaluationMetrics:
+        prompt = EVALUATOR_PROMPT_TEMPLATE.format(input=user_request, output=agent_trace)
 
-        if hasattr(response, "choices") and response.choices:
-            return response.choices[0].message.content
-
-        return str(response)
-
-    async def evaluate(self, user_input: str, model_output: str) -> EvaluationMetrics:
-        import json
-        import re
-
-        prompt = EVALUATOR_PROMPT_TEMPLATE.format(input=user_input, output=model_output)
         content = await self._call_llm(prompt)
-        if not isinstance(content, str):
-            content = str(content)
 
-        json_pattern = (
-            r'\{\s*"task_completion"\s*:\s*([01])\s*,'
-            r'\s*"clarity"\s*:\s*([0-5])\s*,'
-            r'\s*"naturalness"\s*:\s*([0-5])\s*,'
-            r'\s*"conciseness"\s*:\s*([0-5])\s*,'
-            r'\s*"redundancy"\s*:\s*([0-5])\s*\}'
+        start = content.find("{")
+        end = content.rfind("}") + 1
+        if start != -1 and end != 0:
+            content = content[start:end]
+
+        try:
+            scores = json.loads(content)
+        except Exception:
+            print(f"JSON parse failed: {content[:200]}")
+            return EvaluationMetrics()
+
+        return EvaluationMetrics(
+            task_success=int(scores.get("task_success", 0)),
+            correctness=int(scores.get("correctness", 0)),
+            faithfulness=int(scores.get("faithfulness", 0)),
+            relevance=int(scores.get("relevance", 0)),
+            clarity=int(scores.get("clarity", 0)),
+            conciseness=int(scores.get("conciseness", 0)),
+            tool_usage=int(scores.get("tool_usage", 1)),
         )
-
-        matches = list(re.finditer(json_pattern, content, re.DOTALL))
-
-        if matches:
-            match = matches[-1]
-            scores = {
-                "task_completion": int(match.group(1)),
-                "clarity": int(match.group(2)),
-                "naturalness": int(match.group(3)),
-                "conciseness": int(match.group(4)),
-                "redundancy": int(match.group(5)),
-            }
-        else:
-            json_start = content.find('"task_completion"')
-            if json_start != -1:
-                partial = content[json_start:]
-                open_braces = partial.count("{") - partial.count("}")
-                if open_braces > 0:
-                    partial += "}" * open_braces
-                try:
-                    scores = json.loads(partial)
-                except json.JSONDecodeError:
-                    scores = None
-            else:
-                scores = None
-
-        if scores:
-            return EvaluationMetrics(
-                task_completion=int(scores.get("task_completion", 0)),
-                clarity=int(scores.get("clarity", 0)),
-                naturalness=int(scores.get("naturalness", 0)),
-                conciseness=int(scores.get("conciseness", 0)),
-                redundancy=int(scores.get("redundancy", 0)),
-            )
-
-        print(f"Warning: Could not parse evaluation response: {content[:300]}")
-        return EvaluationMetrics()
 
 
 class DatasetFetcher:
-    """Fetch and parse LangSmith dataset."""
-
     def __init__(self):
         self.client = LangSmithClient(api_key=LANGSMITH_API_KEY)
 
-    def get_dataset(self, dataset_name: str = DATASET_NAME):
-        dataset = None
-        for ds in self.client.list_datasets(dataset_name=dataset_name):
-            dataset = ds
-            break
-
-        if dataset is None:
-            raise ValueError(f"Dataset '{dataset_name}' not found")
+    def get_dataset(self):
+        dataset = next(self.client.list_datasets(dataset_name=DATASET_NAME), None)
+        if not dataset:
+            raise ValueError("Dataset not found")
 
         examples = list(self.client.list_examples(dataset_id=dataset.id))
         return dataset, examples
 
     @staticmethod
-    def extract_user_input(messages: List[Dict]) -> str:
+    def format_conversation(messages):
+        """Format complete conversation history including tool calls."""
+        lines = []
         for msg in messages:
-            if msg.get("type") == "human":
-                return msg.get("content", "")
-        return ""
+            msg_type = msg.get("type", "")
+            content = msg.get("content", "")
+            tool_calls = msg.get("tool_calls", [])
 
-    @staticmethod
-    def extract_model_output(messages: List[Dict]) -> str:
-        last_ai = ""
-        for msg in messages:
-            if msg.get("type") == "ai":
-                last_ai = msg.get("content", "")
-        return last_ai
+            if msg_type == "human":
+                lines.append(f"[User] {content}")
 
-    @staticmethod
-    def extract_model_name(metadata: Dict) -> str:
-        return metadata.get("model", "unknown")
+            elif msg_type == "ai":
+                if tool_calls:
+                    for tc in tool_calls:
+                        func_name = tc.get("name", "unknown")
+                        args = tc.get("args", {})
+                        lines.append(f"[AI -> tool:{func_name}] {args}")
+                if content:
+                    lines.append(f"[AI Response] {content}")
+
+            elif msg_type == "tool":
+                tool_name = msg.get("name", "unknown")
+                lines.append(f"[Tool Result: {tool_name}] {content[:500]}...")
+
+        return "\n".join(lines)
+
+    def extract_for_evaluation(self, example):
+        """Extract formatted input/output for evaluation."""
+        inputs = example.inputs.get("messages", [])
+        outputs = example.outputs.get("messages", [])
+
+        human_msgs = [m for m in inputs if m.get("type") == "human"]
+        user_request = human_msgs[-1].get("content", "") if human_msgs else ""
+
+        agent_trace = self.format_conversation(outputs)
+
+        return {
+            "user_request": user_request,
+            "agent_trace": agent_trace,
+            "model_name": example.metadata.get("model", "unknown") if example.metadata else "unknown",
+        }
 
 
 class CSVExporter:
-    """Export evaluation results to CSV."""
+    METRICS_COLUMNS = [
+        "example_id",
+        "model",
+        "task_success",
+        "correctness",
+        "faithfulness",
+        "relevance",
+        "clarity",
+        "conciseness",
+        "tool_usage",
+    ]
 
     def __init__(self, output_dir: Path):
         self.output_dir = output_dir
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
     def export_results(self, results: List[EvaluationResult]) -> Path:
-        filename = self.output_dir / "summary.csv"
+        csv_file = self.output_dir / "results.csv"
 
-        with open(filename, "w", newline="", encoding="utf-8") as f:
+        with open(csv_file, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            writer.writerow([
-                "example_id", "model", "task_completion", "clarity",
-                "naturalness", "conciseness", "redundancy",
-            ])
-            for result in results:
+            writer.writerow(self.METRICS_COLUMNS)
+
+            for r in results:
                 writer.writerow([
-                    result.example_id,
-                    result.model_name,
-                    result.metrics.task_completion,
-                    result.metrics.clarity,
-                    result.metrics.naturalness,
-                    result.metrics.conciseness,
-                    result.metrics.redundancy,
+                    r.example_id,
+                    r.model_name,
+                    r.metrics.task_success,
+                    r.metrics.correctness,
+                    r.metrics.faithfulness,
+                    r.metrics.relevance,
+                    r.metrics.clarity,
+                    r.metrics.conciseness,
+                    r.metrics.tool_usage,
                 ])
 
-        print(f"Summary CSV: {filename}")
-        return filename
+        return csv_file
 
+    def _export_summary(self, results: List[EvaluationResult], summary_file: Path):
+        """Export aggregated summary by model."""
+        from collections import defaultdict
 
-async def _evaluate_single(
-    evaluator: LLMEvaluator,
-    semaphore: asyncio.Semaphore,
-    example,
-    dataset_fetcher: DatasetFetcher,
-    index: int,
-    total: int,
-    lock: asyncio.Lock,
-) -> EvaluationResult:
-    async with semaphore:
-        input_messages = example.inputs.get("messages", [])
-        output_messages = example.outputs.get("messages", [])
+        model_results = defaultdict(list)
+        for r in results:
+            model_results[r.model_name].append(r)
 
-        user_input = dataset_fetcher.extract_user_input(input_messages)
-        model_output = dataset_fetcher.extract_model_output(output_messages)
-        model_name = dataset_fetcher.extract_model_name(example.metadata or {})
+        with open(summary_file, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                "model",
+                "total_count",
+                "task_success_rate",
+                "correctness_avg",
+                "faithfulness_avg",
+                "relevance_avg",
+                "clarity_avg",
+                "conciseness_avg",
+                "tool_usage_avg",
+            ])
 
-        metrics = await evaluator.evaluate(user_input, model_output)
+            for model, model_results_list in sorted(model_results.items()):
+                total = len(model_results_list)
+                successful = sum(1 for r in model_results_list if r.metrics.task_success == 1)
 
-        result = EvaluationResult(
-            example_id=str(example.id),
-            model_name=model_name,
-            user_input=user_input,
-            model_output=model_output,
-            metrics=metrics,
-        )
+                metrics_sums = {
+                    "correctness": 0,
+                    "faithfulness": 0,
+                    "relevance": 0,
+                    "clarity": 0,
+                    "conciseness": 0,
+                    "tool_usage": 0,
+                }
 
-        async with lock:
-            print(
-                f"[{index}/{total}] task_completion={metrics.task_completion}, "
-                f"clarity={metrics.clarity}, naturalness={metrics.naturalness}, "
-                f"conciseness={metrics.conciseness}, redundancy={metrics.redundancy}"
-            )
+                for r in model_results_list:
+                    for m in metrics_sums:
+                        metrics_sums[m] += getattr(r.metrics, m)
 
-        return result
+                writer.writerow([
+                    model,
+                    total,
+                    f"{successful / total * 100:.1f}%" if total > 0 else "0%",
+                    f"{metrics_sums['correctness'] / total:.2f}" if total > 0 else "0",
+                    f"{metrics_sums['faithfulness'] / total:.2f}" if total > 0 else "0",
+                    f"{metrics_sums['relevance'] / total:.2f}" if total > 0 else "0",
+                    f"{metrics_sums['clarity'] / total:.2f}" if total > 0 else "0",
+                    f"{metrics_sums['conciseness'] / total:.2f}" if total > 0 else "0",
+                    f"{metrics_sums['tool_usage'] / total:.2f}" if total > 0 else "0",
+                ])
 
 
 async def run_evaluation():
-    """Main evaluation function with concurrent processing."""
-    print("=" * 60)
-    print("WordAgent Writing Quality Evaluation")
-    print("=" * 60)
-    print()
-    print(f"Model: {EVAL_OPENAI_MODEL}")
-    if EVAL_OPENAI_BASE_URL:
-        print(f"Base URL: {EVAL_OPENAI_BASE_URL}")
-    print(f"Concurrency: {EVAL_CONCURRENCY}")
-    print()
+    print("Starting evaluation...")
 
     dataset_fetcher = DatasetFetcher()
-    evaluator = LLMEvaluator(
-        model_name=EVAL_OPENAI_MODEL,
-        api_key=EVAL_OPENAI_API_KEY,
-        base_url=EVAL_OPENAI_BASE_URL,
-    )
+    evaluator = LLMEvaluator()
 
-    print("Loading dataset...")
     dataset, examples = dataset_fetcher.get_dataset()
-    print(f"Dataset: {dataset.name}")
-    print(f"Number of examples: {len(examples)}")
-    print()
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir = OUTPUT_BASE_DIR / timestamp
-    output_dir.mkdir(parents=True, exist_ok=True)
 
-    try:
-        semaphore = asyncio.Semaphore(EVAL_CONCURRENCY)
-        lock = asyncio.Lock()
-        tasks = [
-            _evaluate_single(evaluator, semaphore, example, dataset_fetcher, i + 1, len(examples), lock)
-            for i, example in enumerate(examples)
-        ]
-        results: List[EvaluationResult] = await asyncio.gather(*tasks)
+    semaphore = asyncio.Semaphore(EVAL_CONCURRENCY)
 
-        print()
+    async def process(example):
+        async with semaphore:
+            eval_data = dataset_fetcher.extract_for_evaluation(example)
+            metrics = await evaluator.evaluate(eval_data["user_request"], eval_data["agent_trace"])
 
-        csv_exporter = CSVExporter(output_dir)
-        csv_path = csv_exporter.export_results(results)
+            return EvaluationResult(
+                example_id=str(example.id),
+                model_name=eval_data["model_name"],
+                user_input=eval_data["user_request"],
+                model_output=eval_data["agent_trace"][:500],
+                metrics=metrics,
+            )
 
-        print()
-        print("=" * 60)
-        print("EVALUATION SUMMARY")
-        print("=" * 60)
+    results = []
+    with tqdm(total=len(examples), desc="Evaluating", unit="task") as pbar:
+        async def process_with_progress(example):
+            result = await process(example)
+            pbar.update(1)
+            return result
 
-        n = len(results)
-        if n > 0:
-            avg_tc = sum(r.metrics.task_completion for r in results) / n * 100
-            completed = sum(r.metrics.task_completion for r in results)
-            avg_c = sum(r.metrics.clarity for r in results) / n
-            avg_n = sum(r.metrics.naturalness for r in results) / n
-            avg_con = sum(r.metrics.conciseness for r in results) / n
-            avg_r = sum(r.metrics.redundancy for r in results) / n
+        results = await asyncio.gather(*[process_with_progress(e) for e in examples])
 
-            print(f"Examples: {n}")
-            print(f"Task Completion: {avg_tc:.1f}% ({completed}/{n})")
-            print(f"Clarity: {avg_c:.2f}/5")
-            print(f"Naturalness: {avg_n:.2f}/5")
-            print(f"Conciseness: {avg_con:.2f}/5")
-            print(f"Redundancy: {avg_r:.2f}/5")
+    csv_exporter = CSVExporter(output_dir)
+    csv_path = csv_exporter.export_results(results)
 
-        print()
-        print("Generating charts...")
-        from evaluation.utils import plot_task_completion, plot_quality_metrics
-        task_completion_chart_path = output_dir / "task_completion.png"
-        quality_chart_path = output_dir / "quality_metrics.png"
-        plot_task_completion(csv_path, task_completion_chart_path)
-        plot_quality_metrics(csv_path, quality_chart_path)
+    # 生成可视化图表
+    print("Generating charts...")
 
-        print()
-        print(f"Results saved to: {output_dir}")
+    # 1. Task Success 柱状图
+    plot_task_success(csv_path, output_dir / "task_success.png")
 
-    except Exception:
-        import shutil
-        shutil.rmtree(output_dir, ignore_errors=True)
-        raise
+    # 2. 质量指标 + Tool Usage 柱状图（合并在一张图）
+    plot_quality_with_tool_usage(csv_path, output_dir / "quality_metrics.png")
 
+    # 3. 雷达图
+    plot_radar_chart(csv_path, output_dir / "radar_chart.png")
 
-def main():
-    """Entry point for running evaluation."""
-    import asyncio
-    asyncio.run(run_evaluation())
+    print(f"Results saved to: {output_dir}")
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(run_evaluation())

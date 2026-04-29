@@ -20,6 +20,7 @@
       <ChatInput
         :mode="mode"
         :selected-model="selectedModel"
+        :selected-model-provider="selectedModelProvider"
         :available-models="availableModels"
         :models-loading="modelsLoading"
         :is-loading="isLoading"
@@ -31,6 +32,7 @@
         :thinking-display-mode="thinkingDisplayMode"
         @update:mode="mode = $event"
         @update:selected-model="selectedModel = $event"
+        @update:selected-model-provider="selectedModelProvider = $event"
         @update:thinking-display-mode="thinkingDisplayMode = $event"
         @send="handleSend"
         @stop="stopGeneration"
@@ -75,6 +77,7 @@ export default {
     return {
       mode: 'agent',
       selectedModel: '',
+      selectedModelProvider: '',
       availableModels: [],
       modelsLoading: false,
       messages: [],
@@ -504,7 +507,8 @@ export default {
             selectionContext: msg.selectionContext || null,
             thinking: msg.thinking || '',
             thinkingExpanded: false,
-            thinkingDone: true
+            thinkingDone: true,
+            attachedFiles: msg.attachedFiles || null
           }));
 
           if (result.data.lastUsedModel) {
@@ -592,7 +596,7 @@ export default {
     /**
      * 保存消息到后端（基于会话）
      */
-    async saveMessageToHistory(role, content, documentJson = null, selectionContext = null, contentParts = null, thinking = null) {
+    async saveMessageToHistory(role, content, documentJson = null, selectionContext = null, contentParts = null, thinking = null, attachedFiles = null) {
       // 确保有会话
       let sessionId = await this.ensureSession();
       if (!sessionId) {
@@ -615,7 +619,8 @@ export default {
           contentParts,
           thinking,
           model: this.selectedModel || 'auto',
-          mode: this.mode
+          mode: this.mode,
+          attachedFiles
         });
 
         // 兼容旧缓存导致的无效 session_id：自动重建并重试一次
@@ -991,13 +996,18 @@ export default {
         }
       }
 
+      // 添加附件到用户消息对象
+      if (uploadedFilesMeta.length > 0) {
+        userMsgObj.attachedFiles = uploadedFilesMeta;
+      }
+
       this.messages.push(userMsgObj);
       this.historyLoaded = true;
 
       this.clearAllSelections();
       this.clearAllFiles();
 
-      this.saveMessageToHistory('user', userMessage, null, selectionContext);
+      this.saveMessageToHistory('user', userMessage, null, selectionContext, null, null, uploadedFilesMeta);
 
       this._sendStreamRequest(userMessage, documentRange, uploadedFilesMeta);
     },
@@ -1028,7 +1038,8 @@ export default {
 
       const streamCtrl = api.chatStream(userMessage, {
         mode: this.mode,
-        model: this.selectedModel || 'auto',
+        model: this.selectedModel,
+        provider: this.selectedModelProvider,
         documentRange: documentRange,
         history: this.messages.slice(0, -1).slice(-10),
         files: files,

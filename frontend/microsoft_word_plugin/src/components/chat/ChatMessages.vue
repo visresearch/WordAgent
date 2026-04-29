@@ -31,14 +31,42 @@
         <!-- 选区上下文 -->
         <div v-if="msg.selectionContext && msg.selectionContext.length" class="selection-context">
           <div class="context-header">
-            <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M14 1H2a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1zM2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2H2z" />
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 16 16"
+              fill="currentColor"
+            >
+              <path
+                d="M14 1H2a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1zM2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2H2z"
+              />
               <path d="M3 4h10v1H3V4zm0 3h10v1H3V7zm0 3h6v1H3v-1z" />
             </svg>
             <span>引用选区 ({{ msg.selectionContext.length }})</span>
           </div>
           <div v-for="(ctx, ctxIdx) in msg.selectionContext" :key="ctxIdx" class="context-item">
             <span class="context-text">{{ ctx.startText }} → {{ ctx.endText }}</span>
+            <span v-if="ctx.startParaIndex !== undefined" class="context-pos">(段落 {{ ctx.startParaIndex }} - {{ ctx.endParaIndex }})</span>
+          </div>
+        </div>
+        <!-- 显示附件文件 -->
+        <div v-if="msg.attachedFiles && msg.attachedFiles.length" class="selection-context attached-files-context">
+          <div class="context-header">
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 16 16"
+              fill="currentColor"
+            >
+              <path
+                d="M14 1H2a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1zM2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2H2z"
+              />
+              <path d="M3 4h10v1H3V4zm0 3h10v1H3V7zm0 3h6v1H3v-1z" />
+            </svg>
+            <span>引用文件 ({{ msg.attachedFiles.length }})</span>
+          </div>
+          <div v-for="(file, fileIdx) in msg.attachedFiles" :key="fileIdx" class="context-item">
+            <span class="context-text">{{ file.filename || file.name || '未知文件' }}</span>
           </div>
         </div>
         <div class="message-content">
@@ -716,15 +744,24 @@ export default {
   font-weight: 500;
   margin-bottom: 4px;
 }
+.attached-files-context .context-item {
+  background: #f0f0f0;
+}
+
+/* 引用选区 */
+.selection-context:not(.attached-files-context) .context-item {
+  padding-left: 0;
+}
 .context-item {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 8px;
+  padding: 4px 8px 4px 0;
   background: #f7f8fa;
   border-radius: 4px;
   margin-top: 4px;
   font-size: 11px;
+  line-height: 1.4;
 }
 .context-text {
   color: #333;
@@ -734,6 +771,12 @@ export default {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.context-pos {
+  color: #999;
+  font-size: 10px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .img-context-menu {

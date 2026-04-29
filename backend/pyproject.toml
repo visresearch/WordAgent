@@ -36,6 +36,8 @@ dependencies = [
     "pymupdf>=1.27.2.2",
     "python-docx>=1.2.0",
     "matplotlib>=3.10.9",
+    "tqdm>=4.67.3",
+    "seaborn>=0.13.2",
 ]
 
 [project.optional-dependencies]

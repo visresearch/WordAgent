@@ -174,13 +174,21 @@
               </div>
               <div class="select-dropdown model-dropdown">
                 <div
-                  v-for="model in availableModels"
-                  :key="model.id"
+                  v-if="availableModels.length === 0"
                   class="select-option"
-                  :class="{ active: selectedModel === model.id }"
-                  @click="selectModel(model.id)"
+                  :class="{ active: !selectedModel }"
+                  @click="selectModel('')"
                 >
-                  {{ model.name }}
+                  None
+                </div>
+                <div
+                  v-for="model in availableModels"
+                  :key="`${model.provider}-${model.id}`"
+                  class="select-option"
+                  :class="{ active: selectedModel === model.id && selectedModelProvider === model.provider }"
+                  @click="selectModel(model.id, model.provider)"
+                >
+                  {{ model.provider || 'Unknown' }}/{{ model.name }}
                 </div>
               </div>
             </div>
@@ -297,6 +305,10 @@ export default {
       type: String,
       default: ''
     },
+    selectedModelProvider: {
+      type: String,
+      default: ''
+    },
     availableModels: {
       type: Array,
       default: () => []
@@ -330,7 +342,7 @@ export default {
       default: () => ({ current: 0, max: 200000 })
     }
   },
-  emits: ['send', 'stop', 'add-selection', 'remove-selection', 'add-files', 'remove-file', 'update:mode', 'update:selectedModel', 'refresh-models', 'confirm-pending', 'cancel-pending'],
+  emits: ['send', 'stop', 'add-selection', 'remove-selection', 'add-files', 'remove-file', 'update:mode', 'update:selectedModel', 'update:selectedModelProvider', 'refresh-models', 'confirm-pending', 'cancel-pending'],
   data() {
     return {
       inputText: '',
@@ -373,8 +385,11 @@ export default {
       return this.agentIcon;
     },
     selectedModelName() {
-      const model = this.availableModels.find((m) => m.id === this.selectedModel);
-      return model ? model.name : '选择模型';
+      if (!this.selectedModel) {
+        return 'None';
+      }
+      const model = this.availableModels.find((m) => m.id === this.selectedModel && m.provider === this.selectedModelProvider);
+      return model ? `${model.provider || 'Unknown'}/${model.name}` : 'None';
     },
     pendingSummary() {
       const parts = [];
@@ -522,8 +537,9 @@ export default {
       this.modeDropdownOpen = false;
     },
 
-    selectModel(id) {
+    selectModel(id, provider = '') {
       this.$emit('update:selectedModel', id);
+      this.$emit('update:selectedModelProvider', provider);
       this.modelDropdownOpen = false;
     },
 

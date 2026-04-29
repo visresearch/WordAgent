@@ -69,6 +69,27 @@
             <span class="context-pos">(段落 {{ ctx.startParaIndex }} - {{ ctx.endParaIndex }})</span>
           </div>
         </div>
+        <!-- 显示附件文件 -->
+        <div v-if="msg.attachedFiles && msg.attachedFiles.length" class="selection-context attached-files-context">
+          <div class="context-header">
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 16 16"
+              fill="currentColor"
+            >
+              <path
+                d="M14 1H2a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1zM2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2H2z"
+              />
+              <path d="M3 4h10v1H3V4zm0 3h10v1H3V7zm0 3h6v1H3v-1z" />
+            </svg>
+            <span>引用文件 ({{ msg.attachedFiles.length }})</span>
+          </div>
+          <div v-for="(file, fileIdx) in msg.attachedFiles" :key="fileIdx" class="context-item">
+            <span class="context-text">{{ file.filename || file.name || '未知文件' }}</span>
+            <span v-if="file.size" class="context-pos">({{ formatFileSize(file.size) }})</span>
+          </div>
+        </div>
         <div class="message-content">
           <span
             v-if="msg.role === 'assistant' && !msg.content && !msg.thinking && !msg.statusText && !(msg.contentParts && msg.contentParts.length > 0) && isLoading"
@@ -314,6 +335,15 @@ export default {
     document.removeEventListener('click', this.hideImgMenu);
   },
   methods: {
+    formatFileSize(bytes) {
+      if (!bytes || bytes === 0) {
+        return '0 B';
+      }
+      const k = 1024;
+      const sizes = ['B', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+    },
     handleImgContextMenu(e) {
       const img = e.target.closest('img');
       if (!img || !img.closest('.markdown-body')) {
@@ -980,6 +1010,14 @@ export default {
   font-size: 11px;
 }
 
+.attached-files-context .context-header {
+  color: #666;
+}
+
+.attached-files-context .context-item {
+  background: #f0f0f0;
+}
+
 .context-header {
   display: flex;
   align-items: center;
@@ -993,7 +1031,7 @@ export default {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 8px;
+  padding: 4px 8px 4px 4px;
   background: #f7f8fa;
   border-radius: 4px;
   margin-top: 4px;

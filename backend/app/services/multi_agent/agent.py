@@ -761,6 +761,7 @@ async def process_writing_request_stream(
     document_meta: dict | None = None,
     history: list | None = None,
     model: str | None = None,
+    provider: str | None = None,
     mode: str | None = None,
     chat_id: str | None = None,
     attached_files: list[dict] | None = None,
@@ -773,7 +774,7 @@ async def process_writing_request_stream(
     """
     print("[MultiAgent] 开始处理请求")
 
-    model_name = resolve_model(model or "auto")
+    model_name = resolve_model(model or "auto", provider or "")
     llm = _create_llm(model_name)
     app = _build_multi_agent_graph(llm, model_name)
 

@@ -147,6 +147,7 @@ class SessionService:
         thinking: str | None = None,
         model: str | None = None,
         mode: str | None = None,
+        attached_files: list[dict] | None = None,
     ) -> ChatMessage | None:
         """
         向会话添加消息，并自动更新会话的 preview / title / updated_at
@@ -174,6 +175,7 @@ class SessionService:
             thinking=thinking,
             model=model,
             mode=mode,
+            attached_files=attached_files,
         )
         self.db.add(message)
 

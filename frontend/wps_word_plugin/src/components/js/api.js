@@ -393,7 +393,8 @@ function chatStream(message, options = {}) {
     onError,
     onComplete,
     mode = 'agent',
-    model = 'auto',
+    model = '',
+    provider = '',
     documentRange = null,
     history = [],
     files = []
@@ -418,6 +419,7 @@ function chatStream(message, options = {}) {
         message: message.trim(),
         mode,
         model,
+        provider,
         documentRange,
         documentMeta,
         history,

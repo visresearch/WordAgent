@@ -20,6 +20,7 @@
       <ChatInput
         :mode="mode"
         :selected-model="selectedModel"
+        :selected-model-provider="selectedModelProvider"
         :available-models="availableModels"
         :models-loading="modelsLoading"
         :is-loading="isLoading"
@@ -29,6 +30,7 @@
         :pending-deletes="pendingDeletes"
         @update:mode="mode = $event"
         @update:selected-model="selectedModel = $event"
+        @update:selected-model-provider="selectedModelProvider = $event"
         @send="handleSend"
         @stop="stopGeneration"
         @add-selection="addSelectionFromWord"
@@ -73,6 +75,7 @@ export default {
     return {
       mode: 'agent',
       selectedModel: '',
+      selectedModelProvider: '',
       availableModels: [],
       modelsLoading: false,
       messages: [],
@@ -355,7 +358,8 @@ export default {
             selectionContext: msg.selectionContext || null,
             thinking: msg.thinking || '',
             thinkingExpanded: false,
-            thinkingDone: true
+            thinkingDone: true,
+            attachedFiles: msg.attachedFiles || null
           }));
 
           if (result.data.lastUsedModel) {
@@ -415,7 +419,7 @@ export default {
       return null;
     },
 
-    async saveMessageToHistory(role, content, documentJson = null, selectionContext = null, contentParts = null, thinking = null) {
+    async saveMessageToHistory(role, content, documentJson = null, selectionContext = null, contentParts = null, thinking = null, attachedFiles = null) {
       let sessionId = await this.ensureSession();
       if (!sessionId) return;
 
@@ -428,7 +432,8 @@ export default {
           contentParts,
           thinking,
           model: this.selectedModel || 'auto',
-          mode: this.mode
+          mode: this.mode,
+          attachedFiles
         });
 
         if (!saveResult?.success) {
@@ -447,7 +452,8 @@ export default {
             contentParts,
             thinking,
             model: this.selectedModel || 'auto',
-            mode: this.mode
+            mode: this.mode,
+            attachedFiles
           });
         }
 
@@ -685,12 +691,17 @@ export default {
         }
       }
 
+      // 添加附件到用户消息对象
+      if (uploadedFilesMeta.length > 0) {
+        userMsgObj.attachedFiles = uploadedFilesMeta;
+      }
+
       this.messages.push(userMsgObj);
       this.historyLoaded = true;
       this.selections = [];
       this.clearAllFiles();
 
-      this.saveMessageToHistory('user', userMessage, null, selectionContext);
+      this.saveMessageToHistory('user', userMessage, null, selectionContext, null, null, uploadedFilesMeta.length > 0 ? uploadedFilesMeta : null);
       this._sendStreamRequest(userMessage, documentRange, uploadedFilesMeta);
     },
 
@@ -716,7 +727,8 @@ export default {
 
       const streamCtrl = api.chatStream(userMessage, {
         mode: this.mode,
-        model: this.selectedModel || 'auto',
+        model: this.selectedModel,
+        provider: this.selectedModelProvider,
         documentRange: documentRange,
         history: this.messages.slice(0, -1).slice(-10),
         files: files,

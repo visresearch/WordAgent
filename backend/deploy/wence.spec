@@ -129,6 +129,7 @@ a = Analysis(
     excludes=[
         # 排除不需要的大型库（AI/ML 库，我们不需要）
         'matplotlib',
+        'seaborn',
         'PIL',
         'tkinter',
         'jupyter',
@@ -143,6 +144,7 @@ a = Analysis(
 
         # 排除其他不需要的库
         'babel',
+        'tqdm',
         'sphinx',
         'docutils',
         'openpyxl',

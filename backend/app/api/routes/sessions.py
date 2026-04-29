@@ -42,6 +42,7 @@ class AddMessageRequest(BaseModel):
     thinking: str | None = None
     model: str | None = None
     mode: str | None = None
+    attachedFiles: list[dict] | None = None
 
 
 class SessionResponse(BaseModel):
@@ -288,6 +289,7 @@ async def add_message(
             thinking=request.thinking,
             model=request.model,
             mode=request.mode,
+            attached_files=request.attachedFiles,
         )
         if not message:
             return CommonResponse(success=False, error="会话不存在")

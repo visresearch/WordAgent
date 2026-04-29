@@ -431,27 +431,50 @@ class LLMClientManager:
         return provider
 
     @classmethod
-    def get_default_model(cls) -> str:
-        """获取默认模型（第一个启用的模型）"""
-        provider, model_id = get_first_available_model()
+    def get_default_model(cls, provider: str = "") -> str:
+        """获取默认模型（第一个启用的模型，可按提供商过滤）"""
+        if provider:
+            # 根据提供商获取模型
+            provider_config = cls._get_provider_config(provider)
+            if provider_config:
+                models = provider_config.get("models", [])
+                for model in models:
+                    if model.get("enabled", False):
+                        return model.get("id", "gpt-4o")
+
+        # 如果没找到指定提供商的模型，尝试获取第一个启用的模型
+        _, model_id = get_first_available_model()
         if model_id:
             return model_id
         # 兜底返回
         return "gpt-4o"
 
     @classmethod
-    def resolve_model(cls, model_id: str | None) -> str:
+    def _get_provider_config(cls, provider_name: str) -> dict | None:
+        """根据提供商名称获取配置"""
+        try:
+            settings_data = load_user_settings()
+            for p in settings_data.get("providers", []):
+                if p.get("name") == provider_name:
+                    return p
+        except Exception:
+            pass
+        return None
+
+    @classmethod
+    def resolve_model(cls, model_id: str | None, provider: str = "") -> str:
         """
         解析模型 ID，处理 auto 和空值
 
         Args:
             model_id: 用户指定的模型 ID，可能是 "auto" 或具体模型
+            provider: 模型提供商名称
 
         Returns:
             实际使用的模型 ID
         """
         if not model_id or model_id == "auto":
-            return cls.get_default_model()
+            return cls.get_default_model(provider)
         return model_id
 
     @classmethod
@@ -468,6 +491,6 @@ def get_llm_client(model_id: str) -> AsyncOpenAI:
     return LLMClientManager.get_client(model_id)
 
 
-def resolve_model(model_id: str | None) -> str:
+def resolve_model(model_id: str | None, provider: str = "") -> str:
     """解析模型 ID 的便捷函数"""
-    return LLMClientManager.resolve_model(model_id)
+    return LLMClientManager.resolve_model(model_id, provider)

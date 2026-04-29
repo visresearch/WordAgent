@@ -119,12 +119,12 @@
               <div class="select-dropdown model-dropdown">
                 <div
                   v-for="model in availableModels"
-                  :key="model.id"
+                  :key="`${model.provider}-${model.id}`"
                   class="select-option"
-                  :class="{ active: selectedModel === model.id }"
-                  @click="selectModel(model.id)"
+                  :class="{ active: selectedModel === model.id && selectedModelProvider === model.provider }"
+                  @click="selectModel(model.id, model.provider)"
                 >
-                  {{ model.name }}
+                  {{ model.provider || 'Unknown' }}/{{ model.name }}
                 </div>
               </div>
             </div>
@@ -182,6 +182,7 @@ export default {
   props: {
     mode: { type: String, default: 'agent' },
     selectedModel: { type: String, default: '' },
+    selectedModelProvider: { type: String, default: '' },
     availableModels: { type: Array, default: () => [] },
     modelsLoading: { type: Boolean, default: false },
     isLoading: { type: Boolean, default: false },
@@ -190,7 +191,7 @@ export default {
     pendingDocument: { type: Object, default: null },
     pendingDeletes: { type: Array, default: () => [] }
   },
-  emits: ['send', 'stop', 'add-selection', 'remove-selection', 'add-files', 'remove-file', 'update:mode', 'update:selectedModel', 'refresh-models', 'confirm-pending', 'cancel-pending'],
+  emits: ['send', 'stop', 'add-selection', 'remove-selection', 'add-files', 'remove-file', 'update:mode', 'update:selectedModel', 'update:selectedModelProvider', 'refresh-models', 'confirm-pending', 'cancel-pending'],
   data() {
     return {
       inputText: '',
@@ -233,8 +234,8 @@ export default {
       return this.agentIcon;
     },
     selectedModelName() {
-      const model = this.availableModels.find((m) => m.id === this.selectedModel);
-      return model ? model.name : '选择模型';
+      const model = this.availableModels.find((m) => m.id === this.selectedModel && m.provider === this.selectedModelProvider);
+      return model ? `${model.provider || 'Unknown'}/${model.name}` : '选择模型';
     },
     pendingSummary() {
       const parts = [];
@@ -340,8 +341,9 @@ export default {
       this.$emit('update:mode', value);
       this.modeDropdownOpen = false;
     },
-    selectModel(id) {
+    selectModel(id, provider = '') {
       this.$emit('update:selectedModel', id);
+      this.$emit('update:selectedModelProvider', provider);
       this.modelDropdownOpen = false;
     },
     modeIconStyle(icon) {

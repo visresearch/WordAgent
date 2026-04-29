@@ -128,18 +128,10 @@ async def get_models():
     """
     try:
         models = get_enabled_models_from_settings()
-
-        # 在列表开头添加 Auto 选项
-        auto_model = ModelInfo(id="auto", name="Auto", provider="WenCe AI", description="自动选择最佳模型")
-
-        return ModelsResponse(success=True, models=[auto_model] + models)
+        return ModelsResponse(success=True, models=models)
     except Exception as e:
         print(f"❌ 获取模型列表失败: {e}")
-        # 失败时返回默认模型
-        return ModelsResponse(
-            success=True,
-            models=[ModelInfo(id="auto", name="Auto", provider="WenCe AI", description="自动选择最佳模型")],
-        )
+        return ModelsResponse(success=True, models=[])
 
 
 @router.post("/models/refresh")

@@ -297,6 +297,7 @@ async def process_writing_request_stream(
     document_meta: dict | None = None,
     history: list | None = None,
     model: str | None = None,
+    provider: str | None = None,
     mode: str | None = None,
     chat_id: str | None = None,
     attached_files: list[dict] | None = None,
@@ -327,11 +328,9 @@ async def process_writing_request_stream(
     print(f"[Agent] 模式: {mode}")
     print("[Agent] 配置: recursion_limit =", _AGENT_RECURSION_LIMIT)
 
-    model_name = resolve_model(model or "auto")
-    _thinking_enabled = supports_thinking(model_name)
+    model_name = resolve_model(model or "auto", provider or "")
+    _thinking_enabled = supports_thinking(model_name)  # 默认全部模型都支持thinking
     llm = init_chat_model_with_reasoning(model_name, enable_thinking=_thinking_enabled)
-    if _thinking_enabled:
-        print(f"[Agent] 🧠 模型 {model_name} 支持 thinking 模式，已启用")
 
     # ask 模式禁用 MCP；agent 模式按用户设置加载 MCP 动态工具
     mcp_clients = []  # 保持 MCP 客户端存活，防止 stdio 子进程被 GC 回收

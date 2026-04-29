@@ -74,6 +74,8 @@ class ChatMessage(Base):
     model = Column(String(64), nullable=True)
     # 使用的模式（agent/ask）
     mode = Column(String(20), nullable=True)
+    # 附件文件列表（用户上传的文件，可选）
+    attached_files = Column(JSON, nullable=True)
     # 创建时间
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -98,5 +100,6 @@ class ChatMessage(Base):
             "thinking": self.thinking,
             "model": self.model,
             "mode": self.mode,
+            "attachedFiles": self.attached_files,
             "createdAt": self.created_at.isoformat() if self.created_at else None,
         }

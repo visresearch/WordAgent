@@ -7,7 +7,7 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 cache/
-output/
+outputs/
 
 # dist
 node_modules

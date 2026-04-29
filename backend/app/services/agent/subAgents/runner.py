@@ -43,6 +43,7 @@ SUB_AGENT_TOOLS: dict[str, list[str]] = {
 # 工具解析
 # ---------------------------------------------------------------------------
 
+
 def _get_all_tools() -> dict[str, Any]:
     """获取所有可用工具。"""
     from app.services.agent.tools.document_tools import (
@@ -51,6 +52,7 @@ def _get_all_tools() -> dict[str, Any]:
         read_document,
         search_documnet,
     )
+
     return {
         "read_document": read_document,
         "search_documnet": search_documnet,
@@ -70,6 +72,7 @@ def resolve_sub_agent_tools(agent_type: str) -> tuple[list, dict[str, Any]]:
 # ---------------------------------------------------------------------------
 # 提示词构建
 # ---------------------------------------------------------------------------
+
 
 def _read_prompt_file(fname: str) -> str | None:
     """读取提示文件。"""
@@ -107,6 +110,7 @@ def build_sub_agent_system_prompt(agent_type: str) -> str:
 # 运行子智能体
 # ---------------------------------------------------------------------------
 
+
 def run_sub_agent_task(
     description: str,
     prompt: str,
@@ -116,6 +120,7 @@ def run_sub_agent_task(
 ) -> str:
     """运行子智能体并返回结果。"""
     from langgraph.config import get_stream_writer
+
     writer = get_stream_writer()
 
     if agent_type not in SUB_AGENT_TOOLS:
@@ -179,7 +184,9 @@ def run_sub_agent_task(
                             break
 
         duration = time.time() - start_time
-        writer({"type": "status", "content": f"✅ {agent_type} 完成，耗时 {duration:.1f}s，工具调用 {tool_call_count} 次"})
+        writer(
+            {"type": "status", "content": f"✅ {agent_type} 完成，耗时 {duration:.1f}s，工具调用 {tool_call_count} 次"}
+        )
         print(f"[SubAgent] ✅ {agent_type} 完成")
 
     except Exception as e:
@@ -197,6 +204,7 @@ def run_sub_agent_task(
 # ---------------------------------------------------------------------------
 # 便捷函数
 # ---------------------------------------------------------------------------
+
 
 def run_explore_agent(description: str, prompt: str, **kwargs) -> str:
     return run_sub_agent_task(description, prompt, "explore", **kwargs)
@@ -217,6 +225,7 @@ def run_general_purpose_agent(description: str, prompt: str, **kwargs) -> str:
 # ---------------------------------------------------------------------------
 # 信息
 # ---------------------------------------------------------------------------
+
 
 def get_sub_agent_info(agent_type: str) -> dict[str, Any]:
     """获取子智能体信息。"""
