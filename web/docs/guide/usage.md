@@ -12,7 +12,7 @@
 
 | 服务商 | 推荐模型 | 获取地址 |
 |---|---|---|
-| 阿里云百炼 | Qwen 3.5 Plus / Qwen3 Max | [bailian.console.aliyun.com](https://bailian.console.aliyun.com/) |
+| 阿里云百炼 | Qwen 3.6 Plus / Qwen3 Max | [bailian.console.aliyun.com](https://bailian.console.aliyun.com/) |
 | MiniMax | M2.5 | [minimax.chat](https://www.minimax.chat/) |
 | 阶跃星辰 | Step 3.5 Flash | [platform.stepfun.com](https://platform.stepfun.com/) |
 | OpenRouter | 多种模型 | [openrouter.ai](https://openrouter.ai/) |
@@ -91,12 +91,12 @@ API Key 保存在本地，不会上传到任何服务器。
 ### 智能体没有生成文档内容？
 
 - 检查 API Key 和 Base URL 是否填写正确
-- 确认所选模型支持工具调用（推荐使用 Qwen 3.5 Plus）
+- 确认所选模型支持工具调用（推荐使用 Qwen 3.6 Plus）
 - 查看后端服务 QT 界面的终端日志，检查是否有错误信息
 
 ### 生成内容卡住了？
 
-- 部分模型（如 DeepSeek v3.2、ChatGLM）在工具调用时可能不稳定
+- 部分模型（如 DeepSeek v4 pro、ChatGLM）在工具调用时可能不稳定
 - 点击停止按钮中断任务，尝试更换为推荐的稳定模型
 
 ### 加载项在 Word 中不显示？

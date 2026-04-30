@@ -268,7 +268,9 @@ def build_graph(llm_with_tools, all_tools: list):
             tool_fn = tool_map.get(tool_name)
             if tool_fn:
                 try:
-                    result = tool_fn.invoke(tool_call["args"])
+                    # 用 normalize_tool_args 预处理参数，修复 JSON 字符串转义等问题
+                    normalized_args = normalize_tool_args(tool_name, tool_call["args"])
+                    result = tool_fn.invoke(normalized_args)
                     if isinstance(result, dict):
                         content = json.dumps(result, ensure_ascii=False)
                     elif isinstance(result, str):

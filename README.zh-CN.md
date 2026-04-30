@@ -167,12 +167,12 @@ uv run pyinstaller wence.spec
 - [x] GPT 5.4运行稳定
 - [x] MiniMax M2.5运行稳定
 - [x] Step 3.5 Flash运行稳定
-- [x] DeepSeek v4 pro运行不稳定，非思考模式运行稳定
+- [x] DeepSeek v4 pro运行稳定
 - [x] Claude Sonnet/Opus 运行稳定
 - [ ] Gemini 3.1 Pro
 - [ ] MiMo-V2.5
 
-> 推荐使用 **GPT系列** 模型，效果最好，详情请看[测评文档](./backend/evaluation/README.md)
+> 推荐使用 **GPT系列** 模型，效果最好，其次是 **Qwen系列** 模型，详情请看[测评文档](./backend/evaluation/README.md)
 
 注：本项目开发使用了部分[阿里云百炼](https://bailian.console.aliyun.com/)、[Openrouter](https://openrouter.ai/models?q=free)免费额度
 

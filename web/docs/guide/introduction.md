@@ -92,16 +92,19 @@ uv run python main.py
 
 | 模型 | 状态 |
 |------|------|
-| Qwen 3.5 Plus | ✅ 运行稳定 |
+| Qwen 3.6 Plus | ✅ 运行稳定 |
 | Qwen3 Max | ✅ 运行稳定 |
-| GLM-5 | ✅ 运行稳定 |
+| GLM-5.1 | ✅ 运行稳定 |
 | GPT 5.4 | ✅ 运行稳定 |
 | MiniMax M2.5 | ✅ 运行稳定 |
 | Step 3.5 Flash | ✅ 运行稳定 |
-| DeepSeek v3.2 | ✅ 运行稳定 |
+| DeepSeek v4 pro | ⚠️ 非思考模式运行稳定 |
 | Claude Sonnet/Opus | ✅ 运行稳定 |
 | Kimi K2.5 | ⚠️ 容易出现工具调用死循环 |
 | Gemini 3.1 Pro | 🔲 待测试 |
+| MiMo-V2.5 | 🔲 待测试 |
+
+> 推荐使用 **GPT 系列** 模型，效果最好，其次是 **Qwen 系列** 模型。详见[测评文档](./backend/evaluation/README.md)。
 
 本项目开发使用了部分[阿里云百炼](https://bailian.console.aliyun.com/)、[Openrouter](https://openrouter.ai/models?q=free)免费额度。
 
