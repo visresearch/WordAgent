@@ -28,9 +28,11 @@
         :uploaded-files="uploadedFiles"
         :pending-document="pendingDocument"
         :pending-deletes="pendingDeletes"
+        :enable-thinking="enableThinking"
         @update:mode="mode = $event"
         @update:selected-model="selectedModel = $event"
         @update:selected-model-provider="selectedModelProvider = $event"
+        @update:enable-thinking="enableThinking = $event"
         @send="handleSend"
         @stop="stopGeneration"
         @add-selection="addSelectionFromWord"
@@ -95,7 +97,8 @@ export default {
       historyLoading: false,
       _streamingSessionId: null,
       _streamingCache: {},
-      isWide: false
+      isWide: false,
+      enableThinking: true  // 是否启用深度思考
     };
   },
   computed: {
@@ -732,6 +735,7 @@ export default {
         documentRange: documentRange,
         history: this.messages.slice(0, -1).slice(-10),
         files: files,
+        enableThinking: this.enableThinking,
 
         onMessage: (data) => {
           this._handleStreamMessage(data, aiMsg);

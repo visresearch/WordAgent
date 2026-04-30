@@ -356,6 +356,7 @@ function chatStream(message, options = {}) {
     documentRange = null,
     history = [],
     files = [],
+    enableThinking = true,
   } = options;
 
   wsManager.onMessage = onMessage;
@@ -379,6 +380,7 @@ function chatStream(message, options = {}) {
         documentMeta,
         history,
         files,
+        enableThinking,
         timestamp: Date.now(),
       });
     } catch (error) {

@@ -165,13 +165,13 @@ You need to configure an LLM API. This project is currently tested with Alibaba 
 
 The project has tested part of the mainstream LLM APIs in China, and compatibility is still expanding:
 
-- [x] Qwen 3.5 Plus (stable)
+- [x] Qwen 3.6 Plus (stable)
 - [x] Qwen3 Max (stable)
 - [x] GLM-5 (stable)
 - [x] GPT 5.4 (stable)
 - [x] MiniMax M2.5 (stable)
 - [x] Step 3.5 Flash (stable)
-- [x] DeepSeek v3.2 (stable)
+- [x] DeepSeek v4 (unstable)
 - [x] Claude Sonnet/Opus (stable)
 - [x] Kimi K2.5 (prone to tool-call loops)
 - [ ] Gemini 3.1 Pro

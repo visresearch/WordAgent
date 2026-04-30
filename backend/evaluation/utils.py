@@ -16,6 +16,7 @@ plt.rcParams["axes.unicode_minus"] = False
 
 # ===== 数据读取 =====
 
+
 def read_csv(csv_path: Path) -> List[Dict[str, str]]:
     """Read evaluation results from CSV file."""
     results = []
@@ -44,6 +45,7 @@ def _parse_int(val: str) -> int:
 
 
 # ===== 数据聚合 =====
+
 
 def aggregate_metrics(csv_path: Path) -> Dict[str, Dict[str, float]]:
     """
@@ -106,6 +108,7 @@ def aggregate_task_success(csv_path: Path) -> Dict[str, Dict[str, float]]:
 
 # ===== 绘图函数 =====
 
+
 def _get_colors(n: int) -> List:
     """Get color palette using matplotlib's default cycle."""
     return plt.rcParams["axes.prop_cycle"].by_key()["color"][:n]
@@ -167,7 +170,7 @@ def plot_task_success(csv_path: Path, output_path: Path | None = None):
 def plot_quality_with_tool_usage(csv_path: Path, output_path: Path | None = None):
     """
     Plot quality metrics + tool usage per model as grouped bar chart.
-    All metrics normalized to 0-5 scale.
+    Uses dual Y-axes: left for quality metrics (0-5), right for tool usage (0-2).
 
     Args:
         csv_path: Path to the summary CSV file
@@ -179,39 +182,44 @@ def plot_quality_with_tool_usage(csv_path: Path, output_path: Path | None = None
         return
 
     models = list(aggregated.keys())
-    all_metrics = ["correctness", "faithfulness", "relevance", "clarity", "conciseness", "tool_usage"]
-    metric_labels = ["Correctness", "Faithfulness", "Relevance", "Clarity", "Conciseness", "Tool Usage"]
+
+    # Quality metrics (0-5 scale)
+    quality_metrics = ["correctness", "faithfulness", "relevance", "clarity", "conciseness"]
+    quality_labels = ["Correctness", "Faithfulness", "Relevance", "Clarity", "Conciseness"]
+    # Tool usage (0-2 scale)
+    tool_metrics = ["tool_usage"]
+    tool_labels = ["Tool Usage"]
 
     n_models = len(models)
-    n_metrics = len(all_metrics)
     bar_width = 0.12
-    x = np.arange(n_metrics)
+
+    # X positions: quality metrics first, then tool usage with a gap
+    n_quality = len(quality_metrics)
+    quality_x = np.arange(n_quality)
+    # Tool usage positioned after a small gap
+    tool_x = np.array([n_quality + 0.5])  # Single position for tool usage
+
     colors = _get_colors(n_models)
 
-    fig, ax = plt.subplots(figsize=(14, 6))
+    fig, ax1 = plt.subplots(figsize=(14, 6))
+    ax2 = ax1.twinx()  # Secondary y-axis for tool usage
 
+    # Plot quality metrics (left axis, 0-5 scale)
     for i, model in enumerate(models):
         values = []
-        raw_values = []
-        for m in all_metrics:
+        for m in quality_metrics:
             val = aggregated[model].get(m, 0)
-            raw_values.append(val)
-            # Scale quality metrics (0-5) to 0-2, keep tool_usage (0-2) as-is
-            if m == "tool_usage":
-                val = val
-            else:
-                val = val / 2.5
             values.append(val)
 
         offset = (i - n_models / 2 + 0.5) * bar_width
-        bars = ax.bar(x + offset, values, bar_width, label=model, color=colors[i])
+        bars = ax1.bar(quality_x + offset, values, bar_width, label=model, color=colors[i])
 
-        for bar, raw in zip(bars, raw_values):
-            if raw == int(raw):
-                label = f"{int(raw)}"
+        for bar, val in zip(bars, values):
+            if val == int(val):
+                label = f"{int(val)}"
             else:
-                label = f"{raw:.1f}"
-            ax.annotate(
+                label = f"{val:.1f}"
+            ax1.annotate(
                 label,
                 xy=(bar.get_x() + bar.get_width() / 2, bar.get_height()),
                 xytext=(0, 2),
@@ -221,16 +229,49 @@ def plot_quality_with_tool_usage(csv_path: Path, output_path: Path | None = None
                 fontsize=8,
             )
 
-    ax.set_xlabel("Metrics", fontsize=12)
-    ax.set_ylabel("Score", fontsize=12)
-    ax.set_title("Quality Metrics & Tool Usage by Model\n(Quality: 0-5, Tool Usage: 0-2)", fontsize=14, fontweight="bold")
-    ax.set_xticks(x)
-    ax.set_xticklabels(metric_labels, fontsize=10)
-    ax.set_ylim(0, 2.2)
-    ax.set_yticks([0, 0.5, 1.0, 1.5, 2.0])
-    ax.set_yticklabels(["0", "0.5", "1.0\n(Q:2.5)", "1.5\n(Q:3.75)", "2.0\n(Q:5.0)"])
-    ax.grid(axis="y", alpha=0.3)
-    ax.legend(loc="upper right", fontsize=9)
+    # Plot tool usage (right axis, 0-2 scale)
+    for i, model in enumerate(models):
+        val = aggregated[model].get("tool_usage", 0)
+        offset = (i - n_models / 2 + 0.5) * bar_width
+        bars = ax2.bar(tool_x[0] + offset, val, bar_width, color=colors[i])
+
+        for bar in bars:
+            if val == int(val):
+                label = f"{int(val)}"
+            else:
+                label = f"{val:.1f}"
+            ax2.annotate(
+                label,
+                xy=(bar.get_x() + bar.get_width() / 2, bar.get_height()),
+                xytext=(0, 2),
+                textcoords="offset points",
+                ha="center",
+                va="bottom",
+                fontsize=8,
+            )
+
+    # Set labels and title
+    all_labels = quality_labels + tool_labels
+    all_ticks = list(quality_x) + [tool_x[0]]
+    ax1.set_xlabel("Metrics", fontsize=12)
+    ax1.set_ylabel("Quality Score (0-5)", fontsize=12, color="black")
+    ax2.set_ylabel("Tool Usage Score (0-2)", fontsize=12, color="black")
+    ax1.set_title("Quality Metrics & Tool Usage by Model", fontsize=14, fontweight="bold")
+
+    ax1.set_xticks(all_ticks)
+    ax1.set_xticklabels(all_labels, fontsize=10)
+    ax1.set_ylim(0, 5.5)
+    ax1.set_yticks([0, 1, 2, 3, 4, 5])
+    ax1.tick_params(axis="y", labelcolor="black")
+    ax1.grid(axis="y", alpha=0.3)
+
+    ax2.set_ylim(0, 2.2)
+    ax2.set_yticks([0, 1, 2])
+    # Force the right axis ticks to show 0, 1, 2
+    ax2.set_yticklabels(["0", "1", "2"])
+    ax2.tick_params(axis="y", labelcolor="black")
+
+    ax1.legend(loc="upper left", fontsize=9)
 
     plt.tight_layout()
 
@@ -246,7 +287,7 @@ def plot_quality_with_tool_usage(csv_path: Path, output_path: Path | None = None
 def plot_radar_chart(csv_path: Path, output_path: Path | None = None):
     """
     Plot quality metrics as radar chart (spider chart) per model.
-    All metrics normalized to 0-5 scale.
+    All metrics normalized to 0-1 scale.
 
     Args:
         csv_path: Path to the summary CSV file
@@ -264,30 +305,34 @@ def plot_radar_chart(csv_path: Path, output_path: Path | None = None):
     n_models = len(models)
     colors = _get_colors(n_models)
 
-    n_rings = 10  # 0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0
+    n_rings = 5  # 0.0, 0.2, 0.4, 0.6, 0.8, 1.0
     angles = np.linspace(0, 2 * np.pi, len(metrics), endpoint=False).tolist()
     angles_closed = angles + [angles[0]]
 
     fig, ax = plt.subplots(figsize=(9, 9), subplot_kw=dict(polar=True))
 
     # Draw concentric circle grids (dashed) and radial lines
-    for val in [i * 0.5 for i in range(n_rings + 1)]:
+    for val in [i * 0.2 for i in range(n_rings + 1)]:
         circle_angles = np.linspace(0, 2 * np.pi, 200)
         ax.plot(circle_angles, [val] * len(circle_angles), "--", color="grey", linewidth=0.6, alpha=0.5)
     for angle in angles:
-        ax.plot([angle, angle], [0, 5], "-", color="grey", linewidth=0.4, alpha=0.4)
+        ax.plot([angle, angle], [0, 1], "-", color="grey", linewidth=0.4, alpha=0.4)
 
     # Ring labels on the right side
-    for val in [0, 1, 2, 3, 4, 5]:
-        ax.text(np.pi / 2, val + 0.08, str(val), fontsize=9, ha="left", va="bottom", color="grey")
+    for val in [0, 0.2, 0.4, 0.6, 0.8, 1.0]:
+        ax.text(np.pi / 2, val + 0.03, f"{val:.1f}", fontsize=9, ha="left", va="bottom", color="grey")
 
-    # Plot data: scale quality metrics (0-5) directly, scale tool_usage (0-2) to (0-5)
+    # Plot data: normalize all metrics to 0-1
     for i, model in enumerate(models):
         values = []
         for m in metric_keys:
             val = aggregated[model].get(m, 0)
-            if m == "tool_usage":
-                val = val * 2.5  # 0-2 -> 0-5
+            # Quality metrics (0-5) -> 0-1
+            if m != "tool_usage":
+                val = val / 5.0
+            # tool_usage (0-2) -> 0-1
+            else:
+                val = val / 2.0
             values.append(val)
         values_closed = values + [values[0]]
 
@@ -296,15 +341,15 @@ def plot_radar_chart(csv_path: Path, output_path: Path | None = None):
 
     # Metric labels outside the outer ring
     for angle, metric in zip(angles, metrics):
-        ax.text(angle, 5.25, metric, fontsize=12, fontweight="bold", ha="center", va="center")
+        ax.text(angle, 1.08, metric, fontsize=12, fontweight="bold", ha="center", va="center")
 
-    ax.set_ylim(0, 5)
+    ax.set_ylim(0, 1)
     ax.set_rticks([])
     ax.set_xticks(angles)
     ax.set_xticklabels([])
     ax.grid(color="grey", linestyle="-", linewidth=0.5, alpha=0.3)
 
-    ax.set_title("Quality Metrics Radar Chart\n(All metrics normalized to 0-5)", fontsize=14, fontweight="bold", pad=20)
+    ax.set_title("Quality Metrics Radar Chart\n(All metrics normalized to 0-1)", fontsize=14, fontweight="bold", pad=20)
     ax.legend(loc="upper right", bbox_to_anchor=(1.28, 1.08), fontsize=10)
 
     plt.tight_layout()

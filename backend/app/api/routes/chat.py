@@ -128,12 +128,14 @@ async def chat_websocket(websocket: WebSocket):
                 document_meta = data.get("documentMeta") or {}
                 history = data.get("history", [])
                 attached_files = data.get("files", [])  # 附件列表 [{file_id, filename, content_type, is_image}, ...]
+                enable_thinking = data.get("enableThinking", True)  # 是否启用深度思考
 
                 print("=" * 50)
                 print("收到 WebSocket 聊天请求:")
                 print(f"用户消息: {message}")
                 print(f"模式: {mode}")
                 print(f"模型: {model}")
+                print(f"深度思考: {enable_thinking}")
                 if document_range:
                     print(f"文档范围: {document_range}")
                 if document_meta:
@@ -162,6 +164,7 @@ async def chat_websocket(websocket: WebSocket):
                         document_meta,
                         history,
                         attached_files,
+                        enable_thinking,
                     )
                 )
 
@@ -265,6 +268,7 @@ async def _run_ws_stream(
     document_meta: dict | None,
     history: list,
     attached_files: list | None = None,
+    enable_thinking: bool = True,
 ):
     """在 WebSocket 上运行流式处理，支持上下文超限时自动重试"""
     mode = _normalize_mode(mode)
@@ -283,6 +287,7 @@ async def _run_ws_stream(
                 mode=mode,
                 chat_id=chat_id,
                 attached_files=attached_files or [],
+                enable_thinking=enable_thinking,
             ):
                 if chunk.startswith("data: "):
                     payload = chunk[6:].strip()

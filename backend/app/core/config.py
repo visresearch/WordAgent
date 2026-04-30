@@ -81,6 +81,9 @@ class Settings(BaseSettings):
     # CORS 配置
     CORS_ORIGINS: list[str] = ["*"]
 
+    # 文件处理配置
+    MAX_TEXT_CHARS: int = 50000  # 注入到 LLM 上下文的文本最大字符数（约 25K tokens）
+
     # SQLite 数据库配置（嵌入式，无需安装）
     # 动态获取，支持打包后运行
     @property

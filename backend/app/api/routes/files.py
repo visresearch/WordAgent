@@ -30,8 +30,10 @@ IMAGE_MIME_TYPES = {"image/png", "image/jpeg", "image/jpg"}
 # 单文件最大 50MB
 MAX_FILE_SIZE = 50 * 1024 * 1024
 
-# 注入到 LLM 上下文的文本最大字符数（约 25K tokens）
-MAX_TEXT_CHARS = 50000
+# 注入到 LLM 上下文的文本最大字符数（约 25K tokens），从配置读取
+from app.core.config import settings
+
+MAX_TEXT_CHARS = settings.MAX_TEXT_CHARS
 
 
 # ============== 响应模型 ==============

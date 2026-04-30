@@ -29,11 +29,11 @@
         :pending-document="pendingDocument"
         :pending-deletes="pendingDeletes"
         :token-stats="tokenStats"
-        :thinking-display-mode="thinkingDisplayMode"
+        :enable-thinking="enableThinking"
         @update:mode="mode = $event"
         @update:selected-model="selectedModel = $event"
         @update:selected-model-provider="selectedModelProvider = $event"
-        @update:thinking-display-mode="thinkingDisplayMode = $event"
+        @update:enable-thinking="enableThinking = $event"
         @send="handleSend"
         @stop="stopGeneration"
         @add-selection="addSelectionManually"
@@ -99,6 +99,7 @@ export default {
       _streamingCache: {},         // {sessionId: messages[]} 流式生成期间切走时缓存消息
       isWide: false,
       tokenStats: { current: 0, max: 200000, percentage: 0 },
+      enableThinking: true,  // 是否启用深度思考
       _proofreadModeInitialized: false,
       _proofreadModeLoadPromise: null
     };
@@ -1043,6 +1044,7 @@ export default {
         documentRange: documentRange,
         history: this.messages.slice(0, -1).slice(-10),
         files: files,
+        enableThinking: this.enableThinking,
 
         onMessage: (data) => {
           this._handleStreamMessage(data, aiMsg);

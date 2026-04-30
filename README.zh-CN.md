@@ -156,20 +156,23 @@ uv run pyinstaller wence.spec
 
 下载后双击exe文件，启动后端服务（wence_word_plugin->安装），打开Word软件，信任加载项，即可体验服务。
 
-需要配置LLM API，本项目目前使用的是阿里云百炼平台的qwen3.5-plus系列API服务。
+需要配置LLM API，本项目目前使用的是阿里云百炼平台的qwen3.6-plus系列API服务。
 
 ## 六、LLM API适配情况
-本项目对部分国内LLM API进行了测试，后续陆续适配中，具体情况如下：
-- [x] Qwen 3.5 Plus运行稳定
-- [x] Qwen3 Max运行稳定
-- [x] GLM-5运行稳定
+
+本项目对部分LLM API进行了测试，后续陆续测试适配中，具体情况如下：
+
+- [x] Qwen 3.6 Plus运行稳定
+- [x] GLM-5.1运行稳定
 - [x] GPT 5.4运行稳定
 - [x] MiniMax M2.5运行稳定
 - [x] Step 3.5 Flash运行稳定
-- [x] DeepSeek v3.2运行稳定
+- [x] DeepSeek v4 pro运行不稳定，非思考模式运行稳定
 - [x] Claude Sonnet/Opus 运行稳定
-- [x] Kimi K2.5容易出现工具调用死循环
 - [ ] Gemini 3.1 Pro
+- [ ] MiMo-V2.5
+
+> 推荐使用 **GPT系列** 模型，效果最好，详情请看[测评文档](./backend/evaluation/README.md)
 
 注：本项目开发使用了部分[阿里云百炼](https://bailian.console.aliyun.com/)、[Openrouter](https://openrouter.ai/models?q=free)免费额度
 

@@ -69,6 +69,7 @@ class EvaluationMetrics:
     Agent能力:
     - tool_usage: 工具使用 (0-2)
     """
+
     task_success: int = 0
     correctness: int = 0
     faithfulness: int = 0
@@ -222,17 +223,19 @@ class CSVExporter:
             writer.writerow(self.METRICS_COLUMNS)
 
             for r in results:
-                writer.writerow([
-                    r.example_id,
-                    r.model_name,
-                    r.metrics.task_success,
-                    r.metrics.correctness,
-                    r.metrics.faithfulness,
-                    r.metrics.relevance,
-                    r.metrics.clarity,
-                    r.metrics.conciseness,
-                    r.metrics.tool_usage,
-                ])
+                writer.writerow(
+                    [
+                        r.example_id,
+                        r.model_name,
+                        r.metrics.task_success,
+                        r.metrics.correctness,
+                        r.metrics.faithfulness,
+                        r.metrics.relevance,
+                        r.metrics.clarity,
+                        r.metrics.conciseness,
+                        r.metrics.tool_usage,
+                    ]
+                )
 
         return csv_file
 
@@ -246,17 +249,19 @@ class CSVExporter:
 
         with open(summary_file, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            writer.writerow([
-                "model",
-                "total_count",
-                "task_success_rate",
-                "correctness_avg",
-                "faithfulness_avg",
-                "relevance_avg",
-                "clarity_avg",
-                "conciseness_avg",
-                "tool_usage_avg",
-            ])
+            writer.writerow(
+                [
+                    "model",
+                    "total_count",
+                    "task_success_rate",
+                    "correctness_avg",
+                    "faithfulness_avg",
+                    "relevance_avg",
+                    "clarity_avg",
+                    "conciseness_avg",
+                    "tool_usage_avg",
+                ]
+            )
 
             for model, model_results_list in sorted(model_results.items()):
                 total = len(model_results_list)
@@ -275,17 +280,19 @@ class CSVExporter:
                     for m in metrics_sums:
                         metrics_sums[m] += getattr(r.metrics, m)
 
-                writer.writerow([
-                    model,
-                    total,
-                    f"{successful / total * 100:.1f}%" if total > 0 else "0%",
-                    f"{metrics_sums['correctness'] / total:.2f}" if total > 0 else "0",
-                    f"{metrics_sums['faithfulness'] / total:.2f}" if total > 0 else "0",
-                    f"{metrics_sums['relevance'] / total:.2f}" if total > 0 else "0",
-                    f"{metrics_sums['clarity'] / total:.2f}" if total > 0 else "0",
-                    f"{metrics_sums['conciseness'] / total:.2f}" if total > 0 else "0",
-                    f"{metrics_sums['tool_usage'] / total:.2f}" if total > 0 else "0",
-                ])
+                writer.writerow(
+                    [
+                        model,
+                        total,
+                        f"{successful / total * 100:.1f}%" if total > 0 else "0%",
+                        f"{metrics_sums['correctness'] / total:.2f}" if total > 0 else "0",
+                        f"{metrics_sums['faithfulness'] / total:.2f}" if total > 0 else "0",
+                        f"{metrics_sums['relevance'] / total:.2f}" if total > 0 else "0",
+                        f"{metrics_sums['clarity'] / total:.2f}" if total > 0 else "0",
+                        f"{metrics_sums['conciseness'] / total:.2f}" if total > 0 else "0",
+                        f"{metrics_sums['tool_usage'] / total:.2f}" if total > 0 else "0",
+                    ]
+                )
 
 
 async def run_evaluation():
@@ -316,6 +323,7 @@ async def run_evaluation():
 
     results = []
     with tqdm(total=len(examples), desc="Evaluating", unit="task") as pbar:
+
         async def process_with_progress(example):
             result = await process(example)
             pbar.update(1)

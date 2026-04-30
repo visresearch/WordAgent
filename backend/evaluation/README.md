@@ -4,11 +4,15 @@
 
 ## 评估指标效果
 
+### 任务完成率指标
+
 ![](./outputs-example/task_success.png)
 
-![](./outputs-example/quality_metrics.png)
+### 各项质量指标
 
-![](./outputs-example/radar_chart.png)
+| 柱状图 | 雷达图 |
+|---|---|
+| ![](./outputs-example/quality_metrics.png) | ![](./outputs-example/radar_chart.png) |
 
 ## 环境配置
 

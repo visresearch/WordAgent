@@ -67,14 +67,24 @@ def _try_init_langsmith():
                 continue
             seen.add(resolved)
             if resolved.exists():
+                print(f"[LangSmith] 加载 .env: {resolved}")
                 load_dotenv(resolved, override=False)
 
-        # 有 API_KEY 时自动启用 LangSmith tracing
-        if os.environ.get("LANGSMITH_API_KEY") and os.environ.get("LANGSMITH_PROJECT"):
-            print("[LangSmith] ✅ 已启用 tracing，project =", os.environ.get("LANGSMITH_PROJECT", "default"))
+        # 检查 LANGSMITH_* 环境变量
+        api_key = os.environ.get("LANGSMITH_API_KEY")
+        project = os.environ.get("LANGSMITH_PROJECT")
+
+        if api_key and project:
+            # 设置 LANGCHAIN_* 变量供 LangGraph tracing 使用
+            os.environ["LANGCHAIN_API_KEY"] = api_key
+            os.environ["LANGCHAIN_PROJECT"] = project
+            os.environ["LANGCHAIN_TRACING_V2"] = "true"
+            print(f"[LangSmith] ✅ 已启用 tracing，project = {project}")
             return True
-    except Exception:
-        pass
+        else:
+            print(f"[LangSmith] ⚠️ 未启用 - API_KEY: {'已设置' if api_key else '未设置'}, PROJECT: {project}")
+    except Exception as e:
+        print(f"[LangSmith] ⚠️ 初始化失败: {e}")
     return False
 
 
@@ -301,6 +311,7 @@ async def process_writing_request_stream(
     mode: str | None = None,
     chat_id: str | None = None,
     attached_files: list[dict] | None = None,
+    enable_thinking: bool = True,
 ) -> AsyncGenerator[str, None]:
     """
     使用 LangGraph ReAct Agent 处理写作请求（流式输出）
@@ -326,10 +337,11 @@ async def process_writing_request_stream(
 
     print("[Agent] 开始处理请求")
     print(f"[Agent] 模式: {mode}")
+    print(f"[Agent] 深度思考: {enable_thinking}")
     print("[Agent] 配置: recursion_limit =", _AGENT_RECURSION_LIMIT)
 
     model_name = resolve_model(model or "auto", provider or "")
-    _thinking_enabled = supports_thinking(model_name)  # 默认全部模型都支持thinking
+    _thinking_enabled = enable_thinking and supports_thinking(model_name)
     llm = init_chat_model_with_reasoning(model_name, enable_thinking=_thinking_enabled)
 
     # ask 模式禁用 MCP；agent 模式按用户设置加载 MCP 动态工具

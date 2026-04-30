@@ -8,6 +8,7 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from openai import AsyncOpenAI
 
@@ -15,6 +16,334 @@ from app.core.config import get_user_settings_file
 
 from langchain_openai import ChatOpenAI as _BaseChatOpenAI
 from langchain_core.outputs import ChatGenerationChunk
+
+
+# =============================================================================
+# DeepSeek / OpenAI 兼容 reasoning_content 修复（monkey-patch LangChain）
+# =============================================================================
+# LangChain 的 _format_message_content 会过滤掉 reasoning_content block，
+# _convert_from_v1_to_chat_completions 会过滤掉 reasoning block，
+# _convert_message_to_dict 不会把 additional_kwargs.reasoning_content 发给 API。
+# 这导致 DeepSeek 思考模式在多轮对话中报错：
+#   "The `reasoning_content` in the thinking mode must be passed back to the API."
+#
+# 修复策略：
+#  1. patch _format_message_content：保留 reasoning_content block
+#  2. patch _convert_from_v1_to_chat_completions：保留 reasoning block
+#  3. patch _convert_message_to_dict：把 additional_kwargs.reasoning_content 注入 API payload
+# =============================================================================
+
+
+def _apply_reasoning_content_patches():
+    """一次性应用所有 reasoning_content 相关 patch。"""
+    try:
+        from langchain_openai.chat_models import base as lc_base
+    except Exception:
+        return
+
+    original_format = lc_base._format_message_content
+
+    def _patched_format_message_content(content, api="chat/completions", role=None):
+        """保留 reasoning_content block，不剥离。"""
+        result = original_format(content, api=api, role=role)
+        if content and isinstance(content, list) and isinstance(result, list):
+            for block in content:
+                if isinstance(block, dict):
+                    btype = block.get("type", "")
+                    if btype in ("reasoning_content", "thinking") and block not in result:
+                        result.append(block)
+        return result
+
+    lc_base._format_message_content = _patched_format_message_content
+
+    # Patch _convert_from_v1_to_chat_completions：保留 reasoning block
+    try:
+        from langchain_openai.chat_models import _compat as lc_compat
+
+        if hasattr(lc_compat, "_convert_from_v1_to_chat_completions"):
+            _orig_convert = lc_compat._convert_from_v1_to_chat_completions
+
+            def _patched_convert(message):
+                if isinstance(message.content, list):
+                    new_content = []
+                    kept = []
+                    for block in message.content:
+                        if isinstance(block, dict):
+                            btype = block.get("type", "")
+                            if btype == "text":
+                                new_content.append({"type": "text", "text": block["text"]})
+                            elif btype == "tool_call":
+                                pass  # 保持不变，tool_call block 正常保留
+                            elif btype in ("reasoning", "reasoning_content", "thinking"):
+                                # 统一转换为 reasoning_content block 类型
+                                kept.append({"type": "reasoning_content", "content": block.get("content", "")})
+                            else:
+                                new_content.append(block)
+                        else:
+                            new_content.append(block)
+                    # 推理内容放在最前面
+                    result = message.model_copy(update={"content": kept + new_content})
+                    return result
+                return message
+
+            lc_compat._convert_from_v1_to_chat_completions = _patched_convert
+    except Exception as e:
+        print(f"[LLM] ⚠️ patch _convert_from_v1_to_chat_completions 失败: {e}")
+
+    # Patch _convert_message_to_dict：把 additional_kwargs.reasoning_content 注入 payload
+    # 同时处理 reasoning block -> top-level reasoning_content 字段的转换
+    _orig_convert_dict = lc_base._convert_message_to_dict
+
+    def _patched_convert_message_to_dict(message, api="chat/completions"):
+        result = _orig_convert_dict(message, api=api)
+        if isinstance(message, lc_base.AIMessage):
+            # 优先从 additional_kwargs 取
+            rc = message.additional_kwargs.get("reasoning_content")
+            # fallback：从 content blocks 中找
+            if not rc and isinstance(message.content, list):
+                for block in message.content:
+                    if isinstance(block, dict) and block.get("type") == "reasoning_content":
+                        rc = block.get("content", "")
+                        break
+            if rc:
+                result["reasoning_content"] = rc
+                # 如果 content 是 list，确保其中有 reasoning block
+                if isinstance(result.get("content"), list):
+                    has_reasoning = any(
+                        isinstance(b, dict) and b.get("type") == "reasoning_content" for b in result["content"]
+                    )
+                    if not has_reasoning:
+                        result["content"] = [{"type": "reasoning_content", "content": rc}] + result["content"]
+        return result
+
+    lc_base._convert_message_to_dict = _patched_convert_message_to_dict
+
+    # Patch _create_chat_result：确保从 API 响应中提取 reasoning_content 到 additional_kwargs
+    _orig_create_chat_result = lc_base.ChatOpenAI._create_chat_result  # type: ignore
+
+    def _patched_create_chat_result(self, response, generation_info=None):
+        result = _orig_create_chat_result(self, response, generation_info)
+        # 从 API 原始响应中提取 reasoning_content（DeepSeek 等模型放在 delta 中）
+        response_dict = response.model_dump() if hasattr(response, "model_dump") else response
+        choices = response_dict.get("choices") or []
+        for choice in choices:
+            delta = choice.get("delta", {})
+            rc = delta.get("reasoning_content") or choice.get("message", {}).get("reasoning_content")
+            if rc:
+                msg = result.generations[0].message
+                if hasattr(msg, "additional_kwargs"):
+                    msg.additional_kwargs["reasoning_content"] = rc
+                # 同时放到 content 中（LangChain 处理时会用到）
+                if hasattr(msg, "content") and isinstance(msg.content, list):
+                    has_reasoning = any(
+                        isinstance(b, dict) and b.get("type") == "reasoning_content" for b in msg.content
+                    )
+                    if not has_reasoning:
+                        msg.content = [{"type": "reasoning_content", "content": rc}] + msg.content
+                break
+        return result
+
+    lc_base.ChatOpenAI._create_chat_result = _patched_create_chat_result  # type: ignore
+
+    # Patch parse_tool_call：DeepSeek thinking 模式有时输出格式不标准的 JSON，
+    # LangChain 默认直接标记为 invalid，这里加入智能修复策略
+    try:
+        from langchain_core.output_parsers.openai_tools import parse_tool_call as _orig_parse_tool_call
+        import re
+
+        def _parse_args_smart_fix(args_str):
+            """智能修复并解析工具参数 JSON。
+
+            策略：
+            1. 直接解析
+            2. 去掉尾随逗号（包括字符串末尾的逗号）
+            3. 修复中文/弯引号
+            4. 从混排文本中提取 JSON
+            """
+            if not args_str:
+                return {}
+            if isinstance(args_str, (dict, list)):
+                return args_str
+            s = str(args_str).strip()
+            if not s:
+                return {}
+
+            # 直接解析
+            try:
+                return json.loads(s)
+            except (json.JSONDecodeError, ValueError, TypeError):
+                pass
+
+            # 修复1：去掉尾随逗号（包括字符串末尾的 ,})
+            # 先处理末尾的 ,} 或 ,]  再处理字符串末尾的 ,}
+            fixed = s
+            for _ in range(5):  # 最多5次，防止过度修复
+                prev = fixed
+                fixed = re.sub(r",(\s*)([}\]])", r"\2", fixed)
+                fixed = re.sub(r",\s*$", "", fixed)  # 字符串末尾的尾随逗号
+                if fixed == prev:
+                    break
+            try:
+                return json.loads(fixed)
+            except (json.JSONDecodeError, ValueError, TypeError):
+                pass
+
+            # 修复2：修复中文/弯引号
+            for old, new in [
+                ("\u201c", '"'),
+                ("\u201d", '"'),
+                ("\u300c", '"'),
+                ("\u300d", '"'),
+                ("\u2018", "'"),
+                ("\u2019", "'"),
+            ]:
+                fixed = fixed.replace(old, new)
+            try:
+                return json.loads(fixed)
+            except (json.JSONDecodeError, ValueError, TypeError):
+                pass
+
+            # 修复3：从混排文本中提取 JSON（从后往前找）
+            # 用括号匹配来找到完整的 JSON 对象
+            def find_json_objects(text):
+                results = []
+                i = len(text) - 1
+                while i >= 0:
+                    if text[i] == "}":
+                        depth = 0
+                        start = i
+                        for j in range(i, -1, -1):
+                            if text[j] == "}":
+                                depth += 1
+                            elif text[j] == "{":
+                                depth -= 1
+                                if depth == 0:
+                                    results.append(text[j : start + 1])
+                                    i = j - 1
+                                    break
+                    i -= 1
+                return results
+
+            for candidate in find_json_objects(s):
+                try:
+                    result = json.loads(candidate)
+                    if isinstance(result, dict):
+                        return result
+                except (json.JSONDecodeError, ValueError, TypeError):
+                    continue
+
+            return None
+
+        def _patched_parse_tool_call(raw_tool_call, *, partial=False, strict=False, return_id=True):
+            if "function" not in raw_tool_call:
+                return None
+            arguments = raw_tool_call["function"]["arguments"]
+
+            if partial:
+                try:
+                    from langchain_core.utils.json import parse_partial_json
+
+                    return _orig_parse_tool_call(raw_tool_call, partial=True, strict=strict, return_id=return_id)
+                except Exception:
+                    return None
+            elif not arguments:
+                return {
+                    "name": raw_tool_call["function"].get("name") or "",
+                    "args": {},
+                    "id": raw_tool_call.get("id"),
+                }
+
+            # 先尝试智能修复
+            parsed = _parse_args_smart_fix(arguments)
+            if parsed is not None:
+                from langchain_core.messages.tool import tool_call as _tc
+                from langchain_core.messages.tool import ToolCall
+
+                result = {
+                    "name": raw_tool_call["function"].get("name") or "",
+                    "args": parsed,
+                }
+                if return_id:
+                    result["id"] = raw_tool_call.get("id")
+                return _tc(**result)
+
+            # 修复失败，回退原始行为（会报 invalid）
+            return _orig_parse_tool_call(raw_tool_call, partial=partial, strict=strict, return_id=return_id)
+
+        import langchain_core.output_parsers.openai_tools as _oa_tools
+
+        _oa_tools.parse_tool_call = _patched_parse_tool_call
+        print("[LLM] ✅ parse_tool_call JSON 智能修复 patch 已应用")
+    except Exception as e:
+        print(f"[LLM] ⚠️ patch parse_tool_call 失败: {e}")
+
+    # Patch parse_partial_json：LangChain 的 init_tool_calls() 直接调用 parse_partial_json，
+    # 而不是 parse_tool_call。如果不 patch 这里，流式路径仍会产生 invalid_tool_calls。
+    # 这个 patch 优先于 _parse_args_smart_fix 的修复（_parse_args_smart_fix 在非流式路径生效）。
+    try:
+        from langchain_core.utils.json import parse_partial_json as _orig_parse_partial_json
+
+        _orig_parse_partial_json_ref = _orig_parse_partial_json
+
+        def _patched_parse_partial_json(s: str, *, strict: bool = False) -> Any:
+            # 先尝试原始解析
+            try:
+                return _orig_parse_partial_json_ref(s, strict=strict)
+            except Exception:
+                pass
+
+            # 修复尾随逗号（DeepSeek thinking 模式的常见问题）
+            fixed = s
+            for _ in range(10):
+                prev = fixed
+                fixed = re.sub(r",(\s*)([}\]])", r"\2", fixed)
+                if fixed == prev:
+                    break
+            if fixed != s:
+                try:
+                    import json
+
+                    return json.loads(fixed, strict=strict)
+                except Exception:
+                    pass
+
+            # 修复中文/弯引号
+            for old, new in [
+                ("\u201c", '"'),
+                ("\u201d", '"'),
+                ("\u300c", '"'),
+                ("\u300d", '"'),
+                ("\u2018", "'"),
+                ("\u2019", "'"),
+            ]:
+                fixed = fixed.replace(old, new)
+            try:
+                import json
+
+                return json.loads(fixed, strict=strict)
+            except Exception:
+                pass
+
+            return _orig_parse_partial_json_ref(s, strict=strict)
+
+        import langchain_core.utils.json as _json_mod
+
+        _json_mod.parse_partial_json = _patched_parse_partial_json
+
+        # 关键：langchain_core.messages.ai 使用了 `from langchain_core.utils.json import parse_partial_json`
+        # 这创建了一个本地引用，必须同时 patch 这个本地引用才能让 init_tool_calls() 使用修复后的版本
+        import langchain_core.messages.ai as _ai_mod
+
+        _ai_mod.parse_partial_json = _patched_parse_partial_json
+
+        print("[LLM] ✅ parse_partial_json trailing-comma patch 已应用（utils + ai）")
+    except Exception as e:
+        print(f"[LLM] ⚠️ patch parse_partial_json 失败: {e}")
+
+    print("[LLM] ✅ DeepSeek reasoning_content patch 已应用")
+
+
+_apply_reasoning_content_patches()
 
 
 class ChatOpenAI(_BaseChatOpenAI):
@@ -293,6 +622,18 @@ def get_reasoning_extra_body(model_name: str) -> dict | None:
     return {"thinking": {"type": "enabled", "parameters": {"effort": "high"}}}
 
 
+def get_disable_thinking_extra_body(model_name: str) -> dict | None:
+    """
+    返回禁用 thinking 的 extra_body 参数。
+
+    对于 DeepSeek r1 等强制 thinking 的模型，需要显式禁用。
+    """
+    lowered = model_name.lower()
+    if "deepseek" in lowered and ("r1" in lowered or "v4-pro" in lowered):
+        return {"thinking": {"type": "disabled"}}
+    return None
+
+
 def supports_thinking(model_name: str) -> bool:
     """
     检查模型是否支持 thinking 模式。
@@ -359,6 +700,12 @@ def _resolve_llm_params(model_name: str, enable_thinking: bool = False) -> dict:
         if enable_thinking:
             kwargs["extra_body"] = get_reasoning_extra_body(actual_model_name)
             print(f"[LLM] 🧠 已注入 thinking extra_body（模型不支持则自动忽略）")
+        else:
+            # 对于强制 thinking 的模型（如 DeepSeek r1），需要显式禁用
+            disable_extra = get_disable_thinking_extra_body(actual_model_name)
+            if disable_extra:
+                kwargs["extra_body"] = disable_extra
+                print(f"[LLM] ⏸️ 已禁用 thinking（模型强制思考时生效）")
 
     return kwargs
 

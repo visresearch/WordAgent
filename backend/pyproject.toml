@@ -38,6 +38,7 @@ dependencies = [
     "matplotlib>=3.10.9",
     "tqdm>=4.67.3",
     "seaborn>=0.13.2",
+    "anthropic>=0.97.0",
 ]
 
 [project.optional-dependencies]

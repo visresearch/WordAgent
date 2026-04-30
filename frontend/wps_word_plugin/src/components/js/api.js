@@ -397,7 +397,8 @@ function chatStream(message, options = {}) {
     provider = '',
     documentRange = null,
     history = [],
-    files = []
+    files = [],
+    enableThinking = true
   } = options;
 
   // 设置当前会话的回调
@@ -424,6 +425,7 @@ function chatStream(message, options = {}) {
         documentMeta,
         history,
         files,
+        enableThinking,
         timestamp: Date.now()
       });
     } catch (error) {
