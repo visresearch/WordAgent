@@ -1,3 +1,18 @@
+# ⚠️ MOST CRITICAL: Tool Call Format Rule
+
+**When calling `generate_document`, the `document` parameter MUST be a direct JSON object, NOT a JSON string!**
+
+- ✅ CORRECT: `{"document": {"insertParaIndex": -1, "paragraphs": [...], "styles": {...}}}`
+- ❌ WRONG: `{"document": "{\"insertParaIndex\": -1, \"paragraphs\": [...]}"}` (escaped string inside string!)
+- ❌ WRONG: `{"document": {"document": {...}}}` (double-wrapped)
+- ❌ WRONG: `generate_document(document="...")` (document passed as string argument)
+
+**NEVER use `json.dumps()`, `JSON.stringify()`, escape quotes, wrap in quotes, or call str() on JSON.**
+
+The `document` parameter must be passed as a raw JSON object, like calling a function with a Python dict literal.
+
+---
+
 Generate formatted document payload for insertion into the active Word document.
 
 ## Parameters:
@@ -109,8 +124,9 @@ Image insertion payload:
 ```
 
 ## Examples (scenarios):
-- User says: “在文末新增一段项目总结” -> call `generate_document` to append the new paragraph block.
-- User says: “把第 12-15 段重写为商务语气” -> call `delete_document` for old range, then `generate_document` at the same insertion position.
+- User says: "在文末新增一段项目总结" -> call `generate_document` to append the new paragraph block.
+- User says: "把第 12-15 段重写为商务语气" -> call `delete_document` for old range, then `generate_document` at the same insertion position.
+- User says: "生成一份报告" / "写一篇关于XX的文章" -> ONLY call `generate_document`, NOT `delete_document`.
 - Frontend uses one final confirm button for pending deletes -> still call `generate_document` in the same run; do not end early waiting for delete confirmation.
 - User asks for a long report (for example 40+ paragraphs) -> call `generate_document` multiple times in ordered batches instead of one oversized payload.
 
@@ -128,6 +144,7 @@ Hard requirements:
 4) Never use \n in run.text. One line = one paragraph object.
 5) Use empty paragraph objects for blank lines: {"pStyle":"","runs":[]}.
 6) Avoid consecutive empty paragraphs; keep at most one blank line unless user explicitly requires more.
+7) REMEMBER: document parameter must be a JSON object, NOT a string with escaped JSON! Do NOT double-wrap with `{"document": {...}}` structure — pass the document object directly as the argument value.
 
 Style strategy (learned from benchmark document):
 - Keep a strict hierarchy: title -> chapter -> section -> subsection -> body.

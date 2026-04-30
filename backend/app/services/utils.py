@@ -132,12 +132,13 @@ def normalize_tool_args(tool_name: str, raw_args: Any) -> dict:
                 except Exception:
                     pass
 
-            if not isinstance(parsed_document, dict):
-                raise ValueError(
-                    "generate_document.document 解析失败。请传对象(dict)而非字符串；"
-                    "若为 JSON 字符串请确保内部引号已正确转义。"
-                )
-            args = {**args, "document": _normalize_blank_paragraph_shape(parsed_document)}
+            if isinstance(parsed_document, dict):
+                # 成功解析，用 dict 替换字符串
+                args = {**args, "document": _normalize_blank_paragraph_shape(parsed_document)}
+                print(f"[normalize_tool_args] ✅ 成功解析 document 字符串为 dict")
+            else:
+                # 解析失败，打印警告但继续（不抛错），让 Pydantic schema 处理
+                print(f"[normalize_tool_args] ⚠️ document 字符串解析失败，将由 schema 处理: {doc_raw[:100]}...")
         elif isinstance(document, dict):
             args = {**args, "document": _normalize_blank_paragraph_shape(document)}
 

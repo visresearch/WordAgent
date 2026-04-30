@@ -3,15 +3,119 @@
 """
 
 import asyncio
+import base64
 import concurrent.futures
 import contextvars
 import json
-
+import re
+from datetime import datetime
+from pathlib import Path
 from typing import Literal
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
 from langchain_core.tools import tool
 from langgraph.config import get_stream_writer
 from pydantic import BaseModel, Field, model_validator
+
+
+# 图片下载工具函数（复用自 agent/tools/document_tools.py）
+def _download_remote_image(url: str) -> str | None:
+    """Download remote image URL to local wence_data/temp and return local path."""
+    try:
+        parsed = urlparse(url)
+        ext = Path(parsed.path).suffix.lower()
+        if ext not in {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp"}:
+            ext = ".png"
+
+        # 获取 wence_data 目录
+        from app.core.config import get_wence_data_dir
+
+        temp_dir = get_wence_data_dir() / "temp"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        filename = f"image_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}{ext}"
+        file_path = temp_dir / filename
+
+        req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urlopen(req, timeout=20) as resp:
+            file_path.write_bytes(resp.read())
+        return str(file_path)
+    except Exception as e:
+        print(f"[generate_document] ⚠️ 下载图片失败: {e}")
+        return None
+
+
+def _save_data_image(data_url: str) -> str | None:
+    """Decode data:image URL to local file path."""
+    try:
+        match = re.match(r"^data:image/([a-zA-Z0-9.+-]+);base64,(.+)$", data_url, flags=re.DOTALL)
+        if not match:
+            return None
+
+        ext_map = {
+            "jpeg": ".jpg",
+            "jpg": ".jpg",
+            "png": ".png",
+            "gif": ".gif",
+            "svg+xml": ".svg",
+            "webp": ".webp",
+            "bmp": ".bmp",
+        }
+        ext = ext_map.get(match.group(1).lower(), ".png")
+
+        from app.core.config import get_wence_data_dir
+
+        temp_dir = get_wence_data_dir() / "temp"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        filename = f"image_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}{ext}"
+        file_path = temp_dir / filename
+
+        raw = base64.b64decode(match.group(2), validate=False)
+        file_path.write_bytes(raw)
+        return str(file_path)
+    except Exception as e:
+        print(f"[generate_document] ⚠️ 保存 base64 图片失败: {e}")
+        return None
+
+
+def _ensure_image_payload_shape(doc_dict: dict) -> None:
+    """Normalize inline image runs in paragraphs: download URLs, resolve data images."""
+    paragraphs = doc_dict.get("paragraphs")
+    if not isinstance(paragraphs, list):
+        return
+
+    for para in paragraphs:
+        if not isinstance(para, dict):
+            continue
+        runs = para.get("runs")
+        if not isinstance(runs, list):
+            continue
+
+        for run in runs:
+            if not isinstance(run, dict):
+                continue
+            # Skip text runs
+            if run.get("text") is not None:
+                continue
+
+            # This is an image run (no text field)
+            run.setdefault("type", "inline")
+
+            # Download remote images or decode data images
+            if not (run.get("tempPath") or run.get("sourcePath")):
+                url = str(run.get("url") or "").strip()
+                if url.startswith("data:image/"):
+                    local_path = _save_data_image(url)
+                    if local_path:
+                        run["tempPath"] = local_path
+                elif url.startswith("http://") or url.startswith("https://"):
+                    local_path = _download_remote_image(url)
+                    if local_path:
+                        run["tempPath"] = local_path
+
+            if not (run.get("tempPath") or run.get("sourcePath")) and run.get("url"):
+                print(f"[generate_document] ⚠️ 图片未获取到本地路径，可能插入失败: url={run.get('url')}")
+
 
 # ============== 工具回调等待机制 ==============
 # 用于 WebSocket 模式下，agent 调用 tool 后等待前端回传结果
@@ -482,84 +586,40 @@ def read_document(startParaIndex: int = 0, endParaIndex: int = 49) -> str:
 
 
 @tool
-def generate_document(document: DocumentOutput) -> dict:
-    """
-    生成带格式的文档 JSON，用于插入到 Word 文档。
-
-    【最小改动原则 - 最高优先级】
-    输出内容会被**插入**到文档的 insertParaIndex 位置，不会替换整个文档。
-    因此必须**只输出需要变动的段落**，不要输出原文中未改动的部分，否则会导致内容重复！
-    - 增加内容：只输出新增的段落
-    - 修改/润色某个范围：先调用 delete_document 删除旧段落，再调用本工具插入新段落
-    - 创建全新文档：输出完整文档内容
-
-    【重要】修改已有内容时必须配合 delete_document！
-    流程：delete_document(删旧段落) -> generate_document(插新段落)
-    否则旧内容会残留在文档中。
-
-    【重要】格式属性必须100%原样复制！
-    除非用户明确要求修改格式，否则所有格式属性（fontName, fontSize, alignment 等）必须与原文档完全一致。
-
-    【结构要求】document 包含以下字段：
-    - paragraphs: Paragraph 对象的数组（只包含新增或被修改的段落）
-    - tables: Table 对象的数组（可选）
-    - styles: 样式字典（必填，且必须覆盖所有样式引用）
-    - insertParaIndex: 插入位置（段落索引，0-based），前端在该段落之前插入内容
-    - document 必须是对象(dict)，不能把整个 document 再包成 JSON 字符串
-    不要把 "tables" 字符串放进 paragraphs 数组里！
-
-    【长文分批生成】
-    当内容很长时，可多次调用 generate_document 分批输出（每次一部分段落），
-    以降低超长 JSON 或截断导致的调用失败风险。
-
-    【表格生成说明】
-    表格通过 tables 数组生成，每个 Table 对象包含：
-    - rows/columns: 行列数
-    - cells: 二维数组 cells[row][col]，每个 Cell 支持两种模式：
-      · 简单模式: {text: "内容", cStyle: "cS_1", rStyle: "rS_1"} - 单段落纯文本
-      · 多段落模式: {paragraphs: [{text: "...", pStyle: "pS_1", runs: [{text: "...", rStyle: "rS_1"}]}], cStyle: "cS_1"} - 精确格式控制
-    - tStyle: 表格对齐样式
-    - columnWidths: 可选，各列宽度（磅值数组），省略则等分页面宽度
-    - rowHeights: 可选，各行高度（[[height, rule], ...]），rule: 0=自动,1=最小值,2=固定值
-    - cStyle 控制: rowSpan/colSpan（合并单元格）、对齐方式、垂直对齐
-
-    【修改已有表格 - 必须先删后插！】
-    CRITICAL: read_document 返回的表格数据包含 paraIndex 和 endParaIndex，标识表格占用的段落范围。
-    修改已有表格时，必须先 delete_document(paraIndex, endParaIndex) 删除整个表格段落范围，
-    再用 generate_document(insertParaIndex=paraIndex) 插入新表格。
-    如果不删除旧表格就直接插入，新表格会嵌套在旧表格的单元格内部，导致文档损坏！
-    读取文档返回的表格 JSON 中包含 columnWidths 和 rowHeights，修改时应原样保留以还原表格尺寸。
-
-    【insertParaIndex 规则】
-    - 增加内容时：insertParaIndex = 要插入到的段落索引位置（在该段落之前插入）
-    - 修改/润色用户选中内容时：insertParaIndex = 用户选区的 startParaIndex
-    - 新建内容无特定位置时：insertParaIndex = -1（文档末尾）或 0（文档开头）
+def generate_document(document: DocumentOutput | str) -> dict:
+    """生成带格式的文档 JSON，用于插入到 Word 文档。
 
     Args:
-        document: 文档结构，包含 paragraphs、tables 和 insertParaIndex
-
-    Returns:
-        文档 JSON 对象
+        document: DocumentOutput 对象，或 JSON 字符串（当模型错误地传字符串时也能处理）
     """
-    writer = get_stream_writer()
-    doc_dict = document.model_dump()
-    para_count = len(doc_dict.get("paragraphs", []))
-    writer({"type": "generate_complete", "content": f"📝 文档已生成，共 {para_count} 个段落"})
+    # 兼容模型错误地传字符串的情况
+    if isinstance(document, str):
+        import ast
 
-    # # 保存生成的文档 JSON 到 example 文件夹
-    # try:
-    #     from datetime import datetime
-    #     from pathlib import Path
+        parsed = None
+        # 先尝试 JSON 解析
+        try:
+            parsed = json.loads(document)
+        except json.JSONDecodeError:
+            pass
+        # 再尝试 Python 字面量解析
+        if not isinstance(parsed, dict):
+            try:
+                parsed = ast.literal_eval(document)
+            except Exception:
+                pass
 
-    #     example_dir = Path(__file__).resolve().parent.parent.parent.parent / "example"
-    #     example_dir.mkdir(exist_ok=True)
-    #     filename = f"generated_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-    #     (example_dir / filename).write_text(json.dumps(doc_dict, ensure_ascii=False, indent=2), encoding="utf-8")
-    #     print(f"[generate_document] 已保存到 example/{filename}")
-    # except Exception as e:
-    #     print(f"[generate_document] 保存 JSON 失败: {e}")
+        if isinstance(parsed, dict):
+            document = parsed
+            print(f"[generate_document] ✅ 成功解析 document 字符串")
+        else:
+            raise ValueError(f"无法解析 document 字符串: {document[:100]}...")
 
-    return doc_dict
+        # 用解析后的 dict 构造 DocumentOutput
+        doc_output = DocumentOutput.model_validate(document)
+        doc_dict = doc_output.model_dump()
+    else:
+        doc_dict = document.model_dump()
 
 
 @tool
