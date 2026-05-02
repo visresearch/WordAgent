@@ -55,15 +55,16 @@ Skill 本质上是一组本地 Markdown 规则文件，核心入口是 `SKILL.md
 - 删除后会清理本地 Skill 文件夹
 - 同时清理该 Skill 的启用状态记录
 
-
 ## 何时会自动使用 Skill
 
 当你的提问意图与某个 Skill 匹配时，智能体会优先读取该 Skill 的规则内容，并结合文档工具执行写作任务。
 
 例如你可以这样提问：
 
-- `按 writing-assistant 的规则给我出一版文章大纲`
+- `按 writing-assistant 的规则给我写一篇伊朗战争目前的战况分析报道`
 - `使用 copywriting skill 帮我重写这段产品文案`
+
+![](/skill-example.png)
 
 ## 常见问题
 
@@ -81,3 +82,10 @@ Skill 本质上是一组本地 Markdown 规则文件，核心入口是 `SKILL.md
 ### 为什么列表名称和文件夹名不一样
 
 列表优先显示 `SKILL.md` frontmatter 里的 `name`；如果未配置，才显示文件夹名。
+
+## 推荐 Skill 下载
+
+| Skill 名称 | 功能简介 | 相关链接 |
+|---|---|---|
+| writing-assistant-skill | 自媒体写作助手 Skill，帮助完成从选题到发布的完整流程 | https://github.com/Ceeon/writing-assistant-skill
+| 躺平skill | 一个会让 AI 拒绝工作的 skill | https://github.com/TreapGoGo/tangping-skill |

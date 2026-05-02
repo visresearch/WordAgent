@@ -14,11 +14,10 @@ from .callback import (
 )
 from .document_tools import delete_document, generate_document, read_document, search_documnet
 from .runSubAgent_tools import run_sub_agent
-from .skill_tools import list_skills, load_skill_context
+from .skill_tools import load_skill_context
 
 # 基础工具集（不含 MCP 动态工具）
 AGENT_BASE_TOOLS = [
-    list_skills,
     load_skill_context,
     read_document,
     search_documnet,
@@ -27,7 +26,6 @@ AGENT_BASE_TOOLS = [
     run_sub_agent,
 ]
 ASK_BASE_TOOLS = [
-    list_skills,
     load_skill_context,
     read_document,
     search_documnet,
@@ -72,6 +70,5 @@ __all__ = [
     "run_sub_agent",
     "search_documnet",
     "submit_tool_response",
-    "list_skills",
     "load_skill_context",
 ]

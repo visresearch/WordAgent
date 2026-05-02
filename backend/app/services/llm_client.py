@@ -615,23 +615,43 @@ def get_reasoning_extra_body(model_name: str) -> dict | None:
     """
     返回 OpenAI 兼容模型的 reasoning/thinking extra_body 参数。
 
-    通用的 thinking 注入参数，适用于任意 OpenAI 兼容 API
+    包含多种启用参数格式，适用于任意 OpenAI 兼容 API
     （Qwen、DeepSeek、vLLM、OneAPI 等均支持）。
     API 不支持该参数时会忽略，不影响正常调用。
+    注意：reasoning_effort 只接受 low/medium/high，不接受 off/none/highest 等值。
     """
-    return {"thinking": {"type": "enabled", "parameters": {"effort": "high"}}}
+    lowered = model_name.lower()
+
+    # 通用参数（所有 API 都支持，忽略不支持的字段）
+    base = {
+        "thinking": {"type": "enabled", "parameters": {"effort": "high"}},
+        "enable_thinking": True,
+        "reasoning": {"type": "enabled"},
+    }
+
+    # Qwen 特定参数
+    if "qwen" in lowered:
+        base["thinking"] = {"type": "enabled"}
+
+    return base
 
 
 def get_disable_thinking_extra_body(model_name: str) -> dict | None:
     """
     返回禁用 thinking 的 extra_body 参数。
 
-    对于 DeepSeek r1 等强制 thinking 的模型，需要显式禁用。
+    对于强制 thinking 的模型（如 DeepSeek r1、Qwen 等），需要显式禁用。
+    包含多种禁用参数格式，API 会自动忽略不认识的参数。
+    注意：reasoning_effort 只接受 low/medium/high，不接受 none，所以禁用时不传此参数。
     """
     lowered = model_name.lower()
-    if "deepseek" in lowered and ("r1" in lowered or "v4-pro" in lowered):
-        return {"thinking": {"type": "disabled"}}
-    return None
+
+    # 通用的禁用参数（所有 API 都支持，忽略不支持的字段）
+    return {
+        "thinking": {"type": "disabled"},
+        "enable_thinking": False,
+        "reasoning": {"type": "off"},
+    }
 
 
 def supports_thinking(model_name: str) -> bool:
@@ -841,3 +861,47 @@ def get_llm_client(model_id: str) -> AsyncOpenAI:
 def resolve_model(model_id: str | None, provider: str = "") -> str:
     """解析模型 ID 的便捷函数"""
     return LLMClientManager.resolve_model(model_id, provider)
+
+
+def create_sync_llm_client(
+    model_name: str,
+    provider: str = "",
+    temperature: float | None = None,
+) -> Any | None:
+    """
+    创建同步的 ChatOpenAI 客户端（用于长期记忆提取等不需要流式的场景）。
+
+    Args:
+        model_name: 模型名称
+        provider: 可选的提供商
+        temperature: 可选的温度参数，不提供则使用模型默认值
+
+    Returns:
+        ChatOpenAI 实例，失败返回 None
+    """
+    try:
+        kwargs = get_llm_init_kwargs(model_name, enable_thinking=False)
+        model_provider = kwargs.pop("model_provider", None)
+
+        # 允许覆盖 temperature
+        if temperature is not None:
+            kwargs["temperature"] = temperature
+
+        if model_provider == "anthropic":
+            from langchain.chat_models import init_chat_model as _init_chat_model
+
+            return _init_chat_model(
+                model=kwargs.pop("model"),
+                model_provider="anthropic",
+                api_key=kwargs.pop("api_key"),
+                base_url=kwargs.pop("base_url", None) or None,
+                temperature=kwargs.pop("temperature"),
+                max_tokens=kwargs.pop("max_tokens"),
+                streaming=kwargs.pop("streaming", False),
+            )
+
+        # OpenAI 兼容接口
+        return ChatOpenAI(**kwargs)
+    except Exception as e:
+        print(f"[LLM] 创建同步客户端失败: {e}")
+        return None

@@ -786,45 +786,32 @@ async def process_writing_request_stream(
 
         # 构建记忆上下文
         memory_context = ""
-        if history:
-            try:
-                from app.services.memory import build_memory_messages
 
-                memory_result = build_memory_messages(
-                    history=history,
-                    current_message=message,
-                    llm=llm,
-                    session_id=chat_id,
-                    enable_long_term=True,
-                    enable_summary=True,
-                    return_meta=True,
-                )
-                memory_msgs, memory_meta = memory_result
-                if memory_msgs:
-                    # 将记忆消息转为文本上下文，供 planner 使用
-                    parts = []
-                    for m in memory_msgs:
-                        if isinstance(m, SystemMessage):
-                            parts.append(m.content)
-                        elif isinstance(m, HumanMessage):
-                            parts.append(f"[用户] {m.content}")
-                        elif isinstance(m, AIMessage):
-                            parts.append(f"[助手] {m.content}")
-                    memory_context = "\n\n".join(parts)
-                    print(f"[MultiAgent] 构建记忆上下文: {len(memory_context)} 字")
-                if isinstance(memory_meta, dict) and memory_meta.get("triggered"):
-                    before_tokens = int(memory_meta.get("before_tokens_est", 0) or 0)
-                    after_tokens = int(memory_meta.get("after_tokens_est", 0) or 0)
-                    strategy = str(memory_meta.get("strategy", "none"))
-                    dropped = int(memory_meta.get("dropped_messages", 0) or 0)
-                    status_text = (
-                        f"🗜️ 上下文压缩完成（{before_tokens} -> {after_tokens} tokens, "
-                        f"strategy={strategy}, dropped={dropped}）"
-                    )
-                    print(f"[MultiAgent] {status_text}")
-                    yield f"data: {json.dumps({'type': 'status', 'content': status_text}, ensure_ascii=False)}\n\n"
-            except Exception as mem_err:
-                print(f"[MultiAgent] ⚠️ 构建记忆失败: {mem_err}")
+        # 1. 长期记忆（来自 md 文件）
+        from app.services.memory import build_long_term_memory_prompt
+
+        long_term_prompt = build_long_term_memory_prompt()
+        if long_term_prompt:
+            memory_context += long_term_prompt + "\n\n"
+            print("[MultiAgent] 已加载长期记忆")
+
+        # 2. 短期记忆（最近 k 轮对话）
+        if history:
+            from app.services.memory import build_short_term_messages
+
+            short_term_msgs = build_short_term_messages(history)
+            if short_term_msgs:
+                parts = []
+                for m in short_term_msgs:
+                    if isinstance(m, SystemMessage):
+                        parts.append(m.content)
+                    elif isinstance(m, HumanMessage):
+                        parts.append(f"[用户] {m.content}")
+                    elif isinstance(m, AIMessage):
+                        parts.append(f"[助手] {m.content}")
+                if parts:
+                    memory_context += "## Recent Conversation\n" + "\n\n".join(parts) + "\n\n"
+                    print(f"[MultiAgent] 构建短期记忆上下文: {len(parts)} 条消息")
 
         initial_state = MultiAgentState(
             user_message=message,

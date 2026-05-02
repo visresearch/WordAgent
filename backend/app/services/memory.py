@@ -3,31 +3,31 @@
 
 提供两层记忆机制 + 两级上下文压缩（类 Claude Code 风格）：
 
+记忆层级：
+1. 短期记忆 (Short-term)   — 固定 token 预算（类 Claude Code）
+2. 长期记忆 (Long-term)    — md 文件持久化（user-memory.md, feedback-memory.md, document-memory.md）
+
 压缩层级：
 1. 轻量压缩 (Light Compact / Microcompact) - 无 LLM 调用，仅清除旧工具结果
 2. 重量压缩 (Heavy Compact) - LLM 生成 9 段结构化摘要
-
-记忆层级：
-1. 短期记忆 (Short-term)   — 保留最近 k 轮对话原文
-2. 总结记忆 (Summary)      — 对更早的对话做 LLM 滚动摘要
 """
 
 from __future__ import annotations
 
 import os
 import warnings
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"langchain_classic")
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.tools import tool
 
 if TYPE_CHECKING:
     from langchain_openai import ChatOpenAI
 
 # ============== 配置常量 ==============
-
-SHORT_TERM_K = 5  # 短期记忆保留最近 k 轮
 
 
 def _get_env_int(name: str, default: int) -> int:
@@ -44,6 +44,10 @@ def _get_env_int(name: str, default: int) -> int:
 
 # 上下文预算控制（可通过环境变量覆盖，默认200k）
 MAX_CONTEXT_TOKENS = _get_env_int("WORDAGENT_MAX_CONTEXT_TOKENS", 200000)
+
+# ============ 短期记忆 Token 预算（类 Claude Code 风格） ============
+# 从最近的消息开始，保留足够的内容满足 token 预算
+SHORT_TERM_TOKEN_BUDGET = _get_env_int("WORDAGENT_SHORT_TERM_TOKEN_BUDGET", 30000)  # 默认 30k tokens
 
 # ============ LLMChainExtractor 语义压缩配置（默认禁用） ============
 ENABLE_LLM_CHAIN_EXTRACTOR = os.environ.get("WORDAGENT_ENABLE_LLM_CHAIN_EXTRACTOR", "false").strip().lower() in {
@@ -81,67 +85,188 @@ HEAVY_COMPACT_RESERVE_OUTPUT = _get_env_int("WORDAGENT_HEAVY_COMPACT_RESERVE_OUT
 HEAVY_COMPACT_MAX_OUTPUT = _get_env_int("WORDAGENT_HEAVY_COMPACT_MAX_OUTPUT", 20000)  # 最大输出 20k
 HEAVY_COMPACT_KEEP_RECENT_MSGS = _get_env_int("WORDAGENT_HEAVY_COMPACT_KEEP_RECENT", 4)  # 保留最近 N 条消息原文
 
+# ============== 长期记忆配置 ==============
+# 是否在每次会话结束时自动提取长期记忆
+ENABLE_AUTO_MEMORY_EXTRACT = os.environ.get("WORDAGENT_ENABLE_AUTO_MEMORY_EXTRACT", "true").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 
-# ============== 短期记忆 (ConversationBufferWindowMemory) ==============
+# 记忆提取 LLM 的 temperature
+MEMORY_EXTRACT_TEMPERATURE = _get_env_int("WORDAGENT_MEMORY_EXTRACT_TEMPERATURE", 0)
+
+# ============== 长期记忆文件类型 ==============
+LONG_TERM_MEMORY_TYPES = ["user", "feedback", "document"]
+
+
+# ============== Memory Tool 定义 ==============
+
+@tool
+def save_user_memory(memory: str) -> str:
+    """保存用户偏好和写作风格等记忆。只在用户明确提供了偏好或相关信息时才调用。"""
+    file_path = _get_memory_file("user")
+    try:
+        file_path.write_text(memory.strip(), encoding="utf-8")
+        return f"已保存到 {file_path}"
+    except Exception as e:
+        return f"保存失败: {e}"
+
+
+@tool
+def save_feedback_memory(memory: str) -> str:
+    """保存用户对 AI 输出的反馈和纠正。只在用户明确提供了反馈时才调用。"""
+    file_path = _get_memory_file("feedback")
+    try:
+        file_path.write_text(memory.strip(), encoding="utf-8")
+        return f"已保存到 {file_path}"
+    except Exception as e:
+        return f"保存失败: {e}"
+
+
+@tool
+def save_document_memory(memory: str) -> str:
+    """保存当前文档的相关信息（类型、主题、格式要求等）。只在对话涉及具体文档时才调用。"""
+    file_path = _get_memory_file("document")
+    try:
+        file_path.write_text(memory.strip(), encoding="utf-8")
+        return f"已保存到 {file_path}"
+    except Exception as e:
+        return f"保存失败: {e}"
+
+
+MEMORY_TOOLS = [save_user_memory, save_feedback_memory, save_document_memory]
+
+
+# ============== 辅助函数 ==============
+
+def _get_memory_dir() -> Path:
+    """获取长期记忆目录，不存在则创建"""
+    from app.core.config import get_wence_data_dir
+
+    memory_dir = get_wence_data_dir() / "memory"
+    memory_dir.mkdir(parents=True, exist_ok=True)
+    return memory_dir
+
+
+def _get_memory_file(name: str) -> Path:
+    """获取指定名称的记忆文件路径"""
+    return _get_memory_dir() / f"{name}-memory.md"
+
+
+# ============== 长期记忆读写 ==============
+
+def read_long_term_memory() -> dict[str, str]:
+    """读取所有长期记忆文件。"""
+    result = {}
+    for name in LONG_TERM_MEMORY_TYPES:
+        file_path = _get_memory_file(name)
+        try:
+            if file_path.exists():
+                result[name] = file_path.read_text(encoding="utf-8").strip()
+            else:
+                result[name] = ""
+        except Exception as e:
+            print(f"[Memory] 读取 {name} 记忆失败: {e}")
+            result[name] = ""
+    return result
+
+
+def write_long_term_memory(name: str, content: str) -> bool:
+    """写入单个长期记忆文件。"""
+    file_path = _get_memory_file(name)
+    try:
+        file_path.write_text(content.strip(), encoding="utf-8")
+        return True
+    except Exception as e:
+        print(f"[Memory] 写入 {name} 记忆失败: {e}")
+        return False
+
+
+def build_long_term_memory_prompt() -> str:
+    """将长期记忆格式化为系统提示词的一部分。"""
+    memories = read_long_term_memory()
+    parts = []
+
+    title_map = {
+        "user": "User Memory",
+        "feedback": "Feedback Memory",
+        "document": "Document Memory",
+    }
+
+    for name, content in memories.items():
+        if not content:
+            continue
+
+        title = title_map.get(name, name)
+
+        # 截断单个记忆文件到 4000 字符
+        if len(content) > 4000:
+            content = content[:4000] + f"\n[...截断，原 {len(content)} 字符]"
+
+        parts.append(f"### {title}\n{content}")
+
+    if not parts:
+        return ""
+
+    header = "## Long-term Memory (Persisted across sessions)\n"
+    return header + "\n\n".join(parts) + "\n"
+
+
+# ============== 短期记忆（固定 Token 预算，类 Claude Code） ==============
 
 
 def build_short_term_messages(
     history: list[dict],
-    k: int = SHORT_TERM_K,
+    token_budget: int | None = None,
 ) -> list[HumanMessage | AIMessage]:
     """
-    使用 ConversationBufferWindowMemory 提取最近 k 轮对话。
+    使用固定 token 预算加载短期记忆（类 Claude Code 风格）。
+
+    从最近的消息开始，保留足够的内容满足 token 预算。
     """
     if not history:
         return []
 
-    from langchain_classic.memory import ConversationBufferWindowMemory
-
-    memory = ConversationBufferWindowMemory(k=k, return_messages=True)
+    budget = token_budget or SHORT_TERM_TOKEN_BUDGET
     pairs = _pair_history(history)
-    for user_msg, ai_msg in pairs:
-        memory.save_context({"input": user_msg}, {"output": ai_msg})
 
-    windowed = memory.load_memory_variables({}).get("history", [])
-    return windowed if isinstance(windowed, list) else []
+    if not pairs:
+        return []
 
+    # 从最新的对话对开始，累积 token 直到达到预算
+    selected_pairs: list[tuple[str, str]] = []
+    total_tokens = 0
 
-# ============== 总结记忆 (ConversationSummaryMemory) ==============
+    for user_msg, ai_msg in reversed(pairs):
+        # 估算这轮的 token 数（user + assistant）
+        user_tokens = _estimate_token_count(user_msg) + 20  # role + overhead
+        ai_tokens = _estimate_token_count(ai_msg) + 20
+        pair_tokens = user_tokens + ai_tokens
 
+        if total_tokens + pair_tokens <= budget:
+            selected_pairs.insert(0, (user_msg, ai_msg))
+            total_tokens += pair_tokens
+        else:
+            # 如果第一个就不满足预算，截断内容
+            if not selected_pairs:
+                # 尝试只保留 user 消息的部分内容
+                max_chars = int(budget * 2)  # rough: 2 chars per token
+                truncated_user = _truncate_text(user_msg, max_chars)
+                if _estimate_token_count(truncated_user) <= budget:
+                    selected_pairs.append((truncated_user, ""))
+            break
 
-def build_summary_memory(
-    history: list[dict],
-    llm: "ChatOpenAI",
-    k: int = SHORT_TERM_K,
-) -> str:
-    """
-    使用 ConversationSummaryMemory 对短期记忆之前的对话生成渐进式摘要。
-    """
-    if not history:
-        return ""
+    # 转换为 langchain messages
+    result: list[HumanMessage | AIMessage] = []
+    for user_msg, ai_msg in selected_pairs:
+        result.append(HumanMessage(content=user_msg))
+        if ai_msg:
+            result.append(AIMessage(content=ai_msg))
 
-    pairs = _pair_history(history)
-    if len(pairs) <= k:
-        return ""
-
-    older_pairs = pairs[: len(pairs) - k]
-    if not older_pairs:
-        return ""
-
-    try:
-        from langchain_classic.memory import ConversationSummaryMemory
-
-        summary_memory = ConversationSummaryMemory(llm=llm)
-        for user_msg, ai_msg in older_pairs:
-            summary_memory.save_context({"input": user_msg}, {"output": ai_msg})
-
-        summary = summary_memory.load_memory_variables({}).get("history", "")
-        if summary:
-            print(f"[Memory] ConversationSummaryMemory 生成摘要: {len(summary)} 字")
-        return summary
-    except Exception as e:
-        print(f"[Memory] ⚠️ 生成摘要失败: {e}")
-        return ""
+    print(f"[Memory] 短期记忆: 保留 {len(selected_pairs)} 轮对话, ~{total_tokens} tokens")
+    return result
 
 
 # ============== 工具函数 ==============
@@ -719,7 +844,7 @@ def _fit_memory_messages_to_budget(
     return final_msgs, meta
 
 
-# ============ [新增] 实时上下文压缩（ReAct 循环中调用） ============
+# ============ 实时上下文压缩（ReAct 循环中调用） ============
 
 
 def compress_conversation_history_if_needed(
@@ -786,6 +911,94 @@ def compress_conversation_history_if_needed(
     )
 
 
+# ============== 长期记忆提取（Tool 方式） ==============
+
+def extract_and_save_memory(
+    conversation: str,
+    llm: Any,
+    force: bool = False,
+) -> dict[str, bool]:
+    """
+    使用 Tool 方式从对话中提取关键信息并保存到长期记忆。
+
+    Args:
+        conversation: 对话内容
+        llm: LLM 实例
+        force: 强制提取，忽略 ENABLE_AUTO_MEMORY_EXTRACT 配置
+
+    Returns:
+        dict[str, bool]: 各记忆类型的保存结果
+    """
+    # 检查是否启用自动记忆提取
+    if not force and not ENABLE_AUTO_MEMORY_EXTRACT:
+        print("[Memory] 自动记忆提取已禁用 (WORDAGENT_ENABLE_AUTO_MEMORY_EXTRACT=false)")
+        return {name: False for name in LONG_TERM_MEMORY_TYPES}
+
+    if not conversation or not llm:
+        return {name: False for name in LONG_TERM_MEMORY_TYPES}
+
+    # 构建提示词
+    prompt = _build_extract_prompt(conversation)
+
+    # 使用 bind_tools 方式调用
+    try:
+        llm_with_tools = llm.bind_tools(MEMORY_TOOLS)
+        response = llm_with_tools.invoke([{"role": "user", "content": prompt}])
+
+        # 处理工具调用
+        saved = {}
+        tool_calls = response.tool_calls if hasattr(response, "tool_calls") else []
+
+        if not tool_calls:
+            print(f"[Memory] LLM 未调用任何工具，响应: {response.content[:200] if hasattr(response, 'content') else response}")
+            return {name: False for name in LONG_TERM_MEMORY_TYPES}
+
+        for tool_call in tool_calls:
+            tool_name = tool_call.get("name")
+            tool_args = tool_call.get("args", {})
+
+            if tool_name == "save_user_memory":
+                saved["user"] = write_long_term_memory("user", tool_args.get("memory", ""))
+            elif tool_name == "save_feedback_memory":
+                saved["feedback"] = write_long_term_memory("feedback", tool_args.get("memory", ""))
+            elif tool_name == "save_document_memory":
+                saved["document"] = write_long_term_memory("document", tool_args.get("memory", ""))
+
+        # 确保所有类型都有返回值
+        for name in LONG_TERM_MEMORY_TYPES:
+            if name not in saved:
+                saved[name] = False
+
+        print(f"[Memory] 长期记忆提取完成: {saved}")
+        return saved
+
+    except Exception as e:
+        print(f"[Memory] 长期记忆提取失败: {e}")
+        import traceback
+        traceback.print_exc()
+        return {name: False for name in LONG_TERM_MEMORY_TYPES}
+
+
+def _load_extract_prompt_template() -> str:
+    """从 md 文件加载记忆提取提示词模板。"""
+    from pathlib import Path
+
+    template_path = Path(__file__).parent / "agent" / "prompts" / "system-prompt-extract-template.md"
+    try:
+        return template_path.read_text(encoding="utf-8")
+    except Exception as e:
+        print(f"[Memory] 加载提取提示词模板失败: {e}")
+        return "Extract key information from the following conversation:\n{conversation}"
+
+
+_EXTRACT_PROMPT_TEMPLATE = _load_extract_prompt_template()
+
+
+def _build_extract_prompt(conversation: str) -> str:
+    """构建记忆提取的提示词"""
+    return _EXTRACT_PROMPT_TEMPLATE.format(conversation=conversation)
+
+
 # ============== 统一记忆注入接口 ==============
 
 
@@ -793,9 +1006,6 @@ def build_memory_messages(
     history: list[dict] | None,
     current_message: str,
     llm: "ChatOpenAI | None" = None,
-    session_id: str | None = None,
-    enable_summary: bool = True,
-    enable_long_term: bool = False,  # 已废弃参数，保留接口兼容
     return_meta: bool = False,
 ) -> (
     list[SystemMessage | HumanMessage | AIMessage]
@@ -804,34 +1014,20 @@ def build_memory_messages(
     """
     构建包含两层记忆的消息列表，供 Agent 注入。
 
-    已移除：长期记忆 (RAG/FAISS) 注入
-
     Args:
         history: 前端传入的历史消息列表
         current_message: 当前用户消息（用于压缩参考）
-        llm: LLM 实例（用于生成摘要和压缩）
-        session_id: 会话 ID（已废弃，仅保留接口兼容）
-        enable_summary: 是否启用总结记忆
-        enable_long_term: 已废弃参数（长期记忆已移除），传入无效
+        llm: LLM 实例（用于重量压缩）
         return_meta: 是否返回压缩元数据
 
     Returns:
-        按顺序排列的消息列表: [摘要上下文, 短期对话历史]
+        按顺序排列的消息列表: [短期对话历史]
     """
     result_messages: list[SystemMessage | HumanMessage | AIMessage] = []
 
-    # 1) 总结记忆 — 对短期记忆之前的对话做摘要
-    if enable_summary and history and llm:
-        try:
-            summary = build_summary_memory(history, llm)
-            if summary:
-                result_messages.append(SystemMessage(content=f"以下是之前对话的摘要（供上下文参考）：\n{summary}"))
-        except Exception as e:
-            print(f"[Memory] ⚠️ 摘要记忆注入失败: {e}")
-
-    # 2) 短期记忆 — 最近 k 轮原文
+    # 短期记忆 — 固定 token 预算
     if history:
-        short_term = build_short_term_messages(history, k=SHORT_TERM_K)
+        short_term = build_short_term_messages(history)
         if short_term:
             result_messages.extend(short_term)
             print(f"[Memory] 注入 {len(short_term)} 条短期记忆")

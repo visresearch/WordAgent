@@ -270,7 +270,7 @@ def build_skills_prompt() -> str:
 
     lines.extend(
         [
-            "When user intent matches a skill, call list_skills first if needed, then call load_skill_context(skill_name).",
+            "When user intent matches a skill, call load_skill_context(skill_name) with the skill folder name.",
             "After loading context, follow skill constraints while using document tools.",
         ]
     )

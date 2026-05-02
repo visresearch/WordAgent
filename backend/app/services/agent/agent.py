@@ -523,6 +523,15 @@ async def process_writing_request_stream(
 
     # 构建系统提示
     system_parts = list(get_core_prompts(mode=mode))
+
+    # 注入长期记忆（来自 md 文件）
+    from app.services.memory import build_long_term_memory_prompt
+
+    long_term_prompt = build_long_term_memory_prompt()
+    if long_term_prompt:
+        system_parts.append(long_term_prompt)
+        print("[Agent] 已注入长期记忆")
+
     if mode == "agent":
         mcp_prompt = build_mcp_tools_prompt(mcp_tools)
         if mcp_prompt:
@@ -554,33 +563,13 @@ async def process_writing_request_stream(
         # 注入系统提示（单一 SystemMessage）
         messages.append(SystemMessage(content=system_prompt))
 
-        # 注入记忆
-        from app.services.memory import build_memory_messages, _estimate_messages_tokens
+        # 注入短期记忆（仅保留最近 k 轮对话原文）
+        from app.services.memory import build_short_term_messages
 
-        memory_result = build_memory_messages(
-            history=history,
-            current_message=message,
-            llm=llm,
-            session_id=chat_id,
-            enable_long_term=False,
-            return_meta=True,
-        )
-        memory_msgs, memory_meta = memory_result
-        if memory_msgs:
-            messages.extend(memory_msgs)
-            print(f"[Agent] 注入 {len(memory_msgs)} 条记忆消息")
-        if isinstance(memory_meta, dict) and memory_meta.get("triggered"):
-            before_tokens = int(memory_meta.get("before_tokens_est", 0) or 0)
-            after_tokens = int(memory_meta.get("after_tokens_est", 0) or 0)
-            strategy = str(memory_meta.get("strategy", "none"))
-            dropped = int(memory_meta.get("dropped_messages", 0) or 0)
-            if strategy != "none":
-                strategy_label = {
-                    "llm_chain_extractor": "LLMChainExtractor",
-                    "recent_keep_with_note": "截断保留",
-                    "recent_keep": "截断保留",
-                }.get(strategy, strategy)
-                print(f"[Agent] 🗜️ 启动压缩（{strategy_label}）: {before_tokens} -> {after_tokens} tokens, dropped={dropped}")
+        short_term = build_short_term_messages(history)
+        if short_term:
+            messages.extend(short_term)
+            print(f"[Agent] 注入 {len(short_term)} 条短期记忆")
 
         # 构建用户消息
         user_content = message
