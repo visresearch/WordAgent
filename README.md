@@ -172,8 +172,8 @@ The project has tested part of the mainstream LLM APIs, and compatibility is sti
 - [x] Step 3.5 Flash (stable)
 - [x] DeepSeek v4 pro (stable)
 - [x] Claude Sonnet/Opus (stable)
+- [x] MiMo-V2.5 (stable)
 - [ ] Gemini 3.1 Pro
-- [ ] MiMo-V2.5
 
 > **Recommended**: Use **GPT series** models for best results, followed by **Qwen series** models. See the [evaluation document](./backend/evaluation/README.md) for details.
 
