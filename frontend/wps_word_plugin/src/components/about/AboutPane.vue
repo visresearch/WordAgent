@@ -47,7 +47,7 @@
             </svg>
             <span>GitHub 仓库</span>
           </a>
-          <a href="https://cmcblog.netlify.app/" target="_blank" class="link-item">
+          <a href="https://visresearch.github.io/WordAgent/" target="_blank" class="link-item">
             <svg
               width="20"
               height="20"
@@ -60,7 +60,7 @@
             </svg>
             <span>项目官网</span>
           </a>
-          <a href="https://cmcblog.netlify.app/" target="_blank" class="link-item">
+          <a href="https://visresearch.github.io/WordAgent/guide/wps-plugin.html" target="_blank" class="link-item">
             <svg
               width="20"
               height="20"

@@ -91,54 +91,56 @@
             <div v-show="msg.thinkingExpanded" class="thinking-content markdown-body" v-html="renderMarkdown(msg.thinking)"></div>
           </div>
           <!-- 用户消息 -->
-          <span v-else-if="msg.role === 'user'">{{ msg.content }}</span>
+          <span v-if="msg.role === 'user'">{{ msg.content }}</span>
           <!-- AI 消息 contentParts -->
-          <template v-else-if="msg.contentParts && msg.contentParts.length > 0">
-            <div v-for="(part, partIndex) in msg.contentParts" :key="partIndex">
-              <div v-if="part.type === 'status'" class="status-line">
-                <span class="typing">{{ part.content }}</span>
-                <span v-if="part.loading" class="loading-spinner"></span>
-              </div>
-              <div v-else-if="part.type === 'mcp'" class="mcp-inline-wrap">
-                <div class="status-line mcp-inline-head">
-                  <button
-                    class="mcp-inline-toggle"
-                    :aria-label="isMcpExpanded(index, partIndex) ? '收起 MCP 详情' : '展开 MCP 详情'"
-                    @click="toggleMcpExpand(index, partIndex)"
-                  >
-                    <svg
-                      class="mcp-toggle-icon"
-                      :class="{ expanded: isMcpExpanded(index, partIndex) }"
-                      width="12"
-                      height="12"
-                      viewBox="0 0 16 16"
-                      fill="currentColor"
+          <template v-else>
+            <template v-if="msg.contentParts && msg.contentParts.length > 0">
+              <div v-for="(part, partIndex) in msg.contentParts" :key="partIndex">
+                <div v-if="part.type === 'status'" class="status-line">
+                  <span class="typing">{{ part.content }}</span>
+                  <span v-if="part.loading" class="loading-spinner"></span>
+                </div>
+                <div v-else-if="part.type === 'mcp'" class="mcp-inline-wrap">
+                  <div class="status-line mcp-inline-head">
+                    <button
+                      class="mcp-inline-toggle"
+                      :aria-label="isMcpExpanded(index, partIndex) ? '收起 MCP 详情' : '展开 MCP 详情'"
+                      @click="toggleMcpExpand(index, partIndex)"
                     >
-                      <path d="M6 3l5 5-5 5V3z" />
-                    </svg>
-                  </button>
-                  <span class="typing" :class="{ 'mcp-error-text': part.isError }">
-                    {{ part.preview || ('🔧 调用 MCP 工具: ' + (part.toolName || 'unknown_tool')) }}
-                  </span>
+                      <svg
+                        class="mcp-toggle-icon"
+                        :class="{ expanded: isMcpExpanded(index, partIndex) }"
+                        width="12"
+                        height="12"
+                        viewBox="0 0 16 16"
+                        fill="currentColor"
+                      >
+                        <path d="M6 3l5 5-5 5V3z" />
+                      </svg>
+                    </button>
+                    <span class="typing" :class="{ 'mcp-error-text': part.isError }">
+                      {{ part.preview || ('🔧 调用 MCP 工具: ' + (part.toolName || 'unknown_tool')) }}
+                    </span>
+                  </div>
+                  <div v-if="isMcpExpanded(index, partIndex)" class="mcp-inline-detail">
+                    <div class="typing mcp-inline-label">- 🧾 参数:</div>
+                    <pre class="mcp-inline-pre">{{ part.argsText || '无参数' }}</pre>
+                    <div class="typing mcp-inline-label">- 🛠️ 工具输出:</div>
+                    <div class="mcp-inline-output markdown-body" v-html="renderMarkdown(part.outputText || '（无输出）')"></div>
+                  </div>
                 </div>
-                <div v-if="isMcpExpanded(index, partIndex)" class="mcp-inline-detail">
-                  <div class="typing mcp-inline-label">- 🧾 参数:</div>
-                  <pre class="mcp-inline-pre">{{ part.argsText || '无参数' }}</pre>
-                  <div class="typing mcp-inline-label">- 🛠️ 工具输出:</div>
-                  <div class="mcp-inline-output markdown-body" v-html="renderMarkdown(part.outputText || '（无输出）')"></div>
+                <!-- Tool 输出压缩信息 -->
+                <div v-else-if="part.type === 'tool_compress'" class="tool-compress-line">
+                  <span class="tool-compress-icon">📦</span>
+                  <span class="tool-compress-text">{{ part.content }}</span>
                 </div>
+                <!-- eslint-disable-next-line vue/no-v-html -->
+                <div v-else-if="part.type === 'text'" class="markdown-body" v-html="renderMarkdown(part.content)"></div>
               </div>
-              <!-- Tool 输出压缩信息 -->
-              <div v-else-if="part.type === 'tool_compress'" class="tool-compress-line">
-                <span class="tool-compress-icon">📦</span>
-                <span class="tool-compress-text">{{ part.content }}</span>
-              </div>
-              <!-- eslint-disable-next-line vue/no-v-html -->
-              <div v-else-if="part.type === 'text'" class="markdown-body" v-html="renderMarkdown(part.content)"></div>
-            </div>
+            </template>
+            <!-- eslint-disable-next-line vue/no-v-html -->
+            <div v-else-if="msg.content" class="markdown-body" v-html="renderMarkdown(msg.content)"></div>
           </template>
-          <!-- eslint-disable-next-line vue/no-v-html -->
-          <div v-else-if="msg.content" class="markdown-body" v-html="renderMarkdown(msg.content)"></div>
         </div>
       </div>
       <!-- AI 消息操作按钮 -->
@@ -756,7 +758,7 @@ export default {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 8px 4px 0;
+  padding: 4px 8px 4px 4px;
   background: #f7f8fa;
   border-radius: 4px;
   margin-top: 4px;

@@ -137,7 +137,7 @@
                 @change="$emit('update:enableThinking', $event.target.checked)"
               />
               <span class="thinking-slider"></span>
-              <span class="thinking-label">{{ enableThinking ? '思考' : '关闭思考' }}</span>
+              <span class="thinking-label">{{ enableThinking ? '允许思考' : '关闭思考' }}</span>
             </label>
           </div>
           <div class="toolbar-right">

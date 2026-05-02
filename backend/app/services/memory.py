@@ -103,6 +103,7 @@ LONG_TERM_MEMORY_TYPES = ["user", "feedback", "document"]
 
 # ============== Memory Tool 定义 ==============
 
+
 @tool
 def save_user_memory(memory: str) -> str:
     """保存用户偏好和写作风格等记忆。只在用户明确提供了偏好或相关信息时才调用。"""
@@ -141,6 +142,7 @@ MEMORY_TOOLS = [save_user_memory, save_feedback_memory, save_document_memory]
 
 # ============== 辅助函数 ==============
 
+
 def _get_memory_dir() -> Path:
     """获取长期记忆目录，不存在则创建"""
     from app.core.config import get_wence_data_dir
@@ -156,6 +158,7 @@ def _get_memory_file(name: str) -> Path:
 
 
 # ============== 长期记忆读写 ==============
+
 
 def read_long_term_memory() -> dict[str, str]:
     """读取所有长期记忆文件。"""
@@ -913,6 +916,7 @@ def compress_conversation_history_if_needed(
 
 # ============== 长期记忆提取（Tool 方式） ==============
 
+
 def extract_and_save_memory(
     conversation: str,
     llm: Any,
@@ -950,7 +954,9 @@ def extract_and_save_memory(
         tool_calls = response.tool_calls if hasattr(response, "tool_calls") else []
 
         if not tool_calls:
-            print(f"[Memory] LLM 未调用任何工具，响应: {response.content[:200] if hasattr(response, 'content') else response}")
+            print(
+                f"[Memory] LLM 未调用任何工具，响应: {response.content[:200] if hasattr(response, 'content') else response}"
+            )
             return {name: False for name in LONG_TERM_MEMORY_TYPES}
 
         for tool_call in tool_calls:
@@ -975,6 +981,7 @@ def extract_and_save_memory(
     except Exception as e:
         print(f"[Memory] 长期记忆提取失败: {e}")
         import traceback
+
         traceback.print_exc()
         return {name: False for name in LONG_TERM_MEMORY_TYPES}
 
@@ -983,7 +990,7 @@ def _load_extract_prompt_template() -> str:
     """从 md 文件加载记忆提取提示词模板。"""
     from pathlib import Path
 
-    template_path = Path(__file__).parent / "agent" / "prompts" / "system-prompt-extract-template.md"
+    template_path = Path(__file__).parent / "agent" / "prompts" / "system-prompt-memory-extract-template.md"
     try:
         return template_path.read_text(encoding="utf-8")
     except Exception as e:

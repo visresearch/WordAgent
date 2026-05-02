@@ -277,19 +277,17 @@ def build_graph(llm_with_tools, all_tools: list):
                         content = result
                     else:
                         content = str(result)
-                    results.append(
-                        ToolMessage(content=content, tool_call_id=tool_call["id"], name=tool_name)
-                    )
+                    results.append(ToolMessage(content=content, tool_call_id=tool_call["id"], name=tool_name))
                 except Exception as e:
                     err = f"Error: tool {tool_name} failed: {e}"
                     print(f"[Tools] ❌ {err}")
-                    results.append(
-                        ToolMessage(content=err, tool_call_id=tool_call["id"], name=tool_name)
-                    )
+                    results.append(ToolMessage(content=err, tool_call_id=tool_call["id"], name=tool_name))
             else:
                 print(f"[Tools] ⚠️ 未知工具: {tool_name}")
                 results.append(
-                    ToolMessage(content=f"Error: unknown tool {tool_name}", tool_call_id=tool_call["id"], name=tool_name)
+                    ToolMessage(
+                        content=f"Error: unknown tool {tool_name}", tool_call_id=tool_call["id"], name=tool_name
+                    )
                 )
 
         return {"messages": results}
@@ -662,6 +660,7 @@ async def process_writing_request_stream(
         queue: asyncio.Queue = asyncio.Queue()
         has_tool_result = False
         _collected_text_parts: list[str] = []
+        _has_streamed_text_chunks = False
         _agent_turn_count = 0
         _last_input_tokens = 0
         _conversation_history: list = list(messages)
@@ -753,7 +752,7 @@ async def process_writing_request_stream(
             # 上下文超限被动重压缩
             if isinstance(stream_item, tuple) and stream_item[0] == "context_overflow":
                 print(f"[Agent] ⚠️ 收到上下文超限信号，触发被动重量重压缩")
-                from app.services.memory import compress_conversation_history_if_needed
+                from app.services.memory import compress_conversation_history_if_needed, _estimate_messages_tokens
 
                 current_tokens = _estimate_messages_tokens(_conversation_history)
                 compressed, meta = compress_conversation_history_if_needed(
@@ -824,6 +823,10 @@ async def process_writing_request_stream(
                     normalized = _extract_text_content(msg.content)
                     if normalized:
                         _collected_text_parts.append(normalized)
+                        # 关键：某些模型在流式场景只产出 AIMessageChunk 而不会产出最终 AIMessage。
+                        # 如果不在这里转发 text，前端可能只能看到 thinking，正式输出为空。
+                        _has_streamed_text_chunks = True
+                        yield f"data: {json.dumps({'type': 'text', 'content': normalized}, ensure_ascii=False)}\n\n"
 
                 # ToolMessage：工具执行结果
                 if isinstance(msg, ToolMessage):
@@ -865,7 +868,9 @@ async def process_writing_request_stream(
 
                     # MCP 工具日志
                     if tool_name in mcp_tool_names:
-                        print(f"[Agent] MCP 工具 {tool_name} 返回类型: {type(content).__name__}, 预览: {str(content)[:200]}")
+                        print(
+                            f"[Agent] MCP 工具 {tool_name} 返回类型: {type(content).__name__}, 预览: {str(content)[:200]}"
+                        )
                     continue
 
                 # AIMessage：处理 content blocks（thinking/reasoning）
@@ -885,14 +890,16 @@ async def process_writing_request_stream(
                                     text = block.get("text", "") or block.get("content", "")
                                     if text:
                                         _collected_text_parts.append(text)
-                                        yield f"data: {json.dumps({'type': 'text', 'content': text}, ensure_ascii=False)}\n\n"
+                                        if not _has_streamed_text_chunks:
+                                            yield f"data: {json.dumps({'type': 'text', 'content': text}, ensure_ascii=False)}\n\n"
                         continue
 
                     # 普通文本
                     normalized_text = _extract_text_content(content)
                     if normalized_text:
                         _collected_text_parts.append(normalized_text)
-                        yield f"data: {json.dumps({'type': 'text', 'content': normalized_text}, ensure_ascii=False)}\n\n"
+                        if not _has_streamed_text_chunks:
+                            yield f"data: {json.dumps({'type': 'text', 'content': normalized_text}, ensure_ascii=False)}\n\n"
 
             elif input_type == "custom":
                 # stream_writer 输出（工具状态消息）
