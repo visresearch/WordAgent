@@ -53,15 +53,21 @@ Compared with many AI writing assistants on the market, WenCe AI provides:
 | -- | -- |
 | ![](./web/docs/public/wps_addon.png) | ![](./web/docs/public/pyQt.png) |
 
-For example, in WPS single-agent mode, if the user asks: "Expand my internship objective into five points," the agent first calls `search_document` to locate the paragraph, then calls `read_document` to fetch the content, analyzes it, calls `delete_document` to remove the original text, and finally calls `generate_document` to produce the rewritten result. The frontend add-in renders before/after changes with different highlight colors, so users can clearly see what was modified.
+For example, in WPS **single-agent mode**, if a user asks: "Expand my internship objective into five points," the agent follows a "**locate → read → understand → edit → generate**" workflow. It calls `search_document` to locate the target paragraph, `read_document` to fetch the content, then performs edits (for example via `delete_document`) and finally calls `generate_document` to produce the rewritten result. The frontend add-in highlights before/after changes with different colors so users can clearly see what was modified.
 
 ![](./web/docs/public/preview2.png)
 
-The generated article conforms to Word document structure and formatting. While generating text, the agent also returns style metadata (such as titles, body text, bold, font, indentation, and line spacing). The frontend add-in then renders content into properly formatted Word output based on these style definitions.
+The output is Word-structure-aware: besides plain text, the agent also returns style metadata (for example headings/body, bold, font, indentation, and line spacing). The frontend add-in renders the final Word-formatted result based on these style definitions.
 
-In addition, this project supports custom tool integration. Users can configure MCP servers to let the agent call third-party APIs and extend capabilities. Taking **Amap Maps MCP** and **Visualization Chart MCP Server** as examples: when a user asks, "Query Changsha's weather for the next five days, draw a temperature line chart, and write a weather report," the agent can call the Amap MCP server to retrieve temperature data, then call the chart MCP server to generate an image URL and render it in the add-in chat panel.
+In addition, the project supports two types of pluggable extensions: **MCP servers** and **Skills**.
+
+1) **MCP server example (third-party API/service integration)**: users can configure MCP servers so the agent can call third-party APIs as tools. For example, with **Amap (Gaode) Maps MCP** and a **Visualization Chart MCP Server**, when a user asks: "Query Changsha's weather for the next five days, draw a temperature line chart, and write a weather report," the agent can retrieve temperature data via the Amap MCP server, then generate a chart image URL via the chart MCP server and render it in the add-in panel.
 
 ![](./web/docs/public/mcp_example.png)
+
+2) **Skill example (packaged, reusable workflows)**: a Skill bundles reusable capabilities and procedures (for example prompt templates, tool-call orchestration, or domain-specific writing logic). Once loaded, the agent can select and execute the appropriate Skill to complete certain task types more reliably.
+
+![](./web/docs/public/skill-example.png)
 
 ## 3. Development Plan
 

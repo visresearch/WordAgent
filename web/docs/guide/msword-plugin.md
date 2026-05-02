@@ -10,11 +10,20 @@
 
 Microsoft Word 加载项以在线模式运行，通过 HTTPS 连接本地后端服务。你可以按下列任一方式使用。
 
-### 1. 启动后端服务
+### 1. 启动后端服务并安装证书
 
 双击运行 `wence_ai` 可执行文件（或通过源码启动），确保后端服务已正常运行。
 
 ![](/MSoffice_pyQt.png)
+
+点击 **安装证书** 按钮，按照下面图示完成证书安装。
+
+<div style="display:flex; gap:12px; flex-wrap:nowrap; align-items:flex-start;">
+	<img src="/cert1.png" alt="证书安装步骤 1" style="flex:1 1 0; min-width:0; max-width:100%; height:auto;" />
+	<img src="/cert2.png" alt="证书安装步骤 2" style="flex:1 1 0; min-width:0; max-width:100%; height:auto;" />
+</div>
+
+![](/cert3.png)
 
 ### 2. 在安装界面准备加载项资源
 

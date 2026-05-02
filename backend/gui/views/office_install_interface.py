@@ -1,13 +1,13 @@
 """MS Office 加载项安装界面"""
 
+import os
 import ssl
 import sys
 import threading
 import webbrowser
-from datetime import datetime, timedelta
+import datetime
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
-import ipaddress
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
@@ -93,7 +93,7 @@ def _generate_localhost_cert(target_dir: Path) -> tuple[Path, Path]:
 
     target_dir.mkdir(parents=True, exist_ok=True)
     cert_file = target_dir / "localhost.crt"
-    key_file = target_dir / "localhost.key"
+    key_file = target_dir / "localhost-key.pem"
 
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     subject = issuer = x509.Name(
@@ -102,20 +102,19 @@ def _generate_localhost_cert(target_dir: Path) -> tuple[Path, Path]:
             x509.NameAttribute(NameOID.COMMON_NAME, "localhost"),
         ]
     )
-    now = datetime.utcnow()
+
     cert = (
         x509.CertificateBuilder()
         .subject_name(subject)
         .issuer_name(issuer)
         .public_key(key.public_key())
         .serial_number(x509.random_serial_number())
-        .not_valid_before(now - timedelta(days=1))
-        .not_valid_after(now + timedelta(days=3650))
+        .not_valid_before(datetime.datetime.now(datetime.UTC))
+        .not_valid_after(datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=365))
         .add_extension(
             x509.SubjectAlternativeName(
                 [
                     x509.DNSName("localhost"),
-                    x509.IPAddress(ipaddress.ip_address("127.0.0.1")),
                 ]
             ),
             critical=False,
@@ -136,20 +135,11 @@ def _generate_localhost_cert(target_dir: Path) -> tuple[Path, Path]:
 
 def _get_cert_paths() -> tuple[Path, Path]:
     """获取 HTTPS 证书路径。优先复用，缺失时自动生成。"""
-    runtime_base = _get_runtime_base()
     persistent_dir = _get_persistent_cert_dir()
-    candidates = [
-        Path.home() / ".office-addin-dev-certs",
-        persistent_dir,
-        runtime_base / "wence_data" / "certs",
-        runtime_base / "certs",
-    ]
-
-    for cert_dir in candidates:
-        cert_file = cert_dir / "localhost.crt"
-        key_file = cert_dir / "localhost.key"
-        if cert_file.exists() and key_file.exists():
-            return cert_file, key_file
+    cert_file = persistent_dir / "localhost.crt"
+    key_file = persistent_dir / "localhost-key.pem"
+    if cert_file.exists() and key_file.exists():
+        return cert_file, key_file
 
     try:
         return _generate_localhost_cert(persistent_dir)
@@ -188,11 +178,16 @@ class OfficeInstallInterface(QWidget):
         card_layout.setSpacing(12)
 
         self._usage_label = BodyLabel(
+            "安装证书：<br/>"
+            "1. 确保“启动 HTTPS 服务”。（进入本页面会自动启动）<br/>"
+            "2. 点击“安装证书”按钮，在系统弹出的证书界面依次点击：安装证书-&gt;本地计算机-&gt;将所有的证书都放入下列存储-&gt;浏览-&gt;受信任的根证书颁发机构，然后一路确定即可。<br/>"
+            "3. 点击“用浏览器打开”，如果没有不安全提示，代表证书安装成功；否则，重启后端服务软件再次点击“用浏览器打开”，如果依然有不安全提示，需要手动接受风险并继续，请询问作者或自行安装证书。<br/><br/>"
+            
             "网页版使用方法：<br/>"
-            "1. 点击“启动 HTTPS 服务”，然后点击“用浏览器打开”在浏览器中接受证书（仅首次需要）。<br/>"
-            "2. 打开 <a href='https://word.cloud.microsoft/' style='color: #2563eb; text-decoration: underline;'>https://word.cloud.microsoft/</a> 并进入 Word 网页版。<br/>"
-            "3. 进入：开始-&gt;加载项-&gt;更多加载项-&gt;我的加载项-&gt;管理我的加载项-&gt;上传我的加载项<br/>"
-            "4. 上传下载好的 manifest.xml，完成加载。如果加载项界面未显示，请刷新页面。<br/><br/>"
+            "1. 打开 <a href='https://word.cloud.microsoft/' style='color: #2563eb; text-decoration: underline;'>https://word.cloud.microsoft/</a> 并进入 Word 网页版。<br/>"
+            "2. 进入：开始-&gt;加载项-&gt;更多加载项-&gt;我的加载项-&gt;管理我的加载项-&gt;上传我的加载项<br/>"
+            "3. 上传下载好的 manifest.xml，完成加载。如果加载项界面未显示，请刷新页面。<br/><br/>"
+            
             "客户端使用方法：<br/>"
             "1. 点击“下载 manifest.xml”保存一个空文件夹中。<br/>"
             "2. 右键属性这个文件夹，进入“共享”选项卡，点击“共享”，选择“Everyone”，点击“共享”并记下网络路径。<br/>"
@@ -220,6 +215,10 @@ class OfficeInstallInterface(QWidget):
         self._start_btn = PushButton("启动 HTTPS 服务", card)
         self._start_btn.clicked.connect(self._on_start_service)
         btn_layout.addWidget(self._start_btn)
+
+        self._install_cert_btn = PushButton("安装证书", card)
+        self._install_cert_btn.clicked.connect(self._on_install_cert)
+        btn_layout.addWidget(self._install_cert_btn)
 
         self._open_browser_btn = PushButton("用浏览器打开", card)
         self._open_browser_btn.clicked.connect(self._on_open_browser)
@@ -312,6 +311,32 @@ class OfficeInstallInterface(QWidget):
                 parent=self,
                 position=InfoBarPosition.TOP,
                 duration=4000,
+            )
+
+    def _on_install_cert(self):
+        """打开 .crt 文件，让用户在系统证书界面手动安装。"""
+        try:
+            cert_file, _ = _get_cert_paths()
+
+            if sys.platform.startswith("win"):
+                os.startfile(str(cert_file))
+            else:
+                webbrowser.open(cert_file.as_uri())
+
+            InfoBar.info(
+                title="已打开证书文件",
+                content=f"请按照本界面提示操作",
+                parent=self,
+                position=InfoBarPosition.TOP,
+                duration=5000,
+            )
+        except Exception as e:
+            InfoBar.error(
+                title="打开证书失败，请手动找到证书文件并安装，证书路径：{cert_file}",
+                content=str(e),
+                parent=self,
+                position=InfoBarPosition.TOP,
+                duration=5000,
             )
 
     def _on_start_service(self):

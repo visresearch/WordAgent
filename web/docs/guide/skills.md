@@ -89,3 +89,4 @@ Skill 本质上是一组本地 Markdown 规则文件，核心入口是 `SKILL.md
 |---|---|---|
 | writing-assistant-skill | 自媒体写作助手 Skill，帮助完成从选题到发布的完整流程 | https://github.com/Ceeon/writing-assistant-skill
 | 躺平skill | 一个会让 AI 拒绝工作的 skill | https://github.com/TreapGoGo/tangping-skill |
+| 张雪峰skill | 张雪峰的认知操作系统。不是语录合集，是可运行的思维框架 | https://github.com/alchaincyf/zhangxuefeng-skill |
