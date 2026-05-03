@@ -98,7 +98,8 @@ export default {
       _streamingSessionId: null,
       _streamingCache: {},
       isWide: false,
-      enableThinking: true  // 是否启用深度思考
+      enableThinking: true,  // 是否启用深度思考
+      _initializing: false   // 是否正在初始化，防止 ensureSession 创建重复会话
     };
   },
   computed: {
@@ -252,6 +253,8 @@ export default {
     // ============== 会话管理 ==============
 
     async initSessionAndLoadHistory() {
+      // 防止初始化过程中 ensureSession 创建新会话
+      this._initializing = true;
       try {
         let savedSessionId = null;
         try {
@@ -269,13 +272,42 @@ export default {
             try {
               localStorage.setItem('wence_current_session_id', String(this.currentSessionId));
             } catch (e) { /* ignore */ }
-            this.hasHistory = result.data.messages && result.data.messages.length > 0;
+
+            // 直接使用返回的消息数据
+            const messages = result.data.messages || [];
+            this.messages = messages.map((msg) => ({
+              role: msg.role,
+              content: msg.content,
+              contentParts: (msg.contentParts && msg.contentParts.length > 0)
+                ? msg.contentParts
+                : (msg.content ? [{ type: 'text', content: msg.content }] : []),
+              documentJson: msg.documentJson || null,
+              selectionContext: msg.selectionContext || null,
+              thinking: msg.thinking || '',
+              thinkingExpanded: false,
+              thinkingDone: true,
+              attachedFiles: msg.attachedFiles || null
+            }));
+
+            if (result.data.lastUsedModel) {
+              this.selectedModel = result.data.lastUsedModel;
+            }
+            if (result.data.lastUsedMode) {
+              this.mode = result.data.lastUsedMode;
+            }
+
+            this.hasHistory = this.messages.length > 0;
+            this.historyLoaded = true;
+            this.$nextTick(() => this.scrollToBottom());
           } else {
             this.hasHistory = false;
+            this.historyLoaded = false;
           }
         }
       } catch (e) {
         console.error('[初始化] 失败:', e);
+      } finally {
+        this._initializing = false;
       }
     },
 
@@ -325,7 +357,7 @@ export default {
         localStorage.setItem('wence_current_session_id', String(sessionId));
       } catch (e) { /* ignore */ }
 
-      await this.loadSessionMessages();
+      await this.loadSessionMessages(sessionId);
     },
 
     onCreateSession(session) {
@@ -344,12 +376,18 @@ export default {
       this.historyLoaded = true;
     },
 
-    async loadSessionMessages() {
-      if (!this.currentSessionId) return;
+    async loadSessionMessages(sessionId) {
+      const targetSessionId = sessionId || this.currentSessionId;
+      if (!targetSessionId) return;
 
       this.historyLoading = true;
       try {
-        const result = await api.getSession(this.currentSessionId);
+        const result = await api.getSession(targetSessionId);
+        // 检查当前会话是否已切换，避免竞态条件
+        if (this.currentSessionId !== targetSessionId) {
+          console.log('[加载历史] 会话已切换，忽略过时响应');
+          return;
+        }
         if (result.success && result.data?.messages) {
           this.messages = result.data.messages.map((msg) => ({
             role: msg.role,
@@ -393,6 +431,7 @@ export default {
     },
 
     async ensureSession() {
+      // 初始化期间如果有会话 ID 就直接返回，避免创建重复会话
       if (this.currentSessionId) {
         try {
           const existsResult = await api.getSession(this.currentSessionId);
@@ -404,6 +443,11 @@ export default {
         this.currentSessionId = null;
         this.currentSessionTitle = null;
         try { localStorage.removeItem('wence_current_session_id'); } catch (e) { /* ignore */ }
+      }
+
+      // 初始化期间不创建新会话，等待初始化完成
+      if (this._initializing) {
+        return null;
       }
 
       try {
@@ -422,12 +466,15 @@ export default {
       return null;
     },
 
-    async saveMessageToHistory(role, content, documentJson = null, selectionContext = null, contentParts = null, thinking = null, attachedFiles = null) {
-      let sessionId = await this.ensureSession();
-      if (!sessionId) return;
+    async saveMessageToHistory(role, content, sessionId = null, documentJson = null, selectionContext = null, contentParts = null, thinking = null, attachedFiles = null) {
+      let targetSessionId = sessionId || this.currentSessionId;
+      if (!targetSessionId) {
+        targetSessionId = await this.ensureSession();
+        if (!targetSessionId) return;
+      }
 
       try {
-        let saveResult = await api.addSessionMessage(sessionId, {
+        let saveResult = await api.addSessionMessage(targetSessionId, {
           role,
           content,
           documentJson,
@@ -439,15 +486,10 @@ export default {
           attachedFiles
         });
 
-        if (!saveResult?.success) {
-          this.currentSessionId = null;
-          this.currentSessionTitle = null;
-          try { localStorage.removeItem('wence_current_session_id'); } catch (e) { /* ignore */ }
-
-          sessionId = await this.ensureSession();
-          if (!sessionId) return;
-
-          saveResult = await api.addSessionMessage(sessionId, {
+        if (!saveResult?.success && !sessionId) {
+          targetSessionId = await this.ensureSession();
+          if (!targetSessionId) return;
+          saveResult = await api.addSessionMessage(targetSessionId, {
             role,
             content,
             documentJson,
@@ -654,6 +696,13 @@ export default {
     },
 
     async handleSend(userMessage) {
+      // 确保有会话
+      const sessionId = await this.ensureSession();
+      if (!sessionId) {
+        console.error('[发送] 无法获取会话，取消发送');
+        return;
+      }
+
       const userMsgObj = {
         role: 'user',
         content: userMessage
@@ -704,7 +753,7 @@ export default {
       this.selections = [];
       this.clearAllFiles();
 
-      this.saveMessageToHistory('user', userMessage, null, selectionContext, null, null, uploadedFilesMeta.length > 0 ? uploadedFilesMeta : null);
+      this.saveMessageToHistory('user', userMessage, null, null, selectionContext, null, null, uploadedFilesMeta.length > 0 ? uploadedFilesMeta : null);
       this._sendStreamRequest(userMessage, documentRange, uploadedFilesMeta);
     },
 
@@ -750,7 +799,6 @@ export default {
         onComplete: () => {
           this.isLoading = false;
           this._streamingSessionId = null;
-          // _streamInsertions 不在此处重置，留给 confirmPending/cancelPending 使用
 
           if (aiMsg.thinking) {
             aiMsg.thinkingDone = true;
@@ -759,24 +807,12 @@ export default {
             }
           }
 
-          if (this.currentSessionId === streamSessionId) {
-            this.scrollToBottom();
-            if (aiMsg.content) {
-              this.saveMessageToHistory('assistant', aiMsg.content, aiMsg.documentJson, null, aiMsg.contentParts, aiMsg.thinking || null);
-            }
-          } else {
-            if (aiMsg.content) {
-              api.addSessionMessage(streamSessionId, {
-                role: 'assistant',
-                content: aiMsg.content,
-                documentJson: aiMsg.documentJson,
-                contentParts: aiMsg.contentParts,
-                thinking: aiMsg.thinking || null,
-                model: this.selectedModel || 'auto',
-                mode: this.mode
-              });
-            }
+          // 使用流开始时的 sessionId 保存消息
+          if (aiMsg.content && streamSessionId) {
+            this.saveMessageToHistory('assistant', aiMsg.content, streamSessionId, aiMsg.documentJson, null, aiMsg.contentParts, aiMsg.thinking || null);
           }
+
+          this.scrollToBottom();
 
           // 如果只有删除没有插入（无 json 事件），在流结束后补充添加删除批注
           if (this.pendingDeletes.length > 0 && !this.pendingDocumentMsg) {

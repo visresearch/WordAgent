@@ -101,7 +101,8 @@ export default {
       tokenStats: { current: 0, max: 200000, percentage: 0 },
       enableThinking: true,  // 是否启用深度思考
       _proofreadModeInitialized: false,
-      _proofreadModeLoadPromise: null
+      _proofreadModeLoadPromise: null,
+      _initializing: false   // 是否正在初始化，防止 ensureSession 创建重复会话
     };
   },
   computed: {
@@ -364,6 +365,8 @@ export default {
      * 优先使用 PluginStorage 中保存的 session_id，否则查找全局最新会话
      */
     async initSessionAndLoadHistory() {
+      // 防止初始化过程中 ensureSession 创建新会话
+      this._initializing = true;
       try {
         console.log('[初始化] 开始获取会话');
 
@@ -392,15 +395,42 @@ export default {
               window.Application.PluginStorage.setItem('current_session_id', String(this.currentSessionId));
             }
 
-            // 如果有消息，标记有历史
-            this.hasHistory = result.data.messages && result.data.messages.length > 0;
+            // 直接使用返回的消息数据
+            const messages = result.data.messages || [];
+            this.messages = messages.map((msg) => ({
+              role: msg.role,
+              content: msg.content,
+              contentParts: (msg.contentParts && msg.contentParts.length > 0)
+                ? msg.contentParts
+                : (msg.content ? [{ type: 'text', content: msg.content }] : []),
+              documentJson: msg.documentJson || null,
+              selectionContext: msg.selectionContext || null,
+              thinking: msg.thinking || '',
+              thinkingExpanded: false,
+              thinkingDone: true,
+              attachedFiles: msg.attachedFiles || null
+            }));
+
+            if (result.data.lastUsedModel) {
+              this.selectedModel = result.data.lastUsedModel;
+            }
+            if (result.data.lastUsedMode) {
+              this.mode = result.data.lastUsedMode;
+            }
+
+            this.hasHistory = this.messages.length > 0;
+            this.historyLoaded = true;
+            this.$nextTick(() => this.scrollToBottom());
           } else {
             console.log('[初始化] 当前没有历史会话');
             this.hasHistory = false;
+            this.historyLoaded = false;
           }
         }
       } catch (e) {
         console.error('[初始化] 失败:', e);
+      } finally {
+        this._initializing = false;
       }
     },
 
@@ -454,7 +484,7 @@ export default {
         window.Application.PluginStorage.setItem('current_session_id', String(sessionId));
       }
 
-      await this.loadSessionMessages();
+      await this.loadSessionMessages(sessionId);
     },
 
     /**
@@ -483,18 +513,25 @@ export default {
     /**
      * 加载当前会话的聊天历史
      */
-    async loadSessionMessages() {
-      if (!this.currentSessionId) {
+    async loadSessionMessages(sessionId) {
+      const targetSessionId = sessionId || this.currentSessionId;
+      if (!targetSessionId) {
         console.warn('[加载历史] 缺少 sessionId');
         return;
       }
 
-      console.log('[加载历史] 开始加载, sessionId:', this.currentSessionId);
+      console.log('[加载历史] 开始加载, sessionId:', targetSessionId);
 
       this.historyLoading = true;
       try {
-        const result = await api.getSession(this.currentSessionId);
+        const result = await api.getSession(targetSessionId);
         console.log('[加载历史] API 返回:', result);
+
+        // 检查当前会话是否已切换，避免竞态条件
+        if (this.currentSessionId !== targetSessionId) {
+          console.log('[加载历史] 会话已切换，忽略过时响应');
+          return;
+        }
 
         if (result.success && result.data?.messages) {
           console.log('[加载历史] 消息数量:', result.data.messages.length);
@@ -570,6 +607,11 @@ export default {
         }
       }
 
+      // 初始化期间不创建新会话，等待初始化完成
+      if (this._initializing) {
+        return null;
+      }
+
       console.log('[自动创建会话] 开始创建');
       try {
         const result = await api.createSession({ title: '新对话' });
@@ -597,22 +639,24 @@ export default {
     /**
      * 保存消息到后端（基于会话）
      */
-    async saveMessageToHistory(role, content, documentJson = null, selectionContext = null, contentParts = null, thinking = null, attachedFiles = null) {
-      // 确保有会话
-      let sessionId = await this.ensureSession();
-      if (!sessionId) {
-        console.warn('[保存消息] 无法获取会话ID，消息未保存');
-        return;
+    async saveMessageToHistory(role, content, sessionId = null, documentJson = null, selectionContext = null, contentParts = null, thinking = null, attachedFiles = null) {
+      let targetSessionId = sessionId || this.currentSessionId;
+      if (!targetSessionId) {
+        targetSessionId = await this.ensureSession();
+        if (!targetSessionId) {
+          console.warn('[保存消息] 无法获取会话ID，消息未保存');
+          return;
+        }
       }
 
       console.log('[保存消息]', {
-        sessionId,
+        sessionId: targetSessionId,
         role,
         contentLength: content.length
       });
 
       try {
-        let saveResult = await api.addSessionMessage(sessionId, {
+        let saveResult = await api.addSessionMessage(targetSessionId, {
           role,
           content,
           documentJson,
@@ -624,8 +668,8 @@ export default {
           attachedFiles
         });
 
-        // 兼容旧缓存导致的无效 session_id：自动重建并重试一次
-        if (!saveResult?.success) {
+        // 兼容旧缓存导致的无效 session_id：自动重建并重试一次（仅当未指定 sessionId 时）
+        if (!saveResult?.success && !sessionId) {
           console.warn('[保存消息] 会话失效，尝试重建后重试:', saveResult?.error);
           this.currentSessionId = null;
           this.currentSessionTitle = null;
@@ -633,13 +677,13 @@ export default {
             window.Application.PluginStorage.removeItem('current_session_id');
           }
 
-          sessionId = await this.ensureSession();
-          if (!sessionId) {
+          targetSessionId = await this.ensureSession();
+          if (!targetSessionId) {
             console.warn('[保存消息] 重建会话失败，消息未保存');
             return;
           }
 
-          saveResult = await api.addSessionMessage(sessionId, {
+          saveResult = await api.addSessionMessage(targetSessionId, {
             role,
             content,
             documentJson,
@@ -960,6 +1004,13 @@ export default {
      * 处理用户发送消息（由 ChatInput 触发）
      */
     async handleSend(userMessage) {
+      // 确保有会话
+      const sessionId = await this.ensureSession();
+      if (!sessionId) {
+        console.error('[发送] 无法获取会话，取消发送');
+        return;
+      }
+
       const userMsgObj = {
         role: 'user',
         content: userMessage
@@ -1008,7 +1059,7 @@ export default {
       this.clearAllSelections();
       this.clearAllFiles();
 
-      this.saveMessageToHistory('user', userMessage, null, selectionContext, null, null, uploadedFilesMeta);
+      this.saveMessageToHistory('user', userMessage, null, null, selectionContext, null, null, uploadedFilesMeta);
 
       this._sendStreamRequest(userMessage, documentRange, uploadedFilesMeta);
     },
@@ -1068,27 +1119,12 @@ export default {
           }
 
           // 流完成时用户可能已切到其他 session
-          if (this.currentSessionId === streamSessionId) {
-            // 仍在原 session，正常保存
-            this.scrollToBottom();
-            if (aiMsg.content) {
-              this.saveMessageToHistory('assistant', aiMsg.content, aiMsg.documentJson, null, aiMsg.contentParts, aiMsg.thinking || null);
-            }
-          } else {
-            // 用户已切走，直接调用 API 保存到原 session
-            console.log('[流完成] 用户已切走，保存到原 session:', streamSessionId);
-            if (aiMsg.content) {
-              api.addSessionMessage(streamSessionId, {
-                role: 'assistant',
-                content: aiMsg.content,
-                documentJson: aiMsg.documentJson,
-                contentParts: aiMsg.contentParts,
-                thinking: aiMsg.thinking || null,
-                model: this.selectedModel || 'auto',
-                mode: this.mode
-              });
-            }
+          if (aiMsg.content && streamSessionId) {
+            // 使用流开始时的 sessionId 保存消息
+            this.saveMessageToHistory('assistant', aiMsg.content, streamSessionId, aiMsg.documentJson, null, aiMsg.contentParts, aiMsg.thinking || null);
           }
+
+          this.scrollToBottom();
 
           // 如果只有删除没有插入（无 json 事件），在流结束后补充添加删除批注
           if (this.pendingDeletes.length > 0 && !this.pendingDocumentMsg) {

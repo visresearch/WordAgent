@@ -13,7 +13,7 @@
 
 ### Fixed
 - Microsoft Word 插件深度思考bug
-- Microsoft Word 插件历史会话bug
+- 前端插件历史会话bug
 
 ---
 
