@@ -3,6 +3,9 @@
 
 ## Unreleased
 
+### Fixed
+- 前端search_document工具调用bug
+
 ## [v0.3.5]
 
 ### Added

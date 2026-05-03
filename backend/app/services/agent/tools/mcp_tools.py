@@ -56,6 +56,8 @@ def _get_env_int(name: str, default: int) -> int:
 
 _MCP_PREVIEW_MAX_CHARS = _get_env_int("WORDAGENT_MCP_PREVIEW_MAX_CHARS", 100000)
 _MCP_MODEL_MAX_CHARS = _get_env_int("WORDAGENT_MCP_MODEL_MAX_CHARS", 100000)
+# MCP 工具调用超时时间（秒），默认 300 秒
+_MCP_TOOL_CALL_TIMEOUT_SECONDS = _get_env_int("WORDAGENT_MCP_TOOL_TIMEOUT", 300)
 
 
 def _to_jsonable(value: Any) -> Any:
@@ -351,9 +353,13 @@ def _load_mcp_server_configs() -> dict[str, dict[str, Any]]:
     return client_config
 
 
-def _wrap_mcp_tool_for_sync(tool, loop: asyncio.AbstractEventLoop, call_timeout_seconds: int = 90):
+def _wrap_mcp_tool_for_sync(tool, loop: asyncio.AbstractEventLoop, call_timeout_seconds: int = None):
     """将异步 MCP 工具包装为同步可调用，通过主事件循环分派执行。"""
     from langchain_core.tools import StructuredTool
+
+    # 默认使用环境变量配置的超时时间
+    if call_timeout_seconds is None:
+        call_timeout_seconds = _MCP_TOOL_CALL_TIMEOUT_SECONDS
 
     def sync_fn(**kwargs):
         import time as _time

@@ -161,6 +161,48 @@ const wsManager = {
   /** 连接 Promise（确保 connect 不会并发） */
   _connectPromise: null,
 
+  // 文档缓存：{documentJson: {...}, timestamp: number}
+  _documentCache: null,
+  // 缓存有效期（毫秒），默认 5 分钟
+  _cacheMaxAge: 5 * 60 * 1000,
+
+  /**
+   * 获取缓存的文档 JSON，如果缓存过期或不存在则返回 null
+   * @returns {Object|null}
+   */
+  getCachedDocument() {
+    if (!this._documentCache) {
+      return null;
+    }
+    const age = Date.now() - this._documentCache.timestamp;
+    if (age > this._cacheMaxAge) {
+      console.log('[WebSocket] 文档缓存已过期，清除缓存');
+      this._documentCache = null;
+      return null;
+    }
+    return this._documentCache.documentJson;
+  },
+
+  /**
+   * 缓存文档 JSON
+   * @param {Object} docJson - 文档 JSON 对象
+   */
+  setCachedDocument(docJson) {
+    this._documentCache = {
+      documentJson: docJson,
+      timestamp: Date.now()
+    };
+    console.log('[WebSocket] 文档已缓存，段落数:', docJson?.paragraphs?.length || 0);
+  },
+
+  /**
+   * 清除文档缓存
+   */
+  clearDocumentCache() {
+    this._documentCache = null;
+    console.log('[WebSocket] 文档缓存已清除');
+  },
+
   /**
    * 获取 WebSocket URL
    */
@@ -291,6 +333,11 @@ const wsManager = {
         throw new Error(docData.error);
       }
 
+      // 如果是读取全文（0 到末尾），更新缓存
+      if (startParaIndex === 0 && endParaIndex === -1) {
+        this.setCachedDocument(docData);
+      }
+
       // 通过 WebSocket 回传文档给后端
       await this.send({
         type: 'document_response',
@@ -312,15 +359,27 @@ const wsManager = {
 
   /**
    * 处理后端的文档查询请求：解析文档后执行 Style Query DSL 并通过 WebSocket 回传匹配结果
+   * 优先使用缓存的文档 JSON，避免重复解析
    * @param {Object} query - Query DSL 对象 {type, filters}
    */
   async _handleQueryRequest(query) {
     try {
-      // 先解析全文文档 JSON
-      const docData = await parseDocumentRange(0, -1);
+      // 优先使用缓存的文档 JSON
+      let docData = this.getCachedDocument();
 
-      if (docData.error) {
-        throw new Error(docData.error);
+      if (!docData) {
+        console.log('[WebSocket] 文档缓存未命中，解析全文...');
+        // 先解析全文文档 JSON
+        docData = await parseDocumentRange(0, -1);
+
+        if (docData.error) {
+          throw new Error(docData.error);
+        }
+
+        // 缓存解析结果
+        this.setCachedDocument(docData);
+      } else {
+        console.log('[WebSocket] 使用缓存的文档进行搜索，段落数:', docData.paragraphs?.length || 0);
       }
 
       // 执行样式查询
