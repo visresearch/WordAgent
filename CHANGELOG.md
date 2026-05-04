@@ -3,8 +3,18 @@
 
 ## Unreleased
 
+### Added
+- 多智能体模式与单智能体模式评估
+
 ### Fixed
 - 前端search_document工具调用bug
+- 防御MCP工具调用报错问题
+- Mutli-agent运行问题
+
+### Changed
+- 提取长期记忆改为异步，不阻塞done
+- 重构多智能体模式plan
+- 修改官网文档
 
 ## [v0.3.5]
 

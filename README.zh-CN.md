@@ -55,7 +55,15 @@
 
 ![](./web/docs/public/preview2.png)
 
-注意：生成结果不仅包含文字内容，还包含与之匹配的样式信息（如标题/正文、加粗、字体、缩进、行距等）。前端加载项会依据这些样式信息将内容渲染为符合 Word 文档结构与格式的最终效果。
+> 注意：生成结果不仅包含文字内容，还包含与之匹配的样式信息（如标题/正文、加粗、字体、缩进、行距等）。前端加载项会依据这些样式信息将内容渲染为符合 Word 文档结构与格式的最终效果。
+
+再举个例子，改为 **多智能体（Multi Agent）模式**，用户提问写一篇长篇小说并绘制插图。各个专家智能体会依次工作，从`规划智能体`编排智能体流程，到`研究智能体`搜索网文小说，调用文生图，到`大纲智能体`描述小说大纲，到`写作智能体`输出文章，最后`检查智能体`回顾文章段落，提出修改意见。
+
+![](./web/docs/public/preview3.png)
+
+![](./web/docs/public/preview4.png)
+
+> 注意：多智能体模式比单智能体更容易生成长文，同时还能够不跑题以及首尾呼应，但是工具调用能力略差于单智能体
 
 除此之外，本项目还支持两类“可插拔扩展”来接入自定义工具：**MCP Server** 与 **Skill**。
 
@@ -182,9 +190,9 @@ uv run pyinstaller wence.spec
 
 注：本项目开发使用了部分[阿里云百炼](https://bailian.console.aliyun.com/)、[Openrouter](https://openrouter.ai/models?q=free)免费额度
 
-## 七、关于作者
+## 七、关于
 
-与我交流：https://cmcblog.netlify.app/about/
+与我交流：https://visresearch.github.io/WordAgent/guide/about.html
 
 ## 八、开源协议
 

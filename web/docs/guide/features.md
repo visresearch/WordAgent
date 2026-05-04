@@ -30,9 +30,8 @@
 | **generate_document** | 生成带格式的文档内容并插入到 Word 中 | ✅ | ❌ | ✅ |
 | **delete_document** | 删除 Word 中指定范围的内容 | ✅ | ❌ | ✅ |
 | **runSubAgent** | 调用子智能体完成特定任务 | ✅ | ❌ | ❌ |
-| **mcp_tools** | 调用 MCP 服务器上的工具（如 tavily-search） | ✅ | ❌ | ❌ |
-| **web_search** | 根据关键词联网搜索获取资料 | ❌ | ❌ | ✅ |
-| **web_fetch** | 根据 URL 获取网页内容 | ❌ | ❌ | ✅ |
+| **mcp_tools** | 调用 MCP 服务器上的工具（如 tavily-search） | ✅ | ❌ | ✅ |
+
 
 ::: info 说明
 这些工具由智能体自动调用，你无需手动操作。智能体会根据你的提问自动判断需要使用哪些工具。

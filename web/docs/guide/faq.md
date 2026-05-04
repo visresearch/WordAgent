@@ -17,18 +17,4 @@
 - 在 QT 界面中重新点击安装加载项
 - 重启 Word 软件，并在弹出的信任提示中选择信任
 
-## LLM API 适配情况
 
-| 模型 | 状态 |
-|------|------|
-| Qwen 3.6 Plus | ✅ 运行稳定 |
-| Qwen3 Max | ✅ 运行稳定 |
-| GLM-5.1 | ✅ 运行稳定 |
-| GPT 5.4 | ✅ 运行稳定 |
-| MiniMax M2.5 | ✅ 运行稳定 |
-| Step 3.5 Flash | ✅ 运行稳定 |
-| DeepSeek v4 pro | ⚠️ 非思考模式运行稳定 |
-| Claude Sonnet/Opus | ✅ 运行稳定 |
-| Kimi K2.5 | ⚠️ 容易出现工具调用死循环 |
-| Gemini 3.1 Pro | 🔲 待测试 |
-| MiMo-V2.5 | 🔲 待测试 |

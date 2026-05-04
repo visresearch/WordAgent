@@ -279,7 +279,14 @@ def build_graph(llm_with_tools, all_tools: list):
                         content = str(result)
                     results.append(ToolMessage(content=content, tool_call_id=tool_call["id"], name=tool_name))
                 except Exception as e:
-                    err = f"Error: tool {tool_name} failed: {e}"
+                    # 为不同工具生成友好的错误消息
+                    is_mcp_tool = tool_name.startswith("mcp_") or tool_name not in ("search_documnet", "read_document", "generate_document", "delete_document", "load_skill_context", "create_workflow", "review_document", "ask")
+                    if is_mcp_tool:
+                        err = f"MCP tool '{tool_name}' execution failed: {e}. The error has been returned as tool result. Please analyze the error and decide how to proceed - you may retry with corrected parameters, use an alternative tool, or report the failure in your response."
+                    elif tool_name == "generate_document":
+                        err = f"Tool {tool_name} failed: {e}. Use correct schema format. For generate_document, document must be an object, not a JSON string."
+                    else:
+                        err = f"Tool {tool_name} failed: {e}. Please check the parameters and try again."
                     print(f"[Tools] ❌ {err}")
                     results.append(ToolMessage(content=err, tool_call_id=tool_call["id"], name=tool_name))
             else:
@@ -384,7 +391,11 @@ def build_graph(llm_with_tools, all_tools: list):
                 )
                 print(f"[Repair] ✅ 已修复并执行工具: {tool_name}")
             except Exception as e:
-                print(f"[Repair] ❌ 工具执行失败: {tool_name}, error={e}")
+                err_text = f"Repaired tool '{tool_name}' execution failed: {e}"
+                print(f"[Repair] ❌ {err_text}")
+                repaired_results.append(
+                    ToolMessage(content=err_text, tool_call_id=tc.get("id", "repaired"), name=tool_name)
+                )
 
         if repaired_tool_calls:
             print(f"[Repair] ✅ 成功修复 {len(repaired_tool_calls)} 个工具调用")

@@ -57,7 +57,15 @@ For example, in WPS **single-agent mode**, if a user asks: "Expand my internship
 
 ![](./web/docs/public/preview2.png)
 
-The output is Word-structure-aware: besides plain text, the agent also returns style metadata (for example headings/body, bold, font, indentation, and line spacing). The frontend add-in renders the final Word-formatted result based on these style definitions.
+> Note: The output includes not only text content but also matching style metadata (for example headings/body, bold, font, indentation, and line spacing). The frontend add-in renders the final Word-formatted result based on these style definitions.
+
+Another example, switching to **multi-agent mode**: when a user requests to write a long novel with illustrations, each specialized agent works in sequence: the **planner agent** orchestrates the workflow, the **research agent** searches online novels and calls image generation tools, the **outline agent** describes the novel outline, the **writer agent** outputs the article content, and finally the **reviewer agent** reviews paragraphs and suggests revisions.
+
+![](./web/docs/public/preview3.png)
+
+![](./web/docs/public/preview4.png)
+
+> Note: Multi-agent mode excels at generating long-form content while staying on-topic and maintaining coherence, but has slightly weaker tool-calling capability compared to single-agent mode.
 
 In addition, the project supports two types of pluggable extensions: **MCP servers** and **Skills**.
 
@@ -185,9 +193,9 @@ The project has tested part of the mainstream LLM APIs, and compatibility is sti
 
 Note: part of development used free quotas from [Alibaba Bailian](https://bailian.console.aliyun.com/) and [OpenRouter](https://openrouter.ai/models?q=free).
 
-## 7. About the Author
+## 7. About
 
-Contact: https://cmcblog.netlify.app/about/
+Contact: https://visresearch.github.io/WordAgent/guide/about.html
 
 ## 8. License
 

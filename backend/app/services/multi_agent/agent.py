@@ -1,7 +1,7 @@
 """
-多智能体文档处理系统 - 使用 LangGraph 编排 5 个专业 Agent
+Multi-agent document processing system - Uses LangGraph to orchestrate 5 specialized Agents.
 
-流程: Planner → Research → Outline → Writer → Reviewer (→ Writer 重写循环)
+Flow: Planner -> Research -> Outline -> Writer -> Reviewer (loop to Writer if needed)
 """
 
 import asyncio
@@ -27,10 +27,7 @@ def _get_env_int(name: str, default: int) -> int:
 
 
 class ContextOverflowError(Exception):
-    """
-    上下文超限异常：携带压缩后的对话历史，
-    通知调用方（chat.py）用压缩后的历史重试请求。
-    """
+    """Context overflow exception with compressed history for retry."""
 
     def __init__(self, message: str, compressed_history: list):
         super().__init__(message)
@@ -38,7 +35,7 @@ class ContextOverflowError(Exception):
 
 
 def _is_transient_stream_error(exc: Exception) -> bool:
-    """判断是否是可重试的流式网络错误。"""
+    """Check if error is a retryable streaming network error."""
     text = str(exc).lower()
     transient_signals = [
         "incomplete chunked read",
@@ -52,7 +49,7 @@ def _is_transient_stream_error(exc: Exception) -> bool:
 
 
 def _is_context_overflow_error(exc: Exception) -> bool:
-    """判断是否是上下文超限错误（413 等）。"""
+    """Check if error is a context overflow error."""
     text = str(exc).lower()
     overflow_signals = [
         "413",
@@ -65,11 +62,11 @@ def _is_context_overflow_error(exc: Exception) -> bool:
     return any(sig in text for sig in overflow_signals)
 
 
-# region LangSmith（可选，不影响正常运行）
+# region LangSmith (optional)
 
 
 def _try_init_langsmith():
-    """尝试加载 .env 并初始化 LangSmith 环境变量，失败时静默跳过。"""
+    """Try to load .env and init LangSmith env vars, skip silently on failure."""
     try:
         from pathlib import Path
         from dotenv import load_dotenv
@@ -97,7 +94,7 @@ def _try_init_langsmith():
                 load_dotenv(resolved, override=False)
 
         if os.environ.get("LANGSMITH_API_KEY") and os.environ.get("LANGSMITH_PROJECT"):
-            print("[LangSmith] ✅ 多智能体已启用 tracing，project =", os.environ.get("LANGSMITH_PROJECT", "default"))
+            print("[LangSmith] Multi-agent tracing enabled, project =", os.environ.get("LANGSMITH_PROJECT", "default"))
             return True
     except Exception:
         pass
@@ -131,46 +128,32 @@ from app.services.multi_agent.tools import (
     read_document,
     generate_document,
     delete_document,
-    web_search,
-    web_fetch,
     search_documnet,
+    load_skill_context,
+    load_mcp_tools,
+    build_mcp_tools_prompt,
 )
 from app.services.agent.tools.callback import _current_model_name
-
-# 所有多智能体工具的映射（含新增工具）
-_ALL_TOOL_MAP = {
-    **TOOL_MAP,
-    "create_workflow": create_workflow,
-    "review_document": review_document,
-}
+from app.services.agent.skills import build_skills_prompt
 
 
 # region State
 
 
 class MultiAgentState(BaseModel):
-    """多智能体共享状态"""
+    """Multi-agent shared state."""
 
-    # 用户原始请求
     user_message: str = ""
     document_range: list[dict] = Field(default_factory=list)
-    document_meta: dict = Field(default_factory=dict)  # 文档全局元信息（totalParas/documentName/parsedAt 等）
-    attached_files: list[dict] = Field(default_factory=list)  # 附件列表
-
-    # 记忆上下文（包含总结 + RAG 检索结果）
+    document_meta: dict = Field(default_factory=dict)
+    attached_files: list[dict] = Field(default_factory=list)
     memory_context: str = ""
-
-    # 各阶段产出
-    workflow: dict = Field(default_factory=dict)  # planner 输出的工作流
-    research_data: str = ""  # research 收集的资料
-    outline: str = ""  # outline 生成的大纲
-    document_json: dict = Field(default_factory=dict)  # writer 输出的文档 JSON
-    review_result: dict = Field(default_factory=dict)  # reviewer 审核结果
-
-    # 控制流
-    current_step_index: int = 0  # 当前执行到第几步
-
-    # 消息历史（每个 agent 内部 ReAct 循环传递的 messages）
+    workflow: dict = Field(default_factory=dict)
+    research_data: str = ""
+    outline: str = ""
+    document_json: dict = Field(default_factory=dict)
+    review_result: dict = Field(default_factory=dict)
+    current_step_index: int = 0
     messages: list = Field(default_factory=list)
 
 
@@ -178,7 +161,7 @@ class MultiAgentState(BaseModel):
 
 
 def _create_llm(model_name: str):
-    """创建 LLM 实例（支持 reasoning_content）"""
+    """Create LLM instance (with reasoning_content support)."""
     from app.services.llm_client import get_temperature, get_https_proxy_url, get_http_proxy_url, ChatOpenAI
 
     provider_info = LLMClientManager.get_provider_info(model_name)
@@ -217,7 +200,7 @@ def _create_llm(model_name: str):
         os.environ.update(saved_env)
 
 
-# region Sub-Agent ReAct runner
+# region Sub-Agent ReAct Runner
 
 
 def _run_sub_agent(
@@ -228,58 +211,43 @@ def _run_sub_agent(
     context: str = "",
     max_iterations: int | None = None,
 ) -> tuple[str, dict | None, list[dict]]:
-    """
-    运行一个 sub-agent 的 ReAct 循环（同步，在线程中运行）。
-    max_iterations 默认为 _AGENT_RECURSION_LIMIT，可覆盖。
-
-    Returns:
-        (text_output, tool_result_json | None, tool_data)
-        text_output: agent 最终的文字回复
-        tool_result_json: 如果 agent 调用了 generate_document / create_workflow / review_document，
-                          返回最后一次调用的结构化结果
-        tool_data: 收集的文档相关工具调用记录（read_document / search_documnet）
-    """
+    """Run a sub-agent ReAct loop (synchronous, in thread)."""
     tool_map = {t.name: t for t in tools}
     llm_with_tools = llm.bind_tools(tools)
     system_prompt = get_agent_prompt(agent_name)
 
-    messages = [
-        SystemMessage(content=system_prompt),
-    ]
+    messages = [SystemMessage(content=system_prompt)]
 
-    # 注入当前时间
     from datetime import datetime
 
-    weekdays = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
+    weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
     now = datetime.now()
-    current_time = now.strftime("%Y年%m月%d日 %H:%M") + " " + weekdays[now.weekday()]
-    messages.append(SystemMessage(content=f"当前时间: {current_time}"))
+    current_time = now.strftime("%Y-%m-%d %H:%M") + " " + weekdays[now.weekday()]
+    messages.append(SystemMessage(content=f"Current time: {current_time}"))
 
-    # 组合任务指令
     user_content = task
     if context:
-        user_content = f"{task}\n\n---\n以下是前序步骤的参考资料：\n{context}"
+        user_content = f"{task}\n\n---\nReference materials from previous steps:\n{context}"
     messages.append(HumanMessage(content=user_content))
 
     last_structured_result = None
     text_output = ""
-    _writer_generated = False  # writer 是否已成功调用 generate_document
-    _tool_data: list[dict] = []  # 收集文档相关工具调用结果
-    _retry_count = 0  # 无效 tool call 重试计数
+    _writer_generated = False
+    _tool_data: list[dict] = []
+    _retry_count = 0
 
     chat_id = _current_chat_id.get(None)
     if max_iterations is None:
         max_iterations = _AGENT_RECURSION_LIMIT
-    print(f"[MultiAgent] {agent_name} 子智能体 max_iterations={max_iterations}")
+    print(f"[MultiAgent] {agent_name} sub-agent max_iterations={max_iterations}")
 
     def _should_stop() -> bool:
         if is_stop_requested(chat_id):
-            print(f"  [{agent_name}] ⛔ 检测到停止信号，终止子Agent执行 (session={chat_id})")
+            print(f"  [{agent_name}] Stop requested, terminating (session={chat_id})")
             return True
         return False
 
     def _fmt_invalid_tool_call(tc) -> str:
-        """格式化 invalid_tool_calls 诊断信息，便于终端排查。"""
         if isinstance(tc, dict):
             name = tc.get("name", "?")
             call_id = tc.get("id", "?")
@@ -291,41 +259,26 @@ def _run_sub_agent(
             err = getattr(tc, "error", None) or "unknown_error"
             raw_args = getattr(tc, "args", None)
 
-        raw_args_str = ""
-        if raw_args is not None:
-            raw_args_str = str(raw_args)
-            if len(raw_args_str) > 300:
-                raw_args_str = raw_args_str[:300] + "...(truncated)"
-
+        raw_args_str = (
+            str(raw_args)[:300] + "..." if raw_args and len(str(raw_args)) > 300 else str(raw_args) if raw_args else ""
+        )
         return f"name={name}, id={call_id}, error={err}, raw_args={raw_args_str}"
 
     def _diagnose_invalid_args(tc) -> str:
-        """尝试解析 invalid tool call 的原始参数，返回可读诊断信息。"""
         raw_args = tc.get("args") if isinstance(tc, dict) else getattr(tc, "args", None)
         if raw_args is None:
             return "args_missing"
-
-        # 某些模型会返回 dict；多数 invalid 情况是字符串 JSON
         if isinstance(raw_args, dict):
             return "args_is_dict_but_marked_invalid"
-
         if not isinstance(raw_args, str):
             return f"args_type_unexpected={type(raw_args).__name__}"
-
-        s = raw_args.strip()
-        if not s:
-            return "args_empty"
-
         try:
-            json.loads(s)
+            json.loads(raw_args)
             return "json_parse_ok_but_tool_call_marked_invalid"
         except Exception as e:
-            # 给出 json 解析的具体位置，帮助定位是截断还是引号问题
-            msg = str(e)
-            return f"json_parse_error={msg}"
+            return f"json_parse_error={e}"
 
     def _try_repair_and_execute_invalid_calls(invalid_calls) -> bool:
-        """尝试修复 invalid_tool_calls，并直接执行可修复的调用。"""
         nonlocal last_structured_result, _writer_generated, _tool_data
 
         repaired_any = False
@@ -379,15 +332,22 @@ def _run_sub_agent(
                 )
                 repaired_tool_messages.append(ToolMessage(content=content, tool_call_id=tool_call_id, name=tool_name))
                 repaired_any = True
-                print(f"  [{agent_name}] ✅ 已修复并执行 invalid tool_call: {tool_name}")
+                print(f"  [{agent_name}] Repaired invalid tool_call: {tool_name}")
 
-                if tool_name == "search_documnet":
-                    _tool_data.append({"tool": tool_name, "args": normalized_args, "result": content})
+                # 收集所有工具调用结果，用于后续步骤共享
+                _tool_data.append({
+                    "tool": tool_name,
+                    "args": normalized_args,
+                    "result": content,
+                    "is_mcp": tool_name.startswith("mcp_") or tool_name not in ("search_documnet", "read_document", "generate_document", "delete_document", "load_skill_context", "create_workflow", "review_document")
+                })
 
                 if agent_name == "writer" and tool_name == "generate_document":
                     _writer_generated = True
             except Exception as e:
-                print(f"  [{agent_name}] ❌ 修复后工具执行失败: {tool_name}, error={e}")
+                err_text = f"Repaired tool '{tool_name}' execution failed: {e}"
+                print(f"  [{agent_name}] Repair failed: {err_text}")
+                repaired_tool_messages.append(ToolMessage(content=err_text, tool_call_id=tool_call_id, name=tool_name))
 
         if repaired_any:
             messages.append(AIMessage(content="", tool_calls=repaired_tool_calls))
@@ -402,7 +362,6 @@ def _run_sub_agent(
 
         response = llm_with_tools.invoke(messages)
 
-        # 处理无效的工具调用（模型生成了不完整的 tool call JSON）
         invalid_calls = getattr(response, "invalid_tool_calls", [])
         if invalid_calls:
             finish_reason = None
@@ -411,20 +370,16 @@ def _run_sub_agent(
 
             if not hasattr(response, "tool_calls") or not response.tool_calls:
                 if _try_repair_and_execute_invalid_calls(invalid_calls):
-                    print(f"  [{agent_name}] 🔧 invalid tool_calls 已自动修复，继续流程")
+                    print(f"  [{agent_name}] Invalid tool_calls auto-repaired, continuing")
                     continue
 
-                # 只有无效工具调用，没有有效的 — 跳过这条消息，提示重试
                 _retry_count += 1
                 invalid_names = [
                     tc.get("name", "?") if isinstance(tc, dict) else getattr(tc, "name", "?") for tc in invalid_calls
                 ]
-                print(f"  [{agent_name}] ⚠️ 检测到无效工具调用: {invalid_names}，重试 ({_retry_count})")
+                print(f"  [{agent_name}] Invalid tool calls: {invalid_names}, retry ({_retry_count})")
                 for idx, tc in enumerate(invalid_calls, 1):
-                    print(f"  [{agent_name}]    ↳ invalid#{idx}: {_fmt_invalid_tool_call(tc)}")
-                    print(f"  [{agent_name}]    ↳ diagnose#{idx}: {_diagnose_invalid_args(tc)}")
-                if finish_reason:
-                    print(f"  [{agent_name}]    ↳ finish_reason={finish_reason}")
+                    print(f"  [{agent_name}]    invalid#{idx}: {_fmt_invalid_tool_call(tc)}")
 
                 if _retry_count <= 2:
                     if _should_stop():
@@ -432,49 +387,38 @@ def _run_sub_agent(
                         break
                     messages.append(
                         SystemMessage(
-                            content="你刚才的工具调用格式不完整（JSON 被截断或参数非法）。请重新调用工具，确保 tool arguments 是完整且可解析的 JSON，字符串中的双引号必须正确转义。必须使用新版样式引用格式：pStyle/rStyle/cStyle/tStyle 只能是样式ID（如 pS_1/rS_1/cS_1/tS_1），禁止直接传样式数组；并在 styles 字典提供对应定义。若内容过长，可拆成多次 generate_document 调用分批输出。"
+                            content="Tool call format incomplete. Use proper JSON format with correct style references (pS_*, rS_*, etc.). Define all referenced styles in styles dictionary. For long content, split into multiple generate_document calls."
                         )
                     )
                     continue
                 else:
-                    # 重试次数超限，放弃
                     text_output = response.content or ""
-                    print(f"  [{agent_name}] ❌ 重试次数超限，放弃工具调用")
+                    print(f"  [{agent_name}] Retry limit exceeded, giving up")
                     break
             else:
-                # 同时有有效和无效的工具调用 — 重建干净的 AIMessage，只保留有效的
-                print(f"  [{agent_name}] ⚠️ 过滤掉无效工具调用，保留有效的")
+                print(f"  [{agent_name}] Filtering invalid tool calls, keeping valid ones")
                 for idx, tc in enumerate(invalid_calls, 1):
-                    print(f"  [{agent_name}]    ↳ dropped_invalid#{idx}: {_fmt_invalid_tool_call(tc)}")
-                    print(f"  [{agent_name}]    ↳ diagnose#{idx}: {_diagnose_invalid_args(tc)}")
-                if finish_reason:
-                    print(f"  [{agent_name}]    ↳ finish_reason={finish_reason}")
-                response = AIMessage(
-                    content=response.content,
-                    tool_calls=response.tool_calls,
-                )
+                    print(f"  [{agent_name}]    dropped_invalid#{idx}: {_fmt_invalid_tool_call(tc)}")
+                response = AIMessage(content=response.content, tool_calls=response.tool_calls)
 
         messages.append(response)
 
         if not hasattr(response, "tool_calls") or not response.tool_calls:
-            # 没有 tool call，agent 给出了最终文字回复
             text_output = response.content or ""
-            # writer 必须调用 generate_document，如果没调用则追加提醒重试
             if agent_name == "writer" and not _writer_generated:
                 messages.append(
                     HumanMessage(
-                        content="你必须调用 generate_document 工具将内容输出为文档，不要在对话中直接输出文本。请立即调用 generate_document。"
+                        content="You must call generate_document tool to output content. Do not output text directly."
                     )
                 )
                 continue
             break
 
-        # 执行工具调用
         for tc in response.tool_calls:
             if _should_stop():
                 break
             tool_name = tc["name"]
-            print(f"  [{agent_name}] 调用工具: {tool_name}")
+            print(f"  [{agent_name}] Calling tool: {tool_name}")
             tool_fn = tool_map.get(tool_name)
             if tool_fn:
                 try:
@@ -496,35 +440,32 @@ def _run_sub_agent(
 
                     messages.append(ToolMessage(content=content, tool_call_id=tc["id"], name=tool_name))
 
-                    # 收集文档搜索工具的调用结果（位置信息），供下游 agent 共享
-                    # 注意：只收集 search_documnet（位置信息小），不收集 read_document（文档内容大）
-                    if tool_name == "search_documnet":
-                        _tool_data.append({"tool": tool_name, "args": tool_args, "result": content})
+                    # 收集所有工具调用结果，用于后续步骤共享
+                    _tool_data.append({
+                        "tool": tool_name,
+                        "args": tool_args,
+                        "result": content,
+                        "is_mcp": tool_name.startswith("mcp_") or tool_name not in ("search_documnet", "read_document", "generate_document", "delete_document", "load_skill_context", "create_workflow", "review_document")
+                    })
 
-                    # writer 调用 generate_document 完成后标记退出
                     if agent_name == "writer" and tool_name == "generate_document":
                         _writer_generated = True
                 except Exception as e:
-                    err = (
-                        f"错误: 工具 {tool_name} 调用失败: {e}。"
-                        "请严格按工具 schema 重新构造参数。"
-                        "若调用 generate_document，document 字段必须是对象(dict)而不是 JSON 字符串。"
-                    )
-                    print(f"  [{agent_name}] ❌ {err}")
+                    # 为不同工具生成友好的错误消息
+                    is_mcp_tool = tool_name.startswith("mcp_") or tool_name not in ("search_documnet", "read_document", "generate_document", "delete_document", "load_skill_context", "create_workflow", "review_document")
+                    if is_mcp_tool:
+                        err = f"MCP tool '{tool_name}' execution failed: {e}. The error has been returned as tool result. Please analyze the error and decide how to proceed - you may retry with corrected parameters, use an alternative tool, or report the failure in your response."
+                    elif tool_name == "generate_document":
+                        err = f"Tool {tool_name} failed: {e}. Use correct schema format. For generate_document, document must be an object, not a JSON string."
+                    else:
+                        err = f"Tool {tool_name} failed: {e}. Please check the parameters and try again."
+                    print(f"  [{agent_name}] {err}")
                     messages.append(ToolMessage(content=err, tool_call_id=tc["id"], name=tool_name))
             else:
                 messages.append(
-                    ToolMessage(
-                        content=f"错误: 未知工具 {tool_name}",
-                        tool_call_id=tc["id"],
-                        name=tool_name,
-                    )
+                    ToolMessage(content=f"Unknown tool: {tool_name}", tool_call_id=tc["id"], name=tool_name)
                 )
-
-        # 允许 writer 在长文场景下多次调用 generate_document 分批输出。
-        # 当模型不再发起 tool_call 时，会在上方 no tool_call 分支自然退出。
     else:
-        # 达到最大迭代但还在调用工具 — 取最后一条 AI 回复
         for m in reversed(messages):
             if isinstance(m, AIMessage) and m.content:
                 text_output = m.content
@@ -534,68 +475,101 @@ def _run_sub_agent(
 
 
 def _format_shared_tool_data(tool_data: list[dict]) -> str:
-    """将收集的工具调用数据格式化为可共享的上下文文本（仅包含搜索定位结果）。"""
+    """Format collected tool data for sharing (all tools including MCP)."""
     if not tool_data:
         return ""
     parts = []
     for item in tool_data:
         tool_name = item["tool"]
-        args = item["args"]
-        result = item["result"]
+        args = item.get("args", {})
+        result = item.get("result", "")
+        is_mcp = item.get("is_mcp", False)
+
+        # 截断过长的结果
+        max_result_len = 4000
+        if len(result) > max_result_len:
+            result = result[:max_result_len] + "\n\n...(结果已截断)"
+
         if tool_name == "search_documnet":
             filters = args.get("filters", {})
             filter_desc = ", ".join(f"{k}={v}" for k, v in filters.items())
             parts.append(f"### 文档搜索: {filter_desc}\n{result}")
+        elif tool_name == "read_document":
+            doc_id = args.get("document_id", "unknown")
+            parts.append(f"### 读取文档 (ID: {doc_id})\n{result}")
+        elif tool_name == "load_skill_context":
+            skill_name = args.get("skill_name", "unknown")
+            parts.append(f"### 技能上下文: {skill_name}\n{result}")
+        elif is_mcp or tool_name.startswith("mcp_"):
+            # MCP 工具调用 - 提取关键信息
+            tool_display_name = args.get("_display_name", tool_name)
+            input_summary = _summarize_mcp_input(args, tool_name)
+            parts.append(f"### MCP工具调用: {tool_display_name}\n输入: {input_summary}\n\n返回结果:\n{result}")
+        else:
+            # 其他工具
+            parts.append(f"### 工具调用: {tool_name}\n参数: {args}\n\n结果:\n{result}")
+
     result_text = "\n\n".join(parts)
-    # 安全截断，避免上下文过大
     if len(result_text) > 8000:
         result_text = result_text[:8000] + "\n\n...(已截断)"
     return result_text
 
 
+def _summarize_mcp_input(args: dict, tool_name: str) -> str:
+    """生成 MCP 工具输入参数的摘要描述。"""
+    if not args:
+        return "无参数"
+
+    # 过滤内部字段
+    public_args = {k: v for k, v in args.items() if not k.startswith("_")}
+
+    if not public_args:
+        return "无参数"
+
+    # 尝试提取关键参数
+    key_params = []
+    for key in ["location", "city", "query", "keyword", "date", "time", "type", "name"]:
+        if key in public_args:
+            key_params.append(f"{key}={public_args[key]}")
+
+    if key_params:
+        return ", ".join(key_params)
+
+    # 如果没有关键参数，列出所有参数（限制数量）
+    param_list = list(public_args.items())[:5]
+    return ", ".join(f"{k}={v}" for k, v in param_list if isinstance(v, (str, int, float, bool)))
+
+
 # region Graph Nodes
 
 
-def _build_multi_agent_graph(llm, model_name: str):
-    """
-    构建多智能体 LangGraph 工作流。
-
-    图结构:
-    START → planner → execute_workflow → END
-
-    execute_workflow 内部按 workflow.steps 顺序执行各 sub-agent。
-    reviewer 负责评审并向用户反馈意见，不会触发自动重写。
-    """
+def _build_multi_agent_graph(llm, model_name: str, mcp_tools: list = None):
+    """Build multi-agent LangGraph workflow."""
+    if mcp_tools is None:
+        mcp_tools = []
     from langgraph.config import get_stream_writer
 
     graph = StateGraph(MultiAgentState)
 
-    # ---- Planner 节点 ----
     def planner_node(state: MultiAgentState) -> dict:
         chat_id = _current_chat_id.get(None)
         if is_stop_requested(chat_id):
-            print(f"[MultiAgent] ⛔ planner 收到停止信号，终止 (session={chat_id})")
+            print(f"[MultiAgent] Planner 收到停止信号，终止 (session={chat_id})")
             return {}
 
         writer = get_stream_writer()
         writer({"type": "status", "content": "🧠 开始分析任务"})
         print("[MultiAgent] Planner 开始规划")
 
-        # 构建 planner 的任务
         task = state.user_message
         if state.document_range:
             range_info = json.dumps(state.document_range, ensure_ascii=False)
-            task += f"\n\n用户选中了文档范围: {range_info}"
+            task += f"\n\nUser selected document range: {range_info}"
 
         if state.document_meta:
             meta_info = json.dumps(state.document_meta, ensure_ascii=False)
-            task += (
-                "\n\n文档全局元信息（来自前端当前文档状态，非正文内容）:"
-                f"\n{meta_info}"
-                "\n请结合这些信息理解任务上下文（如 totalParas/documentName/parsedAt）。"
-            )
+            task += f"\n\nDocument metadata (from frontend):\n{meta_info}"
 
-        # 注入附件内容（文本类文件内容追加到任务，图片仅标注存在）
         if state.attached_files:
             from app.api.routes.files import read_text_file
 
@@ -603,13 +577,12 @@ def _build_multi_agent_graph(llm, model_name: str):
                 filename = f.get("filename", "")
                 is_image = f.get("is_image", False)
                 if is_image:
-                    task += f"\n\n[附件图片: {filename}]（图片内容已随消息发送给模型）"
+                    task += f"\n\n[Attached image: {filename}]"
                 else:
                     text = read_text_file(f.get("file_id", ""), filename)
                     if text:
-                        task += f"\n\n--- 附件: {filename} ---\n{text}"
+                        task += f"\n\n--- Attachment: {filename} ---\n{text}"
 
-        # 注入记忆上下文
         context = state.memory_context if state.memory_context else ""
 
         text, structured, _ = _run_sub_agent(llm, "planner", task, AGENT_TOOLS["planner"], context=context)
@@ -619,19 +592,13 @@ def _build_multi_agent_graph(llm, model_name: str):
             workflow = structured
             step_count = len(workflow.get("steps", []))
             writer(
-                {"type": "status", "content": f"📋 工作流已规划（{step_count} 个步骤）: {workflow.get('summary', '')}"}
+                {"type": "status", "content": f"Workflow planned: {step_count} steps - {workflow.get('summary', '')}"}
             )
         else:
-            # planner 没有调用 create_workflow — 简单问答，流式 token 会通过 messages stream 自然输出
-            print("[MultiAgent] Planner 没有规划出工作流，直接输出文本结果")
-            pass
+            print("[MultiAgent] Planner did not create workflow, direct text output")
 
-        return {
-            "workflow": workflow,
-            "messages": [{"role": "planner", "content": text}],
-        }
+        return {"workflow": workflow, "messages": [{"role": "planner", "content": text}]}
 
-    # ---- 工作流执行节点 ----
     def execute_workflow_node(state: MultiAgentState) -> dict:
         chat_id = _current_chat_id.get(None)
         if is_stop_requested(chat_id):
@@ -642,7 +609,6 @@ def _build_multi_agent_graph(llm, model_name: str):
         workflow = state.workflow
 
         if not workflow or not workflow.get("steps"):
-            # 没有工作流，planner 的文字回复直接作为最终输出
             return {}
 
         steps = workflow["steps"]
@@ -651,7 +617,7 @@ def _build_multi_agent_graph(llm, model_name: str):
         outline = ""
         document_json = {}
         review_result = {}
-        shared_doc_data: list[dict] = []  # 跨步骤共享的文档工具数据
+        shared_doc_data: list[dict] = []
 
         for i, step in enumerate(steps):
             if is_stop_requested(chat_id):
@@ -660,66 +626,66 @@ def _build_multi_agent_graph(llm, model_name: str):
 
             agent_name = step["agent"]
             task = step["task"]
-            tools = AGENT_TOOLS.get(agent_name, [])
+            base_tools = AGENT_TOOLS.get(agent_name, [])
 
-            # 通知消费端当前 agent 阶段（用于决定是否转发流式 token）
+            # For research agent, add MCP tools dynamically
+            if agent_name == "research":
+                tools = list(base_tools) + list(mcp_tools)
+            else:
+                tools = base_tools
+
+            agent_cn = {
+                "planner": "规划",
+                "research": "研究",
+                "outline": "大纲",
+                "writer": "写作",
+                "reviewer": "审核",
+            }.get(agent_name, agent_name)
             writer({"type": "__phase", "agent": agent_name})
-            writer(
-                {
-                    "type": "status",
-                    "content": f"⚙️ 步骤 {i + 1}/{len(steps)}: {agent_name} 开始执行",
-                }
-            )
+            writer({"type": "status", "content": f"⚙️ 步骤 {i + 1}/{len(steps)}: {agent_cn} 开始执行"})
             print(f"[MultiAgent] 步骤 {i + 1}: {agent_name} - {task[:50]}")
 
-            # 构建上下文 — 收集依赖步骤的输出
             context_parts = []
+
+            # 添加共享的长期记忆上下文给所有 Agent
+            if state.memory_context:
+                context_parts.append(f"[长期记忆]\n{state.memory_context}")
+
             for dep_idx in step.get("depends_on", []):
                 if 0 <= dep_idx < len(step_results):
                     context_parts.append(step_results[dep_idx])
-            # 始终把已有的 research_data 和 outline 传给后续 agent
             if agent_name in ("outline", "writer") and research_data:
-                context_parts.insert(0, f"[研究资料]\n{research_data}")
+                context_parts.append(f"[研究资料]\n{research_data}")
             if agent_name == "writer" and outline:
-                context_parts.insert(0, f"[写作大纲]\n{outline}")
-            # 将前序步骤收集的文档数据共享给 outline / writer
+                context_parts.append(f"[写作大纲]\n{outline}")
             if agent_name in ("outline", "writer") and shared_doc_data:
                 formatted = _format_shared_tool_data(shared_doc_data)
                 if formatted:
-                    context_parts.insert(0, f"[前序步骤获取的文档数据]\n{formatted}")
+                    context_parts.append(f"[前序步骤获取的文档数据]\n{formatted}")
 
             context = "\n\n---\n\n".join(context_parts)
 
             text, structured, tool_data = _run_sub_agent(llm, agent_name, task, tools, context=context)
 
-            # 累积文档工具数据供后续步骤使用
             if tool_data:
                 shared_doc_data.extend(tool_data)
 
             step_results.append(text)
 
-            # 按 agent 类型保存结果
             if agent_name == "research":
                 research_data += ("\n\n" + text) if research_data else text
-
             elif agent_name == "outline":
                 outline = text
-
             elif agent_name == "writer":
+                # generate_document 工具已经通过 stream_writer 发送了 {"type": "json", ...} 事件
+                # 这里不需要重复发送，只需要记录结果
                 if structured and "paragraphs" in structured:
                     document_json = structured
-                    # 直接通过 custom stream 发送文档 JSON 给前端
-                    writer({"type": "json", "content": structured})
-
-                else:
-                    writer({"type": "status", "content": "⚠️ Writer 未生成文档结构"})
-
             elif agent_name == "reviewer":
                 if structured and "score" in structured:
                     review_result = structured
-                    feedback = structured.get("feedback", "")
                     score = structured.get("score", 0)
-                    summary = feedback[:100] if feedback else "审核完成"
+                    summary = structured.get("feedback", "")[:100]
                     writer({"type": "status", "content": f"📝 审核评分: {score}/10 - {summary}"})
                 else:
                     writer({"type": "status", "content": "✅ 审核完成"})
@@ -731,13 +697,11 @@ def _build_multi_agent_graph(llm, model_name: str):
             "review_result": review_result,
         }
 
-    # ---- 路由 ----
     def route_after_planner(state: MultiAgentState) -> str:
         if state.workflow and state.workflow.get("steps"):
             return "execute_workflow"
         return END
 
-    # ---- 构建图 ----
     graph.add_node("planner", planner_node)
     graph.add_node("execute_workflow", execute_workflow_node)
 
@@ -752,7 +716,7 @@ def _build_multi_agent_graph(llm, model_name: str):
     return graph.compile()
 
 
-# region 主入口
+# region Main Entry
 
 
 async def process_writing_request_stream(
@@ -765,37 +729,57 @@ async def process_writing_request_stream(
     mode: str | None = None,
     chat_id: str | None = None,
     attached_files: list[dict] | None = None,
+    enable_thinking: bool = True,
 ) -> AsyncGenerator[str, None]:
-    """
-    多智能体流式处理写作请求（与单 agent 接口完全兼容）。
-
-    Yields:
-        SSE 格式的流式输出
-    """
-    print("[MultiAgent] 开始处理请求")
+    """Multi-agent streaming handler (compatible with single agent interface)."""
+    print("[MultiAgent] Starting request")
+    print(f"[MultiAgent] Deep thinking: {enable_thinking}")
 
     model_name = resolve_model(model or "auto", provider or "")
     llm = _create_llm(model_name)
-    app = _build_multi_agent_graph(llm, model_name)
+
+    # Load MCP tools dynamically for multi-agent (research agent uses MCP tools)
+    # MUST load BEFORE building the graph so the closure captures mcp_tools
+    mcp_tools, mcp_clients, mcp_failed_servers = await load_mcp_tools()
+    if mcp_failed_servers:
+        for failed in mcp_failed_servers:
+            server_name = str(failed.get("name") or "未命名服务器")
+            error_text = str(failed.get("error") or "未知错误")
+            if len(error_text) > 300:
+                error_text = error_text[:300] + "..."
+            yield f"data: {json.dumps({'type': 'status', 'content': f'⚠️ MCP 服务器 {server_name} 加载失败: {error_text}'}, ensure_ascii=False)}\n\n"
+    if mcp_tools:
+        print(f"[MultiAgent] MCP tools loaded: {[t.name for t in mcp_tools]}")
+        # Build and cache MCP tools prompt for research agent
+        mcp_prompt = build_mcp_tools_prompt(mcp_tools)
+        from app.services.multi_agent.prompts import update_mcp_tools_prompt
+
+        update_mcp_tools_prompt(mcp_prompt)
+
+    # Build and cache skills prompt for research agent
+    skills_prompt = build_skills_prompt()
+    if skills_prompt:
+        from app.services.multi_agent.prompts import update_skills_prompt
+
+        update_skills_prompt(skills_prompt)
+
+    # Build graph AFTER mcp_tools is loaded
+    app = _build_multi_agent_graph(llm, model_name, mcp_tools)
 
     try:
-        # 获取事件循环，注册供 tool 使用
         loop = asyncio.get_running_loop()
         if chat_id:
             register_loop(chat_id, loop)
 
-        # 构建记忆上下文
         memory_context = ""
 
-        # 1. 长期记忆（来自 md 文件）
         from app.services.memory import build_long_term_memory_prompt
 
         long_term_prompt = build_long_term_memory_prompt()
         if long_term_prompt:
             memory_context += long_term_prompt + "\n\n"
-            print("[MultiAgent] 已加载长期记忆")
+            print("[MultiAgent] Loaded long-term memory")
 
-        # 2. 短期记忆（最近 k 轮对话）
         if history:
             from app.services.memory import build_short_term_messages
 
@@ -806,12 +790,12 @@ async def process_writing_request_stream(
                     if isinstance(m, SystemMessage):
                         parts.append(m.content)
                     elif isinstance(m, HumanMessage):
-                        parts.append(f"[用户] {m.content}")
+                        parts.append(f"[User] {m.content}")
                     elif isinstance(m, AIMessage):
-                        parts.append(f"[助手] {m.content}")
+                        parts.append(f"[Assistant] {m.content}")
                 if parts:
                     memory_context += "## Recent Conversation\n" + "\n\n".join(parts) + "\n\n"
-                    print(f"[MultiAgent] 构建短期记忆上下文: {len(parts)} 条消息")
+                    print(f"[MultiAgent] Built short-term memory: {len(parts)} messages")
 
         initial_state = MultiAgentState(
             user_message=message,
@@ -822,15 +806,12 @@ async def process_writing_request_stream(
         )
 
         queue: asyncio.Queue = asyncio.Queue()
-        # 追踪当前 agent 阶段，决定是否转发流式 token
-        # 只有 writer 的流式 token 不转发（直接 invoke 拿结果），其他 agent 全部流式输出
         _SUPPRESS_STREAM = {"writer"}
         current_agent = "planner"
-        _collected_text_parts: list[str] = []  # 收集 AI 回复文本，用于存入长期记忆
-        _last_input_tokens = 0  # 最近一次 API 响应的真实 input_tokens（优先于本地估算）
+        _collected_text_parts: list[str] = []
+        _last_input_tokens = 0
         _conversation_history: list = []
 
-        # 构建 LangSmith tracing config（可选）
         langsmith_config = None
         if _langsmith_enabled:
             try:
@@ -850,7 +831,6 @@ async def process_writing_request_stream(
                 langsmith_config = None
 
         def run_stream():
-            """在独立线程中运行同步的 LangGraph stream"""
             try:
                 if chat_id:
                     _current_chat_id.set(chat_id)
@@ -870,19 +850,18 @@ async def process_writing_request_stream(
                         response = app.stream(**stream_kwargs)
                         for stream_item in response:
                             if chat_id and is_stop_requested(chat_id):
-                                print(f"[MultiAgent] ⛔ 检测到停止信号，结束流式处理 (session={chat_id})")
+                                print(f"[MultiAgent] Stop requested, ending stream (session={chat_id})")
                                 break
                             asyncio.run_coroutine_threadsafe(queue.put(stream_item), loop)
                         asyncio.run_coroutine_threadsafe(queue.put(None), loop)
                         return
                     except Exception as e:
-                        # 上下文超限：通知主循环触发重量重压缩
                         if _is_context_overflow_error(e):
-                            print(f"[MultiAgent] ⚠️ 上下文超限错误（{e}），触发被动重量重压缩")
+                            print(f"[MultiAgent] Context overflow, triggering heavy compaction")
                             asyncio.run_coroutine_threadsafe(queue.put(("context_overflow", str(e))), loop)
                             raise
                         if attempt < max_attempts and (not has_any_stream_item) and _is_transient_stream_error(e):
-                            print(f"[MultiAgent] ⚠️ 流式连接异常（第 {attempt} 次）: {e}，准备重试")
+                            print(f"[MultiAgent] Streaming error ({attempt}): {e}, retrying")
                             time.sleep(0.5)
                             continue
                         raise
@@ -901,9 +880,8 @@ async def process_writing_request_stream(
             if isinstance(stream_item, tuple) and stream_item[0] == "error":
                 raise Exception(stream_item[1])
 
-            # 上下文超限被动重压缩
             if isinstance(stream_item, tuple) and stream_item[0] == "context_overflow":
-                print(f"[MultiAgent] ⚠️ 收到上下文超限信号，触发被动重量重压缩")
+                print(f"[MultiAgent] Context overflow, triggering passive heavy compaction")
                 from app.services.memory import (
                     compress_conversation_history_if_needed,
                     _estimate_messages_tokens,
@@ -923,7 +901,7 @@ async def process_writing_request_stream(
                 if heavy_meta.get("heavy_compact_triggered"):
                     before = heavy_meta.get("before_tokens", current_tokens)
                     after = heavy_meta.get("after_tokens", 0)
-                    print(f"[MultiAgent] 🗜️ 被动重量重压缩完成: {before} -> {after} tokens")
+                    print(f"[MultiAgent] Heavy compaction done: {before} -> {after} tokens")
                     updated_history = []
                     for m in compressed:
                         role = {"HumanMessage": "user", "AIMessage": "assistant", "SystemMessage": "system"}.get(
@@ -940,10 +918,10 @@ async def process_writing_request_stream(
                             content_val = text_content
                         if isinstance(m, (HumanMessage, AIMessage, SystemMessage)):
                             updated_history.append({"role": role, "content": str(content_val)})
-                    raise ContextOverflowError("上下文超限，已触发重量重压缩", updated_history)
+                    raise ContextOverflowError("Context overflow, heavy compaction triggered", updated_history)
                 else:
-                    print("[MultiAgent] ⚠️ 被动重量重压缩失败，无法生成摘要")
-                    raise Exception("上下文超限但重量重压缩失败，请手动减少对话历史")
+                    print("[MultiAgent] Heavy compaction failed")
+                    raise Exception("Context overflow but heavy compaction failed")
 
             if not isinstance(stream_item, tuple):
                 continue
@@ -955,36 +933,28 @@ async def process_writing_request_stream(
                     continue
                 msg = chunk[0]
 
-                # 跟踪对话历史，记录最近一次 API 响应的真实 input_tokens
-                # 注意：AIMessageChunk 是流式中间块，不追加到 _conversation_history
                 if isinstance(msg, AIMessage):
                     _conversation_history.append(msg)
                     usage = getattr(msg, "usage_metadata", None)
                     if isinstance(usage, dict) and "input_tokens" in usage and usage.get("input_tokens", 0) > 0:
                         _last_input_tokens = int(usage.get("input_tokens", 0))
                 elif isinstance(msg, AIMessageChunk):
-                    # 只收集文本内容用于流式输出，不追加到 _conversation_history
                     from app.services.agent.agent import _extract_text_content
 
                     normalized = _extract_text_content(msg.content)
                     if normalized:
                         _collected_text_parts.append(normalized)
-                    # 从流式 chunk 的 usage_metadata 获取真实 input_tokens
                     usage = getattr(msg, "usage_metadata", None)
                     if isinstance(usage, dict) and "input_tokens" in usage and usage.get("input_tokens", 0) > 0:
                         _last_input_tokens = int(usage.get("input_tokens", 0))
-                        # 发送更新后的 token 统计（让前端始终看到最新值）
                         from app.services.memory import MAX_CONTEXT_TOKENS
 
-                        print(f"[MultiAgent] 当前上下文: {_last_input_tokens / 1000:.1f}k tokens")
                         yield f"data: {json.dumps({'type': 'token_stats', 'current_tokens': _last_input_tokens, 'max_tokens': MAX_CONTEXT_TOKENS}, ensure_ascii=False)}\n\n"
 
-                # 发送 token 统计（优先使用 API 真实 input_tokens）
                 if isinstance(msg, (AIMessage, ToolMessage)):
                     try:
                         from app.services.memory import MAX_CONTEXT_TOKENS
 
-                        # 优先使用 API 真实 input_tokens，ToolMessage 本身很小可忽略
                         current_tokens = (
                             _last_input_tokens
                             if _last_input_tokens > 0
@@ -992,25 +962,25 @@ async def process_writing_request_stream(
                         )
                         tokens_k = current_tokens / 1000
                         max_tokens_k = MAX_CONTEXT_TOKENS / 1000
-                        print(f"[MultiAgent] 当前上下文: {tokens_k:.1f}k tokens")
+                        # print(f"[MultiAgent] Context: {tokens_k:.1f}k tokens")
                         yield f"data: {json.dumps({'type': 'token_stats', 'current_tokens': current_tokens, 'max_tokens': MAX_CONTEXT_TOKENS}, ensure_ascii=False)}\n\n"
                     except Exception:
                         pass
 
-                # 处理 OpenAI/DeepSeek reasoning 模型的 reasoning_content
-                if isinstance(msg, AIMessageChunk):
+                if enable_thinking and isinstance(msg, AIMessageChunk):
                     reasoning_content = getattr(msg, "additional_kwargs", {}).get("reasoning_content")
                     if reasoning_content:
                         yield f"data: {json.dumps({'type': 'thinking', 'content': reasoning_content}, ensure_ascii=False)}\n\n"
-                # 只转发非 writer agent 的 AI 文字 token
+
                 if isinstance(msg, AIMessageChunk) and msg.content and current_agent not in _SUPPRESS_STREAM:
+                    from app.services.agent.agent import _extract_text_content
+
                     normalized = _extract_text_content(msg.content)
                     if normalized:
                         yield f"data: {json.dumps({'type': 'text', 'content': normalized}, ensure_ascii=False)}\n\n"
 
             elif input_type == "custom" and chunk:
                 if isinstance(chunk, dict):
-                    # __phase 是内部标记，用于切换 agent 阶段，不发给前端
                     if chunk.get("type") == "__phase":
                         current_agent = chunk.get("agent", "")
                         continue
@@ -1018,14 +988,10 @@ async def process_writing_request_stream(
                 else:
                     yield f"data: {json.dumps({'type': 'status', 'content': str(chunk)}, ensure_ascii=False)}\n\n"
 
-        # [已移除] 长期记忆存储
-        # 之前代码：store_conversation_to_long_term() → 已移除
-        # 对话历史现在通过短期记忆 + 总结记忆机制管理
-
         yield "data: [DONE]\n\n"
 
     except Exception as e:
         print(f"[MultiAgent Error] {e}")
         traceback.print_exc()
-        yield f"data: {json.dumps({'type': 'text', 'content': f'错误: {str(e)}'}, ensure_ascii=False)}\n\n"
+        yield f"data: {json.dumps({'type': 'text', 'content': f'Error: {str(e)}'}, ensure_ascii=False)}\n\n"
         yield "data: [DONE]\n\n"

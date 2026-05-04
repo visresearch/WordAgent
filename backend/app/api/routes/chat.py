@@ -296,25 +296,31 @@ async def _run_ws_stream(
                     else:
                         await websocket.send_text(payload)
 
-            # 流式处理结束，尝试提取长期记忆
-            from app.services.memory import extract_and_save_memory, MEMORY_EXTRACT_TEMPERATURE
-            from app.services.llm_client import create_sync_llm_client
+            # 通知前端流式处理结束（先发送 done，再异步执行记忆提取）
+            await websocket.send_text(json.dumps({"type": "done"}, ensure_ascii=False))
 
-            try:
-                sync_llm = create_sync_llm_client(model, provider, temperature=MEMORY_EXTRACT_TEMPERATURE)
-                if sync_llm:
-                    # 构建对话文本
-                    conversation_parts = []
-                    for h in history[-10:]:  # 只取最近 10 条
-                        role = h.get("role", "")
-                        content = h.get("content", "")
-                        if content and role in ("user", "assistant"):
-                            conversation_parts.append(f"{role.upper()}: {content}")
-                    conversation = "\n\n".join(conversation_parts)
-                    if conversation:
-                        extract_and_save_memory(conversation, sync_llm)
-            except Exception as e:
-                print(f"[WebSocket] 长期记忆提取失败: {e}")
+            # 异步提取长期记忆（不阻塞前端）
+            async def _extract_memory_async():
+                try:
+                    from app.services.memory import extract_and_save_memory, MEMORY_EXTRACT_TEMPERATURE
+                    from app.services.llm_client import create_sync_llm_client
+
+                    sync_llm = create_sync_llm_client(model, provider, temperature=MEMORY_EXTRACT_TEMPERATURE)
+                    if sync_llm:
+                        conversation_parts = []
+                        for h in history[-10:]:
+                            role = h.get("role", "")
+                            content = h.get("content", "")
+                            if content and role in ("user", "assistant"):
+                                conversation_parts.append(f"{role.upper()}: {content}")
+                        conversation = "\n\n".join(conversation_parts)
+                        if conversation:
+                            extract_and_save_memory(conversation, sync_llm)
+                except Exception as e:
+                    print(f"[WebSocket] 长期记忆提取失败: {e}")
+
+            # 创建后台任务执行记忆提取，不等待完成
+            asyncio.create_task(_extract_memory_async())
 
             return  # 正常结束
         except ContextOverflowError as e:
