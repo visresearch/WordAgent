@@ -53,7 +53,7 @@ Compared with many AI writing assistants on the market, WenCe AI provides:
 | -- | -- |
 | ![](./web/docs/public/wps_addon.png) | ![](./web/docs/public/pyQt.png) |
 
-For example, in WPS **single-agent mode**, if a user asks: "Expand my internship objective into five points," the agent follows a "**locate → read → understand → edit → generate**" workflow. It calls `search_document` to locate the target paragraph, `read_document` to fetch the content, then performs edits (for example via `delete_document`) and finally calls `generate_document` to produce the rewritten result. The frontend add-in highlights before/after changes with different colors so users can clearly see what was modified.
+For example, in WPS **single-agent mode**, if a user asks: "Expand my internship objective into five points," the agent follows a "**locate → read → understand → edit**" workflow. It calls `search_document` to locate the target paragraph, `read_document` to fetch the content, then performs edits (for example via `delete_document`) and finally calls `generate_document` to produce the rewritten result. The frontend add-in highlights before/after changes with different colors so users can clearly see what was modified.
 
 ![](./web/docs/public/preview2.png)
 

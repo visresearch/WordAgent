@@ -1,7 +1,7 @@
 
 # Changelog
 
-## Unreleased
+## [v0.3.6]
 
 ### Added
 - 多智能体模式与单智能体模式评估

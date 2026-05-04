@@ -47,6 +47,7 @@ export default defineConfig({
           text: '关于',
           items: [
             { text: '关于作者', link: '/guide/about' },
+            { text: '赞赏支持', link: '/guide/sponsor' },
           ]
         }
       ]

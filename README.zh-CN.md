@@ -51,7 +51,7 @@
 |--|--|
 |![](./web/docs/public/wps_addon.png)|![](./web/docs/public/pyQt.png)|
 
-举个例子，以 WPS 的**单智能体（Single Agent）模式**为例：用户在加载项里输入“帮我把实习目的扩写成 5 点”。智能体会按“**定位 → 读取 → 理解 → 编辑 → 生成**”的流程完成任务：先调用 `search_document` 定位目标段落，再调用 `read_document` 读取段落内容；在分析理解后，调用 `delete_document` 删除原内容，最后调用 `generate_document` 生成新的扩写结果。前端加载项会以不同颜色的批注方式渲染修改前/修改后内容，便于用户直观看到变更。
+举个例子，以 WPS 的**单智能体（Single Agent）模式**为例：用户在加载项里输入“帮我把实习目的扩写成 5 点”。智能体会按“**定位 → 读取 → 理解 → 编辑**”的流程完成任务：先调用 `search_document` 定位目标段落，再调用 `read_document` 读取段落内容；在分析理解后，调用 `delete_document` 删除原内容，最后调用 `generate_document` 生成新的扩写结果。前端加载项会以不同颜色的批注方式渲染修改前/修改后内容，便于用户直观看到变更。
 
 ![](./web/docs/public/preview2.png)
 
