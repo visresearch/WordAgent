@@ -139,14 +139,18 @@ async def chat_websocket(websocket: WebSocket):
                 if document_range:
                     print(f"文档范围: {document_range}")
                 if document_meta:
-                    print(
-                        "文档元信息:",
-                        {
-                            "documentName": document_meta.get("documentName", ""),
-                            "totalParas": document_meta.get("totalParas", 0),
-                            "parsedAt": document_meta.get("parsedAt", ""),
-                        },
-                    )
+                    # 支持单个文档和多个文档的打印
+                    if isinstance(document_meta, list):
+                        print(f"文档元信息: {document_meta}")
+                    else:
+                        print(
+                            "文档元信息:",
+                            {
+                                "documentName": document_meta.get("documentName", ""),
+                                "totalParas": document_meta.get("totalParas", 0),
+                                "isEmpty": document_meta.get("isEmpty", False),
+                            },
+                        )
                 if attached_files:
                     print(f"附件: {[f.get('filename', '?') for f in attached_files]}")
                 print("=" * 50)
@@ -265,7 +269,7 @@ async def _run_ws_stream(
     model: str,
     provider: str,
     document_range: list | None,
-    document_meta: dict | None,
+    document_meta: list | dict | None,  # 支持单个文档（dict）和多个文档（list）
     history: list,
     attached_files: list | None = None,
     enable_thinking: bool = True,
@@ -277,6 +281,7 @@ async def _run_ws_stream(
     max_retries = 2
     for attempt in range(max_retries):
         try:
+            _done_sent = False
             async for chunk in stream_fn(
                 message=message,
                 document_range=document_range,
@@ -292,12 +297,15 @@ async def _run_ws_stream(
                 if chunk.startswith("data: "):
                     payload = chunk[6:].strip()
                     if payload == "[DONE]":
-                        await websocket.send_text(json.dumps({"type": "done"}, ensure_ascii=False))
+                        if not _done_sent:
+                            await websocket.send_text(json.dumps({"type": "done"}, ensure_ascii=False))
+                            _done_sent = True
                     else:
                         await websocket.send_text(payload)
 
-            # 通知前端流式处理结束（先发送 done，再异步执行记忆提取）
-            await websocket.send_text(json.dumps({"type": "done"}, ensure_ascii=False))
+            # 确保发送一次 done（防止 agent 异常时未发送）
+            if not _done_sent:
+                await websocket.send_text(json.dumps({"type": "done"}, ensure_ascii=False))
 
             # 异步提取长期记忆（不阻塞前端）
             async def _extract_memory_async():

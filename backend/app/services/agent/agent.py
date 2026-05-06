@@ -280,7 +280,16 @@ def build_graph(llm_with_tools, all_tools: list):
                     results.append(ToolMessage(content=content, tool_call_id=tool_call["id"], name=tool_name))
                 except Exception as e:
                     # 为不同工具生成友好的错误消息
-                    is_mcp_tool = tool_name.startswith("mcp_") or tool_name not in ("search_documnet", "read_document", "generate_document", "delete_document", "load_skill_context", "create_workflow", "review_document", "ask")
+                    is_mcp_tool = tool_name.startswith("mcp_") or tool_name not in (
+                        "search_documnet",
+                        "read_document",
+                        "generate_document",
+                        "delete_document",
+                        "load_skill_context",
+                        "create_workflow",
+                        "review_document",
+                        "ask",
+                    )
                     if is_mcp_tool:
                         err = f"MCP tool '{tool_name}' execution failed: {e}. The error has been returned as tool result. Please analyze the error and decide how to proceed - you may retry with corrected parameters, use an alternative tool, or report the failure in your response."
                     elif tool_name == "generate_document":
@@ -583,44 +592,62 @@ async def process_writing_request_stream(
         # 构建用户消息
         user_content = message
         if document_range:
-            range_instructions = "\n".join(
-                f"  - read_document(startParaIndex={r.get('startParaIndex', 0)}, endParaIndex={r.get('endParaIndex', -1)})"
-                for r in document_range
-            )
+            # 构建文档范围描述
+            range_lines = []
+            for r in document_range:
+                doc_name = r.get("docName", "")
+                start = r.get("startParaIndex", 0)
+                end = r.get("endParaIndex", -1)
+                range_str = f"《{doc_name}》paragraphs {start} to {end}"
+                range_lines.append(range_str)
+
             if mode == "ask":
                 user_content = (
-                    f"User request: {message}\n\n"
-                    f"⚠️ First call read_document for the following ranges (mandatory, do not skip):\n{range_instructions}\n"
-                    f"After reading the document content, answer the question with analysis and suggestions. "
-                    f"If professional review feedback is needed, call run_sub_agent(agent_type='reviewer')."
+                    f"{message}\n\n"
+                    f"User has selected the following document content:\n"
+                    + "\n".join(f"  - {line}" for line in range_lines)
+                    + "\nPlease answer based on the above content."
                 )
             else:
                 user_content = (
-                    f"User request: {message}\n\n"
-                    f"⚠️ First call read_document for the following ranges (mandatory, do not skip):\n{range_instructions}\n"
-                    f"After reading the document content, continue based on the user request. "
-                    f"For writing/modification, prioritize direct calls to generate_document/delete_document. "
-                    f"If professional review feedback is needed, call run_sub_agent(agent_type='reviewer')."
+                    f"{message}\n\n"
+                    f"Please process based on the user-selected document content:\n"
+                    + "\n".join(f"  - {line}" for line in range_lines)
                 )
             print(f"[Agent] 文档范围: {document_range}")
 
-        # 注入文档全局元信息
+        # 注入文档全局元信息（支持多文档）
         if document_meta:
-            meta_text = json.dumps(document_meta, ensure_ascii=False)
+            # 支持单个文档（dict）和多个文档（list）
+            if isinstance(document_meta, list):
+                meta_list = document_meta
+            else:
+                meta_list = [document_meta]
+
+            # 使用 JSON 格式输出元信息（紧凑模式，不换行）
+            meta_json = json.dumps(meta_list, ensure_ascii=False, separators=(",", ":"))
             user_content += (
                 "\n\n[Document Global Metadata]"
                 "\nThe following fields come from frontend document state and are not body content."
-                f"\n{meta_text}"
-                "\nUse these metadata fields in task analysis (e.g., totalParas, documentName, parsedAt)."
+                f"\n{meta_json}"
+                "\nUse these metadata fields in task analysis. The first document in the array is the active document the user is currently viewing."
             )
-            print(
-                "[Agent] 文档元信息:",
-                {
-                    "documentName": document_meta.get("documentName", ""),
-                    "totalParas": document_meta.get("totalParas", 0),
-                    "parsedAt": document_meta.get("parsedAt", ""),
-                },
-            )
+            # print(
+            #     "[Agent] 文档元信息:",
+            #     {
+            #         "totalDocuments": len(meta_list),
+            #         "activeDocument": meta_list[0].get("documentName", "") if meta_list else "",
+            #         "documents": [
+            #             {
+            #                 "documentId": m.get("documentId", ""),
+            #                 "documentName": m.get("documentName", ""),
+            #                 "totalParas": m.get("totalParas", 0),
+            #                 "isEmpty": m.get("isEmpty", False),
+            #             }
+            #             for m in meta_list
+            #         ],
+            #     },
+            # )
 
         # 处理附件
         image_content_parts = []
@@ -763,7 +790,7 @@ async def process_writing_request_stream(
             # 上下文超限被动重压缩
             if isinstance(stream_item, tuple) and stream_item[0] == "context_overflow":
                 print(f"[Agent] ⚠️ 收到上下文超限信号，触发被动重量重压缩")
-                from app.services.memory import compress_conversation_history_if_needed, _estimate_messages_tokens
+                from app.services.context import compress_conversation_history_if_needed, _estimate_messages_tokens
 
                 current_tokens = _estimate_messages_tokens(_conversation_history)
                 compressed, meta = compress_conversation_history_if_needed(
@@ -822,7 +849,7 @@ async def process_writing_request_stream(
                     usage = getattr(msg, "usage_metadata", None)
                     if isinstance(usage, dict) and "input_tokens" in usage and usage.get("input_tokens", 0) > 0:
                         _last_input_tokens = int(usage.get("input_tokens", 0))
-                        from app.services.memory import MAX_CONTEXT_TOKENS
+                        from app.services.context import MAX_CONTEXT_TOKENS
 
                         tokens_k = _last_input_tokens / 1000
                         max_tokens_k = MAX_CONTEXT_TOKENS / 1000
@@ -846,10 +873,6 @@ async def process_writing_request_stream(
                     tool_name = getattr(msg, "name", "")
                     has_tool_result = True
 
-                    if tool_name == "read_document":
-                        print(f"[Agent] ⏭️ 跳过 read_document 工具返回值")
-                        continue
-
                     if tool_name == "run_sub_agent":
                         print(f"[Agent] ⏭️ 跳过 run_sub_agent 工具返回值")
                         if isinstance(content, str) and content.startswith("Sub-agent execution failed"):
@@ -857,25 +880,6 @@ async def process_writing_request_stream(
                         elif isinstance(content, str) and content:
                             _collected_text_parts.append(content)
                         continue
-
-                    if tool_name == "generate_document":
-                        doc_json = None
-                        try:
-                            if isinstance(content, dict):
-                                doc_json = content
-                            elif isinstance(content, str):
-                                try:
-                                    doc_json = json.loads(content)
-                                except json.JSONDecodeError:
-                                    import ast
-
-                                    doc_json = ast.literal_eval(content)
-                        except Exception:
-                            pass
-
-                        if isinstance(doc_json, dict) and "paragraphs" in doc_json:
-                            yield f"data: {json.dumps({'type': 'json', 'content': doc_json}, ensure_ascii=False)}\n\n"
-                            continue
 
                     # MCP 工具日志
                     if tool_name in mcp_tool_names:

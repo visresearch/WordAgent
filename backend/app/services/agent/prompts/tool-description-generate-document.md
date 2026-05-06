@@ -2,8 +2,8 @@
 
 **When calling `generate_document`, the `document` parameter MUST be a direct JSON object, NOT a JSON string!**
 
-- ✅ CORRECT: `{"document": {"insertParaIndex": -1, "paragraphs": [...], "styles": {...}}}`
-- ❌ WRONG: `{"document": "{\"insertParaIndex\": -1, \"paragraphs\": [...]}"}` (escaped string inside string!)
+- ✅ CORRECT: `{"document": {"paragraphs": [...], "styles": {...}}, "insertParaIndex": -1}`
+- ❌ WRONG: `{"document": "{\"paragraphs\": [...]}"}` (escaped string inside string!)
 - ❌ WRONG: `{"document": {"document": {...}}}` (double-wrapped)
 - ❌ WRONG: `generate_document(document="...")` (document passed as string argument)
 
@@ -11,12 +11,16 @@
 
 The `document` parameter must be passed as a raw JSON object, like calling a function with a Python dict literal.
 
+**`insertParaIndex` must be passed as a separate tool argument, not inside the document object!**
+
 ---
 
-Generate formatted document payload for insertion into the active Word document.
+Generate formatted document payload for insertion into a Word document.
 
 ## Parameters:
-- `document` (object, DocumentOutput): generated content payload for insertion (paragraphs/tables/styles/insert index).
+- `document` (object, DocumentOutput): generated content payload for insertion (paragraphs/tables/styles).
+- `docId` (string, optional): Document ID to insert into. If None, uses the currently active document. The documentId for each open document is included in the documentMeta sent with each chat message.
+- `insertParaIndex` (int, optional): 0-based paragraph index where content will be inserted before. Default is -1 (append to end). Use 0 for beginning of document.
 
 ## When to use:
 - Create new content and insert into document.
@@ -59,7 +63,6 @@ Minimal append payload:
 ```json
 {
 	"document": {
-		"insertParaIndex": -1,
 		"paragraphs": [
 			{
 				"pStyle": "pS_3",
@@ -71,7 +74,8 @@ Minimal append payload:
 			"pS_3": ["justify", 0, 0, 0, 24, 0, 0, "正文", 1],
 			"rS_2": ["宋体", 12, false, false, 0, "#000000", "#000000", 0, false, false, false]
 		}
-	}
+	},
+	"insertParaIndex": -1
 }
 ```
 
@@ -79,7 +83,6 @@ Replacement payload at a fixed index:
 ```json
 {
 	"document": {
-		"insertParaIndex": 12,
 		"paragraphs": [
 			{
 				"pStyle": "pS_3",
@@ -95,7 +98,8 @@ Replacement payload at a fixed index:
 			"pS_3": ["justify", 0, 0, 0, 24, 0, 0, "正文", 1],
 			"rS_2": ["宋体", 12, false, false, 0, "#000000", "#000000", 0, false, false, false]
 		}
-	}
+	},
+	"insertParaIndex": 12
 }
 ```
 
@@ -103,7 +107,6 @@ Image insertion payload:
 ```json
 {
 	"document": {
-		"insertParaIndex": -1,
 		"paragraphs": [
 			{
 				"pStyle": "pS_3",
@@ -119,7 +122,8 @@ Image insertion payload:
 			"pS_3": ["center", 0, 0, 0, 0, 0, 0, "正文", 1],
 			"rS_2": ["宋体", 12, false, false, 0, "#000000", "#000000", 0, false, false, false]
 		}
-	}
+	},
+	"insertParaIndex": -1
 }
 ```
 

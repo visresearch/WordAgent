@@ -110,11 +110,14 @@ async function request(url, options = {}) {
 async function getCurrentDocumentMeta() {
   try {
     return await Word.run(async (context) => {
-      const paragraphs = context.document.body.paragraphs;
+      const doc = context.document;
+      const paragraphs = doc.body.paragraphs;
       paragraphs.load("items");
       await context.sync();
 
       let documentName = "";
+      let documentId = "";
+
       try {
         const url = Office?.context?.document?.url;
         if (url) {
@@ -122,11 +125,34 @@ async function getCurrentDocumentMeta() {
         }
       } catch (e) {}
 
+      // 尝试从文档属性获取 documentId
+      try {
+        const customProps = doc.properties.customProperties;
+        customProps.load("items");
+        await context.sync();
+        for (let i = 0; i < customProps.items.length; i++) {
+          if (customProps.items[i].name === "wende_doc_id") {
+            documentId = customProps.items[i].value || "";
+            break;
+          }
+        }
+      } catch (e) {}
+
+      // 判断文档是否为空
+      let isEmpty = paragraphs.items.length === 0;
+      if (!isEmpty && paragraphs.items.length > 0) {
+        const firstParaText = paragraphs.items[0].getText();
+        await context.sync();
+        isEmpty = firstParaText.trim().length === 0 && paragraphs.items.length <= 2;
+      }
+
       return {
+        documentId: documentId || "ms_office_active_doc",
+        documentName: documentName || '未命名文档',
         totalParas: paragraphs.items.length,
-        documentName,
         pageCount: 0,
         isReadOnly: false,
+        isEmpty,
         parsedAt: new Date().toISOString(),
       };
     });

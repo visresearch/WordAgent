@@ -1,8 +1,9 @@
-Read paragraph-range content from the active Word document through the frontend bridge.
+Read paragraph-range content from a Word document through the frontend bridge.
 
 ## Parameters:
 - `startParaIndex` (int): 0-based inclusive start paragraph index. Default: `0`.
 - `endParaIndex` (int): 0-based inclusive end paragraph index. Default: `49`. `-1` means end of document.
+- `docId` (string, optional): Document ID to read from. If None, reads from the currently active document. The documentId for each open document is included in the documentMeta sent with each chat message.
 
 ## When to use:
 - Need original paragraph text/style before rewriting, polishing, or translating.

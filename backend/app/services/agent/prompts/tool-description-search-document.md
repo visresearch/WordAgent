@@ -2,6 +2,7 @@ Search document content by text and/or style criteria (`search_documnet`).
 
 ## Parameters:
 - `query` (object, DocumentQuery): includes search type (`run`/`paragraph`) and filter conditions.
+- `docId` (string, optional): Document ID to search in. If None, searches in the currently active document. The documentId for each open document is included in the documentMeta sent with each chat message.
 
 ## When to use:
 - User provides concrete keywords, section names, or style clues.

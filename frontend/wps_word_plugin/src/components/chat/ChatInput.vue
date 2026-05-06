@@ -39,6 +39,7 @@
           </svg>
         </div>
         <div class="selection-bar-info">
+          <span class="selection-bar-docname" v-if="sel.docName">{{ sel.docName }}</span>
           <span class="selection-bar-preview">{{ sel.startText }} → {{ sel.endText }} (段落 {{ sel.startParaIndex }} - {{ sel.endParaIndex }})</span>
         </div>
         <button class="selection-bar-clear" title="清除选区" @click="$emit('remove-selection', index)">
@@ -401,10 +402,14 @@ export default {
     },
     selectedModelName() {
       if (!this.selectedModel) {
-        return 'None';
+        return '请选择模型';
       }
       const model = this.availableModels.find((m) => m.id === this.selectedModel && m.provider === this.selectedModelProvider);
-      return model ? `${model.provider || 'Unknown'}/${model.name}` : 'None';
+      if (model) {
+        return `${model.provider || 'Unknown'}/${model.name}`;
+      }
+      // 模型不在列表中，显示 ID
+      return this.selectedModel;
     },
     pendingSummary() {
       const parts = [];
@@ -615,6 +620,14 @@ export default {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.selection-bar-docname {
+  font-size: 11px;
+  color: #1890ff;
+  font-weight: 500;
+  margin-right: 6px;
+  white-space: nowrap;
 }
 
 .selection-bar-range {

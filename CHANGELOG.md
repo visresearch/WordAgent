@@ -1,6 +1,17 @@
 
 # Changelog
 
+## Unrelease
+
+### Added
+- 支持多文档编辑
+
+### Changed
+- 解耦memory和context
+
+### Fixed
+- 修复后端有时候会done两次，记录两次相同的AI回答的问题
+
 ## [v0.3.6]
 
 ### Added

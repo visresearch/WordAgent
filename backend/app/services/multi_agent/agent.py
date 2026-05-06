@@ -145,7 +145,7 @@ class MultiAgentState(BaseModel):
 
     user_message: str = ""
     document_range: list[dict] = Field(default_factory=list)
-    document_meta: dict = Field(default_factory=dict)
+    document_meta: list | dict = Field(default_factory=dict)  # 支持单个文档（dict）和多个文档（list）
     attached_files: list[dict] = Field(default_factory=list)
     memory_context: str = ""
     workflow: dict = Field(default_factory=dict)
@@ -335,12 +335,24 @@ def _run_sub_agent(
                 print(f"  [{agent_name}] Repaired invalid tool_call: {tool_name}")
 
                 # 收集所有工具调用结果，用于后续步骤共享
-                _tool_data.append({
-                    "tool": tool_name,
-                    "args": normalized_args,
-                    "result": content,
-                    "is_mcp": tool_name.startswith("mcp_") or tool_name not in ("search_documnet", "read_document", "generate_document", "delete_document", "load_skill_context", "create_workflow", "review_document")
-                })
+                _tool_data.append(
+                    {
+                        "tool": tool_name,
+                        "args": normalized_args,
+                        "result": content,
+                        "is_mcp": tool_name.startswith("mcp_")
+                        or tool_name
+                        not in (
+                            "search_documnet",
+                            "read_document",
+                            "generate_document",
+                            "delete_document",
+                            "load_skill_context",
+                            "create_workflow",
+                            "review_document",
+                        ),
+                    }
+                )
 
                 if agent_name == "writer" and tool_name == "generate_document":
                     _writer_generated = True
@@ -441,18 +453,38 @@ def _run_sub_agent(
                     messages.append(ToolMessage(content=content, tool_call_id=tc["id"], name=tool_name))
 
                     # 收集所有工具调用结果，用于后续步骤共享
-                    _tool_data.append({
-                        "tool": tool_name,
-                        "args": tool_args,
-                        "result": content,
-                        "is_mcp": tool_name.startswith("mcp_") or tool_name not in ("search_documnet", "read_document", "generate_document", "delete_document", "load_skill_context", "create_workflow", "review_document")
-                    })
+                    _tool_data.append(
+                        {
+                            "tool": tool_name,
+                            "args": tool_args,
+                            "result": content,
+                            "is_mcp": tool_name.startswith("mcp_")
+                            or tool_name
+                            not in (
+                                "search_documnet",
+                                "read_document",
+                                "generate_document",
+                                "delete_document",
+                                "load_skill_context",
+                                "create_workflow",
+                                "review_document",
+                            ),
+                        }
+                    )
 
                     if agent_name == "writer" and tool_name == "generate_document":
                         _writer_generated = True
                 except Exception as e:
                     # 为不同工具生成友好的错误消息
-                    is_mcp_tool = tool_name.startswith("mcp_") or tool_name not in ("search_documnet", "read_document", "generate_document", "delete_document", "load_skill_context", "create_workflow", "review_document")
+                    is_mcp_tool = tool_name.startswith("mcp_") or tool_name not in (
+                        "search_documnet",
+                        "read_document",
+                        "generate_document",
+                        "delete_document",
+                        "load_skill_context",
+                        "create_workflow",
+                        "review_document",
+                    )
                     if is_mcp_tool:
                         err = f"MCP tool '{tool_name}' execution failed: {e}. The error has been returned as tool result. Please analyze the error and decide how to proceed - you may retry with corrected parameters, use an alternative tool, or report the failure in your response."
                     elif tool_name == "generate_document":
@@ -563,12 +595,26 @@ def _build_multi_agent_graph(llm, model_name: str, mcp_tools: list = None):
 
         task = state.user_message
         if state.document_range:
-            range_info = json.dumps(state.document_range, ensure_ascii=False)
-            task += f"\n\nUser selected document range: {range_info}"
+            # 构建文档范围描述
+            range_lines = []
+            for r in state.document_range:
+                doc_name = r.get("docName", "")
+                start = r.get("startParaIndex", 0)
+                end = r.get("endParaIndex", -1)
+                range_str = f"「{doc_name}」paragraphs {start} to {end}"
+                range_lines.append(range_str)
+            task += f"\n\nUser has selected the following document content:\n" + "\n".join(
+                f"  - {line}" for line in range_lines
+            )
 
         if state.document_meta:
-            meta_info = json.dumps(state.document_meta, ensure_ascii=False)
-            task += f"\n\nDocument metadata (from frontend):\n{meta_info}"
+            # 使用 JSON 格式输出元信息（紧凑模式，不换行）
+            meta_json = json.dumps(
+                state.document_meta if isinstance(state.document_meta, list) else [state.document_meta],
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            task += f"\n\n[Document Global Metadata]\nThe following fields come from frontend document state and are not body content.\n{meta_json}\nUse these metadata fields in task analysis. The first document in the array is the active document the user is currently viewing."
 
         if state.attached_files:
             from app.api.routes.files import read_text_file
@@ -651,6 +697,15 @@ def _build_multi_agent_graph(llm, model_name: str, mcp_tools: list = None):
             if state.memory_context:
                 context_parts.append(f"[长期记忆]\n{state.memory_context}")
 
+            # 添加文档元信息给所有 Agent（让他们知道有哪些文档可用）
+            if state.document_meta:
+                meta_json = json.dumps(
+                    state.document_meta if isinstance(state.document_meta, list) else [state.document_meta],
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                )
+                context_parts.append(f"[Document Metadata]\nThe following documents are available:\n{meta_json}")
+
             for dep_idx in step.get("depends_on", []):
                 if 0 <= dep_idx < len(step_results):
                     context_parts.append(step_results[dep_idx])
@@ -722,7 +777,7 @@ def _build_multi_agent_graph(llm, model_name: str, mcp_tools: list = None):
 async def process_writing_request_stream(
     message: str,
     document_range: list[dict] | None = None,
-    document_meta: dict | None = None,
+    document_meta: list | dict | None = None,  # 支持单个文档（dict）和多个文档（list）
     history: list | None = None,
     model: str | None = None,
     provider: str | None = None,
@@ -882,7 +937,7 @@ async def process_writing_request_stream(
 
             if isinstance(stream_item, tuple) and stream_item[0] == "context_overflow":
                 print(f"[MultiAgent] Context overflow, triggering passive heavy compaction")
-                from app.services.memory import (
+                from app.services.context import (
                     compress_conversation_history_if_needed,
                     _estimate_messages_tokens,
                     MAX_CONTEXT_TOKENS,
@@ -947,13 +1002,13 @@ async def process_writing_request_stream(
                     usage = getattr(msg, "usage_metadata", None)
                     if isinstance(usage, dict) and "input_tokens" in usage and usage.get("input_tokens", 0) > 0:
                         _last_input_tokens = int(usage.get("input_tokens", 0))
-                        from app.services.memory import MAX_CONTEXT_TOKENS
+                        from app.services.context import MAX_CONTEXT_TOKENS
 
                         yield f"data: {json.dumps({'type': 'token_stats', 'current_tokens': _last_input_tokens, 'max_tokens': MAX_CONTEXT_TOKENS}, ensure_ascii=False)}\n\n"
 
                 if isinstance(msg, (AIMessage, ToolMessage)):
                     try:
-                        from app.services.memory import MAX_CONTEXT_TOKENS
+                        from app.services.context import MAX_CONTEXT_TOKENS
 
                         current_tokens = (
                             _last_input_tokens

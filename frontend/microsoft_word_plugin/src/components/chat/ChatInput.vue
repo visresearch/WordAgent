@@ -27,6 +27,7 @@
           </svg>
         </div>
         <div class="selection-bar-info">
+          <span class="selection-bar-docname" v-if="sel.docName">{{ sel.docName }}</span>
           <span class="selection-bar-preview">{{ sel.startText }} → {{ sel.endText }} ({{ sel.charCount }}字)</span>
         </div>
         <button class="selection-bar-clear" title="清除选区" @click="$emit('remove-selection', index)">
@@ -405,6 +406,13 @@ export default {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.selection-bar-docname {
+  font-size: 11px;
+  color: #1890ff;
+  font-weight: 500;
+  margin-right: 6px;
+  white-space: nowrap;
 }
 .selection-bar-clear {
   flex-shrink: 0;

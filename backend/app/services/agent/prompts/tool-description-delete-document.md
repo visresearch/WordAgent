@@ -1,8 +1,9 @@
-Delete a paragraph range from the active Word document.
+Delete a paragraph range from a Word document.
 
 ## Parameters:
 - `startParaIndex` (int): 0-based inclusive start paragraph index. Default: `0`.
 - `endParaIndex` (int): 0-based inclusive end paragraph index. Default: `-1` (end of document).
+- `docId` (string, optional): Document ID to delete from. If None, uses the currently active document. The documentId for each open document is included in the documentMeta sent with each chat message.
 
 ## When to use:
 - User explicitly requests deleting existing content.

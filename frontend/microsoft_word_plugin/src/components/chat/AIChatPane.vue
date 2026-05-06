@@ -544,6 +544,10 @@ export default {
           const selection = context.document.getSelection();
           selection.load("text");
 
+          const doc = context.document;
+          const docName = doc.properties?.title?.value || doc.properties?.name?.value || '未命名文档';
+          const docId = '';
+
           const selParagraphs = selection.paragraphs;
           selParagraphs.load("items");
 
@@ -640,7 +644,9 @@ export default {
             hasMore,
             startParaIndex,
             endParaIndex,
-            fullText: cleanedText
+            fullText: cleanedText,
+            docId,
+            docName
           });
         });
       } catch (error) {
@@ -718,11 +724,15 @@ export default {
           endText: s.endText,
           startParaIndex: s.startParaIndex,
           endParaIndex: s.endParaIndex,
-          charCount: s.charCount
+          charCount: s.charCount,
+          docId: s.docId || '',
+          docName: s.docName || ''
         }));
         documentRange = this.selections.map(s => ({
           startParaIndex: s.startParaIndex,
-          endParaIndex: s.endParaIndex
+          endParaIndex: s.endParaIndex,
+          docId: s.docId || '',
+          docName: s.docName || ''
         }));
         userMsgObj.selectionContext = selectionContext;
       }

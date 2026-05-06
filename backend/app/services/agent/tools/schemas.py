@@ -133,12 +133,6 @@ class DocumentOutput(BaseModel):
         "cStyle format: [rowSpan, colSpan, alignment, verticalAlignment], where verticalAlignment: 0=top, 1=center, 2=bottom.\n"
         "tStyle format: [tableAlignment], where tableAlignment: 0=left, 1=center, 2=right."
     )
-    insertParaIndex: int = Field(
-        default=-1,
-        description="Insertion index (0-based). Frontend inserts content before this paragraph."
-        " For selected-range edits, use startParaIndex."
-        " For new content without a fixed position, use -1 (end) or 0 (beginning).",
-    )
 
     @model_validator(mode="before")
     @classmethod

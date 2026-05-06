@@ -586,11 +586,18 @@ def read_document(startParaIndex: int = 0, endParaIndex: int = 49) -> str:
 
 
 @tool
-def generate_document(document: DocumentOutput | str) -> dict:
+def generate_document(
+    document: DocumentOutput | str,
+    docId: str | None = None,
+    insertParaIndex: int = -1,
+) -> dict:
     """生成带格式的文档 JSON，用于插入到 Word 文档。
 
     Args:
         document: DocumentOutput 对象，或 JSON 字符串（当模型错误地传字符串时也能处理）
+        docId: Document ID to insert into. If None, uses the active document.
+        insertParaIndex: 0-based paragraph index where content will be inserted before.
+            Use -1 for end of document, 0 for beginning.
     """
     # 兼容模型错误地传字符串的情况
     if isinstance(document, str):
@@ -620,6 +627,29 @@ def generate_document(document: DocumentOutput | str) -> dict:
         doc_dict = doc_output.model_dump()
     else:
         doc_dict = document.model_dump()
+
+    # 添加 insertParaIndex
+    doc_dict["insertParaIndex"] = insertParaIndex
+
+    writer = get_stream_writer()
+    if writer:
+        writer(
+            {
+                "type": "json",
+                "content": doc_dict,
+                "docId": docId,
+            }
+        )
+        writer(
+            {
+                "type": "generate_complete",
+                "content": "文档已生成",
+                "docId": docId,
+                "insertParaIndex": insertParaIndex,
+            }
+        )
+
+    return doc_dict
 
 
 @tool

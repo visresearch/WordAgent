@@ -1205,7 +1205,7 @@ function _findEndParaIndex(paraStartsSorted, tableRangeEnd, totalParaCount) {
  *   省略时默认等于 startParaIndex（即只解析单段）；-1 表示解析到文档末尾
  * @returns {Object} - JSON 数据或错误对象
  */
-function parseDocxToJSON(range, startParaIndex, endParaIndex) {
+function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride) {
   try {
     // ========== 快速路径：按 paraIndex 范围解析 ==========
     if (startParaIndex !== undefined && startParaIndex !== null) {
@@ -1213,7 +1213,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex) {
         endParaIndex = startParaIndex;
       }
 
-      const doc = window.Application?.ActiveDocument;
+      const doc = docOverride || window.Application?.ActiveDocument;
       if (!doc) {
         return { error: '没有打开的文档' };
       }
@@ -1645,7 +1645,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex) {
     } catch (e) {}
 
     // 构建 paraStart → 全文段落索引 的映射（O(n) 一次构建，后续 O(1) 查找）
-    const doc = window.Application?.ActiveDocument;
+    const doc = docOverride || window.Application?.ActiveDocument;
     const paraStartToIndex = new Map();
     const paraStartsSorted = []; // 排序数组用于二分查找 endParaIndex
     let totalParaCount = 0;
@@ -2747,9 +2747,10 @@ function generateDocxFromJSON(jsonData, doc, insertParaIndex) {
  * 
  * @param {number} startParaIndex - 起始段落索引（0-based）
  * @param {number} [endParaIndex] - 结束段落索引（0-based，含），省略时默认等于 startParaIndex；-1 表示删除到文档末尾
+ * @param {Object} [docOverride] - 可选，指定文档对象，默认为 ActiveDocument
  * @returns {{ success: boolean, deletedCount: number, message: string }}
  */
-function deleteDocxPara(startParaIndex, endParaIndex) {
+function deleteDocxPara(startParaIndex, endParaIndex, docOverride) {
   if (startParaIndex === undefined || startParaIndex === null) {
     return { success: false, deletedCount: 0, message: '未提供有效的 startParaIndex' };
   }
@@ -2757,7 +2758,7 @@ function deleteDocxPara(startParaIndex, endParaIndex) {
     endParaIndex = startParaIndex;
   }
 
-  const doc = window.Application?.ActiveDocument;
+  const doc = docOverride || window.Application?.ActiveDocument;
   if (!doc) {
     return { success: false, deletedCount: 0, message: '没有打开的文档' };
   }

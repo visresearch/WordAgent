@@ -209,8 +209,14 @@ def _compact_doc_json(doc_json: dict) -> str:
 
 
 @tool(description=get_tool_description("read_document"))
-def read_document(startParaIndex: int = 0, endParaIndex: int = 49) -> str:
-    """Read document content. Requests frontend to parse and return specified paragraph range via WebSocket."""
+def read_document(startParaIndex: int = 0, endParaIndex: int = 49, docId: str | None = None) -> str:
+    """Read document content. Requests frontend to parse and return specified paragraph range via WebSocket.
+
+    Args:
+        startParaIndex: Starting paragraph index (0-based).
+        endParaIndex: Ending paragraph index (inclusive).
+        docId: Document ID. If None, reads the active document.
+    """
     writer = get_stream_writer()
     if writer:
         writer(
@@ -219,10 +225,11 @@ def read_document(startParaIndex: int = 0, endParaIndex: int = 49) -> str:
                 "content": f"📑 正在读取文档（段落 {startParaIndex} - {endParaIndex}）",
                 "startParaIndex": startParaIndex,
                 "endParaIndex": endParaIndex,
+                "docId": docId,
             }
         )
     print(
-        f"[read_document] Requesting document from frontend (startParaIndex={startParaIndex}, endParaIndex={endParaIndex})"
+        f"[read_document] Requesting document from frontend (startParaIndex={startParaIndex}, endParaIndex={endParaIndex}, docId={docId})"
     )
 
     chat_id = _current_chat_id.get(None)
@@ -305,8 +312,19 @@ def read_document(startParaIndex: int = 0, endParaIndex: int = 49) -> str:
 
 
 @tool(description=get_tool_description("generate_document"))
-def generate_document(document: str | dict) -> dict:
-    """Generate formatted document JSON for Word insertion. Also sends json event via stream writer."""
+def generate_document(
+    document: str | dict,
+    docId: str | None = None,
+    insertParaIndex: int = -1,
+) -> dict:
+    """Generate formatted document JSON for Word insertion. Also sends json event via stream writer.
+
+    Args:
+        document: The document content to generate.
+        docId: Document ID to insert into. If None, uses the active document.
+        insertParaIndex: 0-based paragraph index where content will be inserted before.
+            Use -1 for end of document, 0 for beginning.
+    """
     doc_dict = _parse_document_arg(document)
     _ensure_image_payload_shape(doc_dict)
     para_count = len(doc_dict.get("paragraphs", []))
@@ -317,26 +335,36 @@ def generate_document(document: str | dict) -> dict:
         if isinstance(r, dict) and r.get("text") is None
     )
 
+    # 添加 insertParaIndex 到 doc_dict
+    doc_dict["insertParaIndex"] = insertParaIndex
+
     writer = get_stream_writer()
     if writer:
         writer(
             {
                 "type": "json",
                 "content": doc_dict,
+                "docId": docId,
             }
         )
         writer(
             {
                 "type": "generate_complete",
                 "content": f"文档已生成，共 {para_count} 个段落{f'，{image_count} 张图片' if image_count else ''}",
+                "docId": docId,
             }
         )
     return doc_dict
 
 
 @tool(description=get_tool_description("search_document"))
-def search_documnet(query: DocumentQuery) -> str:
-    """Search document content by text or style conditions."""
+def search_documnet(query: DocumentQuery, docId: str | None = None) -> str:
+    """Search document content by text or style conditions.
+
+    Args:
+        query: The search query with filters.
+        docId: Document ID to search in. If None, uses the active document.
+    """
     query_dict = query.model_dump(exclude_none=True)
     query_type = query_dict.get("type", "run")
     filters = query_dict.get("filters", {})
@@ -349,9 +377,10 @@ def search_documnet(query: DocumentQuery) -> str:
                 "type": "search_document",
                 "content": f"🔍 正在搜索文档: {filter_desc}",
                 "query": query_dict,
+                "docId": docId,
             }
         )
-    print(f"[search_documnet] 请求前端搜索文档 (type={query_type}, filters={filters})")
+    print(f"[search_documnet] 请求前端搜索文档 (type={query_type}, filters={filters}, docId={docId})")
 
     chat_id = _current_chat_id.get(None)
     if is_stop_requested(chat_id):
@@ -440,8 +469,14 @@ def search_documnet(query: DocumentQuery) -> str:
 
 
 @tool(description=get_tool_description("delete_document"))
-def delete_document(startParaIndex: int = 0, endParaIndex: int = -1) -> str:
-    """Mark document paragraphs for deletion (non-blocking, frontend handles confirmation)."""
+def delete_document(startParaIndex: int = 0, endParaIndex: int = -1, docId: str | None = None) -> str:
+    """Mark document paragraphs for deletion (non-blocking, frontend handles confirmation).
+
+    Args:
+        startParaIndex: Starting paragraph index (0-based).
+        endParaIndex: Ending paragraph index (inclusive), -1 for the last paragraph.
+        docId: Document ID to delete from. If None, uses the active document.
+    """
     writer = get_stream_writer()
     if writer:
         writer(
@@ -450,7 +485,8 @@ def delete_document(startParaIndex: int = 0, endParaIndex: int = -1) -> str:
                 "content": f"🗑️ 准备删除文档段落（{startParaIndex} - {endParaIndex}）",
                 "startParaIndex": startParaIndex,
                 "endParaIndex": endParaIndex,
+                "docId": docId,
             }
         )
-    print(f"[delete_document] 请求前端标记删除段落 (startParaIndex={startParaIndex}, endParaIndex={endParaIndex})")
+    print(f"[delete_document] 请求前端标记删除段落 (startParaIndex={startParaIndex}, endParaIndex={endParaIndex}, docId={docId})")
     return f"已通知前端标记删除段落 {startParaIndex} - {endParaIndex}，等待用户确认"

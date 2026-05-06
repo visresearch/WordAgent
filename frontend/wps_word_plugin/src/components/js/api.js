@@ -102,18 +102,30 @@ async function request(url, options = {}) {
 }
 
 /**
- * 获取当前文档全局元信息（随用户 chat 请求发送给后端）
+ * 获取单个文档的元信息
+ * @param {Object} doc - WPS Document 对象
+ * @param {number} docIndex - 文档在 Documents 集合中的索引（1-based）
  * @returns {Object|null}
  */
-function getCurrentDocumentMeta() {
-  try {
-    const app = window.Application;
-    const doc = app?.ActiveDocument;
-    if (!doc) {
-      return null;
-    }
+function getDocumentMeta(doc, docIndex) {
+  if (!doc) {
+    return null;
+  }
 
+  try {
     const totalParas = doc.Paragraphs?.Count || 0;
+    // 判断文档是否为空：没有段落或者所有段落都是空白
+    let isEmpty = totalParas === 0;
+    if (!isEmpty && totalParas > 0) {
+      // 检查前 100 个字符是否全是空白
+      try {
+        const firstPara = doc.Paragraphs.Item(1);
+        const text = firstPara?.Range?.Text || '';
+        isEmpty = text.trim().length === 0 && totalParas <= 2;
+      } catch (e) {
+        isEmpty = true;
+      }
+    }
 
     let pageCount = 0;
     try {
@@ -123,12 +135,74 @@ function getCurrentDocumentMeta() {
     }
 
     return {
+      documentId: doc.DocID || `doc_${docIndex}`,
+      documentName: doc.Name || '未命名',
       totalParas,
-      documentName: doc.Name || '',
       pageCount,
       isReadOnly: !!doc.ReadOnly,
-      parsedAt: new Date().toISOString()
+      isEmpty
     };
+  } catch (error) {
+    console.warn('[Meta] 获取文档元信息失败:', error);
+    return null;
+  }
+}
+
+/**
+ * 获取所有打开文档的全局元信息（随用户 chat 请求发送给后端）
+ * 第一个文档是当前活动文档，其余按打开顺序排列
+ * @returns {Array|null} 文档元信息数组
+ */
+function getCurrentDocumentMeta() {
+  try {
+    const app = window.Application;
+    if (!app) {
+      return null;
+    }
+
+    const allDocuments = [];
+    const activeDoc = app.ActiveDocument;
+    let activeDocIndex = -1;
+    let activeMeta = null;
+
+    // 获取所有打开的文档
+    try {
+      const docs = app.Documents;
+      if (docs && docs.Count > 0) {
+        for (let i = 1; i <= docs.Count; i++) {
+          const doc = docs.Item(i);
+          if (doc) {
+            // 判断是否是活动文档
+            const isActive = doc === activeDoc || (activeDoc && doc.Name === activeDoc.Name && doc.Path === activeDoc.Path);
+            if (isActive) {
+              activeDocIndex = i;
+            }
+            const meta = getDocumentMeta(doc, i);
+            if (meta) {
+              if (isActive) {
+                activeMeta = meta;
+              }
+              allDocuments.push({ meta, isActive });
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[Meta] 获取所有文档列表失败:', e);
+    }
+
+    // 将活动文档放到第一位
+    const documents = [];
+    if (activeMeta) {
+      documents.push(activeMeta);
+    }
+    for (const item of allDocuments) {
+      if (!item.isActive) {
+        documents.push(item.meta);
+      }
+    }
+
+    return documents.length > 0 ? documents : null;
   } catch (error) {
     console.warn('[Meta] 获取文档元信息失败:', error);
     return null;
@@ -160,6 +234,12 @@ const wsManager = {
   _maxReconnectAttempts: 5,
   /** 连接 Promise（确保 connect 不会并发） */
   _connectPromise: null,
+  /** 防止重复调用 onComplete */
+  _completeCalled: false,
+  /** 请求超时定时器 */
+  _requestTimeoutTimer: null,
+  /** 请求超时时间（毫秒），默认 120 秒 */
+  _requestTimeout: 120000,
 
   // 文档缓存：{documentJson: {...}, timestamp: number}
   _documentCache: null,
@@ -247,13 +327,27 @@ const wsManager = {
           const data = JSON.parse(event.data);
 
           if (data.type === 'done') {
-            if (this.onComplete) {
-              this.onComplete();
+            // 防重复调用 onComplete
+            if (!this._completeCalled) {
+              this._completeCalled = true;
+              // 清除超时定时器
+              if (this._requestTimeoutTimer) {
+                clearTimeout(this._requestTimeoutTimer);
+                this._requestTimeoutTimer = null;
+              }
+              if (this.onComplete) {
+                this.onComplete();
+              }
             }
             return;
           }
 
           if (data.type === 'error') {
+            // 清除超时定时器
+            if (this._requestTimeoutTimer) {
+              clearTimeout(this._requestTimeoutTimer);
+              this._requestTimeoutTimer = null;
+            }
             if (this.onError) {
               this.onError(new Error(data.content || '未知错误'));
             }
@@ -323,11 +417,12 @@ const wsManager = {
    * 处理后端的文档读取请求：根据 startParaIndex/endParaIndex 解析文档并通过 WebSocket 回传
    * @param {number} startParaIndex - 起始段落索引（0-based），0 表示文档开头
    * @param {number} endParaIndex - 结束段落索引（0-based），-1 表示文档结尾
+   * @param {string|null} docId - 文档 ID，null 表示活动文档
    */
-  async _handleDocumentRequest(startParaIndex = 0, endParaIndex = -1) {
+  async _handleDocumentRequest(startParaIndex = 0, endParaIndex = -1, docId = null) {
     // 注意：不在这里发送 loading 状态，AIChatPane 在收到 read_document 时已经推入了 loading 状态
     try {
-      const docData = await parseDocumentRange(startParaIndex, endParaIndex);
+      const docData = await parseDocumentRange(startParaIndex, endParaIndex, docId);
 
       if (docData.error) {
         throw new Error(docData.error);
@@ -361,23 +456,30 @@ const wsManager = {
    * 处理后端的文档查询请求：解析文档后执行 Style Query DSL 并通过 WebSocket 回传匹配结果
    * 优先使用缓存的文档 JSON，避免重复解析
    * @param {Object} query - Query DSL 对象 {type, filters}
+   * @param {string|null} docId - 文档 ID，null 表示活动文档
    */
-  async _handleQueryRequest(query) {
+  async _handleQueryRequest(query, docId = null) {
     try {
-      // 优先使用缓存的文档 JSON
-      let docData = this.getCachedDocument();
+      // 优先使用缓存的文档 JSON（注意：不同文档的缓存需要区分）
+      // 如果指定了 docId 且与缓存的 docId 不同，需要重新解析
+      let docData = null;
+      if (!docId) {
+        docData = this.getCachedDocument();
+      }
 
       if (!docData) {
-        console.log('[WebSocket] 文档缓存未命中，解析全文...');
+        console.log('[WebSocket] 文档缓存未命中或文档不匹配，解析全文...', docId ? `docId=${docId}` : '(active)');
         // 先解析全文文档 JSON
-        docData = await parseDocumentRange(0, -1);
+        docData = await parseDocumentRange(0, -1, docId);
 
         if (docData.error) {
           throw new Error(docData.error);
         }
 
         // 缓存解析结果
-        this.setCachedDocument(docData);
+        if (!docId) {
+          this.setCachedDocument(docData);
+        }
       } else {
         console.log('[WebSocket] 使用缓存的文档进行搜索，段落数:', docData.paragraphs?.length || 0);
       }
@@ -460,6 +562,14 @@ function chatStream(message, options = {}) {
     enableThinking = true
   } = options;
 
+  // 重置完成状态
+  wsManager._completeCalled = false;
+  // 清除可能残留的超时定时器
+  if (wsManager._requestTimeoutTimer) {
+    clearTimeout(wsManager._requestTimeoutTimer);
+    wsManager._requestTimeoutTimer = null;
+  }
+
   // 设置当前会话的回调
   wsManager.onMessage = onMessage;
   wsManager.onError = onError;
@@ -469,6 +579,21 @@ function chatStream(message, options = {}) {
     try {
       // 确保 WebSocket 已连接
       await wsManager.connect();
+
+      // 设置请求超时：如果长时间没有收到任何消息（超过阈值），通知前端超时
+      wsManager._requestTimeoutTimer = setTimeout(() => {
+        // 只有在没有完成且 WebSocket 仍连接时才触发超时
+        if (!wsManager._completeCalled && wsManager.connected) {
+          console.warn('[WebSocket] 请求超时，未收到完整响应');
+          wsManager._completeCalled = true;
+          if (onError) {
+            onError(new Error('请求超时：LLM 首次响应时间过长，请稍后重试'));
+          }
+          if (wsManager.ws) {
+            wsManager.ws.close();
+          }
+        }
+      }, wsManager._requestTimeout);
 
       // 文档全局元信息：随用户提问发送，不放在 read_document 回包里
       const documentMeta = getCurrentDocumentMeta();
@@ -488,6 +613,11 @@ function chatStream(message, options = {}) {
         timestamp: Date.now()
       });
     } catch (error) {
+      // 清除超时定时器
+      if (wsManager._requestTimeoutTimer) {
+        clearTimeout(wsManager._requestTimeoutTimer);
+        wsManager._requestTimeoutTimer = null;
+      }
       if (onError) {
         onError(error);
       }
@@ -498,6 +628,11 @@ function chatStream(message, options = {}) {
 
   return {
     abort: () => {
+      // 清除超时定时器
+      if (wsManager._requestTimeoutTimer) {
+        clearTimeout(wsManager._requestTimeoutTimer);
+        wsManager._requestTimeoutTimer = null;
+      }
       // 发送停止请求
       wsManager.send({ type: 'stop' }).catch(() => {});
     }
@@ -514,13 +649,53 @@ function chatStream(message, options = {}) {
  * @param {number} [endParaIndex=-1] - 结束段落索引（0-based），-1 表示文档结尾
  * @returns {Promise<Object>} - 解析结果
  */
-async function parseDocumentRange(startParaIndex = 0, endParaIndex = -1) {
+/**
+ * 根据 docId 获取文档对象
+ * @param {string|null} docId - 文档 ID，如果为 null 则返回活动文档
+ * @returns {Object|null} - WPS Document 对象
+ */
+function getDocumentById(docId) {
+  const app = window.Application;
+  if (!app) return null;
+
+  if (!docId) {
+    // 返回活动文档
+    return app.ActiveDocument;
+  }
+
+  // 遍历所有文档，找到匹配 DocID 的文档
+  try {
+    const docs = app.Documents;
+    console.log(`[getDocumentById] 查找 docId="${docId}" (typeof: ${typeof docId}), 共有 ${docs.Count} 个文档`);
+    if (docs && docs.Count > 0) {
+      for (let i = 1; i <= docs.Count; i++) {
+        const doc = docs.Item(i);
+        const docIdValue = doc.DocID;
+        console.log(`[getDocumentById] 检查文档 ${i}: Name="${doc.Name}", DocID="${docIdValue}" (typeof: ${typeof docIdValue}), 匹配: ${docIdValue == docId}`);
+        // 使用宽松比较，因为 DocID 可能是数字或字符串
+        if (String(docIdValue) === String(docId)) {
+          console.log(`[getDocumentById] ✅ 找到匹配文档: ${doc.Name}`);
+          return doc;
+        }
+      }
+    }
+    console.log(`[getDocumentById] ⚠️ 未找到 docId="${docId}" 的文档`);
+  } catch (e) {
+    console.warn('[getDocumentById] 遍历文档失败:', e);
+  }
+
+  // 没找到，返回活动文档作为后备
+  console.log(`[getDocumentById] 使用活动文档作为后备`);
+  return app.ActiveDocument;
+}
+
+async function parseDocumentRange(startParaIndex = 0, endParaIndex = -1, docId = null) {
   return new Promise((resolve) => {
     // 使用 setTimeout 将任务推迟到下一个事件循环
     // 这样可以让 UI 有时间响应，避免卡顿
     setTimeout(() => {
       try {
-        const doc = window.Application?.ActiveDocument;
+        const doc = getDocumentById(docId);
         if (!doc) {
           resolve({ error: '没有打开的文档' });
           return;
@@ -536,10 +711,10 @@ async function parseDocumentRange(startParaIndex = 0, endParaIndex = -1) {
             resolve({ error: '无法获取文档内容' });
             return;
           }
-          result = parseDocxToJSON(fullRange);
+          result = parseDocxToJSON(fullRange, null, null, doc);
         } else {
-          // 按段落索引范围解析（快速路径）
-          result = parseDocxToJSON(null, startParaIndex, endParaIndex);
+          // 按段落索引范围解析（快速路径），传递 docOverride
+          result = parseDocxToJSON(null, startParaIndex, endParaIndex, doc);
         }
 
         // read_document / search_documnet 回包仅返回文档内容，不携带全局 meta。
@@ -1011,6 +1186,7 @@ export {
   getModels,
   fetchAvailableModels,
   parseDocumentRange,
+  getDocumentById,
 
   wsManager,
 
