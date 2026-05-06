@@ -1141,11 +1141,9 @@ export default {
             this._processAllPendingInsertions();
           }
 
-          // 如果只有删除没有插入（无 json 事件），在流结束后补充添加删除批注
-          // 使用第一个 pendingDelete 的 docId（如果有的话）
-          if (this.pendingDeletes.length > 0 && !this.pendingDocumentMsg) {
-            const firstDeleteDocId = this.pendingDeletes[0]?.docId || null;
-            this._addDeleteComments(firstDeleteDocId);
+          // 为待删除内容添加标注（必须在插入完成后调用，这样 _streamInsertions 才已填充）
+          if (this.pendingDeletes.some(pd => !pd._commentAdded)) {
+            this._addDeleteComments(null);
           }
 
           // 清理缓存
@@ -1466,12 +1464,19 @@ export default {
           insertEndPos: null
         };
         this.pendingInsertions.push(insItem);
-        console.log('[AIChatPane] 添加待插入文档到队列, docId:', insItem.docId, 'insertParaIndex:', insItem.insertParaIndex, '队列大小:', this.pendingInsertions.length);
 
-        // 更新 pendingDocument 以显示最新状态
+        // 将插入操作记录到 _streamInsertions，供后续 delete_document 偏移计算
         const paragraphs = data.content.paragraphs || [];
         const paraCount = paragraphs.length;
         const tableCount = (data.content.tables || []).length;
+        const shiftCount = paraCount + tableCount;
+        if (shiftCount > 0) {
+          this._streamInsertions.push({ insertParaIndex: insItem.insertParaIndex, count: shiftCount });
+        }
+
+        console.log('[AIChatPane] 添加待插入文档到队列, docId:', insItem.docId, 'insertParaIndex:', insItem.insertParaIndex, '队列大小:', this.pendingInsertions.length);
+
+        // 更新 pendingDocument 以显示最新状态
         let summary = `${paraCount} 个段落`;
         if (tableCount > 0) {
           summary += `，${tableCount} 个表格`;
@@ -1953,17 +1958,22 @@ export default {
           }
         }
         try {
-          const totalParas = doc.Paragraphs.Count;
+          // 每个 pendingDelete 可能属于不同文档
+          const pdDoc = pd.docId ? getDocumentById(pd.docId) : doc;
+          if (!pdDoc) {
+            continue;
+          }
+          const totalParas = pdDoc.Paragraphs.Count;
           let startIdx = adjStart;
           let endIdx = adjEnd;
           if (endIdx === -1) {
             endIdx = totalParas - 1;
           }
-          const startPara = doc.Paragraphs.Item(startIdx + 1); // WPS 1-based
-          const endPara = doc.Paragraphs.Item(endIdx + 1);
+          const startPara = pdDoc.Paragraphs.Item(startIdx + 1); // WPS 1-based
+          const endPara = pdDoc.Paragraphs.Item(endIdx + 1);
           const rangeStart = startPara.Range.Start;
           const rangeEnd = endPara.Range.End;
-          const deleteRange = doc.Range(rangeStart, rangeEnd);
+          const deleteRange = pdDoc.Range(rangeStart, rangeEnd);
 
           if (mode === 'redblue') {
             // 红蓝高亮模式：蓝色 = 删除

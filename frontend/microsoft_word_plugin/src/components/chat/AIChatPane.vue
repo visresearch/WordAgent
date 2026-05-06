@@ -545,8 +545,9 @@ export default {
           selection.load("text");
 
           const doc = context.document;
-          const docName = doc.properties?.title?.value || doc.properties?.name?.value || '未命名文档';
-          const docId = '';
+          // Microsoft Word 只会有一个活动文档，固定使用 doc_active
+          const docId = "doc_active";
+          const docName = '';
 
           const selParagraphs = selection.paragraphs;
           selParagraphs.load("items");
@@ -581,6 +582,8 @@ export default {
           const hasNonTextContent = hasTable || hasInlineImage;
 
           if (!cleanedText && !hasNonTextContent) {
+            // 用户未选中任何内容，提示用户
+            console.warn('[Selection] 未选中任何内容');
             return;
           }
 
@@ -645,8 +648,7 @@ export default {
             startParaIndex,
             endParaIndex,
             fullText: cleanedText,
-            docId,
-            docName
+            docId
           });
         });
       } catch (error) {

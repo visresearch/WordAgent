@@ -297,7 +297,7 @@ class OfficeInstallInterface(QWidget):
             webbrowser.open(url)
             InfoBar.info(
                 title="已在浏览器中打开",
-                content="请在浏览器中接受证书后，回到 Word 网页版刷新加载项。",
+                content="",
                 parent=self,
                 position=InfoBarPosition.TOP,
                 duration=4000,

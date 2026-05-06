@@ -116,39 +116,41 @@ async function getCurrentDocumentMeta() {
       await context.sync();
 
       let documentName = "";
-      let documentId = "";
 
       try {
-        const url = Office?.context?.document?.url;
-        if (url) {
-          documentName = decodeURIComponent(url.split("/").pop().split("\\\\").pop() || "");
-        }
-      } catch (e) {}
-
-      // 尝试从文档属性获取 documentId
-      try {
-        const customProps = doc.properties.customProperties;
-        customProps.load("items");
-        await context.sync();
-        for (let i = 0; i < customProps.items.length; i++) {
-          if (customProps.items[i].name === "wende_doc_id") {
-            documentId = customProps.items[i].value || "";
-            break;
+        // 优先使用 fileName（本地文档）
+        const fileName = Office?.context?.document?.fileName;
+        if (fileName) {
+          documentName = decodeURIComponent(fileName);
+        } else {
+          const url = Office?.context?.document?.url;
+          if (url) {
+            documentName = decodeURIComponent(url.split("/").pop().split("\\\\").pop() || "");
           }
         }
       } catch (e) {}
 
+      // 只保留文件名，去掉路径
+      if (documentName) {
+        documentName = documentName.split(/[/\\]/).pop().replace(/\.docx?$/i, "");
+      }
+
       // 判断文档是否为空
       let isEmpty = paragraphs.items.length === 0;
       if (!isEmpty && paragraphs.items.length > 0) {
-        const firstParaText = paragraphs.items[0].getText();
-        await context.sync();
-        isEmpty = firstParaText.trim().length === 0 && paragraphs.items.length <= 2;
+        try {
+          const firstParaText = paragraphs.items[0].getText();
+          await context.sync();
+          isEmpty = firstParaText.trim().length === 0 && paragraphs.items.length <= 2;
+        } catch (e) {
+          isEmpty = false;
+        }
       }
 
+      // Microsoft Word 只会有一个活动文档，固定使用 doc_active 作为标识
       return {
-        documentId: documentId || "ms_office_active_doc",
-        documentName: documentName || '未命名文档',
+        documentId: "doc_active",
+        documentName: documentName || 'doc_active',
         totalParas: paragraphs.items.length,
         pageCount: 0,
         isReadOnly: false,
@@ -158,7 +160,15 @@ async function getCurrentDocumentMeta() {
     });
   } catch (error) {
     console.warn("[Meta] 获取文档元信息失败:", error);
-    return null;
+    return {
+      documentId: "doc_active",
+      documentName: 'doc_active',
+      totalParas: 0,
+      pageCount: 0,
+      isReadOnly: false,
+      isEmpty: true,
+      parsedAt: new Date().toISOString(),
+    };
   }
 }
 

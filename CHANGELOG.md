@@ -4,13 +4,14 @@
 ## Unrelease
 
 ### Added
-- 支持多文档编辑
+- WPS Word支持多文档编辑
 
 ### Changed
 - 解耦memory和context
 
 ### Fixed
 - 修复后端有时候会done两次，记录两次相同的AI回答的问题
+- 修复上一个提交，引入的删除文档工具调用前端处理的bug
 
 ## [v0.3.6]
 

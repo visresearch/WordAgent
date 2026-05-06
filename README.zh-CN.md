@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> | <a href="README.zh-CN.md">中文文档</a>
+  <a href="README.md">English</a> | 中文文档
 </p>
 
 ## 一、项目概述
