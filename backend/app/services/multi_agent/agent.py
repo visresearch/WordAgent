@@ -133,7 +133,7 @@ from app.services.multi_agent.tools import (
     load_mcp_tools,
     build_mcp_tools_prompt,
 )
-from app.services.agent.tools.callback import _current_model_name
+from app.services.tools import _current_model_name
 from app.services.agent.skills import build_skills_prompt
 
 
@@ -904,6 +904,7 @@ async def process_writing_request_stream(
                     try:
                         response = app.stream(**stream_kwargs)
                         for stream_item in response:
+                            has_any_stream_item = True
                             if chat_id and is_stop_requested(chat_id):
                                 print(f"[MultiAgent] Stop requested, ending stream (session={chat_id})")
                                 break
@@ -1044,6 +1045,27 @@ async def process_writing_request_stream(
                     yield f"data: {json.dumps({'type': 'status', 'content': str(chunk)}, ensure_ascii=False)}\n\n"
 
         yield "data: [DONE]\n\n"
+
+        # 流式结束后，yield 完整对话用于长期记忆提取
+        # 构造用户消息内容（包含文档上下文）
+        user_content = message
+        if document_range:
+            range_lines = []
+            for r in document_range:
+                doc_name = r.get("docName", "")
+                start = r.get("startParaIndex", 0)
+                end = r.get("endParaIndex", -1)
+                range_lines.append(f"《{doc_name}》paragraphs {start} to {end}")
+            user_content = f"{message}\n\nPlease process based on the user-selected document content:\n" + "\n".join(
+                f"  - {line}" for line in range_lines
+            )
+
+        # 构造 AI 回复内容
+        assistant_content = "".join(_collected_text_parts)
+
+        # 返回完整对话（供记忆提取使用）
+        conversation_for_memory = {"user": user_content, "assistant": assistant_content}
+        yield f"__memory_conversation__: {json.dumps(conversation_for_memory, ensure_ascii=False)}\n\n"
 
     except Exception as e:
         print(f"[MultiAgent Error] {e}")

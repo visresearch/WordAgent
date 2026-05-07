@@ -11,7 +11,7 @@ from langchain.agents import create_agent
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
-from app.services.agent.tools.callback import (
+from app.services.agent.tools import (
     _current_chat_id,
     _current_model_name,
     is_stop_requested,
@@ -46,7 +46,7 @@ SUB_AGENT_TOOLS: dict[str, list[str]] = {
 
 def _get_all_tools() -> dict[str, Any]:
     """获取所有可用工具。"""
-    from app.services.agent.tools.document_tools import (
+    from app.services.agent.tools import (
         delete_document,
         generate_document,
         read_document,
@@ -155,7 +155,10 @@ def run_sub_agent_task(
     start_time = time.time()
 
     try:
-        for stream_item in app.stream(input={"messages": messages}, stream_mode=["values", "custom"]):
+        import uuid
+
+        config = {"configurable": {"thread_id": str(uuid.uuid4())}}
+        for stream_item in app.stream(input={"messages": messages}, stream_mode=["values", "custom"], config=config):
             chat_id = _current_chat_id.get(None)
             if is_stop_requested(chat_id):
                 print(f"[SubAgent] ⛔ 停止信号")

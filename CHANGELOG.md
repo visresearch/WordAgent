@@ -8,10 +8,14 @@
 
 ### Changed
 - 解耦memory和context
+- 复用tools代码
+- 重构长期记忆
+- 增强短期记忆
 
 ### Fixed
 - 修复后端有时候会done两次，记录两次相同的AI回答的问题
-- 修复上一个提交，引入的删除文档工具调用前端处理的bug
+- 修复上一个提交，引入的删除文档工具调用前端处理的bug以及批注缺失的bug
+- 将generate_document和delete_document加入pending，在pending中计算好index，放到done之后执行修改文档
 
 ## [v0.3.6]
 

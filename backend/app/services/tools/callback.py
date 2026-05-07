@@ -33,10 +33,18 @@ def register_loop(chat_id: str, loop: asyncio.AbstractEventLoop):
 
 
 def cleanup_tool_request(chat_id: str):
-    """清理会话的等待队列。"""
+    """清理会话的等待队列。
+
+    注意：故意 *不* 在这里 discard `_stop_requested_sessions[chat_id]`。
+    因为客户端断连后，WebSocket 协程会立刻进 finally 调用本函数，但 agent 线程
+    可能还卡在 `llm.invoke(...)` 里。如果此时把 stop 标志清掉，等 LLM 返回后
+    `should_continue` / `tools_node` 检查 `is_stop_requested` 就会拿到 False，
+    继续执行下一个工具（典型现象：连接已断却又跑了 generate_document）。
+    chat_id 是每次连接生成的 UUID，不会复用，所以让标志留在内存里几乎无成本；
+    新会话开始时 `clear_stop` / `create_tool_request` 各自会 discard 自己的 chat_id。
+    """
     _pending_tool_requests.pop(chat_id, None)
     _pending_loops.pop(chat_id, None)
-    _stop_requested_sessions.discard(chat_id)
 
 
 def request_stop(chat_id: str):

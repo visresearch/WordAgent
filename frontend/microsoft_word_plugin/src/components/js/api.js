@@ -279,6 +279,11 @@ const wsManager = {
             return;
           }
 
+          // 后端 keepalive ping：仅用于保活，不上抛给业务层
+          if (data.type === "ping") {
+            return;
+          }
+
           if (this.onMessage) {
             this.onMessage(data);
           }
@@ -760,6 +765,36 @@ async function clearCache() {
   return response.data;
 }
 
+// ============== 长期记忆 API ==============
+
+/**
+ * 获取长期记忆内容
+ * @returns {Promise<string>} memory content
+ */
+async function getMemory() {
+  const response = await request("/api/settings/memory", { method: "GET" });
+  if (!response.success) {
+    throw new Error(response.error || "获取长期记忆失败");
+  }
+  return response.data.content || "";
+}
+
+/**
+ * 保存长期记忆内容
+ * @param {string} content - 记忆内容
+ * @returns {Promise<Object>} { success }
+ */
+async function saveMemory(content) {
+  const response = await request("/api/settings/memory", {
+    method: "POST",
+    body: { content },
+  });
+  if (!response.success) {
+    throw new Error(response.error || "保存长期记忆失败");
+  }
+  return response.data;
+}
+
 // ============== Skill 管理 API ==============
 
 /**
@@ -887,6 +922,9 @@ export default {
   scanCache,
   clearCache,
 
+  getMemory,
+  saveMemory,
+
   getSkills,
   uploadSkillPackage,
   setSkillEnabled,
@@ -920,6 +958,8 @@ export {
   getWenceTempDir,
   scanCache,
   clearCache,
+  getMemory,
+  saveMemory,
   getSkills,
   uploadSkillPackage,
   setSkillEnabled,

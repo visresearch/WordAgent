@@ -100,6 +100,79 @@
         </div>
       </div>
 
+      <!-- 长期记忆管理 -->
+      <div class="setting-section">
+        <div class="section-header">
+          <svg
+            class="section-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z" />
+            <path d="M12 6v6l4 2" />
+          </svg>
+          <div class="section-title-group">
+            <h2 class="section-title">
+              长期记忆
+            </h2>
+            <p class="section-subtitle">
+              管理 AI 的持久化记忆，影响 AI 对您的长期理解（越靠上越旧，越靠下越新）
+            </p>
+          </div>
+        </div>
+
+        <div class="memory-editor-box">
+          <div class="json-editor-wrapper">
+            <div :ref="setMemoryLineNumberRef" class="json-line-numbers">
+              <span v-for="line in memoryLineCount" :key="line">{{ line }}</span>
+            </div>
+            <textarea
+              ref="memoryTextareaRef"
+              v-model="memoryContent"
+              class="json-editor memory-json-editor"
+              spellcheck="false"
+              placeholder="这里显示 AI 的长期记忆内容，您可以手动编辑后保存..."
+              :disabled="memoryLoading"
+              @input="onMemoryInput"
+              @scroll="syncMemoryLineNumberScroll"
+            ></textarea>
+          </div>
+        </div>
+
+        <div class="memory-hint">
+          <span class="hint-icon">💡</span>
+          <span>提示：记忆按时间顺序排列，最新的记忆在底部。您可以删除不需要的记忆条目。</span>
+        </div>
+
+        <div class="action-area">
+          <button
+            class="btn btn-secondary"
+            :disabled="memoryLoading"
+            @click="loadMemory"
+          >
+            {{ memoryLoading ? '加载中...' : '重新加载' }}
+          </button>
+          <button
+            class="btn btn-primary"
+            :disabled="!memoryHasChanged || memorySaving"
+            @click="saveMemory"
+          >
+            <svg
+              v-if="memorySaving"
+              class="loading-spinner"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+            >
+              <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none" stroke-dasharray="31.4" stroke-dashoffset="10" />
+            </svg>
+            {{ memorySaving ? '保存中...' : '保存记忆' }}
+          </button>
+        </div>
+      </div>
+
       <!-- 数据清理 -->
       <div class="setting-section danger-section">
         <div class="section-header">
@@ -281,7 +354,7 @@
 </template>
 
 <script>
-import { ref, computed, watch } from 'vue';
+import { nextTick, ref, computed, watch } from 'vue';
 import api from '../js/api.js';
 
 export default {
@@ -299,6 +372,31 @@ export default {
     const deleting = ref(false);
     const resultMessage = ref('');
     const resultSuccess = ref(false);
+
+    // 长期记忆相关
+    const memoryContent = ref('');
+    const memoryLoading = ref(false);
+    const memorySaving = ref(false);
+    const memoryHasChanged = ref(false);
+    const memoryTextareaRef = ref(null);
+    const memoryLineNumberRef = ref(null);
+
+    const memoryLineCount = computed(() => Math.max(1, (memoryContent.value || '').split('\n').length));
+
+    const syncMemoryLineNumberScroll = () => {
+      if (memoryTextareaRef.value && memoryLineNumberRef.value) {
+        memoryLineNumberRef.value.scrollTop = memoryTextareaRef.value.scrollTop;
+      }
+    };
+
+    const setMemoryLineNumberRef = (el) => {
+      memoryLineNumberRef.value = el;
+    };
+
+    const onMemoryInput = () => {
+      memoryHasChanged.value = true;
+      nextTick(syncMemoryLineNumberScroll);
+    };
 
     // 缓存相关（从 props 同步）
     const cacheDir = ref(props.cacheInfo.dir || '');
@@ -432,6 +530,50 @@ export default {
       }
     };
 
+    const loadMemory = async () => {
+      memoryLoading.value = true;
+      try {
+        const content = await api.getMemory();
+        memoryContent.value = content;
+        memoryHasChanged.value = false;
+        nextTick(syncMemoryLineNumberScroll);
+      } catch (error) {
+        console.error('加载长期记忆失败:', error);
+        resultMessage.value = '加载长期记忆失败：' + (error.message || '未知错误');
+        resultSuccess.value = false;
+        setTimeout(() => {
+          resultMessage.value = '';
+        }, 5000);
+      } finally {
+        memoryLoading.value = false;
+      }
+    };
+
+    const saveMemory = async () => {
+      memorySaving.value = true;
+      try {
+        await api.saveMemory(memoryContent.value);
+        memoryHasChanged.value = false;
+        resultMessage.value = '长期记忆保存成功！';
+        resultSuccess.value = true;
+        setTimeout(() => {
+          resultMessage.value = '';
+        }, 3000);
+      } catch (error) {
+        console.error('保存长期记忆失败:', error);
+        resultMessage.value = '保存长期记忆失败：' + (error.message || '未知错误');
+        resultSuccess.value = false;
+        setTimeout(() => {
+          resultMessage.value = '';
+        }, 5000);
+      } finally {
+        memorySaving.value = false;
+      }
+    };
+
+    // 初始化时加载记忆
+    loadMemory();
+
     return {
       showDeleteConfirm,
       confirmText,
@@ -446,7 +588,18 @@ export default {
       scanningCache,
       clearingCache,
       scanCache,
-      clearCache: clearCacheFiles
+      clearCache: clearCacheFiles,
+      memoryContent,
+      memoryLoading,
+      memorySaving,
+      memoryHasChanged,
+      memoryLineCount,
+      memoryTextareaRef,
+      loadMemory,
+      saveMemory,
+      setMemoryLineNumberRef,
+      syncMemoryLineNumberScroll,
+      onMemoryInput
     };
   }
 };
@@ -572,6 +725,79 @@ export default {
   word-break: break-all;
   text-align: right;
   max-width: 60%;
+}
+
+/* 长期记忆编辑器 */
+.memory-editor-box {
+  margin-bottom: 12px;
+}
+
+.json-editor-wrapper {
+  display: flex;
+  border: 1px solid #111827;
+  border-radius: 8px;
+  background: #0b0f17;
+  overflow: hidden;
+}
+
+.json-editor-wrapper:focus-within {
+  border-color: #667eea;
+  box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
+}
+
+.json-line-numbers {
+  width: 42px;
+  padding: 12px 8px;
+  box-sizing: border-box;
+  background: #0f1520;
+  color: #6b7280;
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: right;
+  user-select: none;
+  overflow: hidden;
+}
+
+.json-line-numbers span {
+  display: block;
+}
+
+.memory-json-editor {
+  flex: 1;
+  padding: 12px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: #e5e7eb;
+  font-size: 13px;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  line-height: 1.5;
+  resize: none;
+  outline: none;
+  white-space: pre;
+  overflow: auto;
+}
+
+.memory-json-editor::placeholder {
+  color: #6b7280;
+}
+
+.memory-json-editor:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.memory-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  color: #6b7280;
+  margin-bottom: 16px;
+}
+
+.hint-icon {
+  flex-shrink: 0;
 }
 
 .warning-box {

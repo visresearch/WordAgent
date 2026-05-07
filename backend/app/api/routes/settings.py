@@ -14,6 +14,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.core.config import get_user_settings_file, get_wence_data_dir
+from app.services.memory import read_long_term_memory, _get_memory_file
 
 router = APIRouter()
 
@@ -63,7 +64,7 @@ class MCPServerTestRequest(BaseModel):
     config: dict[str, Any] | str
 
 
-@router.get("/settings")
+@router.get("")
 async def get_settings():
     """获取用户设置"""
     try:
@@ -78,7 +79,7 @@ async def get_settings():
         return UserSettings()
 
 
-@router.post("/settings")
+@router.post("")
 async def save_settings(settings: UserSettings):
     """保存用户设置"""
     try:
@@ -112,7 +113,7 @@ async def save_settings(settings: UserSettings):
         raise HTTPException(status_code=500, detail=f"保存设置失败: {str(e)}")
 
 
-@router.post("/settings/mcp/test")
+@router.post("/mcp/test")
 async def test_mcp_server(payload: MCPServerTestRequest):
     """测试 MCP 服务器连接"""
     try:
@@ -198,7 +199,7 @@ async def test_mcp_server(payload: MCPServerTestRequest):
         }
 
 
-@router.get("/settings/wence-temp-dir")
+@router.get("/wence-temp-dir")
 async def get_wence_temp_dir():
     """获取用于前端图片导出的临时目录（wence_data/temp）。"""
     try:
@@ -209,7 +210,7 @@ async def get_wence_temp_dir():
         raise HTTPException(status_code=500, detail=f"获取临时目录失败: {str(e)}")
 
 
-# ============== 图片临时缓存目录（wence_data/temp） ==============
+# ============== 图片缓存管理 ==============
 
 
 def _get_temp_cache_dir() -> Path:
@@ -259,7 +260,6 @@ async def clear_cache():
         except Exception as e:
             print(f"删除缓存文件失败 {f.name}: {e}")
 
-    # 尝试清理空目录（忽略失败）
     for d in sorted(cache_dir.rglob("*"), key=lambda p: len(p.parts), reverse=True):
         if d.is_dir():
             try:
@@ -268,3 +268,34 @@ async def clear_cache():
                 pass
 
     return {"deleted": deleted}
+
+
+# ============== 长期记忆管理 ==============
+
+
+class MemorySaveRequest(BaseModel):
+    """保存记忆请求"""
+
+    content: str
+
+
+@router.get("/memory")
+async def get_memory():
+    """获取长期记忆内容"""
+    try:
+        content = read_long_term_memory()
+        return {"content": content}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/memory")
+async def save_memory(req: MemorySaveRequest):
+    """保存长期记忆内容"""
+    try:
+        file_path = _get_memory_file()
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text(req.content, encoding="utf-8")
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

@@ -25,16 +25,18 @@ from langgraph.graph import END, START, MessagesState, StateGraph
 
 from app.services.llm_client import resolve_model, supports_thinking, init_chat_model_with_reasoning
 from app.services.agent.prompts import get_core_prompts
-from app.services.utils import normalize_tool_args, parse_tool_args_with_repair
+from app.services.utils import normalize_tool_args
 from app.services.agent.tools import (
     TOOL_MAP,
     _current_chat_id,
-    register_loop,
-    is_stop_requested,
+    _current_model_name,
+    _current_request_context,
+    build_mcp_tools_prompt,
     get_base_tools_for_mode,
+    is_stop_requested,
+    load_mcp_tools,
+    register_loop,
 )
-from app.services.agent.tools.callback import _current_model_name
-from app.services.agent.tools.mcp_tools import load_mcp_tools, build_mcp_tools_prompt
 from app.services.agent.skills import build_skills_prompt
 
 
@@ -268,8 +270,14 @@ def build_graph(llm_with_tools, all_tools: list):
             tool_fn = tool_map.get(tool_name)
             if tool_fn:
                 try:
+                    print(
+                        f"[Tools] 调用 normalize_tool_args 前，args 类型={type(tool_call['args'])}, keys={list(tool_call['args'].keys()) if isinstance(tool_call['args'], dict) else 'N/A'}"
+                    )
                     # 用 normalize_tool_args 预处理参数，修复 JSON 字符串转义等问题
                     normalized_args = normalize_tool_args(tool_name, tool_call["args"])
+                    print(
+                        f"[Tools] normalize_tool_args 返回，类型={type(normalized_args)}, keys={list(normalized_args.keys()) if isinstance(normalized_args, dict) else 'N/A'}"
+                    )
                     result = tool_fn.invoke(normalized_args)
                     if isinstance(result, dict):
                         content = json.dumps(result, ensure_ascii=False)
@@ -312,10 +320,10 @@ def build_graph(llm_with_tools, all_tools: list):
         """
         修复 invalid_tool_calls 并直接执行。
 
-        这是解决 escaped JSON 字符串问题的核心：
-        - 模型生成的 document 参数可能是转义字符串 "{\"insertParaIndex\": ...}"
+        处理 escaped JSON 字符串问题：
+        - 模型生成的 document 参数可能是转义字符串
         - LangChain 的 parse_tool_call 会将这些放入 invalid_tool_calls
-        - 我们在这里用 parse_tool_args_with_repair 尝试修复并执行
+        - 这里尝试修复并执行
         """
         last_message = state["messages"][-1]
         invalid_calls = getattr(last_message, "invalid_tool_calls", []) or []
@@ -341,32 +349,56 @@ def build_graph(llm_with_tools, all_tools: list):
             print(f"[Repair] 原始 args: {str(raw_args)[:200]}...")
 
             parsed_args = None
-            for _ in range(3):
+            for attempt in range(3):
                 if isinstance(raw_args, str):
                     raw_args_stripped = raw_args.strip()
                     try:
                         parsed = json.loads(raw_args_stripped)
                         raw_args = parsed
+                        print(f"[Repair] ✅ JSON 解析成功")
                     except json.JSONDecodeError:
-                        pass
-                    try:
-                        import ast
+                        try:
+                            import ast
 
-                        parsed = ast.literal_eval(raw_args_stripped)
-                        raw_args = parsed
-                    except Exception:
-                        pass
+                            parsed = ast.literal_eval(raw_args_stripped)
+                            raw_args = parsed
+                            print(f"[Repair] ✅ ast.literal_eval 解析成功")
+                        except Exception as e:
+                            print(f"[Repair] ⚠️ 解析失败: {e}")
 
                 if isinstance(raw_args, dict):
-                    if "document" in raw_args and isinstance(raw_args.get("document"), dict):
-                        raw_args = raw_args["document"]
-                        continue
-                    parsed_args = raw_args
-                    break
+                    # 如果 document 是字符串，尝试解析
+                    if "document" in raw_args and isinstance(raw_args.get("document"), str):
+                        doc_str = raw_args["document"]
+                        print(f"[Repair] document 是字符串，尝试解析，长度={len(doc_str)}")
+                        try:
+                            # 尝试直接解析
+                            doc_parsed = json.loads(doc_str)
+                            raw_args = {**raw_args, "document": doc_parsed}
+                            print(f"[Repair] ✅ document JSON 解析成功")
+                        except json.JSONDecodeError:
+                            try:
+                                import ast
+
+                                doc_parsed = ast.literal_eval(doc_str)
+                                if isinstance(doc_parsed, dict):
+                                    raw_args = {**raw_args, "document": doc_parsed}
+                                    print(f"[Repair] ✅ document ast.literal_eval 解析成功")
+                            except Exception as e:
+                                print(f"[Repair] ⚠️ document 解析失败: {e}")
+
+                    # 检查 document 是否已正确解析
+                    if isinstance(raw_args.get("document"), dict):
+                        parsed_args = raw_args
+                        break
+                    elif raw_args.get("document") is None:
+                        # document 字段不存在或为 None，跳过
+                        parsed_args = raw_args
+                        break
                 elif isinstance(raw_args, str):
-                    continue
-                else:
-                    break
+                    if attempt < 2:
+                        continue
+                break
 
             if parsed_args is None:
                 print(f"[Repair] ❌ 无法解析工具参数: {tool_name}")
@@ -728,6 +760,13 @@ async def process_writing_request_stream(
                 if chat_id:
                     _current_chat_id.set(chat_id)
                 _current_model_name.set(model_name)
+                # 设置请求上下文，供工具函数获取 document_meta
+                _current_request_context.set(
+                    {
+                        "document_meta": document_meta,
+                        "document_range": document_range,
+                    }
+                )
 
                 import uuid as _uuid
 
@@ -930,6 +969,27 @@ async def process_writing_request_stream(
             yield f"data: {json.dumps({'type': 'status', 'content': '⚠️ 没有检测到调用工具，模型可能不支持'}, ensure_ascii=False)}\n\n"
 
         yield "data: [DONE]\n\n"
+
+        # 流式结束后，yield 完整对话用于长期记忆提取
+        # 构造用户消息内容（包含文档上下文）
+        user_content = message
+        if document_range:
+            range_lines = []
+            for r in document_range:
+                doc_name = r.get("docName", "")
+                start = r.get("startParaIndex", 0)
+                end = r.get("endParaIndex", -1)
+                range_lines.append(f"《{doc_name}》paragraphs {start} to {end}")
+            user_content = f"{message}\n\nPlease process based on the user-selected document content:\n" + "\n".join(
+                f"  - {line}" for line in range_lines
+            )
+
+        # 构造 AI 回复内容
+        assistant_content = "".join(_collected_text_parts)
+
+        # 返回完整对话（供记忆提取使用）
+        conversation_for_memory = {"user": user_content, "assistant": assistant_content}
+        yield f"__memory_conversation__: {json.dumps(conversation_for_memory, ensure_ascii=False)}\n\n"
 
     except Exception as e:
         print(f"[Agent Error] {e}")

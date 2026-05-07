@@ -50,7 +50,7 @@ def initialize_tool_registry() -> None:
     if _TOOL_REGISTRY:
         return
 
-    from app.services.agent.tools.document_tools import (
+    from app.services.agent.tools import (
         delete_document,
         generate_document,
         read_document,

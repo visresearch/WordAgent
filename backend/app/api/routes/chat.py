@@ -4,15 +4,25 @@
 
 import asyncio
 import json
+import traceback
 import uuid
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+
+# Idle watchdog 阈值（秒）：超过 IDLE_WARN_SECONDS 没有 chunk 时，
+# 给前端一条"正在思考下一步"提示；超过 IDLE_ABORT_SECONDS 仍无 chunk 时，
+# 强制停止 LLM 调用并断开 WebSocket。
+IDLE_WARN_SECONDS = 60
+IDLE_ABORT_SECONDS = 180
+# 应用层 keepalive：长 LLM 思考期间，每隔 KEEPALIVE_INTERVAL 秒推一条 ping
+# 防止 WPS WebView / 中间代理因连接长时间空闲而强制关闭 WebSocket。
+KEEPALIVE_INTERVAL = 20
 
 from app.services.agent.agent import (
     ContextOverflowError,
     process_writing_request_stream as single_agent_stream,
 )
-from app.services.agent.tools.tools import (
+from app.services.agent.tools import (
     create_tool_request,
     cleanup_tool_request,
     submit_tool_response,
@@ -177,7 +187,11 @@ async def chat_websocket(websocket: WebSocket):
                     try:
                         incoming = await asyncio.wait_for(msg_queue.get(), timeout=0.5)
                         if incoming is None:
-                            # 连接断开
+                            # 连接断开 - 必须通知 agent 线程停止，
+                            # 否则 ThreadPoolExecutor 里的 LangGraph 会变成孤儿继续跑
+                            print(f"[WebSocket] 客户端断开，停止 agent (session={chat_id})")
+                            request_stop(chat_id)
+                            ma_request_stop(chat_id)
                             stream_task.cancel()
                             try:
                                 await stream_task
@@ -252,6 +266,12 @@ async def chat_websocket(websocket: WebSocket):
         except Exception:
             pass
     finally:
+        # 兜底：确保 agent 线程拿到停止信号，避免孤儿继续跑 LLM/工具
+        try:
+            request_stop(chat_id)
+            ma_request_stop(chat_id)
+        except Exception:
+            pass
         recv_task.cancel()
         cleanup_tool_request(chat_id)
         ma_cleanup_tool_request(chat_id)
@@ -259,6 +279,65 @@ async def chat_websocket(websocket: WebSocket):
 
 
 from app.services.agent.agent import ContextOverflowError
+
+
+class _IdleAbort(Exception):
+    """看门狗主动中止流（达到 IDLE_ABORT_SECONDS）。"""
+
+
+async def _iterate_with_idle_watchdog(aiter, on_warn, on_abort):
+    """
+    包装一个异步迭代器，监测 chunk 之间的静默时长：
+      - 静默达到 IDLE_WARN_SECONDS 时调用一次 on_warn()
+      - 静默达到 IDLE_ABORT_SECONDS 时调用 on_abort() 并以 _IdleAbort 退出
+    使用 asyncio.shield 保护底层 __anext__，避免超时取消把 agent 流给搞坏。
+    """
+    aiterator = aiter.__aiter__()
+    next_task: asyncio.Task | None = asyncio.create_task(aiterator.__anext__())
+    loop = asyncio.get_event_loop()
+    last_chunk_at = loop.time()
+    warned = False
+    try:
+        while True:
+            now = loop.time()
+            deadline = last_chunk_at + (IDLE_ABORT_SECONDS if warned else IDLE_WARN_SECONDS)
+            wait = max(deadline - now, 0.05)
+
+            try:
+                item = await asyncio.wait_for(asyncio.shield(next_task), timeout=wait)
+            except StopAsyncIteration:
+                return
+            except asyncio.TimeoutError:
+                idle = loop.time() - last_chunk_at
+                if not warned and idle >= IDLE_WARN_SECONDS:
+                    try:
+                        await on_warn()
+                    except Exception as cb_err:
+                        print(f"[Watchdog] on_warn 异常: {cb_err}")
+                    warned = True
+                    continue
+                if idle >= IDLE_ABORT_SECONDS:
+                    print(f"[Watchdog] ⛔ 已静默 {idle:.0f}s，达到 abort 阈值")
+                    next_task.cancel()
+                    try:
+                        await next_task
+                    except BaseException:
+                        pass
+                    next_task = None
+                    try:
+                        await on_abort()
+                    except Exception as cb_err:
+                        print(f"[Watchdog] on_abort 异常: {cb_err}")
+                    raise _IdleAbort()
+                continue
+
+            yield item
+            last_chunk_at = loop.time()
+            warned = False
+            next_task = asyncio.create_task(aiterator.__anext__())
+    finally:
+        if next_task is not None and not next_task.done():
+            next_task.cancel()
 
 
 async def _run_ws_stream(
@@ -278,11 +357,58 @@ async def _run_ws_stream(
     mode = _normalize_mode(mode)
     stream_fn = multi_agent_stream if mode == "plan" else single_agent_stream
 
+    # 一把锁串行化所有 WebSocket 发送，避免 keepalive / 主流 / watchdog 并发 send
+    send_lock = asyncio.Lock()
+
+    async def _send(payload: str):
+        async with send_lock:
+            await websocket.send_text(payload)
+
     max_retries = 2
     for attempt in range(max_retries):
         try:
             _done_sent = False
-            async for chunk in stream_fn(
+
+            async def _on_idle_warn():
+                # 60s 没有 chunk：给前端一个轻提示，避免用户以为卡死
+                try:
+                    await _send(
+                        json.dumps(
+                            {"type": "status", "content": "🤔 正在思考下一步"},
+                            ensure_ascii=False,
+                        )
+                    )
+                    print(f"[Watchdog] ⏳ 已静默 {IDLE_WARN_SECONDS}s，已通知前端")
+                except Exception:
+                    pass
+
+            async def _on_idle_abort():
+                # 180s 仍无 chunk：通知 agent 停止 + 告知前端 + 关闭连接
+                print(f"[Watchdog] ⛔ 已静默 {IDLE_ABORT_SECONDS}s，停止 agent 并断开 session={chat_id}")
+                try:
+                    request_stop(chat_id)
+                    ma_request_stop(chat_id)
+                except Exception:
+                    pass
+                try:
+                    await _send(
+                        json.dumps(
+                            {
+                                "type": "error",
+                                "content": f"⏱️ 已超过 {IDLE_ABORT_SECONDS // 60} 分钟无任何输出，已自动停止本次请求。",
+                            },
+                            ensure_ascii=False,
+                        )
+                    )
+                    await _send(json.dumps({"type": "done"}, ensure_ascii=False))
+                except Exception:
+                    pass
+                try:
+                    await websocket.close(code=1011)
+                except Exception:
+                    pass
+
+            stream_iter = stream_fn(
                 message=message,
                 document_range=document_range,
                 document_meta=document_meta or {},
@@ -293,19 +419,53 @@ async def _run_ws_stream(
                 chat_id=chat_id,
                 attached_files=attached_files or [],
                 enable_thinking=enable_thinking,
-            ):
-                if chunk.startswith("data: "):
-                    payload = chunk[6:].strip()
-                    if payload == "[DONE]":
-                        if not _done_sent:
-                            await websocket.send_text(json.dumps({"type": "done"}, ensure_ascii=False))
-                            _done_sent = True
-                    else:
-                        await websocket.send_text(payload)
+            )
 
-            # 确保发送一次 done（防止 agent 异常时未发送）
-            if not _done_sent:
-                await websocket.send_text(json.dumps({"type": "done"}, ensure_ascii=False))
+            # Keepalive 任务：长 LLM 思考期间（一直没 chunk）也每 KEEPALIVE_INTERVAL
+            # 秒发一条 ping，让 WPS WebView / 中间代理看到链路一直有数据，
+            # 不会因为"空闲"把 WebSocket 给关掉。前端收到 type=="ping" 直接忽略即可。
+            async def _keepalive():
+                try:
+                    while True:
+                        await asyncio.sleep(KEEPALIVE_INTERVAL)
+                        try:
+                            await _send(json.dumps({"type": "ping"}, ensure_ascii=False))
+                        except Exception:
+                            return
+                except asyncio.CancelledError:
+                    return
+
+            keepalive_task = asyncio.create_task(_keepalive())
+            memory_conversation: dict | None = None
+
+            try:
+                async for chunk in _iterate_with_idle_watchdog(stream_iter, _on_idle_warn, _on_idle_abort):
+                    if chunk.startswith("data: "):
+                        payload = chunk[6:].strip()
+                        if payload == "[DONE]":
+                            if not _done_sent:
+                                await _send(json.dumps({"type": "done"}, ensure_ascii=False))
+                                _done_sent = True
+                        else:
+                            await _send(payload)
+                    elif chunk.startswith("__memory_conversation__:"):
+                        raw = chunk.split(":", 1)[1].strip()
+                        try:
+                            parsed = json.loads(raw)
+                            if isinstance(parsed, dict):
+                                memory_conversation = parsed
+                        except Exception as e:
+                            print(f"[WebSocket] 解析 memory conversation 失败: {e}")
+
+                # 确保发送一次 done（防止 agent 异常时未发送）
+                if not _done_sent:
+                    await _send(json.dumps({"type": "done"}, ensure_ascii=False))
+            finally:
+                keepalive_task.cancel()
+                try:
+                    await keepalive_task
+                except (asyncio.CancelledError, Exception):
+                    pass
 
             # 异步提取长期记忆（不阻塞前端）
             async def _extract_memory_async():
@@ -315,13 +475,24 @@ async def _run_ws_stream(
 
                     sync_llm = create_sync_llm_client(model, provider, temperature=MEMORY_EXTRACT_TEMPERATURE)
                     if sync_llm:
-                        conversation_parts = []
-                        for h in history[-10:]:
-                            role = h.get("role", "")
-                            content = h.get("content", "")
-                            if content and role in ("user", "assistant"):
-                                conversation_parts.append(f"{role.upper()}: {content}")
-                        conversation = "\n\n".join(conversation_parts)
+                        if (
+                            isinstance(memory_conversation, dict)
+                            and memory_conversation.get("user")
+                            and memory_conversation.get("assistant")
+                        ):
+                            conversation = (
+                                f"USER: {memory_conversation.get('user', '')}\n\n"
+                                f"ASSISTANT: {memory_conversation.get('assistant', '')}"
+                            )
+                        else:
+                            conversation_parts = []
+                            for h in history[-10:]:
+                                role = h.get("role", "")
+                                content = h.get("content", "")
+                                if content and role in ("user", "assistant"):
+                                    conversation_parts.append(f"{role.upper()}: {content}")
+                            conversation = "\n\n".join(conversation_parts)
+
                         if conversation:
                             extract_and_save_memory(conversation, sync_llm)
                 except Exception as e:
@@ -331,6 +502,9 @@ async def _run_ws_stream(
             asyncio.create_task(_extract_memory_async())
 
             return  # 正常结束
+        except _IdleAbort:
+            # 看门狗已经处理了通知和 agent 停止，这里直接退出，不重试
+            return
         except ContextOverflowError as e:
             print(
                 f"[WebSocket] 上下文超限，尝试重试（{attempt + 1}/{max_retries}），压缩后 {len(e.compressed_history)} 条历史"

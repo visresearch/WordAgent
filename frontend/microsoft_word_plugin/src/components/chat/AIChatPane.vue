@@ -841,6 +841,11 @@ export default {
     _handleStreamMessage(data, aiMsg) {
       const msg = aiMsg;
 
+      // 后端 keepalive ping 仅用于保活，不影响任何 UI 状态
+      if (data.type === 'ping') {
+        return;
+      }
+
       // 收到非 thinking 事件时，标记思考已结束
       if (data.type !== 'thinking' && msg.thinkingStartTime && !msg.thinkingDone) {
         msg.thinkingDone = true;

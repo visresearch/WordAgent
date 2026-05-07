@@ -5,7 +5,7 @@
 
 记忆层级：
 1. 短期记忆 (Short-term)   — 固定 token 预算（类 Claude Code）
-2. 长期记忆 (Long-term)    — md 文件持久化（user-memory.md, feedback-memory.md, document-memory.md）
+2. 长期记忆 (Long-term)    — 单个 md 文件持久化（memory.md）
 
 """
 
@@ -50,127 +50,170 @@ ENABLE_AUTO_MEMORY_EXTRACT = os.environ.get("WORDAGENT_ENABLE_AUTO_MEMORY_EXTRAC
     "on",
 }
 
-MEMORY_EXTRACT_TEMPERATURE = _get_env_int("WORDAGENT_MEMORY_EXTRACT_TEMPERATURE", 0)
+MEMORY_EXTRACT_TEMPERATURE = _get_env_int("WORDAGENT_MEMORY_EXTRACT_TEMPERATURE", 0.3)
 
-LONG_TERM_MEMORY_TYPES = ["user", "feedback", "document"]
+# 长期记忆上限（条数）
+MAX_MEMORY_ITEMS = _get_env_int("WORDAGENT_MEMORY_MAX_ITEMS", 20)
 
 
 # ============== Memory Tool 定义 ==============
 
 
 def _get_memory_dir() -> Path:
-    """获取长期记忆目录，不存在则创建"""
+    """获取 wence_data 目录"""
     from app.core.config import get_wence_data_dir
 
-    memory_dir = get_wence_data_dir() / "memory"
-    memory_dir.mkdir(parents=True, exist_ok=True)
-    return memory_dir
+    return get_wence_data_dir()
 
 
-def _get_memory_file(name: str) -> Path:
-    """获取指定名称的记忆文件路径"""
-    return _get_memory_dir() / f"{name}-memory.md"
+def _get_memory_file() -> Path:
+    """获取记忆文件路径"""
+    return _get_memory_dir() / "memory.md"
 
 
-def _get_memory_tools():
-    """延迟导入避免循环依赖"""
-    from langchain_core.tools import tool
-
-    @tool
-    def save_user_memory(memory: str) -> str:
-        """保存用户偏好和写作风格等记忆。只在用户明确提供了偏好或相关信息时才调用。"""
-        file_path = _get_memory_file("user")
-        try:
-            file_path.write_text(memory.strip(), encoding="utf-8")
-            return f"已保存到 {file_path}"
-        except Exception as e:
-            return f"保存失败: {e}"
-
-    @tool
-    def save_feedback_memory(memory: str) -> str:
-        """保存用户对 AI 输出的反馈和纠正。只在用户明确提供了反馈时才调用。"""
-        file_path = _get_memory_file("feedback")
-        try:
-            file_path.write_text(memory.strip(), encoding="utf-8")
-            return f"已保存到 {file_path}"
-        except Exception as e:
-            return f"保存失败: {e}"
-
-    @tool
-    def save_document_memory(memory: str) -> str:
-        """保存当前文档的相关信息（类型、主题、格式要求等）。只在对话涉及具体文档时才调用。"""
-        file_path = _get_memory_file("document")
-        try:
-            file_path.write_text(memory.strip(), encoding="utf-8")
-            return f"已保存到 {file_path}"
-        except Exception as e:
-            return f"保存失败: {e}"
-
-    return [save_user_memory, save_feedback_memory, save_document_memory]
+def _get_all_items() -> list[str]:
+    """获取所有记忆条目（以 - 开头的行）"""
+    file_path = _get_memory_file()
+    if not file_path.exists():
+        return []
+    try:
+        content = file_path.read_text(encoding="utf-8")
+        items = []
+        for line in content.split("\n"):
+            line = line.strip()
+            if line.startswith("-"):
+                item = line[1:].strip()
+                if item:
+                    items.append(item)
+        return items
+    except Exception:
+        return []
 
 
-def get_memory_tools():
-    """获取记忆工具列表（供外部调用）"""
-    return _get_memory_tools()
+def _save_items(items: list[str]) -> bool:
+    """保存所有记忆条目到文件"""
+    file_path = _get_memory_file()
+    try:
+        content = "\n".join(f"- {item}" for item in items if item)
+        file_path.write_text(content + "\n", encoding="utf-8")
+        return True
+    except Exception as e:
+        print(f"[Memory] 保存记忆失败: {e}")
+        return False
+
+
+def _get_item_count() -> int:
+    """获取当前记忆条数"""
+    return len(_get_all_items())
+
+
+def _is_too_similar(item1: str, item2: str, threshold: float = 0.8) -> bool:
+    """检查两个条目是否过于相似"""
+    import difflib
+
+    ratio = difflib.SequenceMatcher(None, item1.lower(), item2.lower()).ratio()
+    return ratio >= threshold
+
+
+def _should_skip_item(new_item: str, existing_items: list[str]) -> tuple[bool, str]:
+    """
+    检查是否应该跳过新条目。
+    返回 (是否跳过, 原因)
+    """
+    new_lower = new_item.lower()
+    for existing in existing_items:
+        if new_lower == existing.lower():
+            return True, "完全相同"
+        if _is_too_similar(existing, new_item):
+            if len(existing) >= len(new_item):
+                return True, f"与已有记忆相似: {existing[:30]}..."
+            else:
+                return False, f"替换更完整的版本: {existing[:30]}..."
+    return False, ""
+
+
+def _add_item(new_item: str) -> tuple[bool, str]:
+    """
+    添加一条记忆。新记忆追加到末尾（最新位置）。
+    如果超过上限，会触发压缩删除旧记忆。
+    返回 (是否添加成功, 原因)
+    """
+    should_skip, reason = _should_skip_item(new_item, _get_all_items())
+    if should_skip:
+        return False, f"跳过: {reason}"
+
+    # 直接追加（压缩逻辑在外部处理）
+    existing_items = _get_all_items()
+
+    # 如果有相似的但新条目更完整，替换旧条目
+    new_lower = new_item.lower()
+    filtered = []
+    replaced = False
+    for existing in existing_items:
+        if not replaced and _is_too_similar(existing, new_item) and len(new_item) > len(existing):
+            filtered.append(new_item)
+            replaced = True
+        elif existing.lower() != new_lower:
+            filtered.append(existing)
+
+    if not replaced:
+        filtered.append(new_item)
+
+    # 超过上限时压缩
+    if len(filtered) > MAX_MEMORY_ITEMS:
+        filtered = _compact_by_removing_old(filtered)
+
+    if _save_items(filtered):
+        return True, f"已添加 ({len(filtered)}/{MAX_MEMORY_ITEMS})"
+    return False, "保存失败"
+
+
+def _compact_by_removing_old(items: list[str]) -> list[str]:
+    """
+    简单压缩：添加新记忆后超过阈值时，删掉超出的条目（从最老的开始删）。
+    """
+    if not items:
+        return []
+
+    if len(items) <= MAX_MEMORY_ITEMS:
+        return items
+
+    removed = len(items) - MAX_MEMORY_ITEMS
+    print(f"[Memory] 压缩: 删除 {removed} 条旧记忆，保留 {MAX_MEMORY_ITEMS} 条")
+    return items[-MAX_MEMORY_ITEMS:]
 
 
 # ============== 长期记忆读写 ==============
 
 
-def read_long_term_memory() -> dict[str, str]:
-    """读取所有长期记忆文件。"""
-    result = {}
-    for name in LONG_TERM_MEMORY_TYPES:
-        file_path = _get_memory_file(name)
-        try:
-            if file_path.exists():
-                result[name] = file_path.read_text(encoding="utf-8").strip()
-            else:
-                result[name] = ""
-        except Exception as e:
-            print(f"[Memory] 读取 {name} 记忆失败: {e}")
-            result[name] = ""
-    return result
-
-
-def write_long_term_memory(name: str, content: str) -> bool:
-    """写入单个长期记忆文件。"""
-    file_path = _get_memory_file(name)
+def read_long_term_memory() -> str:
+    """读取长期记忆文件内容"""
+    file_path = _get_memory_file()
+    if not file_path.exists():
+        return ""
     try:
-        file_path.write_text(content.strip(), encoding="utf-8")
-        return True
+        return file_path.read_text(encoding="utf-8").strip()
     except Exception as e:
-        print(f"[Memory] 写入 {name} 记忆失败: {e}")
-        return False
+        print(f"[Memory] 读取记忆失败: {e}")
+        return ""
 
 
 def build_long_term_memory_prompt() -> str:
-    """将长期记忆格式化为系统提示词的一部分。"""
-    memories = read_long_term_memory()
-    parts = []
-
-    title_map = {
-        "user": "User Memory",
-        "feedback": "Feedback Memory",
-        "document": "Document Memory",
-    }
-
-    for name, content in memories.items():
-        if not content:
-            continue
-
-        title = title_map.get(name, name)
-
-        if len(content) > 4000:
-            content = content[:4000] + f"\n[...截断，原 {len(content)} 字符]"
-
-        parts.append(f"### {title}\n{content}")
-
-    if not parts:
+    """将长期记忆格式化为系统提示词的一部分"""
+    content = read_long_term_memory()
+    if not content:
         return ""
 
-    header = "## Long-term Memory (Persisted across sessions)\n"
-    return header + "\n\n".join(parts) + "\n"
+    count = len(_get_all_items())
+    if len(content) > 4000:
+        content = content[:4000] + f"\n[...截断，原 {len(content)} 字符]"
+
+    return f"""## Long-term Memory ({count} items, persisted across sessions)
+
+**Note: Memory is stored in chronological order — OLDEST entries are at the TOP, NEWEST at the BOTTOM.**
+
+{content}
+"""
 
 
 # ============== 短期记忆（固定 Token 预算，类 Claude Code） ==============
@@ -184,6 +227,8 @@ def build_short_term_messages(
     使用固定 token 预算加载短期记忆（类 Claude Code 风格）。
 
     从最近的消息开始，保留足够的内容满足 token 预算。
+    AI 消息会包含 tool_calls 信息（工具名和参数，不含结果）。
+
     """
     if not history:
         return []
@@ -194,30 +239,32 @@ def build_short_term_messages(
     if not pairs:
         return []
 
-    selected_pairs: list[tuple[str, str]] = []
+    selected_pairs: list[tuple[str, str, list[dict]]] = []
     total_tokens = 0
 
-    for user_msg, ai_msg in reversed(pairs):
+    for user_msg, ai_msg, tool_calls in reversed(pairs):
         user_tokens = _estimate_token_count(user_msg) + 20
         ai_tokens = _estimate_token_count(ai_msg) + 20
         pair_tokens = user_tokens + ai_tokens
 
         if total_tokens + pair_tokens <= budget:
-            selected_pairs.insert(0, (user_msg, ai_msg))
+            selected_pairs.insert(0, (user_msg, ai_msg, tool_calls))
             total_tokens += pair_tokens
         else:
             if not selected_pairs:
                 max_chars = int(budget * 2)
                 truncated_user = _truncate_text(user_msg, max_chars)
                 if _estimate_token_count(truncated_user) <= budget:
-                    selected_pairs.append((truncated_user, ""))
+                    selected_pairs.append((truncated_user, "", []))
             break
 
     result: list[HumanMessage | AIMessage] = []
-    for user_msg, ai_msg in selected_pairs:
+    for user_msg, ai_msg, tool_calls in selected_pairs:
         result.append(HumanMessage(content=user_msg))
-        if ai_msg:
-            result.append(AIMessage(content=ai_msg))
+        if ai_msg or tool_calls:
+            # 确保 tool_calls 是列表而不是 None
+            safe_tool_calls = tool_calls if isinstance(tool_calls, list) else []
+            result.append(AIMessage(content=ai_msg or "", tool_calls=safe_tool_calls))
 
     print(f"[Memory] 短期记忆: 保留 {len(selected_pairs)} 轮对话, ~{total_tokens} tokens")
     return result
@@ -226,8 +273,8 @@ def build_short_term_messages(
 # ============== 工具函数 ==============
 
 
-def _pair_history(history: list[dict]) -> list[tuple[str, str]]:
-    """将 history 列表配对为 (user_msg, assistant_msg) 元组列表。"""
+def _pair_history(history: list[dict]) -> list[tuple[str, str, list[dict]]]:
+    """将 history 列表配对为 (user_msg, assistant_msg, tool_calls) 元组列表。"""
     pairs = []
     i = 0
     valid = [
@@ -238,7 +285,9 @@ def _pair_history(history: list[dict]) -> list[tuple[str, str]]:
     print(f"[Memory] _pair_history: 原始 history={len(history)}, 过滤后 valid={len(valid)}")
     while i < len(valid) - 1:
         if valid[i]["role"] == "user" and valid[i + 1]["role"] == "assistant":
-            pairs.append((valid[i]["content"], valid[i + 1]["content"]))
+            assistant_entry = valid[i + 1]
+            tool_calls = assistant_entry.get("tool_calls", [])
+            pairs.append((valid[i]["content"], assistant_entry["content"], tool_calls))
             i += 2
         else:
             i += 1
@@ -268,83 +317,17 @@ def _truncate_text(text: str, max_chars: int) -> str:
     return f"{text[:keep]}\n[内容过长，已截断 {omitted} 字符]"
 
 
-# ============== 长期记忆提取（Tool 方式） ==============
-
-
-def extract_and_save_memory(
-    conversation: str,
-    llm: Any,
-    force: bool = False,
-) -> dict[str, bool]:
-    """
-    使用 Tool 方式从对话中提取关键信息并保存到长期记忆。
-
-    Args:
-        conversation: 对话内容
-        llm: LLM 实例
-        force: 强制提取，忽略 ENABLE_AUTO_MEMORY_EXTRACT 配置
-
-    Returns:
-        dict[str, bool]: 各记忆类型的保存结果
-    """
-    if not force and not ENABLE_AUTO_MEMORY_EXTRACT:
-        print("[Memory] 自动记忆提取已禁用 (WORDAGENT_ENABLE_AUTO_MEMORY_EXTRACT=false)")
-        return {name: False for name in LONG_TERM_MEMORY_TYPES}
-
-    if not conversation or not llm:
-        return {name: False for name in LONG_TERM_MEMORY_TYPES}
-
-    prompt = _build_extract_prompt(conversation)
-
-    try:
-        memory_tools = _get_memory_tools()
-        llm_with_tools = llm.bind_tools(memory_tools)
-        response = llm_with_tools.invoke([{"role": "user", "content": prompt}])
-
-        saved = {}
-        tool_calls = response.tool_calls if hasattr(response, "tool_calls") else []
-
-        if not tool_calls:
-            print(
-                f"[Memory] LLM 未调用任何工具，响应: {response.content[:200] if hasattr(response, 'content') else response}"
-            )
-            return {name: False for name in LONG_TERM_MEMORY_TYPES}
-
-        for tool_call in tool_calls:
-            tool_name = tool_call.get("name")
-            tool_args = tool_call.get("args", {})
-
-            if tool_name == "save_user_memory":
-                saved["user"] = write_long_term_memory("user", tool_args.get("memory", ""))
-            elif tool_name == "save_feedback_memory":
-                saved["feedback"] = write_long_term_memory("feedback", tool_args.get("memory", ""))
-            elif tool_name == "save_document_memory":
-                saved["document"] = write_long_term_memory("document", tool_args.get("memory", ""))
-
-        for name in LONG_TERM_MEMORY_TYPES:
-            if name not in saved:
-                saved[name] = False
-
-        print(f"[Memory] 长期记忆提取完成: {saved}")
-        return saved
-
-    except Exception as e:
-        print(f"[Memory] 长期记忆提取失败: {e}")
-        import traceback
-
-        traceback.print_exc()
-        return {name: False for name in LONG_TERM_MEMORY_TYPES}
+# ============== 长期记忆提取 ==============
 
 
 def _load_extract_prompt_template() -> str:
-    """从 md 文件加载记忆提取提示词模板。"""
+    """从 md 文件加载记忆提取提示词模板"""
     from pathlib import Path
 
     template_path = Path(__file__).parent / "agent" / "prompts" / "system-prompt-memory-extract-template.md"
     try:
         return template_path.read_text(encoding="utf-8")
-    except Exception as e:
-        print(f"[Memory] 加载提取提示词模板失败: {e}")
+    except Exception:
         return "Extract key information from the following conversation:\n{conversation}"
 
 
@@ -354,3 +337,99 @@ _EXTRACT_PROMPT_TEMPLATE = _load_extract_prompt_template()
 def _build_extract_prompt(conversation: str) -> str:
     """构建记忆提取的提示词"""
     return _EXTRACT_PROMPT_TEMPLATE.format(conversation=conversation)
+
+
+def _parse_extracted_items(content: str) -> list[str]:
+    """从 LLM 响应中解析记忆条目"""
+    content = content.strip()
+
+    # 检查是否表示不需要添加记忆
+    if content.upper() == "NO_MEMORY":
+        return []
+
+    items = []
+    for line in content.split("\n"):
+        line = line.strip()
+        if line.startswith("-"):
+            item = line[1:].strip()
+            if item and item.upper() != "NO_MEMORY":
+                items.append(item)
+        elif line.startswith("[记忆]") or line.startswith("[memory]"):
+            item = line.split("]", 1)[-1].strip()
+            if item and item.upper() != "NO_MEMORY":
+                items.append(item)
+    return items
+
+
+def extract_and_save_memory(
+    conversation: str,
+    llm: Any,
+    force: bool = False,
+) -> dict[str, bool]:
+    """
+    从对话中提取关键信息并保存到长期记忆。
+
+    机制：
+    - LLM 可能返回多条记忆，也可能返回"不需要添加任何记忆"
+    - 自动去重和合并相似条目
+    - 超过上限时跳过或触发精炼
+
+    Args:
+        conversation: 对话内容
+        llm: LLM 实例
+        force: 强制提取，忽略 ENABLE_AUTO_MEMORY_EXTRACT 配置
+
+    Returns:
+        dict[str, bool]: {"added": True/False}
+    """
+    if not force and not ENABLE_AUTO_MEMORY_EXTRACT:
+        print("[Memory] 自动记忆提取已禁用 (WORDAGENT_ENABLE_AUTO_MEMORY_EXTRACT=false)")
+        return {"added": False}
+
+    if not conversation or not llm:
+        return {"added": False}
+
+    prompt = _build_extract_prompt(conversation)
+
+    try:
+        response = llm.invoke([{"role": "user", "content": prompt}])
+
+        content = ""
+        if hasattr(response, "content") and response.content:
+            content = response.content.strip()
+        elif hasattr(response, "text") and response.text:
+            content = response.text.strip()
+
+        if not content:
+            print("[Memory] LLM 未返回任何内容")
+            return {"added": False}
+
+        items = _parse_extracted_items(content)
+        if not items:
+            print("[Memory] 未提取到有效记忆条目")
+            return {"added": False}
+
+        print(f"[Memory] 提取到 {len(items)} 条候选记忆")
+
+        added_count = 0
+        for item in items:
+            success, reason = _add_item(item)
+            if success:
+                added_count += 1
+                print(f"[Memory] 添加: {item[:40]}... ({reason})")
+            else:
+                print(f"[Memory] 跳过: {item[:40]}... ({reason})")
+
+        current_count = _get_item_count()
+        print(f"[Memory] 记忆提取完成: 新增 {added_count} 条, 当前共 {current_count} 条")
+
+        return {"added": added_count > 0}
+
+    except Exception as e:
+        print(f"[Memory] 记忆提取失败: {e}")
+        import traceback
+
+        traceback.print_exc()
+        return {"added": False}
+
+

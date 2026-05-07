@@ -74,6 +74,9 @@ def start_api_server():
         print(f"📍 访问地址: http://{settings.HOST}:{settings.PORT}")
 
         # 打包后直接使用 app 对象，而不是字符串导入
+        # ws_ping_interval/timeout：默认是 (20s, 20s)，对长 LLM 思考过于激进。
+        # 我们应用层每 20s 自己发 ping，这里把协议层的也放宽到 60s/180s，
+        # 让"WebSocket 静默 3 分钟"成为唯一会触发断开的时间窗。
         uvicorn.run(
             app,
             host=settings.HOST,
@@ -81,6 +84,8 @@ def start_api_server():
             reload=False,
             log_level="info",
             access_log=True,
+            ws_ping_interval=60,
+            ws_ping_timeout=180,
         )
     except Exception as e:
         print(f"❌ API 服务启动失败: {e}")

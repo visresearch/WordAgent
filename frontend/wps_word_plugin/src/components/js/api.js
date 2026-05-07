@@ -236,10 +236,13 @@ const wsManager = {
   _connectPromise: null,
   /** 防止重复调用 onComplete */
   _completeCalled: false,
-  /** 请求超时定时器 */
+  /** 空闲超时定时器（每收到任何消息都会被重置） */
   _requestTimeoutTimer: null,
-  /** 请求超时时间（毫秒），默认 120 秒 */
-  _requestTimeout: 120000,
+  /**
+   * 空闲超时阈值（毫秒）：从上一次收到消息开始计算，超过该时间未收到任何消息
+   * （包括后端每 20s 发的 ping）才判定为超时。180s 与后端 watchdog abort 对齐。
+   */
+  _requestTimeout: 180000,
 
   // 文档缓存：{documentJson: {...}, timestamp: number}
   _documentCache: null,
@@ -281,6 +284,30 @@ const wsManager = {
   clearDocumentCache() {
     this._documentCache = null;
     console.log('[WebSocket] 文档缓存已清除');
+  },
+
+  /**
+   * 启动/重置空闲超时计时器：阈值时间内没有任何消息就视为超时。
+   * 每次收到消息（包括后端 keepalive ping）都应调用一次。
+   */
+  _armIdleTimeout() {
+    if (this._requestTimeoutTimer) {
+      clearTimeout(this._requestTimeoutTimer);
+    }
+    this._requestTimeoutTimer = setTimeout(() => {
+      // 只有在没有完成且 WebSocket 仍连接时才触发超时
+      if (!this._completeCalled && this.connected) {
+        const seconds = Math.round(this._requestTimeout / 1000);
+        console.warn(`[WebSocket] 已 ${seconds}s 未收到任何消息，判定为超时`);
+        this._completeCalled = true;
+        if (this.onError) {
+          this.onError(new Error(`请求超时：${seconds}s 内未收到任何响应（含心跳），请稍后重试`));
+        }
+        if (this.ws) {
+          this.ws.close();
+        }
+      }
+    }, this._requestTimeout);
   },
 
   /**
@@ -326,6 +353,11 @@ const wsManager = {
         try {
           const data = JSON.parse(event.data);
 
+          // 收到任何消息（包括后端 keepalive 的 ping）都重置空闲超时计时
+          if (this._requestTimeoutTimer) {
+            this._armIdleTimeout();
+          }
+
           if (data.type === 'done') {
             // 防重复调用 onComplete
             if (!this._completeCalled) {
@@ -351,6 +383,11 @@ const wsManager = {
             if (this.onError) {
               this.onError(new Error(data.content || '未知错误'));
             }
+            return;
+          }
+
+          // 后端 keepalive ping：仅用于保活和重置空闲超时，不上抛
+          if (data.type === 'ping') {
             return;
           }
 
@@ -580,20 +617,9 @@ function chatStream(message, options = {}) {
       // 确保 WebSocket 已连接
       await wsManager.connect();
 
-      // 设置请求超时：如果长时间没有收到任何消息（超过阈值），通知前端超时
-      wsManager._requestTimeoutTimer = setTimeout(() => {
-        // 只有在没有完成且 WebSocket 仍连接时才触发超时
-        if (!wsManager._completeCalled && wsManager.connected) {
-          console.warn('[WebSocket] 请求超时，未收到完整响应');
-          wsManager._completeCalled = true;
-          if (onError) {
-            onError(new Error('请求超时：LLM 首次响应时间过长，请稍后重试'));
-          }
-          if (wsManager.ws) {
-            wsManager.ws.close();
-          }
-        }
-      }, wsManager._requestTimeout);
+      // 设置空闲超时：每收到任何消息（含后端 keepalive ping）会自动重置计时
+      // 真正空闲到阈值才会触发，正常长 LLM 思考期间因为有 ping 不会被误杀
+      wsManager._armIdleTimeout();
 
       // 文档全局元信息：随用户提问发送，不放在 read_document 回包里
       const documentMeta = getCurrentDocumentMeta();
@@ -1034,7 +1060,7 @@ async function uploadFiles(files) {
  * @returns {Promise<Object>} { dir, fileCount, totalSize }
  */
 async function scanCache() {
-  const response = await request('/api/cache/scan', { method: 'GET' });
+  const response = await request('/api/settings/cache/scan', { method: 'GET' });
   if (!response.success) {
     throw new Error(response.error || '扫描缓存失败');
   }
@@ -1046,9 +1072,39 @@ async function scanCache() {
  * @returns {Promise<Object>} { deleted }
  */
 async function clearCache() {
-  const response = await request('/api/cache/clear', { method: 'DELETE' });
+  const response = await request('/api/settings/cache/clear', { method: 'DELETE' });
   if (!response.success) {
     throw new Error(response.error || '清除缓存失败');
+  }
+  return response.data;
+}
+
+// ============== 长期记忆 API ==============
+
+/**
+ * 获取长期记忆内容
+ * @returns {Promise<string>} memory content
+ */
+async function getMemory() {
+  const response = await request('/api/settings/memory', { method: 'GET' });
+  if (!response.success) {
+    throw new Error(response.error || '获取长期记忆失败');
+  }
+  return response.data.content || '';
+}
+
+/**
+ * 保存长期记忆内容
+ * @param {string} content - 记忆内容
+ * @returns {Promise<Object>} { success }
+ */
+async function saveMemory(content) {
+  const response = await request('/api/settings/memory', {
+    method: 'POST',
+    body: { content }
+  });
+  if (!response.success) {
+    throw new Error(response.error || '保存长期记忆失败');
   }
   return response.data;
 }
@@ -1166,6 +1222,10 @@ export default {
   scanCache,
   clearCache,
 
+  // 长期记忆 API
+  getMemory,
+  saveMemory,
+
   // Skill 管理 API
   getSkills,
   uploadSkillPackage,
@@ -1208,6 +1268,8 @@ export {
   getWenceTempDir,
   scanCache,
   clearCache,
+  getMemory,
+  saveMemory,
   getSkills,
   uploadSkillPackage,
   setSkillEnabled,

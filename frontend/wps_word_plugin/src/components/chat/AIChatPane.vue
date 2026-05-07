@@ -92,7 +92,7 @@ export default {
       pendingDocumentMsg: null,
       pendingDeletes: [],  // [{startParaIndex, endParaIndex, commentStartPos, commentEndPos, preview, msg}] 待确认删除列表
       pendingInsertions: [],  // [{documentJson, docId, insertParaIndex, msg}] 待确认的文档插入列表
-      _streamInsertions: [], // [{insertParaIndex, count}] 当前流式中已执行的插入操作
+      _streamInsertions: [], // [{insertParaIndex, count, docId}] 当前流式中已执行的插入操作
       historyLoading: false,
       hasHistory: false,
       historyLoaded: false,
@@ -1160,6 +1160,11 @@ export default {
     _handleStreamMessage(data, aiMsg) {
       const msg = aiMsg;
 
+      // 后端 keepalive ping 仅用于保活，不影响任何 UI 状态
+      if (data.type === 'ping') {
+        return;
+      }
+
       // 收到非 thinking 事件时，标记思考已结束
       if (data.type !== 'thinking' && msg.thinkingStartTime && !msg.thinkingDone) {
         msg.thinkingDone = true;
@@ -1471,7 +1476,11 @@ export default {
         const tableCount = (data.content.tables || []).length;
         const shiftCount = paraCount + tableCount;
         if (shiftCount > 0) {
-          this._streamInsertions.push({ insertParaIndex: insItem.insertParaIndex, count: shiftCount });
+          this._streamInsertions.push({
+            insertParaIndex: insItem.insertParaIndex,
+            count: shiftCount,
+            docId: insItem.docId || null
+          });
         }
 
         console.log('[AIChatPane] 添加待插入文档到队列, docId:', insItem.docId, 'insertParaIndex:', insItem.insertParaIndex, '队列大小:', this.pendingInsertions.length);
@@ -1574,6 +1583,10 @@ export default {
                 adjStart = pd.origStartParaIndex;
                 adjEnd = pd.origEndParaIndex;
                 for (const ins of this._streamInsertions) {
+                  // 仅应用同文档的插入偏移，避免跨文档串扰
+                  if (ins.docId && pd.docId && String(ins.docId) !== String(pd.docId)) {
+                    continue;
+                  }
                   const insAt = ins.insertParaIndex;
                   if (insAt === -1 || insAt === null || insAt === undefined) {
                     continue;
@@ -1946,6 +1959,10 @@ export default {
         let adjStart = pd.origStartParaIndex;
         let adjEnd = pd.origEndParaIndex;
         for (const ins of this._streamInsertions) {
+          // 仅应用同文档的插入偏移，避免跨文档串扰
+          if (ins.docId && pd.docId && String(ins.docId) !== String(pd.docId)) {
+            continue;
+          }
           const insAt = ins.insertParaIndex;
           if (insAt === -1 || insAt === null || insAt === undefined) {
             continue;
@@ -1986,7 +2003,7 @@ export default {
           } else {
             // 修订模式：使用批注
             try {
-              const comment = doc.Comments.Add(deleteRange, '待删除内容');
+              const comment = pdDoc.Comments.Add(deleteRange, '待删除内容');
               comment.Author = '文策AI-删除';
               pd._commentAdded = true;
               pd._markingMode = 'comment';

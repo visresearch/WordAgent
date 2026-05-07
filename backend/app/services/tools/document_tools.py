@@ -1,4 +1,11 @@
-"""Document tools for multi-agent (read, search, generate, delete)."""
+"""共享文档工具实现（read / search / generate / delete）。
+
+这里只放纯逻辑函数 + "工厂函数"。每个 agent 模式（agent / multi_agent）
+通过传入自己的 `description` 字符串拿到一份装好 `@tool` 的副本，从而复用
+所有实现，但又能让 LLM 看到不同模式下定制的 prompt 描述。
+"""
+
+from __future__ import annotations
 
 import asyncio
 import base64
@@ -13,49 +20,23 @@ from urllib.request import Request, urlopen
 from langchain_core.tools import tool
 from langgraph.config import get_stream_writer
 
-from app.services.multi_agent.prompts import get_tool_description
 from app.core.config import get_wence_data_dir
-from .callback import _current_chat_id, _pending_loops, _pending_tool_requests, is_stop_requested
+
+from .callback import (
+    _current_chat_id,
+    _current_request_context,
+    _pending_loops,
+    _pending_tool_requests,
+    is_stop_requested,
+)
 from .schemas import DocumentOutput, DocumentQuery
 
 
+# 返回给 LLM 的文档 JSON 最大字符数（超过则进入精简模式）
 _MAX_DOC_JSON_CHARS = 100_000
 
 
-def _parse_document_arg(document: str | dict | DocumentOutput) -> dict:
-    """Parse the document argument into a dict, handling strings, dicts, and DocumentOutput instances."""
-    if isinstance(document, DocumentOutput):
-        doc_dict = document.model_dump()
-    elif isinstance(document, dict):
-        doc_dict = dict(document)
-    elif isinstance(document, str):
-        doc_raw = document.strip()
-        if doc_raw.startswith("```"):
-            lines = doc_raw.splitlines()
-            if len(lines) >= 2:
-                doc_raw = "\n".join(lines[1:-1]).strip()
-
-        try:
-            parsed = json.loads(doc_raw)
-            if isinstance(parsed, dict):
-                doc_dict = parsed
-            else:
-                raise ValueError(f"Expected dict, got {type(parsed).__name__}")
-        except json.JSONDecodeError:
-            try:
-                import ast
-
-                literal_val = ast.literal_eval(doc_raw)
-                if isinstance(literal_val, dict):
-                    doc_dict = literal_val
-                else:
-                    raise ValueError(f"Expected dict, got {type(literal_val).__name__}")
-            except Exception:
-                raise ValueError(f"Cannot parse document string as JSON: {doc_raw[:200]}")
-    else:
-        raise ValueError(f"document must be dict or string, got {type(document).__name__}")
-
-    return DocumentOutput.model_validate(doc_dict).model_dump()
+# region 图片 / 文档辅助
 
 
 def _download_remote_image(url: str) -> str | None:
@@ -76,7 +57,7 @@ def _download_remote_image(url: str) -> str | None:
             file_path.write_bytes(resp.read())
         return str(file_path)
     except Exception as e:
-        print(f"[generate_document] Image download failed: {e}")
+        print(f"[generate_document] ⚠️ 下载图片失败: {e}")
         return None
 
 
@@ -107,12 +88,12 @@ def _save_data_image(data_url: str) -> str | None:
         file_path.write_bytes(raw)
         return str(file_path)
     except Exception as e:
-        print(f"[generate_document] Base64 image save failed: {e}")
+        print(f"[generate_document] ⚠️ 保存 base64 图片失败: {e}")
         return None
 
 
 def _ensure_image_payload_shape(doc_dict: dict) -> None:
-    """Normalize inline image runs in paragraphs."""
+    """Normalize inline image runs in paragraphs: download URLs, resolve data images."""
     paragraphs = doc_dict.get("paragraphs")
     if not isinstance(paragraphs, list):
         return
@@ -127,11 +108,14 @@ def _ensure_image_payload_shape(doc_dict: dict) -> None:
         for run in runs:
             if not isinstance(run, dict):
                 continue
+            # 跳过文本 run
             if run.get("text") is not None:
                 continue
 
+            # 这里是图片 run（无 text 字段）
             run.setdefault("type", "inline")
 
+            # 下载远程图片或解码 data: 图片
             if not (run.get("tempPath") or run.get("sourcePath")):
                 url = str(run.get("url") or "").strip()
                 if url.startswith("data:image/"):
@@ -144,11 +128,45 @@ def _ensure_image_payload_shape(doc_dict: dict) -> None:
                         run["tempPath"] = local_path
 
             if not (run.get("tempPath") or run.get("sourcePath")) and run.get("url"):
-                print(f"[generate_document] Image may fail to insert: url={run.get('url')}")
+                print(f"[generate_document] ⚠️ 图片未获取到本地路径，可能插入失败: url={run.get('url')}")
+
+
+def _save_generated_document_json(doc_dict: dict) -> str | None:
+    """将生成的文档 JSON 持久化到 wence_data/json 目录。"""
+    try:
+        json_dir = get_wence_data_dir() / "json"
+        json_dir.mkdir(parents=True, exist_ok=True)
+
+        timestamp = datetime.now().strftime("%Y-%m-%dT%H-%M-%S-%f")[:-3]
+        filename = f"document_{timestamp}.json"
+        file_path = json_dir / filename
+
+        json_str = json.dumps(doc_dict, ensure_ascii=False, indent=2)
+        file_path.write_text(json_str, encoding="utf-8")
+        return str(file_path)
+    except Exception as e:
+        print(f"[generate_document] ⚠️ 保存 JSON 文件失败: {e}")
+        return None
+
+
+def _get_active_doc_id() -> str | None:
+    """从请求上下文中获取当前活动文档的 documentId。"""
+    ctx = _current_request_context.get(None)
+    if not ctx:
+        return None
+    document_meta = ctx.get("document_meta")
+    if not document_meta:
+        return None
+    if isinstance(document_meta, list):
+        if document_meta:
+            return document_meta[0].get("documentId") if isinstance(document_meta[0], dict) else None
+    elif isinstance(document_meta, dict):
+        return document_meta.get("documentId")
+    return None
 
 
 def _compact_doc_json(doc_json: dict) -> str:
-    """Compact document JSON to LLM-handleable size."""
+    """Compact document JSON to a size the LLM can handle."""
     full = json.dumps(doc_json, ensure_ascii=False)
     if len(full) <= _MAX_DOC_JSON_CHARS:
         return full
@@ -167,7 +185,17 @@ def _compact_doc_json(doc_json: dict) -> str:
                         k: v
                         for k, v in r.items()
                         if k
-                        in ("url", "tempPath", "sourcePath", "width", "height", "left", "top", "wrapType", "altText")
+                        in (
+                            "url",
+                            "tempPath",
+                            "sourcePath",
+                            "width",
+                            "height",
+                            "left",
+                            "top",
+                            "wrapType",
+                            "altText",
+                        )
                         and v is not None
                     }
                     if img_info:
@@ -204,19 +232,22 @@ def _compact_doc_json(doc_json: dict) -> str:
             compact["tables"].append(table_compact)
 
     result = json.dumps(compact, ensure_ascii=False)
-    print(f"[read_document] Document too large ({len(full)} chars), compacted to {len(result)} chars")
+    print(f"[read_document] 📦 文档过大 ({len(full)} chars)，已精简为 {len(result)} chars（纯文本模式）")
     return result
 
 
-@tool(description=get_tool_description("read_document"))
-def read_document(startParaIndex: int = 0, endParaIndex: int = 49, docId: str | None = None) -> str:
-    """Read document content. Requests frontend to parse and return specified paragraph range via WebSocket.
+# endregion
 
-    Args:
-        startParaIndex: Starting paragraph index (0-based).
-        endParaIndex: Ending paragraph index (inclusive).
-        docId: Document ID. If None, reads the active document.
-    """
+
+# region 工具实现（裸函数 + 工厂）
+
+
+def _read_document_impl(startParaIndex: int, endParaIndex: int, docId: str | None) -> str:
+    """read_document 的核心逻辑，被工厂函数包裹后变成 LangChain @tool。"""
+    resolved_doc_id = docId
+    if resolved_doc_id is None:
+        resolved_doc_id = _get_active_doc_id()
+
     writer = get_stream_writer()
     if writer:
         writer(
@@ -225,11 +256,11 @@ def read_document(startParaIndex: int = 0, endParaIndex: int = 49, docId: str | 
                 "content": f"📑 正在读取文档（段落 {startParaIndex} - {endParaIndex}）",
                 "startParaIndex": startParaIndex,
                 "endParaIndex": endParaIndex,
-                "docId": docId,
+                "docId": resolved_doc_id,
             }
         )
     print(
-        f"[read_document] Requesting document from frontend (startParaIndex={startParaIndex}, endParaIndex={endParaIndex}, docId={docId})"
+        f"[read_document] 请求前端发送文档 (startParaIndex={startParaIndex}, endParaIndex={endParaIndex}, docId={resolved_doc_id})"
     )
 
     chat_id = _current_chat_id.get(None)
@@ -240,8 +271,7 @@ def read_document(startParaIndex: int = 0, endParaIndex: int = 49, docId: str | 
     if chat_id:
         q = _pending_tool_requests.get(chat_id)
         if q:
-            print(f"[read_document] WebSocket 模式，等待前端回传文档 (session={chat_id})")
-
+            print(f"[read_document] WebSocket 模式，等待前端回传文档 (session={chat_id}, 队列现有 {q.qsize()} 条)")
             loop = _pending_loops.get(chat_id)
             if loop:
                 future = asyncio.run_coroutine_threadsafe(
@@ -251,18 +281,16 @@ def read_document(startParaIndex: int = 0, endParaIndex: int = 49, docId: str | 
                 try:
                     result = future.result(timeout=65)
                     result_type = result.get("type", "?")
-                    print(f"[read_document] 收到回传: type={result_type}")
-
+                    print(f"[read_document] 收到回传: type={result_type}, keys={list(result.keys())}")
                     if result_type == "stop" or result.get("error") == "stopped_by_user":
                         print("[read_document] ⛔ 用户已停止，终止读取")
                         return ""
                     if result.get("error"):
                         err_msg = result.get("error")
-                        print(f"[read_document] 前端错误: {err_msg}")
+                        print(f"[read_document] ⚠️ 前端读取失败: {err_msg}")
                         if writer:
-                            writer({"type": "status", "content": f"文档读取失败: {err_msg}"})
+                            writer({"type": "status", "content": f"⚠️ 读取文档失败: {err_msg}"})
                         return ""
-
                     doc_json = result.get("documentJson", {})
 
                     def count_inline_images(doc):
@@ -278,30 +306,33 @@ def read_document(startParaIndex: int = 0, endParaIndex: int = 49, docId: str | 
                     if has_content:
                         para_count = len(doc_json.get("paragraphs", []))
                         table_count = len(doc_json.get("tables", []))
-                        print(f"[read_document] ✅ 收到文档: {para_count} 段落, {table_count} 表格, {image_count} 图片")
+                        print(
+                            f"[read_document] ✅ 收到文档，段落数: {para_count}，表格数: {table_count}，图片数: {image_count}"
+                        )
                         if writer:
                             writer(
                                 {
                                     "type": "read_complete",
                                     "content": f"📑 文档读取完成（段落 {startParaIndex} - {endParaIndex}）",
+                                    "docId": resolved_doc_id,
                                 }
                             )
                         return _compact_doc_json(doc_json)
-
-                    print(f"[read_document] ⚠️ 收到空文档")
+                    print(
+                        "[read_document] ⚠️ 收到空文档 "
+                        f"(documentJson keys={list(doc_json.keys()) if isinstance(doc_json, dict) else type(doc_json).__name__})"
+                    )
                     if writer:
                         writer({"type": "status", "content": "⚠️ 文档为空"})
                     return ""
-
                 except (TimeoutError, concurrent.futures.TimeoutError):
                     print("[read_document] ⏰ 等待文档超时")
                     if writer:
-                        writer({"type": "status", "content": "⏰ 文档读取超时"})
+                        writer({"type": "status", "content": "⏰ 等待文档超时"})
                     return ""
                 except Exception as e:
                     print(f"[read_document] ❌ 等待文档出错: {repr(e)}")
                     return ""
-
             else:
                 print(f"[read_document] ⚠️ 找不到事件循环 (session={chat_id})")
         else:
@@ -311,32 +342,23 @@ def read_document(startParaIndex: int = 0, endParaIndex: int = 49, docId: str | 
     return ""
 
 
-@tool(description=get_tool_description("generate_document"))
-def generate_document(
-    document: str | dict,
-    docId: str | None = None,
-    insertParaIndex: int = -1,
-) -> dict:
-    """Generate formatted document JSON for Word insertion. Also sends json event via stream writer.
+def _generate_document_impl(document: DocumentOutput, docId: str | None, insertParaIndex: int) -> dict:
+    """generate_document 的核心逻辑。"""
+    resolved_doc_id = docId
+    if resolved_doc_id is None:
+        resolved_doc_id = _get_active_doc_id()
 
-    Args:
-        document: The document content to generate.
-        docId: Document ID to insert into. If None, uses the active document.
-        insertParaIndex: 0-based paragraph index where content will be inserted before.
-            Use -1 for end of document, 0 for beginning.
-    """
-    doc_dict = _parse_document_arg(document)
+    doc_dict = document.model_dump()
     _ensure_image_payload_shape(doc_dict)
     para_count = len(doc_dict.get("paragraphs", []))
-    image_count = sum(
-        1
-        for p in doc_dict.get("paragraphs", [])
-        for r in p.get("runs", [])
-        if isinstance(r, dict) and r.get("text") is None
-    )
+    image_count = 0
+    for p in doc_dict.get("paragraphs", []):
+        for r in p.get("runs", []):
+            if isinstance(r, dict) and r.get("text") is None:
+                image_count += 1
 
-    # 添加 insertParaIndex 到 doc_dict
     doc_dict["insertParaIndex"] = insertParaIndex
+    doc_dict["docId"] = resolved_doc_id
 
     writer = get_stream_writer()
     if writer:
@@ -344,32 +366,29 @@ def generate_document(
             {
                 "type": "json",
                 "content": doc_dict,
-                "docId": docId,
+                "docId": resolved_doc_id,
             }
         )
         writer(
             {
                 "type": "generate_complete",
-                "content": f"文档已生成，共 {para_count} 个段落{f'，{image_count} 张图片' if image_count else ''}",
-                "docId": docId,
+                "content": f"📝 文档已生成，共 {para_count} 个段落{f'，{image_count} 张图片' if image_count else ''}",
+                "docId": resolved_doc_id,
             }
         )
     return doc_dict
 
 
-@tool(description=get_tool_description("search_document"))
-def search_documnet(query: DocumentQuery, docId: str | None = None) -> str:
-    """Search document content by text or style conditions.
+def _search_document_impl(query: DocumentQuery, docId: str | None) -> str:
+    """search_documnet 的核心逻辑。"""
+    resolved_doc_id = docId
+    if resolved_doc_id is None:
+        resolved_doc_id = _get_active_doc_id()
 
-    Args:
-        query: The search query with filters.
-        docId: Document ID to search in. If None, uses the active document.
-    """
     query_dict = query.model_dump(exclude_none=True)
     query_type = query_dict.get("type", "run")
     filters = query_dict.get("filters", {})
     filter_desc = ", ".join(f"{k}={v}" for k, v in filters.items())
-
     writer = get_stream_writer()
     if writer:
         writer(
@@ -377,10 +396,10 @@ def search_documnet(query: DocumentQuery, docId: str | None = None) -> str:
                 "type": "search_document",
                 "content": f"🔍 正在搜索文档: {filter_desc}",
                 "query": query_dict,
-                "docId": docId,
+                "docId": resolved_doc_id,
             }
         )
-    print(f"[search_documnet] 请求前端搜索文档 (type={query_type}, filters={filters}, docId={docId})")
+    print(f"[search_documnet] 请求前端搜索文档 (type={query_type}, filters={filters}, docId={resolved_doc_id})")
 
     chat_id = _current_chat_id.get(None)
     if is_stop_requested(chat_id):
@@ -391,7 +410,6 @@ def search_documnet(query: DocumentQuery, docId: str | None = None) -> str:
         q = _pending_tool_requests.get(chat_id)
         if q:
             print(f"[search_documnet] WebSocket 模式，等待前端回传查询结果 (session={chat_id})")
-
             loop = _pending_loops.get(chat_id)
             if loop:
                 future = asyncio.run_coroutine_threadsafe(
@@ -403,30 +421,29 @@ def search_documnet(query: DocumentQuery, docId: str | None = None) -> str:
                     if result.get("type") == "stop" or result.get("error") == "stopped_by_user":
                         print("[search_documnet] ⛔ 用户已停止，终止搜索")
                         return '{"matches": [], "matchCount": 0, "error": "stopped_by_user"}'
-
                     matches = result.get("matches", [])
                     match_count = result.get("matchCount", 0)
 
-                    matched_para_indices = sorted(
-                        set(
-                            m.get("paragraphIndex")
-                            for m in matches
-                            if isinstance(m, dict) and isinstance(m.get("paragraphIndex"), int)
-                        )
-                    )
+                    matched_para_indices: list[int] = []
+                    for m in matches:
+                        if not isinstance(m, dict):
+                            continue
+                        para_idx = m.get("paragraphIndex")
+                        if isinstance(para_idx, int):
+                            matched_para_indices.append(para_idx)
+                    matched_para_indices = sorted(set(matched_para_indices))
                     suggested_read_ranges = [
                         {"startParaIndex": idx, "endParaIndex": idx} for idx in matched_para_indices[:20]
                     ]
 
                     if match_count > 0:
-                        print(
-                            f"[search_documnet] ✅ 查询完成: {match_count} 匹配，涉及 {len(matched_para_indices)} 段落"
-                        )
+                        print(f"[search_documnet] ✅ 查询完成，匹配 {match_count} 项，涉及段落 {matched_para_indices}")
                         if writer:
                             writer(
                                 {
                                     "type": "query_complete",
-                                    "content": f"✅ 搜索完成，找到 {match_count} 处匹配",
+                                    "content": f"✅ 搜索完成，找到 {match_count} 处匹配（涉及 {len(matched_para_indices)} 个段落）",
+                                    "docId": resolved_doc_id,
                                 }
                             )
                         return json.dumps(
@@ -435,14 +452,20 @@ def search_documnet(query: DocumentQuery, docId: str | None = None) -> str:
                                 "matchCount": match_count,
                                 "matchedParaIndices": matched_para_indices,
                                 "suggestedReadRanges": suggested_read_ranges,
-                                "coverageAdvice": "命中多处候选时，按段落索引顺序读取附近内容，证据充分即可停止",
+                                "coverageAdvice": "When multiple candidates are found, read nearby context around each candidate in paragraph-index order, and stop early once evidence is sufficient.",
                             },
                             ensure_ascii=False,
                         )
 
                     print("[search_documnet] ⚠️ 未找到匹配项")
                     if writer:
-                        writer({"type": "query_complete", "content": "⚠️ 未找到匹配内容，建议更换关键词"})
+                        writer(
+                            {
+                                "type": "query_complete",
+                                "content": "⚠️ 未找到匹配内容，建议更换关键词重试",
+                                "docId": resolved_doc_id,
+                            }
+                        )
                     return json.dumps(
                         {
                             "matches": [],
@@ -450,15 +473,14 @@ def search_documnet(query: DocumentQuery, docId: str | None = None) -> str:
                             "matchedParaIndices": [],
                             "suggestedReadRanges": [],
                             "triedQuery": query_dict,
-                            "retryAdvice": "请更换关键词重试（同义词/简称/章节名/核心词）",
+                            "retryAdvice": "Try alternative keywords (synonyms, abbreviations, section names, core terms).",
                         },
                         ensure_ascii=False,
                     )
-
                 except (TimeoutError, concurrent.futures.TimeoutError):
                     print("[search_documnet] ⏰ 等待查询结果超时")
                     if writer:
-                        writer({"type": "status", "content": "⏰ 搜索超时"})
+                        writer({"type": "status", "content": "⏰ 搜索超时", "docId": resolved_doc_id})
                     return '{"matches": [], "matchCount": 0, "error": "timeout"}'
                 except Exception as e:
                     print(f"[search_documnet] ❌ 等待查询结果出错: {e}")
@@ -468,15 +490,12 @@ def search_documnet(query: DocumentQuery, docId: str | None = None) -> str:
     return '{"matches": [], "matchCount": 0, "error": "non-websocket"}'
 
 
-@tool(description=get_tool_description("delete_document"))
-def delete_document(startParaIndex: int = 0, endParaIndex: int = -1, docId: str | None = None) -> str:
-    """Mark document paragraphs for deletion (non-blocking, frontend handles confirmation).
+def _delete_document_impl(startParaIndex: int, endParaIndex: int, docId: str | None) -> str:
+    """delete_document 的核心逻辑。"""
+    resolved_doc_id = docId
+    if resolved_doc_id is None:
+        resolved_doc_id = _get_active_doc_id()
 
-    Args:
-        startParaIndex: Starting paragraph index (0-based).
-        endParaIndex: Ending paragraph index (inclusive), -1 for the last paragraph.
-        docId: Document ID to delete from. If None, uses the active document.
-    """
     writer = get_stream_writer()
     if writer:
         writer(
@@ -485,8 +504,110 @@ def delete_document(startParaIndex: int = 0, endParaIndex: int = -1, docId: str 
                 "content": f"🗑️ 准备删除文档段落（{startParaIndex} - {endParaIndex}）",
                 "startParaIndex": startParaIndex,
                 "endParaIndex": endParaIndex,
-                "docId": docId,
+                "docId": resolved_doc_id,
             }
         )
-    print(f"[delete_document] 请求前端标记删除段落 (startParaIndex={startParaIndex}, endParaIndex={endParaIndex}, docId={docId})")
-    return f"已通知前端标记删除段落 {startParaIndex} - {endParaIndex}，等待用户确认"
+    print(
+        f"[delete_document] 请求前端删除文档段落 (startParaIndex={startParaIndex}, endParaIndex={endParaIndex}, docId={resolved_doc_id})"
+    )
+    return f"Frontend notified to mark paragraphs {startParaIndex} - {endParaIndex} for deletion, awaiting user confirmation"
+
+
+# endregion
+
+
+# region 工厂函数：用 description 装配出 @tool
+
+
+def build_read_document(description: str):
+    """根据传入的 description 构造 read_document 工具实例。"""
+
+    @tool(description=description)
+    def read_document(startParaIndex: int = 0, endParaIndex: int = 49, docId: str | None = None) -> str:
+        """Read document content. Requests the frontend to parse and return the specified paragraph range via WebSocket.
+
+        Args:
+            startParaIndex: Starting paragraph index (0-based).
+            endParaIndex: Ending paragraph index (inclusive).
+            docId: Document ID. If None, reads the active document.
+        """
+        return _read_document_impl(startParaIndex, endParaIndex, docId)
+
+    return read_document
+
+
+def build_generate_document(description: str):
+    """根据传入的 description 构造 generate_document 工具实例。"""
+
+    @tool(description=description)
+    def generate_document(
+        document: DocumentOutput,
+        docId: str | None = None,
+        insertParaIndex: int = -1,
+    ) -> dict:
+        """Generate a formatted document JSON for insertion into the Word document.
+
+        Args:
+            document: The document content to generate.
+            docId: Document ID to insert into. If None, uses the active document.
+            insertParaIndex: 0-based paragraph index where content will be inserted before.
+                Use -1 for end of document, 0 for beginning.
+        """
+        return _generate_document_impl(document, docId, insertParaIndex)
+
+    return generate_document
+
+
+def build_search_document(description: str):
+    """根据传入的 description 构造 search_documnet 工具实例。
+
+    注意：工具名拼写为 search_documnet（历史遗留，与 LLM 提示一致，不修正）。
+    """
+
+    @tool(description=description)
+    def search_documnet(query: DocumentQuery, docId: str | None = None) -> str:
+        """Search document content. Requests the frontend to search for matching content by text or style criteria.
+
+        Args:
+            query: The search query with filters.
+            docId: Document ID to search in. If None, uses the active document.
+        """
+        return _search_document_impl(query, docId)
+
+    return search_documnet
+
+
+def build_delete_document(description: str):
+    """根据传入的 description 构造 delete_document 工具实例。"""
+
+    @tool(description=description)
+    def delete_document(startParaIndex: int = 0, endParaIndex: int = -1, docId: str | None = None) -> str:
+        """Delete a specified range of paragraphs from the document.
+
+        Args:
+            startParaIndex: Starting paragraph index (0-based).
+            endParaIndex: Ending paragraph index (inclusive), -1 for the last paragraph.
+            docId: Document ID to delete from. If None, uses the active document.
+        """
+        return _delete_document_impl(startParaIndex, endParaIndex, docId)
+
+    return delete_document
+
+
+# endregion
+
+
+__all__ = [
+    "build_read_document",
+    "build_generate_document",
+    "build_search_document",
+    "build_delete_document",
+    # 内部实现也导出，便于子智能体或测试直接复用
+    "_read_document_impl",
+    "_generate_document_impl",
+    "_search_document_impl",
+    "_delete_document_impl",
+    "_get_active_doc_id",
+    "_compact_doc_json",
+    "_ensure_image_payload_shape",
+]
