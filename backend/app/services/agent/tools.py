@@ -20,9 +20,12 @@ from app.services.tools import (
     _pending_tool_requests,
     _stop_requested_sessions,
     build_delete_document,
+    build_edit_file,
     build_generate_document,
+    build_list_file,
     build_load_skill_context,
     build_mcp_tools_prompt,
+    build_read_file,
     build_read_document,
     build_run_sub_agent,
     build_search_document,
@@ -49,8 +52,11 @@ read_document = build_read_document(get_tool_description("read_document"))
 generate_document = build_generate_document(get_tool_description("generate_document"))
 search_documnet = build_search_document(get_tool_description("search_document"))
 delete_document = build_delete_document(get_tool_description("delete_document"))
-load_skill_context = build_load_skill_context()  # 沿用默认 docstring
+load_skill_context = build_load_skill_context(get_tool_description("load_skill_context"))
 run_sub_agent = build_run_sub_agent(get_tool_description("run_sub_agent"))
+list_file = build_list_file(get_tool_description("list_file"))
+read_file = build_read_file(get_tool_description("read_file"))
+edit_file = build_edit_file(get_tool_description("edit_file"))
 
 
 # ---------------------------------------------------------------------------
@@ -64,6 +70,9 @@ AGENT_BASE_TOOLS = [
     search_documnet,
     generate_document,
     delete_document,
+    list_file,
+    read_file,
+    edit_file,
     run_sub_agent,
 ]
 ASK_BASE_TOOLS = [
@@ -93,8 +102,11 @@ TOOL_MAP = {t.name: t for t in BASE_TOOLS}
 __all__ = [
     # tools
     "delete_document",
+    "edit_file",
     "generate_document",
+    "list_file",
     "load_skill_context",
+    "read_file",
     "read_document",
     "run_sub_agent",
     "search_documnet",

@@ -21,13 +21,13 @@ class SkillEnableRequest(BaseModel):
 
 @router.get("/skills")
 async def list_skills():
-    """List downloaded skills discovered under wence_data/skills."""
+    """List downloaded skills discovered under wence_data/project/skills."""
     return {"skills": discover_skills(include_disabled=True)}
 
 
 @router.post("/skills/upload")
 async def upload_skill_package(file: UploadFile = File(...)):
-    """Upload zip package and install it into wence_data/skills."""
+    """Upload zip package and install it into wence_data/project/skills."""
     filename = (file.filename or "").strip()
     if not filename.lower().endswith(".zip"):
         raise HTTPException(status_code=400, detail="仅支持上传 .zip 压缩包")

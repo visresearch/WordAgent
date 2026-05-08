@@ -5,6 +5,9 @@ Search and collect reference information from web and external MCP tools.
 
 ## Available Tools
 - `load_skill_context`: Load guidance from discovered skills
+- `list_file`: List files/folders under `wence_data/project`
+- `read_file`: Read text files or OCR image text under `wence_data/project`
+- `edit_file`: Create/edit text files under `wence_data/project`
 - **MCP Tools** (loaded dynamically from user MCP server settings)
 
 ## Usage Guidelines

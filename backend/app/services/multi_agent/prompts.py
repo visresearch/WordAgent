@@ -63,6 +63,9 @@ _TOOL_USAGE_FILES = {
     "create_workflow": "system-prompt-tool-usage-create-workflow.md",
     "review_document": "system-prompt-tool-usage-review-document.md",
     "load_skill_context": "system-prompt-tool-usage-load-skill-context.md",
+    "list_file": "system-prompt-tool-usage-list-file.md",
+    "read_file": "system-prompt-tool-usage-read-file.md",
+    "edit_file": "system-prompt-tool-usage-edit-file.md",
 }
 
 
@@ -77,6 +80,10 @@ _TOOL_DESCRIPTION_FILES = {
     "delete_document": "tool-description-delete-document.md",
     "create_workflow": "tool-description-create-workflow.md",
     "review_document": "tool-description-review-document.md",
+    "load_skill_context": "tool-description-load-skill-context.md",
+    "list_file": "tool-description-list-file.md",
+    "read_file": "tool-description-read-file.md",
+    "edit_file": "tool-description-edit-file.md",
 }
 
 
@@ -143,6 +150,10 @@ def get_agent_prompt(agent_name: str) -> str:
     elif agent_name == "research":
         tool_prompts = [
             _load_prompt_content(_TOOL_USAGE_FILES.get("load_skill_context", "")),
+            _load_prompt_content(_TOOL_USAGE_FILES.get("list_file", "")),
+            _load_prompt_content(_TOOL_USAGE_FILES.get("read_file", "")),
+            _load_prompt_content(_TOOL_USAGE_FILES.get("edit_file", "")),
+            _load_prompt_content("system-prompt-project-directory-guide.md"),
             _load_prompt_content("system-prompt-tool-usage-mcp-invocation.md"),
         ]
         if _mcp_tools_prompt_cache:

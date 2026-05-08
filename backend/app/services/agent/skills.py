@@ -8,14 +8,12 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-from app.core.config import get_user_settings_file, get_wence_data_dir
+from app.core.config import get_user_settings_file, get_skills_dir
 
 
 def _skills_root() -> Path:
-    """Return skills root directory under wence_data."""
-    root = get_wence_data_dir() / "skills"
-    root.mkdir(parents=True, exist_ok=True)
-    return root
+    """Return skills root directory under wence_data/project."""
+    return get_skills_dir()
 
 
 def _load_skill_enable_map() -> dict[str, bool]:
@@ -260,7 +258,7 @@ def build_skills_prompt() -> str:
         return ""
 
     lines = [
-        "Discovered local skills (auto-scanned from wence_data/skills with SKILL.md):",
+        "Discovered local skills (auto-scanned from wence_data/project/skills with SKILL.md):",
     ]
     for s in skills:
         desc = s["description"].strip() or "(no description)"
@@ -293,7 +291,7 @@ def _safe_extract_zip(archive_path: Path, target_dir: Path) -> None:
 
 
 def install_skill_zip(zip_path: Path, original_filename: str | None = None) -> dict[str, str]:
-    """Install skill package from zip file into wence_data/skills."""
+    """Install skill package from zip file into wence_data/project/skills."""
     if not zip_path.exists():
         raise FileNotFoundError(f"Zip file not found: {zip_path}")
 

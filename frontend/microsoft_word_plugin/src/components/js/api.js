@@ -730,7 +730,7 @@ async function testMcpServer({ name, config }) {
 }
 
 /**
- * 获取前端图片导出目录（wence_data/temp）
+ * 获取前端图片导出目录（wence_data/project/temp）
  * @returns {Promise<Object>} { dir: string }
  */
 async function getWenceTempDir() {
@@ -744,10 +744,11 @@ async function getWenceTempDir() {
 // ============== 缓存管理 API ==============
 
 /**
- * 扫描缓存
+ * 扫描项目缓存目录（temp + uploads）
+ * @returns {Promise<Object>} { dir, dirs, fileCount, totalSize }
  */
 async function scanCache() {
-  const response = await request("/api/cache/scan", { method: "GET" });
+  const response = await request("/api/settings/cache/scan", { method: "GET" });
   if (!response.success) {
     throw new Error(response.error || "扫描缓存失败");
   }
@@ -755,10 +756,11 @@ async function scanCache() {
 }
 
 /**
- * 清除缓存
+ * 清除项目缓存目录（temp + uploads）
+ * @returns {Promise<Object>} { deleted, dirs }
  */
 async function clearCache() {
-  const response = await request("/api/cache/clear", { method: "DELETE" });
+  const response = await request("/api/settings/cache/clear", { method: "DELETE" });
   if (!response.success) {
     throw new Error(response.error || "清除缓存失败");
   }

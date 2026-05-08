@@ -11,7 +11,9 @@
 - Keep image URLs unchanged (including query parameters). Do not rewrite or strip URL params.
 - Image runs can be mixed with text runs in the same paragraph.
 - Prefer `pStyle` centered with zero horizontal indent (for example `["center", 0, 0, 0, 0, 0, 0, "正文", 1]`).
-- Keep image `width` within printable page width. If uncertain, use conservative width (for example 320-420) or omit width and keep aspect ratio.
+- Keep image `width` within printable page width. If uncertain, use conservative width (for example 320-420).
+- Do not break original image aspect ratio. If only one side is provided (`width` or `height`), the other side must follow the original ratio.
+- Prefer original size when possible: omitting both `width` and `height` means using the image's native width/height.
 - For mixed-language text, split runs and use multiple `rStyle` values; do not use one `rStyle` for the whole document.
 
 Pre-call guardrails:
@@ -80,6 +82,8 @@ Use a profile similar to the benchmark sample rather than one-style-for-all outp
 - Image runs can be mixed with text runs in the same paragraph.
 - Prefer `pStyle` centered with left/right indent = 0.
 - Ensure image width does not exceed page printable width.
+- Do not distort images: keep original aspect ratio. If only one dimension is given, the other should be inferred proportionally.
+- If no explicit `width`/`height` is required, prefer omitting both and keep native image size.
 
 ### Suggested execution prompt (internal)
 Before calling `generate_document`, follow this checklist:

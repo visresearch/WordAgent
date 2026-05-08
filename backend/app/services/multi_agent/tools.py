@@ -22,9 +22,12 @@ from app.services.tools import (
     _stop_requested_sessions,
     build_create_workflow,
     build_delete_document,
+    build_edit_file,
     build_generate_document,
+    build_list_file,
     build_load_skill_context,
     build_mcp_tools_prompt,
+    build_read_file,
     build_read_document,
     build_review_document,
     build_search_document,
@@ -51,9 +54,12 @@ read_document = build_read_document(get_tool_description("read_document"))
 generate_document = build_generate_document(get_tool_description("generate_document"))
 search_documnet = build_search_document(get_tool_description("search_document"))
 delete_document = build_delete_document(get_tool_description("delete_document"))
-load_skill_context = build_load_skill_context()  # 沿用默认 docstring
+load_skill_context = build_load_skill_context(get_tool_description("load_skill_context"))
 create_workflow = build_create_workflow(get_tool_description("create_workflow"))
 review_document = build_review_document(get_tool_description("review_document"))
+list_file = build_list_file(get_tool_description("list_file"))
+read_file = build_read_file(get_tool_description("read_file"))
+edit_file = build_edit_file(get_tool_description("edit_file"))
 
 
 # ---------------------------------------------------------------------------
@@ -65,7 +71,7 @@ OUTLINE_TOOLS = [read_document, search_documnet]
 WRITER_TOOLS = [read_document, search_documnet, generate_document, delete_document]
 REVIEWER_TOOLS = [review_document]
 # load_skill_context 总是可用；MCP 工具运行时再动态加载
-RESEARCH_TOOLS = [load_skill_context]
+RESEARCH_TOOLS = [load_skill_context, list_file, read_file, edit_file]
 
 AGENT_TOOLS = {
     "planner": PLANNER_TOOLS,
@@ -84,6 +90,9 @@ ALL_TOOLS = [
     create_workflow,
     review_document,
     load_skill_context,
+    list_file,
+    read_file,
+    edit_file,
 ]
 TOOL_MAP = {t.name: t for t in ALL_TOOLS}
 
@@ -93,7 +102,10 @@ __all__ = [
     "create_workflow",
     "delete_document",
     "generate_document",
+    "list_file",
     "load_skill_context",
+    "read_file",
+    "edit_file",
     "read_document",
     "review_document",
     "search_documnet",

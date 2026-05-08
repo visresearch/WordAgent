@@ -13,7 +13,7 @@ import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from app.core.config import get_user_settings_file, get_wence_data_dir
+from app.core.config import get_user_settings_file, get_temp_dir, get_upload_dir
 from app.services.memory import read_long_term_memory, _get_memory_file
 
 router = APIRouter()
@@ -201,10 +201,9 @@ async def test_mcp_server(payload: MCPServerTestRequest):
 
 @router.get("/wence-temp-dir")
 async def get_wence_temp_dir():
-    """获取用于前端图片导出的临时目录（wence_data/temp）。"""
+    """获取用于前端图片导出的临时目录（wence_data/project/temp）。"""
     try:
-        temp_dir = get_wence_data_dir() / "temp"
-        temp_dir.mkdir(parents=True, exist_ok=True)
+        temp_dir = get_temp_dir()
         return {"dir": str(temp_dir)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取临时目录失败: {str(e)}")
@@ -213,61 +212,69 @@ async def get_wence_temp_dir():
 # ============== 图片缓存管理 ==============
 
 
-def _get_temp_cache_dir() -> Path:
-    """获取图片临时缓存目录（固定为 wence_data/temp）"""
-    cache_dir = get_wence_data_dir() / "temp"
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    return cache_dir
+def _get_cache_dirs() -> list[Path]:
+    """获取缓存目录（固定为 wence_data/project/temp + uploads）。"""
+    return [get_temp_dir(), get_upload_dir()]
 
 
-def _iter_temp_cache_files(cache_dir: Path) -> list[Path]:
-    """递归收集 temp 目录下所有文件。"""
-    if not cache_dir.exists():
-        return []
-    return [p for p in cache_dir.rglob("*") if p.is_file()]
+def _iter_cache_files(cache_dirs: list[Path]) -> list[Path]:
+    """递归收集缓存目录下所有文件。"""
+    files: list[Path] = []
+    for cache_dir in cache_dirs:
+        if not cache_dir.exists():
+            continue
+        files.extend([p for p in cache_dir.rglob("*") if p.is_file()])
+    return files
 
 
 @router.get("/cache/scan")
 async def scan_cache():
-    """扫描 wence_data/temp 缓存"""
-    cache_dir = _get_temp_cache_dir()
+    """扫描 wence_data/project/temp 与 uploads 缓存"""
+    cache_dirs = _get_cache_dirs()
 
     count = 0
     total_size = 0
-    for f in _iter_temp_cache_files(cache_dir):
+    for f in _iter_cache_files(cache_dirs):
         try:
             count += 1
             total_size += f.stat().st_size
         except Exception as e:
             print(f"读取缓存文件大小失败 {f}: {e}")
 
-    return {"dir": str(cache_dir), "fileCount": count, "totalSize": total_size}
+    dirs_str = "；".join(str(d) for d in cache_dirs)
+    return {
+        "dir": dirs_str,
+        "dirs": [str(d) for d in cache_dirs],
+        "fileCount": count,
+        "totalSize": total_size,
+    }
 
 
 @router.delete("/cache/clear")
 async def clear_cache():
-    """清除 wence_data/temp 缓存文件"""
-    cache_dir = _get_temp_cache_dir()
-
-    if not cache_dir.exists():
+    """清除 wence_data/project/temp 与 uploads 缓存文件"""
+    cache_dirs = _get_cache_dirs()
+    existing_dirs = [d for d in cache_dirs if d.exists()]
+    if not existing_dirs:
         return {"deleted": 0}
 
     deleted = 0
-    for f in _iter_temp_cache_files(cache_dir):
+    for f in _iter_cache_files(existing_dirs):
         try:
             f.unlink()
             deleted += 1
         except Exception as e:
             print(f"删除缓存文件失败 {f.name}: {e}")
 
-    for d in sorted(cache_dir.rglob("*"), key=lambda p: len(p.parts), reverse=True):
-        if d.is_dir():
-            try:
-                d.rmdir()
-            except Exception:
-                pass
+    for cache_dir in existing_dirs:
+        for d in sorted(cache_dir.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+            if d.is_dir():
+                try:
+                    d.rmdir()
+                except Exception:
+                    pass
 
-    return {"deleted": deleted}
+    return {"deleted": deleted, "dirs": [str(d) for d in cache_dirs]}
 
 
 # ============== 长期记忆管理 ==============

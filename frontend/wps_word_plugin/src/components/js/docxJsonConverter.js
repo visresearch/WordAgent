@@ -437,12 +437,82 @@ function getDocumentUsableWidth(doc) {
   return pageWidth;
 }
 
+function parsePositiveNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function isLikelyAbsolutePath(path) {
+  if (!path) {
+    return false;
+  }
+  return (
+    path.startsWith('/') ||
+    path.startsWith('\\\\') ||
+    /^[A-Za-z]:[\\/]/.test(path)
+  );
+}
+
+function getProjectDataDirFromTempDir() {
+  const tempDir = getImageExportTempDir().replace(/\\/g, '/');
+  if (/\/temp$/i.test(tempDir)) {
+    return tempDir.replace(/\/temp$/i, '');
+  }
+  return '';
+}
+
+function normalizeFileUrlToLocalPath(fileUrl) {
+  try {
+    const u = new URL(fileUrl);
+    let normalized = decodeURIComponent(u.pathname || '');
+    if (u.host) {
+      normalized = `//${u.host}${normalized}`;
+    }
+    // file:///C:/a.png -> C:/a.png
+    if (/^\/[A-Za-z]:\//.test(normalized)) {
+      normalized = normalized.slice(1);
+    }
+    return normalized;
+  } catch (e) {
+    return String(fileUrl || '').replace(/^file:\/\//i, '');
+  }
+}
+
+function resolveImagePathForInsert(pathValue) {
+  const rawPath = String(pathValue || '').trim();
+  if (!rawPath) {
+    return '';
+  }
+
+  // 网络图片保持原样
+  if (/^https?:\/\//i.test(rawPath)) {
+    return rawPath;
+  }
+
+  let normalized = rawPath;
+  if (/^file:\/\//i.test(normalized)) {
+    normalized = normalizeFileUrlToLocalPath(normalized);
+  }
+
+  normalized = normalized.replace(/\\/g, '/');
+
+  // 相对路径（例如 uploads/xxx.png）默认按 wence_data/project 解析
+  if (!isLikelyAbsolutePath(normalized) && !/^data:image\//i.test(normalized)) {
+    const projectDir = getProjectDataDirFromTempDir();
+    if (projectDir) {
+      normalized = `${projectDir}/${normalized.replace(/^\.?\//, '')}`;
+    }
+  }
+
+  return normalized;
+}
+
 function normalizeImageSizeByMaxWidth(img, maxWidth) {
   const normalized = {};
-  const width = Number(img && img.width);
-  const height = Number(img && img.height);
-  const hasWidth = Number.isFinite(width) && width > 0;
-  const hasHeight = Number.isFinite(height) && height > 0;
+  const width = parsePositiveNumber(img && img.width);
+  const height = parsePositiveNumber(img && img.height);
+  const hasWidth = width !== null;
+  const hasHeight = height !== null;
   const safeMaxWidth = Number.isFinite(maxWidth) && maxWidth > 0 ? maxWidth : 425;
 
   if (!hasWidth && !hasHeight) {
@@ -466,6 +536,28 @@ function normalizeImageSizeByMaxWidth(img, maxWidth) {
   }
 
   return normalized;
+}
+
+function resolveTargetImageSize(img, nativeWidth, nativeHeight, maxWidth) {
+  const width = parsePositiveNumber(img && img.width);
+  const height = parsePositiveNumber(img && img.height);
+  const nWidth = parsePositiveNumber(nativeWidth);
+  const nHeight = parsePositiveNumber(nativeHeight);
+
+  // 未显式传尺寸：使用图片本身长宽
+  if (width === null && height === null) {
+    return {};
+  }
+
+  let targetWidth = width;
+  let targetHeight = height;
+  if (targetWidth !== null && targetHeight === null && nWidth !== null && nHeight !== null) {
+    targetHeight = Math.max(1, Math.round((nHeight * targetWidth) / nWidth));
+  } else if (targetHeight !== null && targetWidth === null && nWidth !== null && nHeight !== null) {
+    targetWidth = Math.max(1, Math.round((nWidth * targetHeight) / nHeight));
+  }
+
+  return normalizeImageSizeByMaxWidth({ width: targetWidth, height: targetHeight }, maxWidth);
 }
 
 function getImageParagraphStyle(img, styles) {
@@ -843,7 +935,20 @@ function getImageExportTempDir() {
     dir = window.Application.Options.DefaultFilePath(2) || '/tmp';
   }
 
-  return dir.replace(/\\/g, '/').replace(/[\/]+$/, '');
+  let normalized = dir.replace(/\\/g, '/').replace(/[\/]+$/, '');
+
+  // 兼容历史缓存目录：wence_data/temp -> wence_data/project/temp
+  if (normalized.includes('/wence_data/temp')) {
+    normalized = normalized.replace('/wence_data/temp', '/wence_data/project/temp');
+    try {
+      window.__WENCE_TEMP_DIR__ = normalized;
+    } catch (e) {}
+    try {
+      localStorage.setItem('wence_temp_dir', normalized);
+    } catch (e) {}
+  }
+
+  return normalized;
 }
 
 /**
@@ -2051,22 +2156,22 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride) {
  */
 function insertImage(doc, img, insertPos, maxWidth) {
   try {
-    const imagePath = img.tempPath || img.sourcePath || img.url;
+    const imagePath = resolveImagePathForInsert(img.tempPath || img.sourcePath || img.url);
     if (!imagePath) {
       return 0;
     }
 
     const insertRange = doc.Range(insertPos, insertPos);
-    const constrainedSize = normalizeImageSizeByMaxWidth(img, maxWidth);
 
     if (img.type === 'inline') {
       try {
         const inlineShape = doc.InlineShapes.AddPicture(imagePath, false, true, insertRange);
-        if (constrainedSize.width) {
-          inlineShape.Width = constrainedSize.width;
+        const targetSize = resolveTargetImageSize(img, inlineShape.Width, inlineShape.Height, maxWidth);
+        if (targetSize.width) {
+          inlineShape.Width = targetSize.width;
         }
-        if (constrainedSize.height) {
-          inlineShape.Height = constrainedSize.height;
+        if (targetSize.height) {
+          inlineShape.Height = targetSize.height;
         }
         if (img.altText) {
           inlineShape.AlternativeText = img.altText;
@@ -2080,11 +2185,12 @@ function insertImage(doc, img, insertPos, maxWidth) {
       try {
         const inlineShape = doc.InlineShapes.AddPicture(imagePath, false, true, insertRange);
         const shape = inlineShape.ConvertToShape();
-        if (constrainedSize.width) {
-          shape.Width = constrainedSize.width;
+        const targetSize = resolveTargetImageSize(img, shape.Width, shape.Height, maxWidth);
+        if (targetSize.width) {
+          shape.Width = targetSize.width;
         }
-        if (constrainedSize.height) {
-          shape.Height = constrainedSize.height;
+        if (targetSize.height) {
+          shape.Height = targetSize.height;
         }
         if (img.left !== undefined) {
           shape.Left = img.left;

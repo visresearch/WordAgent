@@ -39,7 +39,7 @@
               清除缓存
             </h2>
             <p class="section-subtitle">
-              清除解析文档时生成的临时图片文件，释放磁盘空间
+              清除 project/temp 与 project/uploads 下的缓存文件，释放磁盘空间
             </p>
           </div>
         </div>
@@ -47,7 +47,7 @@
         <div class="cache-info-box">
           <div class="cache-info-item">
             <span class="cache-label">缓存位置</span>
-            <span class="cache-value">{{ cacheDir || 'wence_data/temp' }}</span>
+            <span class="cache-value">{{ cacheDir || 'wence_data/project/temp；wence_data/project/uploads' }}</span>
           </div>
           <div class="cache-info-item">
             <span class="cache-label">缓存大小</span>
@@ -465,7 +465,7 @@ export default {
       if (cacheFileCount.value === 0) {
         return;
       }
-      if (!confirm('确定要清除 wence_data/temp 目录下的所有缓存文件吗？')) {
+      if (!confirm('确定要清除 wence_data/project/temp 和 wence_data/project/uploads 下的所有缓存文件吗？')) {
         return;
       }
 

@@ -473,28 +473,23 @@ async def _run_ws_stream(
                     from app.services.memory import extract_and_save_memory, MEMORY_EXTRACT_TEMPERATURE
                     from app.services.llm_client import create_sync_llm_client
 
+                    # 仅使用本次对话结束后回传的 user/assistant 对，禁止回退到历史记录。
+                    if not (
+                        isinstance(memory_conversation, dict)
+                        and str(memory_conversation.get("user", "")).strip()
+                        and str(memory_conversation.get("assistant", "")).strip()
+                    ):
+                        print("[WebSocket] 跳过长期记忆提取：未收到本轮完整 user/assistant 对话")
+                        return
+
+                    conversation = (
+                        f"USER: {memory_conversation.get('user', '')}\n\n"
+                        f"ASSISTANT: {memory_conversation.get('assistant', '')}"
+                    )
+
                     sync_llm = create_sync_llm_client(model, provider, temperature=MEMORY_EXTRACT_TEMPERATURE)
                     if sync_llm:
-                        if (
-                            isinstance(memory_conversation, dict)
-                            and memory_conversation.get("user")
-                            and memory_conversation.get("assistant")
-                        ):
-                            conversation = (
-                                f"USER: {memory_conversation.get('user', '')}\n\n"
-                                f"ASSISTANT: {memory_conversation.get('assistant', '')}"
-                            )
-                        else:
-                            conversation_parts = []
-                            for h in history[-10:]:
-                                role = h.get("role", "")
-                                content = h.get("content", "")
-                                if content and role in ("user", "assistant"):
-                                    conversation_parts.append(f"{role.upper()}: {content}")
-                            conversation = "\n\n".join(conversation_parts)
-
-                        if conversation:
-                            extract_and_save_memory(conversation, sync_llm)
+                        extract_and_save_memory(conversation, sync_llm)
                 except Exception as e:
                     print(f"[WebSocket] 长期记忆提取失败: {e}")
 

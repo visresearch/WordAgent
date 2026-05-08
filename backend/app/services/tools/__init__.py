@@ -37,6 +37,7 @@ from .document_tools import (
     build_read_document,
     build_search_document,
 )
+from .file_tools import build_edit_file, build_list_file, build_read_file
 from .mcp_tools import build_mcp_tools_prompt, load_mcp_tools
 from .schemas import (
     Cell,
@@ -89,6 +90,9 @@ __all__ = [
     "build_generate_document",
     "build_search_document",
     "build_delete_document",
+    "build_list_file",
+    "build_read_file",
+    "build_edit_file",
     "_read_document_impl",
     "_generate_document_impl",
     "_search_document_impl",

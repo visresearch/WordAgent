@@ -1015,7 +1015,7 @@ async function testMcpServer({ name, config }) {
 }
 
 /**
- * 获取前端图片导出目录（wence_data/temp）
+ * 获取前端图片导出目录（wence_data/project/temp）
  * @returns {Promise<Object>} { dir: string }
  */
 async function getWenceTempDir() {
@@ -1056,8 +1056,8 @@ async function uploadFiles(files) {
 }
 
 /**
- * 扫描 WPS 图片缓存
- * @returns {Promise<Object>} { dir, fileCount, totalSize }
+ * 扫描项目缓存目录（temp + uploads）
+ * @returns {Promise<Object>} { dir, dirs, fileCount, totalSize }
  */
 async function scanCache() {
   const response = await request('/api/settings/cache/scan', { method: 'GET' });
@@ -1068,8 +1068,8 @@ async function scanCache() {
 }
 
 /**
- * 清除 WPS 图片缓存
- * @returns {Promise<Object>} { deleted }
+ * 清除项目缓存目录（temp + uploads）
+ * @returns {Promise<Object>} { deleted, dirs }
  */
 async function clearCache() {
   const response = await request('/api/settings/cache/clear', { method: 'DELETE' });

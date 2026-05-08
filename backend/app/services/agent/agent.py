@@ -146,6 +146,30 @@ def _extract_text_content(content) -> str:
     return ""
 
 
+def _extract_latest_final_ai_text(messages: list) -> str:
+    """
+    从对话消息中提取最后一条“最终回答”文本。
+
+    规则：
+    - 只看 AIMessage
+    - 忽略仍在发起工具调用的中间 AIMessage（tool_calls 非空）
+    - 取最后一条非空文本
+    """
+    for msg in reversed(messages):
+        if not isinstance(msg, AIMessage):
+            continue
+
+        tool_calls = getattr(msg, "tool_calls", None)
+        if isinstance(tool_calls, list) and tool_calls:
+            continue
+
+        text = _extract_text_content(getattr(msg, "content", "")).strip()
+        if text:
+            return text
+
+    return ""
+
+
 def _extract_thinking_content(content) -> str:
     """提取 thinking/reasoning 内容，兼容 Claude 与 OpenAI 常见结构。"""
     if content is None:
@@ -215,6 +239,19 @@ def _is_context_overflow_error(exc: Exception) -> bool:
     text = str(exc).lower()
     overflow_signals = ["413", "context_length", "too many tokens", "maximum context", "exceeds context", "token limit"]
     return any(sig in text for sig in overflow_signals)
+
+
+def _is_image_input_unsupported_error(exc: Exception) -> bool:
+    """判断是否是模型端点不支持图像输入错误。"""
+    text = str(exc).lower()
+    image_signals = [
+        "no endpoints found that support image input",
+        "does not support image input",
+        "does not support images",
+        "image input is not supported",
+        "unsupported image input",
+    ]
+    return any(sig in text for sig in image_signals)
 
 
 # region LangGraph Agent（ReAct）
@@ -293,10 +330,14 @@ def build_graph(llm_with_tools, all_tools: list):
                         "read_document",
                         "generate_document",
                         "delete_document",
+                        "list_file",
+                        "read_file",
+                        "edit_file",
                         "load_skill_context",
                         "create_workflow",
                         "review_document",
                         "ask",
+                        "run_sub_agent",
                     )
                     if is_mcp_tool:
                         err = f"MCP tool '{tool_name}' execution failed: {e}. The error has been returned as tool result. Please analyze the error and decide how to proceed - you may retry with corrected parameters, use an alternative tool, or report the failure in your response."
@@ -683,17 +724,24 @@ async def process_writing_request_stream(
 
         # 处理附件
         image_content_parts = []
-        text_file_parts = []
+        file_reference_parts = []
         if attached_files:
-            from app.api.routes.files import read_file_as_base64, read_text_file
+            from app.api.routes.files import read_file_as_base64
 
             for f in attached_files:
                 file_id = f.get("file_id", "")
                 filename = f.get("filename", "")
                 content_type = f.get("content_type", "")
                 is_image = f.get("is_image", False)
+                project_path = f.get("project_path", f"uploads/{file_id}" if file_id else "")
+                absolute_path = f.get("absolute_path", "")
 
                 if is_image:
+                    line = f"- {filename} [image] | project_path={project_path or '(unknown)'}" + (
+                        f" | absolute_path={absolute_path}" if absolute_path else ""
+                    )
+                    file_reference_parts.append(line)
+
                     b64 = read_file_as_base64(file_id)
                     if b64:
                         image_content_parts.append(
@@ -704,13 +752,20 @@ async def process_writing_request_stream(
                         )
                         print(f"[Agent] 🖼️ 附件图片: {filename}")
                 else:
-                    text = read_text_file(file_id, filename)
-                    if text:
-                        text_file_parts.append(f"\n--- 附件: {filename} ---\n{text}")
-                        print(f"[Agent] 📄 附件文本: {filename} ({len(text)} chars)")
+                    line = f"- {filename} | project_path={project_path or '(unknown)'}" + (
+                        f" | absolute_path={absolute_path}" if absolute_path else ""
+                    )
+                    file_reference_parts.append(line)
+                    print(f"[Agent] 📄 附件文件引用: {filename} -> {project_path}")
 
-        if text_file_parts:
-            user_content += "\n" + "\n".join(text_file_parts)
+        if file_reference_parts:
+            user_content += (
+                "\n\n[Attached Files]"
+                "\nFiles are already uploaded under wence_data/project."
+                "\nDo NOT assume file contents from metadata."
+                "\nWhen file content is needed, call `read_file` with the provided project_path."
+                "\n" + "\n".join(file_reference_parts)
+            )
 
         # 构建 HumanMessage
         if image_content_parts:
@@ -718,6 +773,7 @@ async def process_writing_request_stream(
             messages.append(HumanMessage(content=human_content))
         else:
             messages.append(HumanMessage(content=user_content))
+        text_only_messages = list(messages[:-1]) + [HumanMessage(content=user_content)]
 
         print(f"[Agent] 消息数量: {len(messages)}")
 
@@ -730,6 +786,7 @@ async def process_writing_request_stream(
         queue: asyncio.Queue = asyncio.Queue()
         has_tool_result = False
         _collected_text_parts: list[str] = []
+        _assistant_text_for_memory_parts: list[str] = []
         _has_streamed_text_chunks = False
         _agent_turn_count = 0
         _last_input_tokens = 0
@@ -784,7 +841,8 @@ async def process_writing_request_stream(
                     "config": _config,
                 }
 
-                max_attempts = 2
+                max_attempts = 3 if image_content_parts else 2
+                image_fallback_applied = False
                 for attempt in range(1, max_attempts + 1):
                     has_any_stream_item = False
                     try:
@@ -800,6 +858,12 @@ async def process_writing_request_stream(
                         asyncio.run_coroutine_threadsafe(queue.put(None), loop)
                         return
                     except Exception as e:
+                        if image_content_parts and not image_fallback_applied and _is_image_input_unsupported_error(e):
+                            image_fallback_applied = True
+                            print("[Agent] ⚠️ 当前端点不支持图像输入，自动降级为文本模式重试")
+                            stream_kwargs["input"] = {"messages": text_only_messages}
+                            continue
+
                         if _is_context_overflow_error(e):
                             print(f"[Agent] ⚠️ 上下文超限错误（{e}），触发被动重量重压缩")
                             asyncio.run_coroutine_threadsafe(queue.put(("context_overflow", str(e))), loop)
@@ -900,6 +964,7 @@ async def process_writing_request_stream(
                     normalized = _extract_text_content(msg.content)
                     if normalized:
                         _collected_text_parts.append(normalized)
+                        _assistant_text_for_memory_parts.append(normalized)
                         # 关键：某些模型在流式场景只产出 AIMessageChunk 而不会产出最终 AIMessage。
                         # 如果不在这里转发 text，前端可能只能看到 thinking，正式输出为空。
                         _has_streamed_text_chunks = True
@@ -945,6 +1010,7 @@ async def process_writing_request_stream(
                                     if text:
                                         _collected_text_parts.append(text)
                                         if not _has_streamed_text_chunks:
+                                            _assistant_text_for_memory_parts.append(text)
                                             yield f"data: {json.dumps({'type': 'text', 'content': text}, ensure_ascii=False)}\n\n"
                         continue
 
@@ -953,6 +1019,7 @@ async def process_writing_request_stream(
                     if normalized_text:
                         _collected_text_parts.append(normalized_text)
                         if not _has_streamed_text_chunks:
+                            _assistant_text_for_memory_parts.append(normalized_text)
                             yield f"data: {json.dumps({'type': 'text', 'content': normalized_text}, ensure_ascii=False)}\n\n"
 
             elif input_type == "custom":
@@ -984,8 +1051,15 @@ async def process_writing_request_stream(
                 f"  - {line}" for line in range_lines
             )
 
-        # 构造 AI 回复内容
-        assistant_content = "".join(_collected_text_parts)
+        # 构造 AI 回复内容：
+        # 1) 优先使用“实际流给前端”的 text 片段，确保与用户最终看到的一致；
+        # 2) 兜底使用最终 AIMessage；
+        # 3) 最后再回退到历史拼接（兼容极端场景）。
+        assistant_content = "".join(_assistant_text_for_memory_parts).strip()
+        if not assistant_content:
+            assistant_content = _extract_latest_final_ai_text(_conversation_history).strip()
+        if not assistant_content:
+            assistant_content = "".join(_collected_text_parts).strip()
 
         # 返回完整对话（供记忆提取使用）
         conversation_for_memory = {"user": user_content, "assistant": assistant_content}

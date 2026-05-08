@@ -58,6 +58,34 @@ def get_wence_data_dir() -> Path:
     return Path(__file__).parent.parent.parent / "wence_data"
 
 
+def get_wence_project_dir() -> Path:
+    """获取项目业务数据目录（wence_data/project）。"""
+    project_dir = get_wence_data_dir() / "project"
+    project_dir.mkdir(parents=True, exist_ok=True, mode=0o755)
+    return project_dir
+
+
+def get_upload_dir() -> Path:
+    """获取上传目录（wence_data/project/uploads）。"""
+    upload_dir = get_wence_project_dir() / "uploads"
+    upload_dir.mkdir(parents=True, exist_ok=True, mode=0o755)
+    return upload_dir
+
+
+def get_temp_dir() -> Path:
+    """获取临时目录（wence_data/project/temp）。"""
+    temp_dir = get_wence_project_dir() / "temp"
+    temp_dir.mkdir(parents=True, exist_ok=True, mode=0o755)
+    return temp_dir
+
+
+def get_skills_dir() -> Path:
+    """获取技能目录（wence_data/project/skills）。"""
+    skills_dir = get_wence_project_dir() / "skills"
+    skills_dir.mkdir(parents=True, exist_ok=True, mode=0o755)
+    return skills_dir
+
+
 def get_user_settings_file() -> Path:
     """获取用户设置文件路径（固定在 wence_data 目录）"""
     new_dir = get_wence_data_dir()

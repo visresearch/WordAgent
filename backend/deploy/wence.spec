@@ -6,7 +6,7 @@ PyInstaller 配置文件
 
 import sys
 import os
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_submodules
 
 block_cipher = None
 
@@ -44,7 +44,7 @@ hiddenimports = [
     'uvicorn.protocols.websockets.auto',
     'uvicorn.lifespan',
     'uvicorn.lifespan.on',
-    
+
     # FastAPI
     'fastapi',
     'fastapi.responses',
@@ -77,6 +77,8 @@ hiddenimports = [
     
     # Other dependencies
     'dotenv',
+    'rapidocr_onnxruntime',
+    'onnxruntime',
     'json',
     'asyncio',
     
@@ -130,7 +132,6 @@ a = Analysis(
         # 排除不需要的大型库（AI/ML 库，我们不需要）
         'matplotlib',
         'seaborn',
-        'PIL',
         'tkinter',
         'jupyter',
         'notebook',
@@ -143,6 +144,7 @@ a = Analysis(
         'jax',
 
         # 排除其他不需要的库
+        'evaluation',
         'babel',
         'tqdm',
         'sphinx',

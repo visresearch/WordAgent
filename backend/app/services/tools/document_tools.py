@@ -10,17 +10,18 @@ from __future__ import annotations
 import asyncio
 import base64
 import concurrent.futures
+import importlib
 import json
 import re
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 from urllib.request import Request, urlopen
 
 from langchain_core.tools import tool
 from langgraph.config import get_stream_writer
 
-from app.core.config import get_wence_data_dir
+from app.core.config import get_temp_dir, get_wence_data_dir, get_wence_project_dir
 
 from .callback import (
     _current_chat_id,
@@ -34,21 +35,31 @@ from .schemas import DocumentOutput, DocumentQuery
 
 # 返回给 LLM 的文档 JSON 最大字符数（超过则进入精简模式）
 _MAX_DOC_JSON_CHARS = 100_000
+DocIdInput = str | int | None
+
+
+def _normalize_doc_id(doc_id: DocIdInput) -> str | None:
+    """Normalize docId from tool input / frontend metadata to string form."""
+    if doc_id is None:
+        return None
+    if isinstance(doc_id, str):
+        cleaned = doc_id.strip()
+        return cleaned or None
+    return str(doc_id)
 
 
 # region 图片 / 文档辅助
 
 
 def _download_remote_image(url: str) -> str | None:
-    """Download remote image URL to local wence_data/temp and return local path."""
+    """Download remote image URL to local wence_data/project/temp and return local path."""
     try:
         parsed = urlparse(url)
         ext = Path(parsed.path).suffix.lower()
         if ext not in {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp"}:
             ext = ".png"
 
-        temp_dir = get_wence_data_dir() / "temp"
-        temp_dir.mkdir(parents=True, exist_ok=True)
+        temp_dir = get_temp_dir()
         filename = f"image_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}{ext}"
         file_path = temp_dir / filename
 
@@ -79,8 +90,7 @@ def _save_data_image(data_url: str) -> str | None:
         }
         ext = ext_map.get(match.group(1).lower(), ".png")
 
-        temp_dir = get_wence_data_dir() / "temp"
-        temp_dir.mkdir(parents=True, exist_ok=True)
+        temp_dir = get_temp_dir()
         filename = f"image_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}{ext}"
         file_path = temp_dir / filename
 
@@ -90,6 +100,66 @@ def _save_data_image(data_url: str) -> str | None:
     except Exception as e:
         print(f"[generate_document] ⚠️ 保存 base64 图片失败: {e}")
         return None
+
+
+def _resolve_local_image_path(path_or_url: str) -> str | None:
+    """Resolve local image path from raw path / file:// URL / project-relative path."""
+    raw = str(path_or_url or "").strip()
+    if not raw:
+        return None
+
+    try:
+        candidate_str = raw
+        if raw.lower().startswith("file://"):
+            parsed = urlparse(raw)
+            decoded_path = unquote(parsed.path or "")
+            if parsed.netloc:
+                # UNC path, e.g. file://server/share/a.png
+                decoded_path = f"//{parsed.netloc}{decoded_path}"
+            # Windows drive path in file URL can become /C:/...
+            if re.match(r"^/[a-zA-Z]:/", decoded_path):
+                decoded_path = decoded_path[1:]
+            candidate_str = decoded_path or ""
+
+        if not candidate_str:
+            return None
+
+        candidate = Path(candidate_str).expanduser()
+        if not candidate.is_absolute():
+            candidate = get_wence_project_dir() / candidate
+        candidate = candidate.resolve(strict=False)
+        if candidate.exists() and candidate.is_file():
+            return str(candidate)
+    except Exception:
+        return None
+
+    return None
+
+
+def _to_positive_float(value: object) -> float | None:
+    try:
+        number = float(value)  # type: ignore[arg-type]
+        if number > 0:
+            return number
+    except Exception:
+        pass
+    return None
+
+
+def _read_image_size(path: str) -> tuple[float, float] | None:
+    """Read image intrinsic width/height by Pillow when available."""
+    try:
+        pil_image_module = importlib.import_module("PIL.Image")
+        open_image = getattr(pil_image_module, "open", None)
+        if open_image is None:
+            return None
+        with open_image(path) as image:
+            width, height = image.size
+            if width > 0 and height > 0:
+                return float(width), float(height)
+    except Exception:
+        return None
+    return None
 
 
 def _ensure_image_payload_shape(doc_dict: dict) -> None:
@@ -115,7 +185,23 @@ def _ensure_image_payload_shape(doc_dict: dict) -> None:
             # 这里是图片 run（无 text 字段）
             run.setdefault("type", "inline")
 
-            # 下载远程图片或解码 data: 图片
+            # 优先标准化已有本地路径（兼容 sourcePath/tempPath 传相对路径）
+            raw_temp_path = str(run.get("tempPath") or "").strip()
+            raw_source_path = str(run.get("sourcePath") or "").strip()
+            existing_temp = _resolve_local_image_path(raw_temp_path)
+            existing_source = _resolve_local_image_path(raw_source_path)
+            if existing_temp:
+                run["tempPath"] = existing_temp
+            elif raw_temp_path:
+                run.pop("tempPath", None)
+            if existing_source:
+                run["sourcePath"] = existing_source
+                # 如果只有 sourcePath，补一个 tempPath 让前端优先拿绝对本地路径
+                run.setdefault("tempPath", existing_source)
+            elif raw_source_path:
+                run.pop("sourcePath", None)
+
+            # 下载远程图片、解码 data: 图片，或解析本地路径图片
             if not (run.get("tempPath") or run.get("sourcePath")):
                 url = str(run.get("url") or "").strip()
                 if url.startswith("data:image/"):
@@ -126,9 +212,47 @@ def _ensure_image_payload_shape(doc_dict: dict) -> None:
                     local_path = _download_remote_image(url)
                     if local_path:
                         run["tempPath"] = local_path
+                elif url:
+                    local_path = _resolve_local_image_path(url)
+                    if local_path:
+                        run["tempPath"] = local_path
 
             if not (run.get("tempPath") or run.get("sourcePath")) and run.get("url"):
                 print(f"[generate_document] ⚠️ 图片未获取到本地路径，可能插入失败: url={run.get('url')}")
+
+            # 若宽高缺失，则按原图尺寸/比例补齐，避免拉伸变形
+            width_value = _to_positive_float(run.get("width"))
+            height_value = _to_positive_float(run.get("height"))
+            has_width = width_value is not None
+            has_height = height_value is not None
+            if has_width and has_height:
+                continue
+            local_image_path = (
+                _resolve_local_image_path(str(run.get("tempPath") or ""))
+                or _resolve_local_image_path(str(run.get("sourcePath") or ""))
+                or _resolve_local_image_path(str(run.get("url") or ""))
+            )
+            if not local_image_path:
+                continue
+            image_size = _read_image_size(local_image_path)
+            if not image_size:
+                continue
+            native_width, native_height = image_size
+            if native_width <= 0 or native_height <= 0:
+                continue
+
+            # 两边都缺失：使用图片原始尺寸
+            if not has_width and not has_height:
+                run["width"] = native_width
+                run["height"] = native_height
+                continue
+
+            # 仅缺一边：按原图比例推导另一边，避免破坏长宽比
+            if has_width and not has_height and width_value is not None:
+                run["height"] = width_value * native_height / native_width
+                continue
+            if has_height and not has_width and height_value is not None:
+                run["width"] = height_value * native_width / native_height
 
 
 def _save_generated_document_json(doc_dict: dict) -> str | None:
@@ -159,9 +283,11 @@ def _get_active_doc_id() -> str | None:
         return None
     if isinstance(document_meta, list):
         if document_meta:
-            return document_meta[0].get("documentId") if isinstance(document_meta[0], dict) else None
+            if isinstance(document_meta[0], dict):
+                return _normalize_doc_id(document_meta[0].get("documentId"))
+            return None
     elif isinstance(document_meta, dict):
-        return document_meta.get("documentId")
+        return _normalize_doc_id(document_meta.get("documentId"))
     return None
 
 
@@ -242,9 +368,9 @@ def _compact_doc_json(doc_json: dict) -> str:
 # region 工具实现（裸函数 + 工厂）
 
 
-def _read_document_impl(startParaIndex: int, endParaIndex: int, docId: str | None) -> str:
+def _read_document_impl(startParaIndex: int, endParaIndex: int, docId: DocIdInput) -> str:
     """read_document 的核心逻辑，被工厂函数包裹后变成 LangChain @tool。"""
-    resolved_doc_id = docId
+    resolved_doc_id = _normalize_doc_id(docId)
     if resolved_doc_id is None:
         resolved_doc_id = _get_active_doc_id()
 
@@ -342,9 +468,9 @@ def _read_document_impl(startParaIndex: int, endParaIndex: int, docId: str | Non
     return ""
 
 
-def _generate_document_impl(document: DocumentOutput, docId: str | None, insertParaIndex: int) -> dict:
+def _generate_document_impl(document: DocumentOutput, docId: DocIdInput, insertParaIndex: int) -> dict:
     """generate_document 的核心逻辑。"""
-    resolved_doc_id = docId
+    resolved_doc_id = _normalize_doc_id(docId)
     if resolved_doc_id is None:
         resolved_doc_id = _get_active_doc_id()
 
@@ -379,9 +505,9 @@ def _generate_document_impl(document: DocumentOutput, docId: str | None, insertP
     return doc_dict
 
 
-def _search_document_impl(query: DocumentQuery, docId: str | None) -> str:
+def _search_document_impl(query: DocumentQuery, docId: DocIdInput) -> str:
     """search_documnet 的核心逻辑。"""
-    resolved_doc_id = docId
+    resolved_doc_id = _normalize_doc_id(docId)
     if resolved_doc_id is None:
         resolved_doc_id = _get_active_doc_id()
 
@@ -490,9 +616,9 @@ def _search_document_impl(query: DocumentQuery, docId: str | None) -> str:
     return '{"matches": [], "matchCount": 0, "error": "non-websocket"}'
 
 
-def _delete_document_impl(startParaIndex: int, endParaIndex: int, docId: str | None) -> str:
+def _delete_document_impl(startParaIndex: int, endParaIndex: int, docId: DocIdInput) -> str:
     """delete_document 的核心逻辑。"""
-    resolved_doc_id = docId
+    resolved_doc_id = _normalize_doc_id(docId)
     if resolved_doc_id is None:
         resolved_doc_id = _get_active_doc_id()
 
@@ -523,13 +649,13 @@ def build_read_document(description: str):
     """根据传入的 description 构造 read_document 工具实例。"""
 
     @tool(description=description)
-    def read_document(startParaIndex: int = 0, endParaIndex: int = 49, docId: str | None = None) -> str:
+    def read_document(startParaIndex: int = 0, endParaIndex: int = 49, docId: str | int | None = None) -> str:
         """Read document content. Requests the frontend to parse and return the specified paragraph range via WebSocket.
 
         Args:
             startParaIndex: Starting paragraph index (0-based).
             endParaIndex: Ending paragraph index (inclusive).
-            docId: Document ID. If None, reads the active document.
+            docId: Document ID (string or integer). If None, reads the active document.
         """
         return _read_document_impl(startParaIndex, endParaIndex, docId)
 
@@ -542,14 +668,14 @@ def build_generate_document(description: str):
     @tool(description=description)
     def generate_document(
         document: DocumentOutput,
-        docId: str | None = None,
+        docId: str | int | None = None,
         insertParaIndex: int = -1,
     ) -> dict:
         """Generate a formatted document JSON for insertion into the Word document.
 
         Args:
             document: The document content to generate.
-            docId: Document ID to insert into. If None, uses the active document.
+            docId: Document ID (string or integer) to insert into. If None, uses the active document.
             insertParaIndex: 0-based paragraph index where content will be inserted before.
                 Use -1 for end of document, 0 for beginning.
         """
@@ -565,12 +691,12 @@ def build_search_document(description: str):
     """
 
     @tool(description=description)
-    def search_documnet(query: DocumentQuery, docId: str | None = None) -> str:
+    def search_documnet(query: DocumentQuery, docId: str | int | None = None) -> str:
         """Search document content. Requests the frontend to search for matching content by text or style criteria.
 
         Args:
             query: The search query with filters.
-            docId: Document ID to search in. If None, uses the active document.
+            docId: Document ID (string or integer) to search in. If None, uses the active document.
         """
         return _search_document_impl(query, docId)
 
@@ -581,13 +707,13 @@ def build_delete_document(description: str):
     """根据传入的 description 构造 delete_document 工具实例。"""
 
     @tool(description=description)
-    def delete_document(startParaIndex: int = 0, endParaIndex: int = -1, docId: str | None = None) -> str:
+    def delete_document(startParaIndex: int = 0, endParaIndex: int = -1, docId: str | int | None = None) -> str:
         """Delete a specified range of paragraphs from the document.
 
         Args:
             startParaIndex: Starting paragraph index (0-based).
             endParaIndex: Ending paragraph index (inclusive), -1 for the last paragraph.
-            docId: Document ID to delete from. If None, uses the active document.
+            docId: Document ID (string or integer) to delete from. If None, uses the active document.
         """
         return _delete_document_impl(startParaIndex, endParaIndex, docId)
 

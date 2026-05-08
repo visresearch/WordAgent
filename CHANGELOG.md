@@ -5,12 +5,14 @@
 
 ### Added
 - WPS Word支持多文档编辑
+- 添加file工具
 
 ### Changed
 - 解耦memory和context
-- 复用tools代码
-- 重构长期记忆
+- 单多智能体模式复用tools代码
+- 重构长期记忆memory.md
 - 增强短期记忆
+- 修改wence_data结构
 
 ### Fixed
 - 修复后端有时候会done两次，记录两次相同的AI回答的问题

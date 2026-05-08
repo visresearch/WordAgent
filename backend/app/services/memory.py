@@ -227,7 +227,6 @@ def build_short_term_messages(
     使用固定 token 预算加载短期记忆（类 Claude Code 风格）。
 
     从最近的消息开始，保留足够的内容满足 token 预算。
-    AI 消息会包含 tool_calls 信息（工具名和参数，不含结果）。
 
     """
     if not history:
@@ -239,32 +238,30 @@ def build_short_term_messages(
     if not pairs:
         return []
 
-    selected_pairs: list[tuple[str, str, list[dict]]] = []
+    selected_pairs: list[tuple[str, str]] = []
     total_tokens = 0
 
-    for user_msg, ai_msg, tool_calls in reversed(pairs):
+    for user_msg, ai_msg in reversed(pairs):
         user_tokens = _estimate_token_count(user_msg) + 20
         ai_tokens = _estimate_token_count(ai_msg) + 20
         pair_tokens = user_tokens + ai_tokens
 
         if total_tokens + pair_tokens <= budget:
-            selected_pairs.insert(0, (user_msg, ai_msg, tool_calls))
+            selected_pairs.insert(0, (user_msg, ai_msg))
             total_tokens += pair_tokens
         else:
             if not selected_pairs:
                 max_chars = int(budget * 2)
                 truncated_user = _truncate_text(user_msg, max_chars)
                 if _estimate_token_count(truncated_user) <= budget:
-                    selected_pairs.append((truncated_user, "", []))
+                    selected_pairs.append((truncated_user, ""))
             break
 
     result: list[HumanMessage | AIMessage] = []
-    for user_msg, ai_msg, tool_calls in selected_pairs:
+    for user_msg, ai_msg in selected_pairs:
         result.append(HumanMessage(content=user_msg))
-        if ai_msg or tool_calls:
-            # 确保 tool_calls 是列表而不是 None
-            safe_tool_calls = tool_calls if isinstance(tool_calls, list) else []
-            result.append(AIMessage(content=ai_msg or "", tool_calls=safe_tool_calls))
+        if ai_msg:
+            result.append(AIMessage(content=ai_msg))
 
     print(f"[Memory] 短期记忆: 保留 {len(selected_pairs)} 轮对话, ~{total_tokens} tokens")
     return result
@@ -273,21 +270,74 @@ def build_short_term_messages(
 # ============== 工具函数 ==============
 
 
-def _pair_history(history: list[dict]) -> list[tuple[str, str, list[dict]]]:
-    """将 history 列表配对为 (user_msg, assistant_msg, tool_calls) 元组列表。"""
-    pairs = []
+def _normalize_history_role(entry: dict) -> str:
+    """将不同来源的角色字段统一为 user / assistant。"""
+    role = str(entry.get("role", "")).strip().lower()
+    if role in ("user", "assistant"):
+        return role
+
+    msg_type = str(entry.get("type", "")).strip().lower()
+    if msg_type in ("human", "user"):
+        return "user"
+    if msg_type in ("ai", "assistant"):
+        return "assistant"
+
+    return ""
+
+
+def _normalize_history_content(content: Any) -> str:
+    """将消息 content 统一转换为文本。"""
+    if content is None:
+        return ""
+
+    if isinstance(content, str):
+        return content
+
+    if isinstance(content, dict):
+        text = content.get("text")
+        if isinstance(text, str):
+            return text
+        fallback = content.get("content")
+        return fallback if isinstance(fallback, str) else ""
+
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            item_text = _normalize_history_content(item)
+            if item_text:
+                parts.append(item_text)
+        return "".join(parts)
+
+    return ""
+
+
+def _pair_history(history: list[dict]) -> list[tuple[str, str]]:
+    """将 history 列表配对为 (user_msg, assistant_msg) 元组列表。"""
+    pairs: list[tuple[str, str]] = []
     i = 0
-    valid = [
-        h
-        for h in history
-        if h.get("content") and isinstance(h["content"], str) and h.get("role") in ("user", "assistant")
-    ]
+    valid: list[dict[str, str]] = []
+    for entry in history:
+        if not isinstance(entry, dict):
+            continue
+
+        role = _normalize_history_role(entry)
+        if role not in ("user", "assistant"):
+            continue
+
+        content = _normalize_history_content(entry.get("content")).strip()
+
+        if role == "user" and not content:
+            continue
+        if role == "assistant" and not content:
+            continue
+
+        valid.append({"role": role, "content": content})
+
     print(f"[Memory] _pair_history: 原始 history={len(history)}, 过滤后 valid={len(valid)}")
+
     while i < len(valid) - 1:
         if valid[i]["role"] == "user" and valid[i + 1]["role"] == "assistant":
-            assistant_entry = valid[i + 1]
-            tool_calls = assistant_entry.get("tool_calls", [])
-            pairs.append((valid[i]["content"], assistant_entry["content"], tool_calls))
+            pairs.append((valid[i]["content"], valid[i + 1]["content"]))
             i += 2
         else:
             i += 1
@@ -337,6 +387,83 @@ _EXTRACT_PROMPT_TEMPLATE = _load_extract_prompt_template()
 def _build_extract_prompt(conversation: str) -> str:
     """构建记忆提取的提示词"""
     return _EXTRACT_PROMPT_TEMPLATE.format(conversation=conversation)
+
+
+def _extract_latest_user_assistant_turn(conversation: str) -> str:
+    """
+    从拼接后的对话文本中提取最近一轮 user/assistant 对话。
+
+    兼容输入形态：
+    - USER: ...
+      ASSISTANT: ...
+      USER: ...
+      ASSISTANT: ...
+    """
+    if not conversation:
+        return ""
+
+    messages: list[tuple[str, str]] = []
+    current_role: str | None = None
+    current_lines: list[str] = []
+
+    def _flush_current() -> None:
+        nonlocal current_role, current_lines
+        if current_role is None:
+            return
+        content = "\n".join(current_lines).strip()
+        if content:
+            messages.append((current_role, content))
+        current_role = None
+        current_lines = []
+
+    for raw_line in conversation.splitlines():
+        stripped = raw_line.strip()
+        marker = stripped.upper()
+
+        if marker.startswith("USER:"):
+            _flush_current()
+            current_role = "user"
+            current_lines = [stripped[5:].lstrip()]
+            continue
+
+        if marker.startswith("ASSISTANT:"):
+            _flush_current()
+            current_role = "assistant"
+            current_lines = [stripped[10:].lstrip()]
+            continue
+
+        if current_role is not None:
+            current_lines.append(raw_line)
+
+    _flush_current()
+
+    # 没有 role 标记时，保持原始文本，避免误伤其他调用方
+    if not messages:
+        return conversation.strip()
+
+    last_assistant_idx = -1
+    for idx in range(len(messages) - 1, -1, -1):
+        if messages[idx][0] == "assistant":
+            last_assistant_idx = idx
+            break
+
+    if last_assistant_idx == -1:
+        # 没有 assistant 时，退化为最近一条 user
+        for idx in range(len(messages) - 1, -1, -1):
+            if messages[idx][0] == "user":
+                return f"USER: {messages[idx][1]}"
+        return conversation.strip()
+
+    assistant_text = messages[last_assistant_idx][1]
+    user_text = ""
+    for idx in range(last_assistant_idx - 1, -1, -1):
+        if messages[idx][0] == "user":
+            user_text = messages[idx][1]
+            break
+
+    if user_text:
+        return f"USER: {user_text}\n\nASSISTANT: {assistant_text}"
+    return f"ASSISTANT: {assistant_text}"
 
 
 def _parse_extracted_items(content: str) -> list[str]:
@@ -389,7 +516,14 @@ def extract_and_save_memory(
     if not conversation or not llm:
         return {"added": False}
 
-    prompt = _build_extract_prompt(conversation)
+    latest_turn_conversation = _extract_latest_user_assistant_turn(conversation)
+    if not latest_turn_conversation:
+        return {"added": False}
+
+    if latest_turn_conversation.strip() != conversation.strip():
+        print("[Memory] 记忆提取仅使用最近一轮 user/assistant 对话")
+
+    prompt = _build_extract_prompt(latest_turn_conversation)
 
     try:
         response = llm.invoke([{"role": "user", "content": prompt}])
@@ -431,5 +565,3 @@ def extract_and_save_memory(
 
         traceback.print_exc()
         return {"added": False}
-
-

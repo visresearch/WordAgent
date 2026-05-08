@@ -62,6 +62,27 @@ def _is_context_overflow_error(exc: Exception) -> bool:
     return any(sig in text for sig in overflow_signals)
 
 
+def _extract_latest_final_ai_text(messages: list) -> str:
+    """
+    从消息列表中提取最后一条最终 AI 文本，避免流式 chunk 重复拼接。
+    """
+    from app.services.agent.agent import _extract_text_content
+
+    for msg in reversed(messages):
+        if not isinstance(msg, AIMessage):
+            continue
+
+        tool_calls = getattr(msg, "tool_calls", None)
+        if isinstance(tool_calls, list) and tool_calls:
+            continue
+
+        text = _extract_text_content(getattr(msg, "content", "")).strip()
+        if text:
+            return text
+
+    return ""
+
+
 # region LangSmith (optional)
 
 
@@ -347,6 +368,9 @@ def _run_sub_agent(
                             "read_document",
                             "generate_document",
                             "delete_document",
+                            "list_file",
+                            "read_file",
+                            "edit_file",
                             "load_skill_context",
                             "create_workflow",
                             "review_document",
@@ -465,6 +489,9 @@ def _run_sub_agent(
                                 "read_document",
                                 "generate_document",
                                 "delete_document",
+                                "list_file",
+                                "read_file",
+                                "edit_file",
                                 "load_skill_context",
                                 "create_workflow",
                                 "review_document",
@@ -481,6 +508,9 @@ def _run_sub_agent(
                         "read_document",
                         "generate_document",
                         "delete_document",
+                        "list_file",
+                        "read_file",
+                        "edit_file",
                         "load_skill_context",
                         "create_workflow",
                         "review_document",
@@ -617,17 +647,32 @@ def _build_multi_agent_graph(llm, model_name: str, mcp_tools: list = None):
             task += f"\n\n[Document Global Metadata]\nThe following fields come from frontend document state and are not body content.\n{meta_json}\nUse these metadata fields in task analysis. The first document in the array is the active document the user is currently viewing."
 
         if state.attached_files:
-            from app.api.routes.files import read_text_file
-
+            file_reference_lines: list[str] = []
             for f in state.attached_files:
                 filename = f.get("filename", "")
                 is_image = f.get("is_image", False)
+                file_id = f.get("file_id", "")
+                project_path = f.get("project_path", f"uploads/{file_id}" if file_id else "")
+                absolute_path = f.get("absolute_path", "")
                 if is_image:
                     task += f"\n\n[Attached image: {filename}]"
+                    file_reference_lines.append(
+                        f"- {filename} [image] | project_path={project_path or '(unknown)'}"
+                        + (f" | absolute_path={absolute_path}" if absolute_path else "")
+                    )
                 else:
-                    text = read_text_file(f.get("file_id", ""), filename)
-                    if text:
-                        task += f"\n\n--- Attachment: {filename} ---\n{text}"
+                    file_reference_lines.append(
+                        f"- {filename} | project_path={project_path or '(unknown)'}"
+                        + (f" | absolute_path={absolute_path}" if absolute_path else "")
+                    )
+
+            if file_reference_lines:
+                task += (
+                    "\n\n[Attached Files]"
+                    "\nFiles are uploaded under wence_data/project."
+                    "\nWhen content is needed, call `read_file` with project_path."
+                    "\n" + "\n".join(file_reference_lines)
+                )
 
         context = state.memory_context if state.memory_context else ""
 
@@ -864,6 +909,7 @@ async def process_writing_request_stream(
         _SUPPRESS_STREAM = {"writer"}
         current_agent = "planner"
         _collected_text_parts: list[str] = []
+        _assistant_text_for_memory_parts: list[str] = []
         _last_input_tokens = 0
         _conversation_history: list = []
 
@@ -1033,6 +1079,7 @@ async def process_writing_request_stream(
 
                     normalized = _extract_text_content(msg.content)
                     if normalized:
+                        _assistant_text_for_memory_parts.append(normalized)
                         yield f"data: {json.dumps({'type': 'text', 'content': normalized}, ensure_ascii=False)}\n\n"
 
             elif input_type == "custom" and chunk:
@@ -1060,8 +1107,15 @@ async def process_writing_request_stream(
                 f"  - {line}" for line in range_lines
             )
 
-        # 构造 AI 回复内容
-        assistant_content = "".join(_collected_text_parts)
+        # 构造 AI 回复内容：
+        # 1) 优先使用实际流给前端的 text；
+        # 2) 兜底使用最终 AIMessage；
+        # 3) 最后回退到 chunk 拼接。
+        assistant_content = "".join(_assistant_text_for_memory_parts).strip()
+        if not assistant_content:
+            assistant_content = _extract_latest_final_ai_text(_conversation_history).strip()
+        if not assistant_content:
+            assistant_content = "".join(_collected_text_parts).strip()
 
         # 返回完整对话（供记忆提取使用）
         conversation_for_memory = {"user": user_content, "assistant": assistant_content}

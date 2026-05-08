@@ -19,7 +19,7 @@ Generate formatted document payload for insertion into a Word document.
 
 ## Parameters:
 - `document` (object, DocumentOutput): generated content payload for insertion (paragraphs/tables/styles).
-- `docId` (string, optional): Document ID to insert into. If None, uses the currently active document. The documentId for each open document is included in the documentMeta sent with each chat message.
+- `docId` (string/integer, optional): Document ID to insert into. If None, uses the currently active document. The documentId for each open document is included in the documentMeta sent with each chat message.
 - `insertParaIndex` (int, optional): 0-based paragraph index where content will be inserted before. Default is -1 (append to end). Use 0 for beginning of document.
 
 ## When to use:
@@ -42,7 +42,9 @@ Generate formatted document payload for insertion into a Word document.
 - Keep image URL unchanged (including query parameters). Do not strip URL params.
 - Image runs can be mixed with text runs in the same paragraph.
 - Recommend `pStyle` centered with zero left/right indent, for example `["center", 0, 0, 0, 0, 0, 0, "正文", 1]`.
-- Keep image width within printable page width; if uncertain, use moderate width (320-420) or omit explicit width.
+- Keep image width within printable page width; if uncertain, use moderate width (320-420).
+- Do not break original image aspect ratio. If only one side is provided (`width` or `height`), the other side must follow original ratio.
+- Prefer original size when possible: omitting both `width` and `height` means using the image's native width/height.
 
 ## Typography rules for runs:
 - Do not use one `rStyle` for the entire document.
@@ -165,6 +167,8 @@ Image strategy:
 - Image runs can be mixed with text runs in the same paragraph.
 - Prefer `pStyle` centered and left/right indent = 0.
 - Ensure image width is not larger than printable page width.
+- Do not distort images: keep original aspect ratio. If only one dimension is provided, infer the other proportionally.
+- If image native size is acceptable, omit both `width` and `height`.
 - If there is a figure/chart, add a caption paragraph directly below it using `图X，描述`, with `pS_6` (centered, `题图`) and a dedicated caption run style (`rS_5`, 黑体五号).
 
 Output process:

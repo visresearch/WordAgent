@@ -22,6 +22,8 @@ Split documents with 10+ paragraphs into multiple calls (6-12 paragraphs per bat
 - Images are inline runs without `text` field
 - Text run: `{"text": "...", "rStyle": "rS_2"}`
 - Image run: `{"url": "...", "width": 320, "height": 240, "altText": "..."}`
+- Do not break original image aspect ratio. If only one side is provided (`width` or `height`), infer the other side proportionally.
+- Prefer original size when possible: omitting both `width` and `height` means using native dimensions.
 - Add caption below figures: `图X 描述` with `pS_6` + `rS_5`
 
 ## Typography

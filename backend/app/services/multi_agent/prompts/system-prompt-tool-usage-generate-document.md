@@ -12,6 +12,8 @@ Pre-call guardrails:
 - Ensure style references are internally consistent.
 - Ensure insertion index matches the intended position.
 - Image runs: `{"url": "...", "width": 320, "height": 240}`. Prefer `pStyle` centered with zero horizontal indent.
+- Do not break original image aspect ratio. If only one side is provided (`width` or `height`), the other side must follow original ratio.
+- Prefer original image size when possible: omitting both `width` and `height` means using native dimensions.
 
 ## Long-content Batching Strategy
 

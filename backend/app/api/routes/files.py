@@ -2,7 +2,7 @@
 文件上传路由
 
 提供附件上传、查询、清理接口。
-上传的文件保存在 wence_data/uploads/ 目录下，以 UUID 命名防止冲突。
+上传的文件保存在 wence_data/project/uploads/ 目录下，以 UUID 命名防止冲突。
 """
 
 import base64
@@ -13,28 +13,33 @@ from pathlib import Path
 from fastapi import APIRouter, UploadFile, File
 from pydantic import BaseModel
 
-from app.core.config import get_wence_data_dir
+from app.core.config import get_upload_dir, get_wence_project_dir
 
 router = APIRouter()
 
 # 上传目录
-UPLOAD_DIR = get_wence_data_dir() / "uploads"
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+UPLOAD_DIR = get_upload_dir()
 
 # 允许的文件扩展名
-ALLOWED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".pdf", ".docx", ".txt", ".md"}
+ALLOWED_EXTENSIONS = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".pdf",
+    ".docx",
+    ".txt",
+    ".md",
+    ".csv",
+    ".yml",
+    ".yaml",
+    ".ymal",  # 兼容历史/误写扩展名
+}
 
 # 图片 MIME 类型
 IMAGE_MIME_TYPES = {"image/png", "image/jpeg", "image/jpg"}
 
 # 单文件最大 50MB
 MAX_FILE_SIZE = 50 * 1024 * 1024
-
-# 注入到 LLM 上下文的文本最大字符数（约 25K tokens），从配置读取
-from app.core.config import settings
-
-MAX_TEXT_CHARS = settings.MAX_TEXT_CHARS
-
 
 # ============== 响应模型 ==============
 
@@ -47,6 +52,8 @@ class UploadedFileInfo(BaseModel):
     size: int
     content_type: str
     is_image: bool
+    project_path: str
+    absolute_path: str
 
 
 class UploadResponse(BaseModel):
@@ -81,6 +88,18 @@ def get_file_path(file_id: str) -> Path | None:
     return None
 
 
+def get_file_project_path(file_id: str) -> str | None:
+    """根据 file_id 获取 project 根目录下的相对路径（如 uploads/xxx）。"""
+    file_path = get_file_path(file_id)
+    if not file_path:
+        return None
+    project_root = get_wence_project_dir().resolve()
+    try:
+        return file_path.resolve().relative_to(project_root).as_posix()
+    except Exception:
+        return None
+
+
 def read_file_as_base64(file_id: str) -> str | None:
     """读取文件并返回 base64 编码"""
     file_path = get_file_path(file_id)
@@ -88,79 +107,6 @@ def read_file_as_base64(file_id: str) -> str | None:
         return None
     with open(file_path, "rb") as f:
         return base64.b64encode(f.read()).decode("utf-8")
-
-
-def _truncate_text(text: str, max_chars: int = MAX_TEXT_CHARS) -> str:
-    """截断过长的文本，保留头尾"""
-    if len(text) <= max_chars:
-        return text
-    # 头部保留 80%，尾部保留 20%
-    head_size = int(max_chars * 0.8)
-    tail_size = max_chars - head_size
-    return (
-        text[:head_size] + f"\n\n... [内容过长，已省略中间 {len(text) - max_chars} 个字符] ...\n\n" + text[-tail_size:]
-    )
-
-
-def read_text_file(file_id: str, original_filename: str) -> str | None:
-    """读取文本类文件内容（自动截断过长内容）"""
-    file_path = get_file_path(file_id)
-    if not file_path:
-        return None
-
-    suffix = Path(original_filename).suffix.lower()
-    text = None
-
-    if suffix in (".txt", ".md"):
-        try:
-            text = file_path.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
-            text = file_path.read_text(encoding="gbk", errors="replace")
-
-    elif suffix == ".pdf":
-        text = _extract_pdf_text(file_path)
-
-    elif suffix == ".docx":
-        text = _extract_docx_text(file_path)
-
-    if text:
-        return _truncate_text(text)
-    return None
-
-
-def _extract_pdf_text(file_path: Path) -> str:
-    """从 PDF 提取文本（使用 pymupdf）"""
-    try:
-        import fitz  # pymupdf
-
-        doc = fitz.open(str(file_path))
-        pages = []
-        for page in doc:
-            pages.append(page.get_text())
-        doc.close()
-        text = "\n".join(pages).strip()
-        return text if text else "[PDF 文件内容为空（可能是扫描件/纯图片 PDF）]"
-    except Exception as e:
-        return f"[PDF 文件，文本提取失败: {e}]"
-
-
-def _extract_docx_text(file_path: Path) -> str:
-    """从 DOCX 提取纯文本（使用 python-docx）"""
-    try:
-        import docx
-
-        doc = docx.Document(str(file_path))
-        lines = [p.text for p in doc.paragraphs]
-
-        # 同时提取表格内容
-        for table in doc.tables:
-            for row in table.rows:
-                cells = [cell.text.strip() for cell in row.cells]
-                lines.append(" | ".join(cells))
-
-        return "\n".join(lines)
-    except Exception as e:
-        return f"[DOCX 文件，文本提取失败: {e}]"
 
 
 # ============== 路由 ==============
@@ -171,9 +117,9 @@ async def upload_files(files: list[UploadFile] = File(...)):
     """
     上传一个或多个文件
 
-    支持格式: png, jpg, jpeg, pdf, docx, txt, md
+    支持格式: png, jpg, jpeg, pdf, docx, txt, md, csv, yml, yaml, ymal
     单文件最大 50MB
-    返回每个文件的 file_id，供后续 chat 请求引用
+    返回每个文件在 project 下的路径，供 agent 后续通过 read_file 工具读取
     """
     results: list[UploadedFileInfo] = []
 
@@ -198,6 +144,7 @@ async def upload_files(files: list[UploadFile] = File(...)):
 
         content_type = _get_content_type(filename)
         is_image = content_type in IMAGE_MIME_TYPES
+        project_path = get_file_project_path(file_id) or f"uploads/{file_id}"
 
         results.append(
             UploadedFileInfo(
@@ -206,6 +153,8 @@ async def upload_files(files: list[UploadFile] = File(...)):
                 size=len(content),
                 content_type=content_type,
                 is_image=is_image,
+                project_path=project_path,
+                absolute_path=str(save_path.resolve()),
             )
         )
 

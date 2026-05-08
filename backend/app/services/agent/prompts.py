@@ -17,6 +17,11 @@ _COMMON_PROMPT_FILES = [
     "system-prompt-tool-usage-strategy.md",
     "system-prompt-tool-usage-read-document.md",
     "system-prompt-tool-usage-search-document.md",
+    "system-prompt-tool-usage-load-skill-context.md",
+    "system-prompt-tool-usage-list-file.md",
+    "system-prompt-tool-usage-read-file.md",
+    "system-prompt-tool-usage-edit-file.md",
+    "system-prompt-project-directory-guide.md",
     "system-prompt-tool-usage-subagent-guidance.md",
 ]
 
@@ -62,6 +67,10 @@ _TOOL_DESCRIPTION_FILES = {
     "generate_document": "tool-description-generate-document.md",
     "delete_document": "tool-description-delete-document.md",
     "search_document": "tool-description-search-document.md",
+    "load_skill_context": "tool-description-load-skill-context.md",
+    "list_file": "tool-description-list-file.md",
+    "read_file": "tool-description-read-file.md",
+    "edit_file": "tool-description-edit-file.md",
     "run_sub_agent": "tool-description-run-subagent.md",
 }
 
