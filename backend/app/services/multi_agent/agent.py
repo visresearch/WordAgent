@@ -653,24 +653,21 @@ def _build_multi_agent_graph(llm, model_name: str, mcp_tools: list = None):
                 is_image = f.get("is_image", False)
                 file_id = f.get("file_id", "")
                 project_path = f.get("project_path", f"uploads/{file_id}" if file_id else "")
-                absolute_path = f.get("absolute_path", "")
                 if is_image:
                     task += f"\n\n[Attached image: {filename}]"
-                    file_reference_lines.append(
-                        f"- {filename} [image] | project_path={project_path or '(unknown)'}"
-                        + (f" | absolute_path={absolute_path}" if absolute_path else "")
-                    )
+                    file_reference_lines.append(f"- {filename} [image] | project_path={project_path or '(unknown)'}")
                 else:
-                    file_reference_lines.append(
-                        f"- {filename} | project_path={project_path or '(unknown)'}"
-                        + (f" | absolute_path={absolute_path}" if absolute_path else "")
-                    )
+                    file_reference_lines.append(f"- {filename} | project_path={project_path or '(unknown)'}")
 
             if file_reference_lines:
                 task += (
                     "\n\n[Attached Files]"
                     "\nFiles are uploaded under wence_data/project."
-                    "\nWhen content is needed, call `read_file` with project_path."
+                    "\nDo NOT assume file contents from metadata."
+                    "\nOnly project_path is shown; it is relative to that project root."
+                    "\nWhen content is needed, call `read_file` with exactly that project_path."
+                    "\nFor generate_document image runs, url may use the same project-relative path;"
+                    " the server resolves it for the Word/WPS client."
                     "\n" + "\n".join(file_reference_lines)
                 )
 

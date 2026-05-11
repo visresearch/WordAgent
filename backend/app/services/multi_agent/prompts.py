@@ -5,6 +5,7 @@ Multi-agent prompts loader.
 from functools import lru_cache
 from pathlib import Path
 
+from app.services.tools.prompts import get_tool_description, read_tool_prompt
 
 _PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 
@@ -29,7 +30,6 @@ def update_skills_prompt(prompt: str) -> None:
 # Core prompts by agent role
 # ============================================================================
 
-# Common prompts for all agents
 _COMMON_PROMPT_FILES = [
     "system-prompt-common-rules.md",
     "system-prompt-output-format.md",
@@ -54,7 +54,6 @@ _AGENT_PROMPT_FILES = {
     ],
 }
 
-# Tool usage strategy prompts (file names - will be loaded by _read_prompt_file)
 _TOOL_USAGE_FILES = {
     "read_document": "system-prompt-tool-usage-read-document.md",
     "search_document": "system-prompt-tool-usage-search-document.md",
@@ -69,67 +68,40 @@ _TOOL_USAGE_FILES = {
 }
 
 
-# ============================================================================
-# Tool description files
-# ============================================================================
-
-_TOOL_DESCRIPTION_FILES = {
-    "read_document": "tool-description-read-document.md",
-    "search_document": "tool-description-search-document.md",
-    "generate_document": "tool-description-generate-document.md",
-    "delete_document": "tool-description-delete-document.md",
-    "create_workflow": "tool-description-create-workflow.md",
-    "review_document": "tool-description-review-document.md",
-    "load_skill_context": "tool-description-load-skill-context.md",
-    "list_file": "tool-description-list-file.md",
-    "read_file": "tool-description-read-file.md",
-    "edit_file": "tool-description-edit-file.md",
-}
-
-
 @lru_cache(maxsize=64)
 def _read_prompt_file(file_name: str) -> str:
-    """Read a single markdown prompt file."""
+    """Read a single markdown prompt file from multi_agent/prompts."""
     file_path = _PROMPTS_DIR / file_name
     if not file_path.exists():
         raise FileNotFoundError(f"Prompt file not found: {file_path}")
     return file_path.read_text(encoding="utf-8").strip()
 
 
-def get_tool_description(tool_name: str) -> str:
-    """Get tool description markdown content by tool name."""
-    file_name = _TOOL_DESCRIPTION_FILES.get(tool_name)
-    if not file_name:
-        raise KeyError(f"No description file mapped for tool: {tool_name}")
-    return _read_prompt_file(file_name)
-
-
 def _load_prompt_content(prompt_ref: str) -> str:
-    """Load prompt content from file name or return as-is if already content."""
+    """Load markdown: shared tool prompts first, then multi_agent-local prompts."""
     if not prompt_ref:
         return ""
-    # If it's a file name (ends with .md), read the file
-    if prompt_ref.endswith(".md"):
+    if not prompt_ref.endswith(".md"):
+        return prompt_ref
+    try:
+        return read_tool_prompt(prompt_ref)
+    except FileNotFoundError:
         try:
             return _read_prompt_file(prompt_ref)
         except FileNotFoundError:
             return ""
-    # Otherwise return as-is (e.g., cached MCP/skills prompt)
-    return prompt_ref
 
 
 def get_agent_prompt(agent_name: str) -> str:
     """Get the complete system prompt for a specific agent."""
     parts = []
 
-    # Common prompts
     for f in _COMMON_PROMPT_FILES:
         try:
             parts.append(_read_prompt_file(f))
         except FileNotFoundError:
             pass
 
-    # Agent-specific prompts
     agent_files = _AGENT_PROMPT_FILES.get(agent_name, [])
     for f in agent_files:
         try:
@@ -137,12 +109,10 @@ def get_agent_prompt(agent_name: str) -> str:
         except FileNotFoundError:
             pass
 
-    # Tool usage prompts based on available tools
     if agent_name == "planner":
         tool_prompts = [
             _load_prompt_content(_TOOL_USAGE_FILES.get("create_workflow", "")),
         ]
-        # Planner needs to know what MCP tools and skills are available for workflow planning
         if _mcp_tools_prompt_cache:
             tool_prompts.append("## Available MCP Tools (for research agent)\n" + _mcp_tools_prompt_cache)
         if _skills_prompt_cache:
@@ -196,3 +166,12 @@ def get_agent_prompt_parts(agent_name: str) -> list[str]:
         except FileNotFoundError:
             pass
     return parts
+
+
+__all__ = [
+    "get_tool_description",
+    "get_agent_prompt",
+    "get_agent_prompt_parts",
+    "update_mcp_tools_prompt",
+    "update_skills_prompt",
+]

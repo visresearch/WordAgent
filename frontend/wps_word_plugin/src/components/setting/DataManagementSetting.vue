@@ -166,7 +166,16 @@
               height="16"
               viewBox="0 0 24 24"
             >
-              <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none" stroke-dasharray="31.4" stroke-dashoffset="10" />
+              <circle
+                cx="12"
+                cy="12"
+                r="10"
+                stroke="currentColor"
+                stroke-width="4"
+                fill="none"
+                stroke-dasharray="31.4"
+                stroke-dashoffset="10"
+              />
             </svg>
             {{ memorySaving ? '保存中...' : '保存记忆' }}
           </button>

@@ -65,6 +65,7 @@ import ChatInput from './ChatInput.vue';
 import SessionPane from './SessionPane.vue';
 import { sessionState } from '../../sessionState.js';
 import { settingsState } from '../../settingsState.js';
+import { chatState } from '../../chatState.js';
 
 export default {
   name: 'AIChatPane',
@@ -91,7 +92,8 @@ export default {
       pendingDocument: null,
       pendingDocumentMsg: null,
       pendingDeletes: [],  // [{startParaIndex, endParaIndex, preview, msg}] 待确认删除列表
-      _streamInsertions: [], // [{insertParaIndex, count}] 当前流式中已执行的插入操作
+      pendingInsertions: [], // [{documentJson, docId, insertParaIndex, msg}] 待确认的文档插入列表
+      _streamInsertions: [], // [{insertParaIndex, count, docId}] 当前流式中已执行的插入操作
       hasHistory: false,
       historyLoaded: false,
       historyLoading: false,
@@ -99,6 +101,7 @@ export default {
       _streamingCache: {},
       isWide: false,
       enableThinking: true,  // 是否启用深度思考
+      _insertQueue: Promise.resolve(),
       _initializing: false   // 是否正在初始化，防止 ensureSession 创建重复会话
     };
   },
@@ -116,6 +119,9 @@ export default {
     },
     isWide() {
       sessionState.manualValue = null;
+    },
+    isLoading(val) {
+      chatState.aiBusy = !!val;
     }
   },
   mounted() {
@@ -132,6 +138,7 @@ export default {
     sessionState.visible = this.sessionVisible;
   },
   beforeUnmount() {
+    chatState.aiBusy = false;
     if (this._onResize) {
       window.removeEventListener('resize', this._onResize);
     }
@@ -804,7 +811,12 @@ export default {
 
         onError: (error) => {
           console.error('请求失败:', error);
-          aiMsg.content = `网络错误：${error.message}。请确保后端服务运行在 localhost:3880`;
+          const errMsg = String(error?.message || '');
+          if (errMsg.includes('⛔ 网络超时连接，自动断开')) {
+            aiMsg.content = '⛔ 网络超时连接，自动断开';
+          } else {
+            aiMsg.content = `网络错误：${errMsg}。请确保后端服务运行在 localhost:3880`;
+          }
           this.isLoading = false;
         },
 
@@ -923,23 +935,19 @@ export default {
         return;
       }
 
-      // 后端请求删除文档段落：记录待删除列表，批注将在所有文档操作完成后统一添加
+      // 后端请求删除文档段落：立即标记删除范围（真正删除在用户确认时执行）
       if (data.type === 'delete_document') {
-        console.log('[AIChatPane] 后端请求删除文档段落, startParaIndex:', data.startParaIndex, 'endParaIndex:', data.endParaIndex);
+        console.log('[AIChatPane] 后端请求删除文档段落, startParaIndex:', data.startParaIndex, 'endParaIndex:', data.endParaIndex, 'docId:', data.docId);
         msg.contentParts.push({
           type: 'status',
           content: data.content || `🗑️ 准备删除段落(${data.startParaIndex} - ${data.endParaIndex})`,
           loading: false
         });
         this.scrollToBottom();
-
-        // 存储原始索引，确认时再根据实际插入情况计算偏移
-        this.pendingDeletes.push({
-          origStartParaIndex: data.startParaIndex,
-          origEndParaIndex: data.endParaIndex,
-          preview: `AI 准备删除段落（段落 ${data.startParaIndex} - ${data.endParaIndex}）`,
-          msg: msg,
-          _commentAdded: false
+        this._applyImmediateDelete({
+          startParaIndex: data.startParaIndex,
+          endParaIndex: data.endParaIndex,
+          docId: data.docId || null
         });
         return;
       }
@@ -1070,329 +1078,363 @@ export default {
 
         this.scrollToBottom();
       } else if (data.type === 'json' && data.content) {
-        msg.documentJson = data.content;
-
-        // 计算原始插入位置和段落数
-        const _insParaCount = (data.content.paragraphs || []).length;
-        const _insTableCount = (data.content.tables || []).length;
-        const _insShiftCount = _insParaCount + _insTableCount;
-        const _insParaIndex = data.content.insertParaIndex ?? -1;
-
-        // 根据同一流中之前的插入操作调整当前插入位置
-        // （第二次及以后的插入需要偏移，因为前面的插入已改变文档结构）
-        if (_insParaIndex !== -1 && _insParaIndex !== null && _insParaIndex !== undefined && this._streamInsertions.length > 0) {
-          let adjustedInsPos = _insParaIndex;
-          for (const ins of this._streamInsertions) {
-            const insAt = ins.insertParaIndex;
-            if (insAt === -1 || insAt === null || insAt === undefined) continue;
-            if (insAt <= adjustedInsPos) {
-              adjustedInsPos += ins.count;
+        const insItem = {
+          documentJson: data.content,
+          docId: data.docId || data.content.docId || null,
+          insertParaIndex: data.content.insertParaIndex !== undefined ? data.content.insertParaIndex : -1,
+          msg: msg
+        };
+        this._insertQueue = this._insertQueue
+          .then(() => this._applyImmediateInsertion(insItem))
+          .then((inserted) => {
+            if (!inserted) {
+              msg.contentParts.push({
+                type: 'status',
+                content: '⚠️ 文档插入失败，请检查目标文档是否可写',
+                loading: false
+              });
+              this.scrollToBottom();
             }
-          }
-          data.content.insertParaIndex = adjustedInsPos;
-        }
-
-        // 用原始索引记录插入意图（供后续 delete_document 偏移计算）
-        if (_insShiftCount > 0) {
-          this._streamInsertions.push({ insertParaIndex: _insParaIndex, count: _insShiftCount });
-        }
-
-        console.log('收到完整JSON，自动输出到文档');
-        this.$nextTick(async () => {
-          // 先设置 pendingDocument 更新 UI（同步，立即生效）
-          const paragraphs = data.content.paragraphs || [];
-          const paraCount = paragraphs.length;
-          const tableCount = (data.content.tables || []).length;
-          let summary = `${paraCount} 个段落`;
-          if (tableCount > 0) {
-            summary += `，${tableCount} 个表格`;
-          }
-          this.pendingDocument = {
-            preview: `AI 已生成（${summary}）`
-          };
-          this.pendingDocumentMsg = msg;
-
-          // 执行文档插入（await 确保完成后再添加批注，避免并发 Word.run）
-          await this.insertToWord(msg);
-
-          // 插入完成后，统一添加所有待处理批注（生成 + 删除）
-          await this._addAllPendingComments(msg);
-        });
-
+          })
+          .catch((e) => {
+            console.error('[AIChatPane] 插入队列执行失败:', e);
+          });
         this.scrollToBottom();
       } else if (data.error) {
         msg.content += `\n\n错误: ${data.error}`;
       }
     },
 
-    // ============== 待处理操作确认/取消 ==============
+    // ============== 待处理操作确认/取消（与 WPS 行为对齐） ==============
+
+    _normalizeDocId(docId = null) {
+      if (docId === null || docId === undefined || docId === '') {
+        return null;
+      }
+      return String(docId);
+    },
+
+    _adjustDeleteRangeWithInsertions(startParaIndex, endParaIndex, docId = null) {
+      let adjStart = Number(startParaIndex);
+      let adjEnd = Number(endParaIndex);
+      const normalizedDocId = this._normalizeDocId(docId);
+
+      if (!Number.isFinite(adjStart)) {
+        adjStart = 0;
+      }
+      if (!Number.isFinite(adjEnd)) {
+        adjEnd = adjStart;
+      }
+
+      for (const ins of this._streamInsertions) {
+        const insDocId = this._normalizeDocId(ins.docId);
+        if (insDocId && normalizedDocId && insDocId !== normalizedDocId) {
+          continue;
+        }
+        const insAt = ins.insertParaIndex;
+        if (insAt === -1 || insAt === null || insAt === undefined) {
+          continue;
+        }
+        if (insAt <= adjStart) {
+          adjStart += ins.count;
+          if (adjEnd !== -1) {
+            adjEnd += ins.count;
+          }
+        }
+      }
+
+      return { startParaIndex: adjStart, endParaIndex: adjEnd };
+    },
+
+    _refreshPendingDocumentSummary() {
+      if (this.pendingInsertions.length === 0) {
+        this.pendingDocument = null;
+        this.pendingDocumentMsg = null;
+        return;
+      }
+
+      const totalParaCount = this.pendingInsertions.reduce(
+        (sum, item) => sum + ((item.documentJson?.paragraphs || []).length),
+        0
+      );
+      const totalTableCount = this.pendingInsertions.reduce(
+        (sum, item) => sum + ((item.documentJson?.tables || []).length),
+        0
+      );
+
+      let summary = `${totalParaCount} 个段落`;
+      if (totalTableCount > 0) {
+        summary += `，${totalTableCount} 个表格`;
+      }
+      this.pendingDocument = { preview: `AI 已生成（${summary}，待确认）` };
+      this.pendingDocumentMsg = this.pendingInsertions[this.pendingInsertions.length - 1]?.msg || null;
+    },
+
+    _applyImmediateDelete(payload) {
+      const docId = this._normalizeDocId(payload?.docId || null);
+      const startParaIndex = payload?.startParaIndex;
+      const endParaIndex = payload?.endParaIndex;
+
+      this.pendingDeletes.push({
+        origStartParaIndex: startParaIndex,
+        origEndParaIndex: endParaIndex,
+        docId,
+        preview: `AI 准备删除段落（段落 ${startParaIndex} - ${endParaIndex}）`,
+        _commentAdded: false,
+        _markingMode: 'highlight'
+      });
+      // Microsoft Office 统一使用高亮标记，不使用批注。
+      this._addDeleteComments(docId);
+    },
+
+    async _applyImmediateInsertion(insItem) {
+      const normalizedDocId = this._normalizeDocId(insItem.docId || null);
+      const rawInsertParaIndex = Number(insItem.insertParaIndex);
+      const requestedInsertParaIndex = Number.isFinite(rawInsertParaIndex) ? rawInsertParaIndex : -1;
+
+      let adjustedInsertParaIndex = requestedInsertParaIndex;
+      if (adjustedInsertParaIndex !== -1) {
+        for (const ins of this._streamInsertions) {
+          const insDocId = this._normalizeDocId(ins.docId);
+          if (insDocId && normalizedDocId && insDocId !== normalizedDocId) {
+            continue;
+          }
+          const insAt = ins.insertParaIndex;
+          if (insAt === -1 || insAt === null || insAt === undefined) {
+            continue;
+          }
+          if (insAt <= adjustedInsertParaIndex) {
+            adjustedInsertParaIndex += ins.count;
+          }
+        }
+      }
+
+      const docPayload = { ...(insItem.documentJson || {}) };
+      if (adjustedInsertParaIndex !== -1) {
+        docPayload.paraIndex = adjustedInsertParaIndex;
+      } else {
+        delete docPayload.paraIndex;
+      }
+      const insertLocation = adjustedInsertParaIndex === -1 ? 'end' : 'before';
+
+      const result = await generateDocxFromJSON(docPayload, insertLocation);
+      if (!result || !result.success) {
+        console.error('[AIChatPane] 即时插入失败:', result?.error || '(unknown)');
+        return false;
+      }
+
+      const paraCount = (docPayload.paragraphs || []).length;
+      const tableCount = (docPayload.tables || []).length;
+      const shiftCount = paraCount + tableCount;
+
+      if (shiftCount > 0) {
+        this._streamInsertions.push({
+          insertParaIndex: requestedInsertParaIndex,
+          count: shiftCount,
+          docId: normalizedDocId
+        });
+      }
+
+      let insertStartParaIndex = null;
+      let insertEndParaIndex = null;
+      if (shiftCount > 0) {
+        if (adjustedInsertParaIndex === -1) {
+          const totalParas = await Word.run(async (context) => {
+            const paras = context.document.body.paragraphs;
+            paras.load('items');
+            await context.sync();
+            return paras.items.length;
+          });
+          insertEndParaIndex = totalParas - 1;
+          insertStartParaIndex = Math.max(0, totalParas - shiftCount);
+        } else {
+          insertStartParaIndex = adjustedInsertParaIndex;
+          insertEndParaIndex = adjustedInsertParaIndex + shiftCount - 1;
+        }
+      }
+
+      const pendingItem = {
+        ...insItem,
+        docId: normalizedDocId,
+        insertParaIndex: requestedInsertParaIndex,
+        insertStartParaIndex,
+        insertEndParaIndex,
+        _alreadyInserted: true,
+        _markingMode: 'highlight'
+      };
+
+      if (pendingItem.msg) {
+        pendingItem.msg._docId = normalizedDocId;
+        pendingItem.msg._insertParaIndex = requestedInsertParaIndex;
+        pendingItem.msg.documentJson = docPayload;
+        pendingItem.msg.insertStartParaIndex = insertStartParaIndex;
+        pendingItem.msg.insertEndParaIndex = insertEndParaIndex;
+      }
+
+      this.pendingInsertions.push(pendingItem);
+      this._refreshPendingDocumentSummary();
+      await this._markInsertHighlight(pendingItem);
+
+      console.log(
+        '[AIChatPane] 文档已即时插入:',
+        `docId=${normalizedDocId || '(active)'}`,
+        `insertParaIndex=${requestedInsertParaIndex}`,
+        `appliedInsertParaIndex=${adjustedInsertParaIndex}`,
+        `range=${insertStartParaIndex}-${insertEndParaIndex}`
+      );
+      return true;
+    },
+
+    async _markInsertHighlight(insItem) {
+      if (
+        insItem.insertStartParaIndex === null ||
+        insItem.insertStartParaIndex === undefined ||
+        insItem.insertEndParaIndex === null ||
+        insItem.insertEndParaIndex === undefined
+      ) {
+        return;
+      }
+      try {
+        // Microsoft Office 统一用高亮标记新增内容（浅红）
+        await addCommentToParas(
+          insItem.insertStartParaIndex,
+          insItem.insertEndParaIndex,
+          '[文策AI] 待添加内容',
+          'redblue'
+        );
+        insItem._markingMode = 'highlight';
+      } catch (e) {
+        console.warn('[AIChatPane] 标记新增内容失败:', e);
+      }
+    },
+
+    async _addDeleteComments(docId = null) {
+      const normalizedDocId = this._normalizeDocId(docId);
+      for (const pd of this.pendingDeletes) {
+        if (pd._commentAdded) {
+          continue;
+        }
+        const pdDocId = this._normalizeDocId(pd.docId);
+        if (normalizedDocId && pdDocId && normalizedDocId !== pdDocId) {
+          continue;
+        }
+
+        const adjusted = this._adjustDeleteRangeWithInsertions(
+          pd.origStartParaIndex,
+          pd.origEndParaIndex,
+          pd.docId
+        );
+
+        try {
+          // Microsoft Office 统一用高亮标记删除内容（浅蓝）
+          const res = await addCommentToParas(
+            adjusted.startParaIndex,
+            adjusted.endParaIndex,
+            '[文策AI-删除] 待删除内容',
+            'redblue'
+          );
+          if (res && res.success) {
+            pd._commentAdded = true;
+            pd._adjStartParaIndex = adjusted.startParaIndex;
+            pd._adjEndParaIndex = adjusted.endParaIndex;
+            pd._markingMode = 'highlight';
+          }
+        } catch (e) {
+          console.warn('[AIChatPane] 标记删除段落失败:', e);
+        }
+      }
+    },
 
     /**
      * 一键确认所有待处理操作（删除 + 生成）
      */
     async confirmPending() {
-      // 1. 删除段落
-      if (this.pendingDeletes.length > 0) {
-        let deleted = false;
-        const useComments = this.pendingDeletes.some(pd => pd._markingMode === 'comment');
-
-        if (useComments) {
-          // 批注模式：通过批注定位删除
-          try {
-            await Word.run(async (context) => {
-              const comments = context.document.body.getComments();
-              comments.load('items');
-              await context.sync();
-
-              for (const comment of comments.items) {
-                comment.load('content');
-              }
-              await context.sync();
-
-              const deleteItems = [];
-              for (const comment of comments.items) {
-                if (comment.content && comment.content.startsWith('[文策AI-删除]')) {
-                  deleteItems.push(comment);
-                }
-              }
-
-              if (deleteItems.length > 0) {
-                for (let i = deleteItems.length - 1; i >= 0; i--) {
-                  const range = deleteItems[i].getRange();
-                  deleteItems[i].delete();
-                  range.delete();
-                }
-                await context.sync();
-                deleted = true;
-                console.log('[AIChatPane] 通过批注成功删除', deleteItems.length, '处内容');
-              }
-            });
-          } catch (e) {
-            console.warn('[AIChatPane] 通过批注删除失败，降级到索引删除:', e);
-          }
-        }
-
-        // 高亮模式 或 批注模式降级：按索引删除，先清除高亮再删除
-        if (!deleted) {
-          const deletes = this.pendingDeletes.map(pd => {
-            let adjStart = pd._adjStartParaIndex ?? pd.origStartParaIndex;
-            let adjEnd = pd._adjEndParaIndex ?? pd.origEndParaIndex;
-            if (pd._adjStartParaIndex === undefined) {
-              // 未记录调整后索引，重新计算
-              adjStart = pd.origStartParaIndex;
-              adjEnd = pd.origEndParaIndex;
-              for (const ins of this._streamInsertions) {
-                const insAt = ins.insertParaIndex;
-                if (insAt === -1 || insAt === null || insAt === undefined) continue;
-                if (insAt <= adjStart) {
-                  adjStart += ins.count;
-                  if (adjEnd !== -1) adjEnd += ins.count;
-                }
-              }
-            }
-            return { startParaIndex: adjStart, endParaIndex: adjEnd, isHighlight: pd._markingMode === 'highlight' };
-          });
-          const sortedDeletes = deletes.sort((a, b) => b.startParaIndex - a.startParaIndex);
-          for (const d of sortedDeletes) {
-            try {
-              // 先清除高亮标记
-              if (d.isHighlight) {
-                await this._clearHighlightOnRange(d.startParaIndex, d.endParaIndex);
-              }
-              const result = await deleteDocxPara(d.startParaIndex, d.endParaIndex);
-              console.log('[AIChatPane] 按索引删除:', result.message);
-            } catch (e) {
-              console.error('[AIChatPane] 删除段落失败:', e);
-            }
-          }
+      // 1) 删除正文：每次基于原始索引 + 当前插入记录重算，避免索引漂移
+      const deletes = this.pendingDeletes.map((pd) => {
+        const adjusted = this._adjustDeleteRangeWithInsertions(
+          pd.origStartParaIndex,
+          pd.origEndParaIndex,
+          pd.docId
+        );
+        return {
+          ...pd,
+          startParaIndex: adjusted.startParaIndex,
+          endParaIndex: adjusted.endParaIndex
+        };
+      });
+      deletes.sort((a, b) => b.startParaIndex - a.startParaIndex);
+      for (const d of deletes) {
+        await this._clearHighlightOnRange(d.startParaIndex, d.endParaIndex);
+        try {
+          await deleteDocxPara(d.startParaIndex, d.endParaIndex);
+        } catch (e) {
+          console.warn('[AIChatPane] confirmPending 删除失败:', e);
         }
       }
 
-      // 2. 确认生成文档：移除标注（保留内容）
-      if (this.pendingDocumentMsg) {
-        const insertMsg = this.pendingDocumentMsg;
-        if (insertMsg._markingMode === 'highlight') {
-          // 高亮模式：清除高亮
-          if (insertMsg.insertStartParaIndex !== undefined && insertMsg.insertEndParaIndex !== undefined) {
-            await this._clearHighlightOnRange(insertMsg.insertStartParaIndex, insertMsg.insertEndParaIndex);
-          }
-        } else {
-          // 批注模式：删除批注
-          await this._removeCommentsByPrefix('[文策AI]', true);
+      // 2) 确认新增：仅移除新增高亮，保留内容
+      for (const ins of this.pendingInsertions) {
+        if (
+          ins.insertStartParaIndex !== null &&
+          ins.insertStartParaIndex !== undefined &&
+          ins.insertEndParaIndex !== null &&
+          ins.insertEndParaIndex !== undefined
+        ) {
+          await this._clearHighlightOnRange(ins.insertStartParaIndex, ins.insertEndParaIndex);
         }
       }
 
       this.pendingDeletes = [];
+      this.pendingInsertions = [];
       this.pendingDocument = null;
       this.pendingDocumentMsg = null;
       this._streamInsertions = [];
     },
 
     /**
-     * 一键取消所有待处理操作（移除删除标记 + 撤销生成）
+     * 一键取消所有待处理操作（移除删除标记 + 回滚新增）
      */
     async cancelPending() {
-      // 1. 移除所有删除标注（不删除内容）
-      if (this.pendingDeletes.length > 0) {
-        const hasComments = this.pendingDeletes.some(pd => pd._markingMode === 'comment');
-        const hasHighlights = this.pendingDeletes.some(pd => pd._markingMode === 'highlight');
-        if (hasComments) {
-          await this._removeCommentsByPrefix('[文策AI-删除]');
-        }
-        if (hasHighlights) {
-          for (const pd of this.pendingDeletes) {
-            if (pd._markingMode === 'highlight' && pd._adjStartParaIndex !== undefined) {
-              await this._clearHighlightOnRange(pd._adjStartParaIndex, pd._adjEndParaIndex);
-            }
-          }
-        }
-        this.pendingDeletes = [];
+      // 1) 取消删除：只清除删除高亮，不删除正文
+      for (const pd of this.pendingDeletes) {
+        const adjusted = this._adjustDeleteRangeWithInsertions(
+          pd.origStartParaIndex,
+          pd.origEndParaIndex,
+          pd.docId
+        );
+        await this._clearHighlightOnRange(adjusted.startParaIndex, adjusted.endParaIndex);
       }
 
-      // 2. 撤销生成文档
-      if (this.pendingDocumentMsg) {
-        let reverted = false;
-        const insertMsg = this.pendingDocumentMsg;
-
-        if (insertMsg._markingMode === 'highlight') {
-          // 高亮模式：清除高亮后按索引删除插入的内容
-          if (insertMsg.insertStartParaIndex !== undefined && insertMsg.insertEndParaIndex !== undefined) {
-            await this._clearHighlightOnRange(insertMsg.insertStartParaIndex, insertMsg.insertEndParaIndex);
-            try {
-              const result = await deleteDocxPara(insertMsg.insertStartParaIndex, insertMsg.insertEndParaIndex);
-              reverted = result?.success ?? false;
-            } catch (e) {
-              console.warn('按索引撤销失败:', e);
-            }
-          }
-        } else {
-          // 批注模式：通过批注定位删除内容
-          try {
-            await Word.run(async (context) => {
-              const comments = context.document.body.getComments();
-              comments.load('items');
-              await context.sync();
-              for (const comment of comments.items) {
-                comment.load('content');
-              }
-              await context.sync();
-              for (const comment of comments.items) {
-                if (comment.content && comment.content.startsWith('[文策AI]') && !comment.content.startsWith('[文策AI-删除]')) {
-                  const range = comment.getRange();
-                  comment.delete();
-                  range.delete();
-                }
-              }
-              await context.sync();
-              reverted = true;
-            });
-          } catch (e) {
-            console.warn('通过批注撤销生成文档失败:', e);
-          }
+      // 2) 取消新增：按倒序删除新增内容，避免位置串扰
+      const inserts = [...this.pendingInsertions].sort(
+        (a, b) => (b.insertStartParaIndex ?? -1) - (a.insertStartParaIndex ?? -1)
+      );
+      for (const ins of inserts) {
+        if (
+          ins.insertStartParaIndex === null ||
+          ins.insertStartParaIndex === undefined ||
+          ins.insertEndParaIndex === null ||
+          ins.insertEndParaIndex === undefined
+        ) {
+          continue;
         }
-        this.pendingDocumentMsg.documentReverted = reverted;
+        await this._clearHighlightOnRange(ins.insertStartParaIndex, ins.insertEndParaIndex);
+        try {
+          await deleteDocxPara(ins.insertStartParaIndex, ins.insertEndParaIndex);
+        } catch (e) {
+          console.warn('[AIChatPane] cancelPending 回滚新增失败:', e);
+        }
       }
+
+      this.pendingDeletes = [];
+      this.pendingInsertions = [];
       this.pendingDocument = null;
       this.pendingDocumentMsg = null;
       this._streamInsertions = [];
-      console.log('用户取消了所有待处理操作');
     },
 
     /**
-     * 统一添加所有待处理批注（在 insertToWord 完成后调用）
-     */
-    async _addAllPendingComments(insertMsg) {
-      const mode = settingsState.proofreadMode || 'revision';
-      // 为生成的内容添加标注
-      if (insertMsg) {
-        const si = insertMsg.insertStartParaIndex;
-        const ei = insertMsg.insertEndParaIndex;
-        if (si !== undefined && ei !== undefined) {
-          try {
-            const res = await addCommentToParas(si, ei, '[文策AI] 待添加内容', mode);
-            if (res && res.success) {
-              insertMsg._markingMode = res.mode; // 'comment' or 'highlight'
-              console.log('[AIChatPane] 已为生成内容添加标注, 模式:', res.mode, '范围:', si, '-', ei);
-            } else {
-              console.warn('[AIChatPane] 添加生成标注返回失败:', res);
-            }
-          } catch (e) {
-            console.warn('添加生成标注异常:', e);
-          }
-        } else {
-          console.warn('[AIChatPane] 插入范围未设置, insertStartParaIndex:', si, 'insertEndParaIndex:', ei);
-        }
-      }
-      // 为待删除内容添加标注
-      await this._addDeleteComments();
-    },
-
-    /**
-     * 为待删除内容添加批注（使用调整后的索引）
-     */
-    async _addDeleteComments() {
-      const mode = settingsState.proofreadMode || 'revision';
-      for (const pd of this.pendingDeletes) {
-        if (pd._commentAdded) continue;
-        let adjStart = pd.origStartParaIndex;
-        let adjEnd = pd.origEndParaIndex;
-        for (const ins of this._streamInsertions) {
-          const insAt = ins.insertParaIndex;
-          if (insAt === -1 || insAt === null || insAt === undefined) continue;
-          if (insAt <= adjStart) {
-            adjStart += ins.count;
-            if (adjEnd !== -1) adjEnd += ins.count;
-          }
-        }
-        try {
-          const res = await addCommentToParas(adjStart, adjEnd, '[文策AI-删除] 待删除内容', mode);
-          if (res && res.success) {
-            pd._commentAdded = true;
-            pd._adjStartParaIndex = adjStart;
-            pd._adjEndParaIndex = adjEnd;
-            pd._markingMode = res.mode; // 'comment' or 'highlight'
-            console.log('[AIChatPane] 已添加删除标注(模式:', res.mode, '索引:', adjStart, '-', adjEnd, ')');
-          } else {
-            console.warn('[AIChatPane] 删除标注添加失败:', res, '索引:', adjStart, '-', adjEnd);
-          }
-        } catch (e) {
-          console.warn('[AIChatPane] 标记删除段落异常:', e);
-        }
-      }
-    },
-
-    /**
-     * 移除指定前缀的批注（best-effort，不抛错）
-     * @param {string} prefix - 批注内容前缀
-     * @param {boolean} excludeDelete - 是否排除 '[文策AI-删除]' 前缀的批注
-     */
-    async _removeCommentsByPrefix(prefix, excludeDelete = false) {
-      try {
-        await Word.run(async (context) => {
-          const comments = context.document.body.getComments();
-          comments.load('items');
-          await context.sync();
-
-          for (const comment of comments.items) {
-            comment.load('content');
-          }
-          await context.sync();
-
-          for (const comment of comments.items) {
-            if (comment.content && comment.content.startsWith(prefix)) {
-              if (excludeDelete && comment.content.startsWith('[文策AI-删除]')) continue;
-              comment.delete();
-            }
-          }
-          await context.sync();
-        });
-      } catch (e) {
-        console.warn('清理批注失败(不影响功能):', e);
-      }
-    },
-
-    /**
-     * 清除指定段落范围的高亮（用于批注 API 不可用时的降级标记清理）
+     * 清除指定段落范围的高亮（best-effort）
      */
     async _clearHighlightOnRange(startParaIndex, endParaIndex) {
       try {
@@ -1401,9 +1443,16 @@ export default {
           allParas.load('items');
           await context.sync();
           const total = allParas.items.length;
-          let end = endParaIndex === -1 ? total - 1 : endParaIndex;
-          if (startParaIndex >= 0 && end < total) {
-            const startRange = allParas.items[startParaIndex].getRange('Start');
+          if (total <= 0) {
+            return;
+          }
+          let start = Number.isFinite(Number(startParaIndex)) ? Number(startParaIndex) : 0;
+          let end = endParaIndex === -1 ? total - 1 : Number(endParaIndex);
+          start = Math.max(0, Math.min(start, total - 1));
+          end = Number.isFinite(end) ? end : start;
+          end = Math.max(start, Math.min(end, total - 1));
+          if (start >= 0 && end < total) {
+            const startRange = allParas.items[start].getRange('Start');
             const endRange = allParas.items[end].getRange('End');
             const fullRange = startRange.expandTo(endRange);
             fullRange.font.highlightColor = null;
@@ -1416,54 +1465,31 @@ export default {
     },
 
     /**
-     * 还原到某条消息 - 通过批注定位删除插入的内容
+     * 还原到某条消息（Microsoft Office 统一走高亮/索引回滚）
      */
     async revertToMessage(messageIndex) {
       if (this.isLoading) return;
       const msg = this.messages[messageIndex];
       if (!msg) return;
 
-      let reverted = false;
-      // 优先通过批注定位删除
+      if (
+        msg.insertStartParaIndex === null ||
+        msg.insertStartParaIndex === undefined ||
+        msg.insertEndParaIndex === null ||
+        msg.insertEndParaIndex === undefined
+      ) {
+        msg.documentReverted = false;
+        return;
+      }
+
       try {
-        await Word.run(async (context) => {
-          const comments = context.document.body.getComments();
-          comments.load('items');
-          await context.sync();
-
-          for (const comment of comments.items) {
-            comment.load('content');
-          }
-          await context.sync();
-
-          for (const comment of comments.items) {
-            if (comment.content && comment.content.startsWith('[文策AI]') && !comment.content.startsWith('[文策AI-删除]')) {
-              const range = comment.getRange();
-              comment.delete();
-              range.delete();
-            }
-          }
-          await context.sync();
-          reverted = true;
-        });
+        await this._clearHighlightOnRange(msg.insertStartParaIndex, msg.insertEndParaIndex);
+        const result = await deleteDocxPara(msg.insertStartParaIndex, msg.insertEndParaIndex);
+        msg.documentReverted = !!result?.success;
       } catch (e) {
-        console.warn('通过批注撤销失败，尝试按索引撤销:', e);
+        console.warn('[AIChatPane] revertToMessage 回滚失败:', e);
+        msg.documentReverted = false;
       }
-
-      // 降级方案：通过记录的段落索引删除
-      if (!reverted && msg.insertStartParaIndex !== undefined && msg.insertEndParaIndex !== undefined) {
-        try {
-          const result = await deleteDocxPara(msg.insertStartParaIndex, msg.insertEndParaIndex);
-          if (result.success) {
-            reverted = true;
-            console.log('[AIChatPane] 按索引撤销成功:', result.message);
-          }
-        } catch (e) {
-          console.error('按索引撤销也失败:', e);
-        }
-      }
-
-      msg.documentReverted = reverted;
     },
 
     // ============== 文档操作 ==============
@@ -1484,7 +1510,7 @@ export default {
           }
         }
 
-        if (jsonData && (jsonData.paragraphs || jsonData.tables || jsonData.images)) {
+        if (jsonData && (jsonData.paragraphs || jsonData.tables)) {
           // 统一使用 JSON 中 AI 指定的 insertParaIndex 作为插入位置
           let insertLocation = 'end';
           if (jsonData.insertParaIndex !== null && jsonData.insertParaIndex !== undefined) {

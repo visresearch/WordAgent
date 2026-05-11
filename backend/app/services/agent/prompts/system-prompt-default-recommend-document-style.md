@@ -1,28 +1,9 @@
 ## Default Recommended Writing Style (for generated documents)
 
-Use this style unless the user explicitly requests another format.
+Use this style unless the user requests another format.
 
-1. Keep layout clean and consistent.
-2. Use bold headings and unified body formatting.
-3. Preserve clear heading hierarchy: main title, section title, subsection title, body.
-4. Never use \n inside run.text. One line = one paragraph.
-5. For blank lines, insert an empty paragraph: {"pStyle": "", "runs": []}; avoid consecutive empty paragraphs unless user explicitly asks for larger spacing.
-
-### Recommended style IDs
-- pS_1: centered main title (1.5 line spacing)
-- pS_2: section heading (Heading 1, 1.5 line spacing)
-- pS_4: subsection heading (Heading 2, 1.5 line spacing)
-- pS_3: body text (justified, first-line indent, 1.5 line spacing)
-- pS_5: table cell text (centered, no first-line indent, single line spacing)
-- pS_6: figure/chart caption paragraph (centered, single line spacing, style name `正文`)
-- rS_1: heading font (bold)
-- rS_2: body font
-- rS_3: English/number run in headings (Times New Roman, bold)
-- rS_4: English/number run in body text (Times New Roman, regular)
-- rS_5: figure caption run (黑体, 五号, for "图X" caption under figures/charts)
-
-### Canonical default styles (use as-is for new content)
-When creating new content and user did not request a custom format, use this exact style map:
+### Canonical styles
+Use this map for new content and include every style referenced in the payload:
 
 ```json
 {
@@ -40,36 +21,9 @@ When creating new content and user did not request a custom format, use this exa
 }
 ```
 
-### Style object shape rules
-- `styles` is mandatory for generate_document.
-- Each style definition value must be an array, not an object.
-- Every `pStyle/rStyle/cStyle/tStyle` used in content must be defined in `styles`.
-
-### Heading rules
-- Section headings (e.g., 一、...) should use pS_2.
-- Subsection headings (e.g., 1.1, 1.2, 2.1) should use pS_4.
-- Heading runs must be bold.
-- If headings contain English words or numbering, split those parts into separate runs and use rS_3.
-
-### Body rules
-- Body text should use pS_3 + rS_2 by default.
-- English words and numbers in body paragraphs should use rS_4 (Times New Roman).
-- Split mixed content into multiple runs (Chinese runs use rS_2; English/number runs use rS_4).
-- Do not add extra spaces around English/number runs only to separate them from adjacent Chinese text.
-- Do not use a single rStyle from beginning to end for the whole article.
-- Table content should use pS_5 (not pS_3).
-
-### Figure/Chart caption rules
-- If a figure or chart is generated, add one caption paragraph directly below it.
-- Caption pattern: `图X <brief description>` (for example: `图1 销售趋势对比图`).
-- Caption paragraph should use `pS_6` (centered, single line spacing, style name `正文`).
-- Use a dedicated caption run style `rS_5` (黑体, 五号) for the caption text.
-
-### Mandatory defaults for new content
-- Title must be bold.
-- Body must use SimSun 12 with first-line indent and 1.5 spacing behavior from pS_3.
-- Table cell content must use pS_5.
-- If heading contains English words or numbering, split into separate run and use rS_3 for that run.
-- If body contains English words or numbers, split into separate run and use rS_4.
-- Do not insert extra spaces around English/number runs adjacent to Chinese text.
-- If a figure/chart exists, place one caption paragraph below it in `图X 描述` form and use `pS_6` + `rS_5`.
+### Style rules
+- `styles` is mandatory; style values are arrays.
+- `pS_1`: title. `pS_2`: section heading. `pS_4`: subsection. `pS_3`: body. `pS_5`: table cell. `pS_6`: figure/chart caption.
+- `rS_1`: Chinese heading. `rS_2`: Chinese body. `rS_3`: English/number heading. `rS_4`: English/number body. `rS_5`: caption.
+- Split mixed Chinese/English/number text into runs; do not add extra spaces only to separate scripts.
+- Figure/chart captions go directly below the figure as `图X 描述` using `pS_6` + `rS_5`.

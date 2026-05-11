@@ -19,9 +19,10 @@ class Run(BaseModel):
         description='Character style reference ID, e.g. "rS_1", mapped to document.styles["rS_1"]',
     )
     # Image run fields (if text is absent, this is an image run)
-    url: str | None = Field(default=None, description="Remote image URL")
-    tempPath: str | None = Field(default=None, description="Local temp file path")
-    sourcePath: str | None = Field(default=None, description="Local source file path")
+    url: str | None = Field(
+        default=None,
+        description="Image URL or local file path (supports http/https/file URL/absolute path/relative path)",
+    )
     width: float | None = Field(default=None, description="Image width in points")
     height: float | None = Field(default=None, description="Image height in points")
     left: float | None = Field(default=None, description="Floating image left position")

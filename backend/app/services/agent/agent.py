@@ -734,12 +734,9 @@ async def process_writing_request_stream(
                 content_type = f.get("content_type", "")
                 is_image = f.get("is_image", False)
                 project_path = f.get("project_path", f"uploads/{file_id}" if file_id else "")
-                absolute_path = f.get("absolute_path", "")
 
                 if is_image:
-                    line = f"- {filename} [image] | project_path={project_path or '(unknown)'}" + (
-                        f" | absolute_path={absolute_path}" if absolute_path else ""
-                    )
+                    line = f"- {filename} [image] | project_path={project_path or '(unknown)'}"
                     file_reference_parts.append(line)
 
                     b64 = read_file_as_base64(file_id)
@@ -752,9 +749,7 @@ async def process_writing_request_stream(
                         )
                         print(f"[Agent] 🖼️ 附件图片: {filename}")
                 else:
-                    line = f"- {filename} | project_path={project_path or '(unknown)'}" + (
-                        f" | absolute_path={absolute_path}" if absolute_path else ""
-                    )
+                    line = f"- {filename} | project_path={project_path or '(unknown)'}"
                     file_reference_parts.append(line)
                     print(f"[Agent] 📄 附件文件引用: {filename} -> {project_path}")
 
@@ -763,7 +758,10 @@ async def process_writing_request_stream(
                 "\n\n[Attached Files]"
                 "\nFiles are already uploaded under wence_data/project."
                 "\nDo NOT assume file contents from metadata."
-                "\nWhen file content is needed, call `read_file` with the provided project_path."
+                "\nOnly project_path is shown; it is relative to that project root (e.g. uploads/...)."
+                "\nWhen file content is needed, call `read_file` with exactly that project_path string."
+                "\nFor generate_document image runs, you may set url to the same project-relative path;"
+                " the server resolves it to an absolute local path for the Word/WPS client."
                 "\n" + "\n".join(file_reference_parts)
             )
 

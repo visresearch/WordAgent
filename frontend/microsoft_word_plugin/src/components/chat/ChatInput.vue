@@ -131,7 +131,7 @@
             </div>
 
             <!-- 思考模式切换 -->
-            <label class="thinking-toggle" title="启用/禁用深度思考">
+            <label class="thinking-toggle" aria-label="启用或禁用深度思考">
               <input
                 :checked="enableThinking"
                 type="checkbox"
@@ -143,8 +143,8 @@
           </div>
           <div class="toolbar-right">
             <div class="btn-wrapper">
-              <button class="add-selection-btn" title="添加文件" @click="triggerFilePicker">
-                <img :src="fileIcon" alt="添加文件" class="toolbar-icon" />
+              <button type="button" class="add-selection-btn" aria-label="添加文件" @click="triggerFilePicker">
+                <img :src="fileIcon" alt="" class="toolbar-icon" />
               </button>
               <span class="tooltip">添加文件</span>
             </div>
@@ -157,8 +157,8 @@
               @change="handleFileChange"
             />
             <div class="btn-wrapper">
-              <button class="add-selection-btn" title="添加选区" @click="$emit('add-selection')">
-                <img :src="addIcon" alt="添加选区" class="toolbar-icon" />
+              <button type="button" class="add-selection-btn" aria-label="添加选区" @click="$emit('add-selection')">
+                <img :src="addIcon" alt="" class="toolbar-icon" />
               </button>
               <span class="tooltip">添加选区</span>
             </div>

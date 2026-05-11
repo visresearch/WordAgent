@@ -68,7 +68,7 @@
       <div class="stats">
         <span>段落: {{ parsedData.paragraphs?.length || 0 }}</span>
         <span>表格: {{ parsedData.tables?.length || 0 }}</span>
-        <span>图片: {{ parsedData.images?.length || 0 }}</span>
+        <span>图片: {{ inlineImageRunCount }}</span>
         <span>字数: {{ totalCharCount }}</span>
       </div>
       <div class="json-container">
@@ -120,6 +120,23 @@ export default {
         }
       }
       return count;
+    },
+    inlineImageRunCount() {
+      if (!this.parsedData || !this.parsedData.paragraphs) {
+        return 0;
+      }
+      let n = 0;
+      for (const para of this.parsedData.paragraphs) {
+        if (!para.runs) {
+          continue;
+        }
+        for (const run of para.runs) {
+          if (run && run.text == null && run.url) {
+            n++;
+          }
+        }
+      }
+      return n;
     },
   },
   methods: {

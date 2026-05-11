@@ -413,6 +413,19 @@ const wsManager = {
         this.connected = false;
         this.ws = null;
         this._connectPromise = null;
+        if (this._requestTimeoutTimer) {
+          clearTimeout(this._requestTimeoutTimer);
+          this._requestTimeoutTimer = null;
+        }
+
+        // 后端 watchdog 超时主动断开时，确保前端拿到明确提示
+        const isIdleTimeoutClose = event.code === 1011 && event.reason === 'idle-timeout';
+        if (!this._completeCalled && isIdleTimeoutClose) {
+          this._completeCalled = true;
+          if (this.onError) {
+            this.onError(new Error('⛔ 网络超时连接，自动断开'));
+          }
+        }
 
         // 如果不是主动关闭，尝试重连
         if (event.code !== 1000 && this._reconnectAttempts < this._maxReconnectAttempts) {
@@ -682,7 +695,9 @@ function chatStream(message, options = {}) {
  */
 function getDocumentById(docId) {
   const app = window.Application;
-  if (!app) return null;
+  if (!app) {
+    return null;
+  }
 
   if (!docId) {
     // 返回活动文档
@@ -711,7 +726,7 @@ function getDocumentById(docId) {
   }
 
   // 没找到，返回活动文档作为后备
-  console.log(`[getDocumentById] 使用活动文档作为后备`);
+  console.log('[getDocumentById] 使用活动文档作为后备');
   return app.ActiveDocument;
 }
 

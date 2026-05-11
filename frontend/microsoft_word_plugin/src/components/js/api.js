@@ -189,6 +189,32 @@ const wsManager = {
   _reconnectAttempts: 0,
   _maxReconnectAttempts: 5,
   _connectPromise: null,
+  /** 防止重复调用 onComplete / onError（与 WPS 版一致） */
+  _completeCalled: false,
+  /** 空闲超时：长时间无任何 WS 消息（含后端 ping）则判定超时 */
+  _requestTimeoutTimer: null,
+  _requestTimeout: 180000,
+
+  _armIdleTimeout() {
+    if (this._requestTimeoutTimer) {
+      clearTimeout(this._requestTimeoutTimer);
+    }
+    this._requestTimeoutTimer = setTimeout(() => {
+      if (!this._completeCalled && this.connected) {
+        const seconds = Math.round(this._requestTimeout / 1000);
+        console.warn(`[WebSocket] 已 ${seconds}s 未收到任何消息，判定为超时`);
+        this._completeCalled = true;
+        if (this.onError) {
+          this.onError(
+            new Error(`请求超时：${seconds}s 内未收到任何响应（含心跳），请稍后重试`)
+          );
+        }
+        if (this.ws) {
+          this.ws.close();
+        }
+      }
+    }, this._requestTimeout);
+  },
 
   // 文档缓存：{documentJson: {...}, timestamp: number}
   _documentCache: null,
@@ -265,21 +291,36 @@ const wsManager = {
         try {
           const data = JSON.parse(event.data);
 
+          if (this._requestTimeoutTimer) {
+            this._armIdleTimeout();
+          }
+
           if (data.type === "done") {
-            if (this.onComplete) {
-              this.onComplete();
+            if (!this._completeCalled) {
+              this._completeCalled = true;
+              if (this._requestTimeoutTimer) {
+                clearTimeout(this._requestTimeoutTimer);
+                this._requestTimeoutTimer = null;
+              }
+              if (this.onComplete) {
+                this.onComplete();
+              }
             }
             return;
           }
 
           if (data.type === "error") {
+            if (this._requestTimeoutTimer) {
+              clearTimeout(this._requestTimeoutTimer);
+              this._requestTimeoutTimer = null;
+            }
             if (this.onError) {
               this.onError(new Error(data.content || "未知错误"));
             }
             return;
           }
 
-          // 后端 keepalive ping：仅用于保活，不上抛给业务层
+          // 后端 keepalive ping：仅用于保活和重置空闲超时，不上抛
           if (data.type === "ping") {
             return;
           }
@@ -305,6 +346,19 @@ const wsManager = {
         this.connected = false;
         this.ws = null;
         this._connectPromise = null;
+        if (this._requestTimeoutTimer) {
+          clearTimeout(this._requestTimeoutTimer);
+          this._requestTimeoutTimer = null;
+        }
+
+        const isIdleTimeoutClose =
+          event.code === 1011 && event.reason === "idle-timeout";
+        if (!this._completeCalled && isIdleTimeoutClose) {
+          this._completeCalled = true;
+          if (this.onError) {
+            this.onError(new Error("⛔ 网络超时连接，自动断开"));
+          }
+        }
 
         if (event.code !== 1000 && this._reconnectAttempts < this._maxReconnectAttempts) {
           this._scheduleReconnect();
@@ -326,6 +380,10 @@ const wsManager = {
     if (this._reconnectTimer) {
       clearTimeout(this._reconnectTimer);
       this._reconnectTimer = null;
+    }
+    if (this._requestTimeoutTimer) {
+      clearTimeout(this._requestTimeoutTimer);
+      this._requestTimeoutTimer = null;
     }
     if (this.ws) {
       this.ws.close(1000, "主动关闭");
@@ -459,6 +517,12 @@ function chatStream(message, options = {}) {
     enableThinking = true,
   } = options;
 
+  wsManager._completeCalled = false;
+  if (wsManager._requestTimeoutTimer) {
+    clearTimeout(wsManager._requestTimeoutTimer);
+    wsManager._requestTimeoutTimer = null;
+  }
+
   wsManager.onMessage = onMessage;
   wsManager.onError = onError;
   wsManager.onComplete = onComplete;
@@ -466,6 +530,7 @@ function chatStream(message, options = {}) {
   const execute = async () => {
     try {
       await wsManager.connect();
+      wsManager._armIdleTimeout();
 
       // 文档全局元信息：随用户提问发送，不放在 read_document 回包里
       const documentMeta = await getCurrentDocumentMeta();
@@ -484,6 +549,10 @@ function chatStream(message, options = {}) {
         timestamp: Date.now(),
       });
     } catch (error) {
+      if (wsManager._requestTimeoutTimer) {
+        clearTimeout(wsManager._requestTimeoutTimer);
+        wsManager._requestTimeoutTimer = null;
+      }
       if (onError) {
         onError(error);
       }
@@ -494,6 +563,10 @@ function chatStream(message, options = {}) {
 
   return {
     abort: () => {
+      if (wsManager._requestTimeoutTimer) {
+        clearTimeout(wsManager._requestTimeoutTimer);
+        wsManager._requestTimeoutTimer = null;
+      }
       wsManager.send({ type: "stop" }).catch(() => {});
     },
   };

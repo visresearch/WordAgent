@@ -3,8 +3,9 @@
 设计原则：
 - 这里集中放所有工具实现，**包括 agent / multi-agent 各自独有的工具**
   (run_sub_agent / create_workflow / review_document 等)。
-- 每个 agent 模式下只有一个 `tools.py` 入口：从这里导入工厂函数，传入
-  自家的 prompt description，得到一份装好 LangChain `@tool` 的副本。
+- 工具 description / 工具 usage 等 markdown 集中在 `tools/prompts/`（`app.services.tools.prompts`），
+  单智能体与多智能体共用；各模式 `tools.py` 从该包取 `get_tool_description` 装配 `@tool`。
+  项目目录说明、默认文档样式等非工具片段仍放在各模式自己的 `prompts/` 目录。
 - 回调队列 / Pydantic schemas / MCP 加载器 在所有模式间二进制级别相同，
   直接 import。
 """

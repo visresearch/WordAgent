@@ -49,7 +49,6 @@
  *       ]
  *     }]]
  *   }],
- *   images: [{...}],          // 图片数组
  *   fields: [],               // 域代码数组
  *   hasTOC: boolean,          // 是否包含目录
  *   styles: {                 // 样式字典（去重）
@@ -59,6 +58,10 @@
  *     tS_1: [...]             // 表格样式，键名 tS_N
  *   }
  * }
+ *
+ * 图片作为段落内 inline runs（无 text、有 url），与 WPS 版一致。
+ * Office 解析时通过 InlinePicture.getBase64ImageSrc 得到 data URL 写入 url（不落地 temp 文件）；
+ * 插入时用 insertInlinePictureFromBase64。本地/相对路径的解析规则与 WPS 相同（相对路径相对 wence_data/project）。
  */
 
 /* global Word */
@@ -102,6 +105,7 @@ const CSTYLE = {
 const DEFAULT_PSTYLE = ["left", 0, 0, 0, 0, 0, 0, "", 0];
 const DEFAULT_RSTYLE = ["", 12, false, false, 0, "#000000", "#000000", 0, false, false, false];
 const DEFAULT_CSTYLE = [1, 1, "left", "center"];
+const DEFAULT_IMAGE_PSTYLE = ["center", 0, 0, 0, 0, 0, 0, "", 0];
 
 // ============== 样式去重与解析 ==============
 
@@ -393,6 +397,223 @@ function cleanText(text) {
 function cleanCellText(text) {
   if (!text) return "";
   return text.replace(/[\r\n\u0007\u0001]+$/g, "");
+}
+
+// ============== 图片路径（与 WPS docxJsonConverter 对齐）==============
+
+function parsePositiveNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function isLikelyAbsolutePath(path) {
+  if (!path) {
+    return false;
+  }
+  return (
+    path.startsWith("/") ||
+    path.startsWith("\\\\") ||
+    /^[A-Za-z]:[\\/]/.test(path)
+  );
+}
+
+/**
+ * 与 WPS 一致：优先 __WENCE_TEMP_DIR__ / localStorage，否则无桌面宿主时退回 /tmp（仅用于拼 project 根路径）。
+ */
+function getImageExportTempDir() {
+  let dir = "";
+
+  try {
+    if (typeof window.__WENCE_TEMP_DIR__ === "string" && window.__WENCE_TEMP_DIR__.trim()) {
+      dir = window.__WENCE_TEMP_DIR__.trim();
+    }
+  } catch (e) {}
+
+  if (!dir) {
+    try {
+      const cached = localStorage.getItem("wence_temp_dir");
+      if (cached && cached.trim()) {
+        dir = cached.trim();
+      }
+    } catch (e) {}
+  }
+
+  if (!dir) {
+    dir = "/tmp";
+  }
+
+  let normalized = dir.replace(/\\/g, "/").replace(/[/]+$/, "");
+
+  if (normalized.includes("/wence_data/temp")) {
+    normalized = normalized.replace("/wence_data/temp", "/wence_data/project/temp");
+    try {
+      window.__WENCE_TEMP_DIR__ = normalized;
+    } catch (e) {}
+    try {
+      localStorage.setItem("wence_temp_dir", normalized);
+    } catch (e) {}
+  }
+
+  return normalized;
+}
+
+function getProjectDataDirFromTempDir() {
+  const tempDir = getImageExportTempDir().replace(/\\/g, "/");
+  if (/\/temp$/i.test(tempDir)) {
+    return tempDir.replace(/\/temp$/i, "");
+  }
+  return "";
+}
+
+function normalizeFileUrlToLocalPath(fileUrl) {
+  try {
+    const u = new URL(fileUrl);
+    let normalized = decodeURIComponent(u.pathname || "");
+    if (u.host) {
+      normalized = `//${u.host}${normalized}`;
+    }
+    if (/^\/[A-Za-z]:\//.test(normalized)) {
+      normalized = normalized.slice(1);
+    }
+    return normalized;
+  } catch (e) {
+    return String(fileUrl || "").replace(/^file:\/\//i, "");
+  }
+}
+
+/**
+ * 规范化图片 url/路径：支持 http(s)、data:、file:、绝对路径、以及相对 wence_data/project 的路径。
+ */
+function resolveImagePathForInsert(pathValue) {
+  const rawPath = String(pathValue || "").trim();
+  if (!rawPath) {
+    return "";
+  }
+
+  if (/^https?:\/\//i.test(rawPath)) {
+    return rawPath;
+  }
+
+  let normalized = rawPath;
+  if (/^file:\/\//i.test(normalized)) {
+    normalized = normalizeFileUrlToLocalPath(normalized);
+  }
+
+  normalized = normalized.replace(/\\/g, "/");
+
+  if (!isLikelyAbsolutePath(normalized) && !/^data:image\//i.test(normalized)) {
+    const projectDir = getProjectDataDirFromTempDir();
+    if (projectDir) {
+      normalized = `${projectDir}/${normalized.replace(/^\.?\//, "")}`;
+    }
+  }
+
+  return normalized;
+}
+
+/**
+ * 将 InlinePicture 导出为与 WPS exportImageToTemp 等价的 { url, saved }（url 为 data URL，不写入磁盘）。
+ */
+async function exportImageToTemp(pic, context) {
+  try {
+    pic.load("width,height,altTextTitle,altTextDescription");
+    await context.sync();
+    const b64Result = pic.getBase64ImageSrc();
+    await context.sync();
+    const v = b64Result.value;
+    if (!v || typeof v !== "string") {
+      return { saved: false };
+    }
+    return {
+      url: "data:image/png;base64," + v,
+      saved: true,
+      width: pic.width,
+      height: pic.height,
+      altText: pic.altTextTitle || pic.altTextDescription || "",
+    };
+  } catch (e) {
+    console.warn("[exportImageToTemp] Office InlinePicture 导出失败:", e);
+    return { saved: false };
+  }
+}
+
+/**
+ * 把段落内嵌入式图片接到 runs 末尾（与 WPS 在段末挂图片 run 的行为一致）。
+ */
+async function appendParagraphInlinePictureRuns(runs, para, context) {
+  try {
+    const pics = para.inlinePictures;
+    pics.load("items");
+    await context.sync();
+    if (!pics.items || pics.items.length === 0) {
+      return;
+    }
+    for (const pic of pics.items) {
+      const info = await exportImageToTemp(pic, context);
+      if (!info.saved || !info.url) {
+        continue;
+      }
+      runs.push({
+        type: "inline",
+        url: info.url,
+        width: info.width,
+        height: info.height,
+        altText: info.altText || "",
+      });
+    }
+  } catch (e) {
+    console.warn("[appendParagraphInlinePictureRuns]", e);
+  }
+}
+
+function uint8ArrayToBase64(bytes) {
+  let binary = "";
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
+/**
+ * 为 insertInlinePictureFromBase64 准备纯 base64（不含 data: 前缀）。
+ */
+async function loadImageAsBase64ForInsert(url) {
+  const raw = String(url || "").trim();
+  if (!raw) {
+    return "";
+  }
+
+  const dataMatch = raw.match(/^data:image\/[a-zA-Z0-9.+-]+;base64,(.+)$/i);
+  if (dataMatch) {
+    return dataMatch[1].replace(/\s/g, "");
+  }
+
+  if (/^https?:\/\//i.test(raw)) {
+    try {
+      const res = await fetch(raw);
+      if (!res.ok) {
+        console.warn("[loadImageAsBase64ForInsert] HTTP", res.status, raw);
+        return "";
+      }
+      const buf = await res.arrayBuffer();
+      return uint8ArrayToBase64(new Uint8Array(buf));
+    } catch (e) {
+      console.warn("[loadImageAsBase64ForInsert] 拉取网络图片失败:", e);
+      return "";
+    }
+  }
+
+  const path = resolveImagePathForInsert(raw);
+  if (!path || /^data:image\//i.test(path)) {
+    return "";
+  }
+
+  console.warn(
+    "[loadImageAsBase64ForInsert] Office 加载项无法直接读取本地文件，请使用 http(s) 或 data: URL:",
+    path
+  );
+  return "";
 }
 
 const MATH_FONT_KEYWORDS = ["cambria math", "dejavu math", "tex gyre", "stix", "latin modern math"];
@@ -1239,7 +1460,7 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
         }
         await context.sync();
 
-        const rangeResult = { paragraphs: [], tables: [], images: [], fields: [] };
+        const rangeResult = { paragraphs: [], tables: [], fields: [] };
 
         // 检测范围内的表格段落范围（连续 tableNestingLevel > 0 的段落组）
         const tableParagraphRanges = [];
@@ -1504,10 +1725,20 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
           }
 
           const paraText = cleanText(para.text || "");
+          const isBlankText = !paraText || paraText.match(/^[\r\n\f\u0007]*$/);
 
-          // 空段落
-          if (!paraText || paraText.match(/^[\r\n\f\u0007]*$/)) {
-            rangeResult.paragraphs.push({ pStyle: "", runs: [], paraIndex: idx });
+          if (isBlankText) {
+            const picRuns = [];
+            await appendParagraphInlinePictureRuns(picRuns, para, context);
+            if (picRuns.length === 0) {
+              rangeResult.paragraphs.push({ pStyle: "", runs: [], paraIndex: idx });
+            } else {
+              rangeResult.paragraphs.push({
+                pStyle: DEFAULT_IMAGE_PSTYLE,
+                runs: picRuns,
+                paraIndex: idx,
+              });
+            }
             continue;
           }
 
@@ -1594,6 +1825,8 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
             runs = [];
           }
 
+          await appendParagraphInlinePictureRuns(runs, para, context);
+
           rangeResult.paragraphs.push({
             pStyle: makePStyle(
               getAlignmentName(para.alignment),
@@ -1623,16 +1856,6 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
       tables.load("items");
       await context.sync();
 
-      // 分别加载 inlinePictures 和 fields（可选 API，低版本 Word 可能不支持）
-      let inlinePictures = { items: [] };
-      try {
-        inlinePictures = range.inlinePictures;
-        inlinePictures.load("items");
-        await context.sync();
-      } catch (e) {
-        inlinePictures = { items: [] };
-      }
-
       let fields = { items: [] };
       try {
         fields = range.fields;
@@ -1645,7 +1868,6 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
       const result = {
         paragraphs: [],
         tables: [],
-        images: [],
         fields: [],
       };
 
@@ -1889,28 +2111,6 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
         }
       }
 
-      // === 解析图片 ===
-      try {
-        if (inlinePictures.items && inlinePictures.items.length > 0) {
-          for (const pic of inlinePictures.items) {
-            pic.load("width,height,altTextTitle,altTextDescription");
-          }
-          await context.sync();
-
-          for (const pic of inlinePictures.items) {
-            result.images.push({
-              type: "inline",
-              width: pic.width || 100,
-              height: pic.height || 100,
-              altText: pic.altTextTitle || pic.altTextDescription || "",
-              placeholder: "[图片]",
-            });
-          }
-        }
-      } catch (e) {
-        // inlinePictures API 可能不可用
-      }
-
       // === 解析段落 ===
       // 始终从 body.paragraphs 获取段落，数组下标即全文索引
       const bodyParas = context.document.body.paragraphs;
@@ -2046,10 +2246,20 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
           if (para.tableNestingLevel > 0) continue;
 
           const paraText = cleanText(para.text || "");
+          const isBlankText = !paraText || paraText.match(/^[\r\n\f\u0007]*$/);
 
-          // 空段落
-          if (!paraText || paraText.match(/^[\r\n\f\u0007]*$/)) {
-            result.paragraphs.push({ pStyle: "", runs: [], paraIndex: _paraIdx });
+          if (isBlankText) {
+            const picRuns = [];
+            await appendParagraphInlinePictureRuns(picRuns, para, context);
+            if (picRuns.length === 0) {
+              result.paragraphs.push({ pStyle: "", runs: [], paraIndex: _paraIdx });
+            } else {
+              result.paragraphs.push({
+                pStyle: DEFAULT_IMAGE_PSTYLE,
+                runs: picRuns,
+                paraIndex: _paraIdx,
+              });
+            }
             continue;
           }
 
@@ -2232,6 +2442,11 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
             }
           }
 
+          if (!runs) {
+            runs = [];
+          }
+          await appendParagraphInlinePictureRuns(runs, para, context);
+
           const paragraphData = {
             pStyle: makePStyle(
               getAlignmentName(para.alignment),
@@ -2390,7 +2605,7 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection") {
           const spaceAfter = pStyle[PSTYLE.SPACE_AFTER] || 0;
           const styleName = pStyle[PSTYLE.STYLE_NAME] || "";
 
-          // 空段落
+          // 空段落（无 runs）
           if (isEmptyParagraph(para)) {
             if (insertBeforeMode) {
               targetRange.insertParagraph("", Word.InsertLocation.before);
@@ -2402,28 +2617,28 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection") {
             continue;
           }
 
-          // 拼接段落文本
-          const fullText = (para.runs || []).map((r) => r.text || "").join("");
-          if (!fullText) continue;
-
-          // 插入段落
-          let newParagraph;
-          if (insertBeforeMode) {
-            newParagraph = targetRange.insertParagraph(fullText, Word.InsertLocation.before);
-          } else if (insertLocation === "end") {
-            newParagraph = targetRange.insertParagraph(fullText, Word.InsertLocation.end);
-          } else {
-            newParagraph = targetRange.insertParagraph(fullText, insertLoc);
+          const paraRuns = para.runs || [];
+          const hasImageRun = paraRuns.some((r) => r && r.text == null && r.url);
+          const fullText = paraRuns.map((r) => r.text || "").join("");
+          if (!fullText && !hasImageRun) {
+            continue;
           }
 
-          // 应用段落样式名
+          let newParagraph;
+          if (insertBeforeMode) {
+            newParagraph = targetRange.insertParagraph("", Word.InsertLocation.before);
+          } else if (insertLocation === "end") {
+            newParagraph = targetRange.insertParagraph("", Word.InsertLocation.end);
+          } else {
+            newParagraph = targetRange.insertParagraph("", insertLoc);
+          }
+
           if (styleName) {
             try {
               newParagraph.style = styleName;
             } catch (e) {}
           }
 
-          // 段落格式
           newParagraph.alignment = getAlignmentValue(alignment);
           if (indentLeft) newParagraph.leftIndent = indentLeft;
           if (indentRight) newParagraph.rightIndent = indentRight;
@@ -2432,12 +2647,48 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection") {
           if (spaceAfter) newParagraph.spaceAfter = spaceAfter;
           if (lineSpacing) newParagraph.lineSpacing = lineSpacing;
 
-          // 应用 runs 字符格式
-          if (para.runs && para.runs.length > 0) {
+          for (const run of paraRuns) {
+            const isImageRun = run && run.text == null && run.url;
+            if (isImageRun) {
+              const b64 = await loadImageAsBase64ForInsert(run.url);
+              if (!b64) {
+                continue;
+              }
+              const endR = newParagraph.getRange("End");
+              const pic = endR.insertInlinePictureFromBase64(b64, Word.InsertLocation.after);
+              await context.sync();
+              if (run.width) {
+                pic.width = run.width;
+              }
+              if (run.height) {
+                pic.height = run.height;
+              }
+              await context.sync();
+              continue;
+            }
+
+            let runText = run.text || "";
+            if (!runText) {
+              continue;
+            }
+            const isExplicitLatexRun = run.isFormula === true && run.formulaFormat === "latex";
+            if (isExplicitLatexRun) {
+              runText = run.text || normalizeFormulaTextToLatex(run.text);
+            }
+            const endR = newParagraph.getRange("End");
+            endR.insertText(runText, Word.InsertLocation.after);
+          }
+
+          await context.sync();
+
+          const textRuns = paraRuns.filter((r) => r && (r.text || "").length > 0);
+          if (textRuns.length > 0) {
             let charOffset = 0;
-            for (const run of para.runs) {
+            for (const run of paraRuns) {
               let runText = run.text || "";
-              if (!runText) continue;
+              if (!runText) {
+                continue;
+              }
 
               const rStyle = resolveStyle(styles, run.rStyle, DEFAULT_RSTYLE);
               const isExplicitLatexRun = run.isFormula === true && run.formulaFormat === "latex";
@@ -2446,10 +2697,6 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection") {
               }
 
               try {
-                // 使用 getRange 获取段落中的子范围
-                const runRange = newParagraph.getRange().getRange("Whole");
-                // Office.js 不支持直接按字符偏移设置格式，
-                // 使用 search 方式定位文本
                 const searchResults = newParagraph.search(runText, {
                   matchCase: true,
                   matchWholeWord: false,
@@ -2457,7 +2704,6 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection") {
                 searchResults.load("items");
                 await context.sync();
 
-                // 取匹配结果，应用字符格式
                 if (searchResults.items.length > 0) {
                   const targetItem =
                     searchResults.items[
@@ -2467,21 +2713,17 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection") {
                     ];
                   applyRunStyle(targetItem.font, rStyle);
                 }
-              } catch (e) {
-                // 降级处理：给整个段落设置最后一个 run 的格式
-              }
+              } catch (e) {}
 
               charOffset += runText.length;
             }
 
-            // 如果只有一个 run，直接给整段设格式（更可靠）
-            if (para.runs.length === 1) {
-              const rStyle = resolveStyle(styles, para.runs[0].rStyle, DEFAULT_RSTYLE);
+            if (textRuns.length === 1 && !hasImageRun) {
+              const rStyle = resolveStyle(styles, textRuns[0].rStyle, DEFAULT_RSTYLE);
               applyRunStyle(newParagraph.font, rStyle);
             }
           }
 
-          // 更新 targetRange 引用（before 模式不需要更新，始终在同一段落前插入）
           if (!insertBeforeMode && insertLocation !== "end") {
             targetRange = newParagraph;
           }
@@ -2905,6 +3147,12 @@ export default {
   getUnderlineType,
   getHighlightValue,
   getHighlightColor,
+  getImageExportTempDir,
+  getProjectDataDirFromTempDir,
+  resolveImagePathForInsert,
+  exportImageToTemp,
+  appendParagraphInlinePictureRuns,
+  loadImageAsBase64ForInsert,
 };
 
 export {
@@ -2929,4 +3177,10 @@ export {
   getUnderlineType,
   getHighlightValue,
   getHighlightColor,
+  getImageExportTempDir,
+  getProjectDataDirFromTempDir,
+  resolveImagePathForInsert,
+  exportImageToTemp,
+  appendParagraphInlinePictureRuns,
+  loadImageAsBase64ForInsert,
 };

@@ -163,7 +163,7 @@ def _read_image_size(path: str) -> tuple[float, float] | None:
 
 
 def _ensure_image_payload_shape(doc_dict: dict) -> None:
-    """Normalize inline image runs in paragraphs: download URLs, resolve data images."""
+    """Normalize image runs to a single `url` field and resolve local paths when possible."""
     paragraphs = doc_dict.get("paragraphs")
     if not isinstance(paragraphs, list):
         return
@@ -184,40 +184,28 @@ def _ensure_image_payload_shape(doc_dict: dict) -> None:
 
             # 这里是图片 run（无 text 字段）
             run.setdefault("type", "inline")
+            raw_url = str(run.get("url") or "").strip()
 
-            # 优先标准化已有本地路径（兼容 sourcePath/tempPath 传相对路径）
-            raw_temp_path = str(run.get("tempPath") or "").strip()
-            raw_source_path = str(run.get("sourcePath") or "").strip()
-            existing_temp = _resolve_local_image_path(raw_temp_path)
-            existing_source = _resolve_local_image_path(raw_source_path)
-            if existing_temp:
-                run["tempPath"] = existing_temp
-            elif raw_temp_path:
-                run.pop("tempPath", None)
-            if existing_source:
-                run["sourcePath"] = existing_source
-                # 如果只有 sourcePath，补一个 tempPath 让前端优先拿绝对本地路径
-                run.setdefault("tempPath", existing_source)
-            elif raw_source_path:
-                run.pop("sourcePath", None)
+            normalized_url = raw_url
+            if raw_url.startswith("data:image/"):
+                local_path = _save_data_image(raw_url)
+                if local_path:
+                    normalized_url = local_path
+            elif raw_url.startswith("http://") or raw_url.startswith("https://"):
+                local_path = _download_remote_image(raw_url)
+                if local_path:
+                    normalized_url = local_path
+            elif raw_url:
+                local_path = _resolve_local_image_path(raw_url)
+                if local_path:
+                    normalized_url = local_path
 
-            # 下载远程图片、解码 data: 图片，或解析本地路径图片
-            if not (run.get("tempPath") or run.get("sourcePath")):
-                url = str(run.get("url") or "").strip()
-                if url.startswith("data:image/"):
-                    local_path = _save_data_image(url)
-                    if local_path:
-                        run["tempPath"] = local_path
-                elif url.startswith("http://") or url.startswith("https://"):
-                    local_path = _download_remote_image(url)
-                    if local_path:
-                        run["tempPath"] = local_path
-                elif url:
-                    local_path = _resolve_local_image_path(url)
-                    if local_path:
-                        run["tempPath"] = local_path
+            if normalized_url:
+                run["url"] = normalized_url
+            else:
+                run.pop("url", None)
 
-            if not (run.get("tempPath") or run.get("sourcePath")) and run.get("url"):
+            if run.get("url") and _resolve_local_image_path(str(run.get("url") or "")) is None:
                 print(f"[generate_document] ⚠️ 图片未获取到本地路径，可能插入失败: url={run.get('url')}")
 
             # 若宽高缺失，则按原图尺寸/比例补齐，避免拉伸变形
@@ -227,11 +215,7 @@ def _ensure_image_payload_shape(doc_dict: dict) -> None:
             has_height = height_value is not None
             if has_width and has_height:
                 continue
-            local_image_path = (
-                _resolve_local_image_path(str(run.get("tempPath") or ""))
-                or _resolve_local_image_path(str(run.get("sourcePath") or ""))
-                or _resolve_local_image_path(str(run.get("url") or ""))
-            )
+            local_image_path = _resolve_local_image_path(str(run.get("url") or ""))
             if not local_image_path:
                 continue
             image_size = _read_image_size(local_image_path)
@@ -313,8 +297,6 @@ def _compact_doc_json(doc_json: dict) -> str:
                         if k
                         in (
                             "url",
-                            "tempPath",
-                            "sourcePath",
                             "width",
                             "height",
                             "left",

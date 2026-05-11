@@ -1,26 +1,55 @@
 <template>
   <div class="app-container">
     <div class="top-nav">
-      <router-link to="/aichat" class="nav-btn" active-class="active" title="AI对话">
-        <img :src="robotIcon" width="18" height="18" />
-      </router-link>
-      <button
+      <a
+        href="#"
         class="nav-btn"
-        :class="{ active: sessionState.visible }"
+        :class="{ active: $route.path === '/aichat' }"
+        title="AI对话"
+        @click.prevent="onNavAichat"
+      >
+        <img :src="robotIcon" width="18" height="18" alt="" />
+      </a>
+      <button
+        type="button"
+        class="nav-btn"
+        :class="{ active: sessionState.visible, 'nav-btn-disabled': chatState.aiBusy }"
+        :aria-disabled="chatState.aiBusy ? 'true' : 'false'"
         title="历史会话"
         @click="toggleSession"
       >
-        <img :src="sessionIcon" width="16" height="16" />
+        <img :src="sessionIcon" width="16" height="16" alt="" />
       </button>
-      <router-link to="/setting" class="nav-btn" active-class="active" title="设置">
-        <img :src="settingIcon" width="16" height="16" />
-      </router-link>
-      <router-link to="/about" class="nav-btn" active-class="active" title="关于">
-        <img :src="aboutIcon" width="16" height="16" />
-      </router-link>
-      <router-link to="/debug" class="nav-btn" active-class="active" title="调试">
-        <img :src="debugIcon" width="16" height="16" />
-      </router-link>
+      <a
+        href="#"
+        class="nav-btn"
+        :class="{ active: $route.path === '/setting', 'nav-btn-disabled': chatState.aiBusy }"
+        :aria-disabled="chatState.aiBusy ? 'true' : 'false'"
+        title="设置"
+        @click.prevent="go('/setting')"
+      >
+        <img :src="settingIcon" width="16" height="16" alt="" />
+      </a>
+      <a
+        href="#"
+        class="nav-btn"
+        :class="{ active: $route.path === '/about', 'nav-btn-disabled': chatState.aiBusy }"
+        :aria-disabled="chatState.aiBusy ? 'true' : 'false'"
+        title="关于"
+        @click.prevent="go('/about')"
+      >
+        <img :src="aboutIcon" width="16" height="16" alt="" />
+      </a>
+      <a
+        href="#"
+        class="nav-btn"
+        :class="{ active: $route.path === '/debug', 'nav-btn-disabled': chatState.aiBusy }"
+        :aria-disabled="chatState.aiBusy ? 'true' : 'false'"
+        title="调试"
+        @click.prevent="go('/debug')"
+      >
+        <img :src="debugIcon" width="16" height="16" alt="" />
+      </a>
     </div>
     <div class="app-content">
       <RouterView />
@@ -35,6 +64,7 @@ import settingIcon from '../assets/setting.svg';
 import aboutIcon from '../assets/about.svg';
 import debugIcon from '../assets/debug.svg';
 import { sessionState } from './sessionState.js';
+import { chatState } from './chatState.js';
 
 export default {
   name: 'App',
@@ -45,19 +75,40 @@ export default {
       settingIcon,
       aboutIcon,
       debugIcon,
-      sessionState
+      sessionState,
+      chatState
     };
   },
   methods: {
+    _navBlocked() {
+      return !!this.chatState.aiBusy;
+    },
+    go(path) {
+      if (this._navBlocked()) {
+        return;
+      }
+      if (this.$route.path !== path) {
+        this.$router.push(path);
+      }
+    },
+    onNavAichat() {
+      if (this._navBlocked()) {
+        return;
+      }
+      if (this.$route.path !== '/aichat') {
+        this.$router.push('/aichat');
+      }
+    },
     toggleSession() {
-      // 如果不在 chat 页面，先跳转并打开
+      if (this._navBlocked()) {
+        return;
+      }
       if (this.$route.path !== '/aichat') {
         this.$router.push('/aichat');
         sessionState.manualValue = true;
         return;
       }
-      // 在 chat 页面：切换显隐
-      sessionState.manualValue = !sessionState.visible;
+      sessionState.manualValue = !sessionState.manualValue;
     }
   }
 };
@@ -102,6 +153,17 @@ export default {
 .nav-btn.active {
   background: #f0f4ff;
   color: #667eea;
+}
+.nav-btn.nav-btn-disabled {
+  opacity: 0.35;
+  color: #b8b8b8;
+  background: transparent;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+.nav-btn.nav-btn-disabled:hover {
+  background: transparent;
+  color: #b8b8b8;
 }
 .app-content {
   flex: 1;

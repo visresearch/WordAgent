@@ -35,7 +35,7 @@
  *         subscript            // [10] 下标
  *       ]
  *       // 或图片 run（没有 text 字段）:
- *       // url/tempPath/sourcePath: 图片路径（三选一）
+ *       // url: 图片路径（支持网络 URL、本地路径或 file:// URL）
  *       // width/height: 图片尺寸
  *       // left/top/wrapType: 浮动图片属性
  *       // altText: 替代文本
@@ -66,7 +66,7 @@
  * }
  *
  * 图片现在作为 inline runs 嵌入段落中，没有独立的 images 数组。
- * 文本 run 有 text 字段，图片 run 没有 text 字段但有 url/tempPath 等。
+ * 文本 run 有 text 字段，图片 run 没有 text 字段但有 url。
  *
  * 段落/run/单元格中的 pStyle/rStyle/cStyle/tStyle 为字符串引用（如 "pS_1"），
  * 指向 styles 字典中的完整样式数组，以去重节约 token。
@@ -954,7 +954,7 @@ function getImageExportTempDir() {
 /**
  * 导出图片到临时文件
  * @param {Object} shape - InlineShape 或 Shape 对象
- * @returns {Object} - {tempPath, saved} 或 {sourcePath, saved}
+ * @returns {Object} - {url, saved}
  */
 function exportImageToTemp(shape) {
   try {
@@ -968,7 +968,7 @@ function exportImageToTemp(shape) {
     try {
       if (shape.SaveAsPicture) {
         shape.SaveAsPicture(tempPath);
-        return { tempPath: tempPath, saved: true };
+        return { url: tempPath, saved: true };
       }
     } catch (e) {
       console.log('SaveAsPicture 不可用:', e);
@@ -976,7 +976,7 @@ function exportImageToTemp(shape) {
 
     try {
       if (shape.LinkFormat && shape.LinkFormat.SourceFullName) {
-        return { sourcePath: shape.LinkFormat.SourceFullName, saved: false };
+        return { url: shape.LinkFormat.SourceFullName, saved: false };
       }
     } catch (e) {}
 
@@ -1649,8 +1649,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride) {
             width: img.width,
             height: img.height,
             altText: img.altText,
-            tempPath: img.tempPath,
-            sourcePath: img.sourcePath
+            url: img.url
           });
         }
         for (const img of paraFloatingImages) {
@@ -1662,8 +1661,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride) {
             top: img.top,
             wrapType: img.wrapType,
             altText: img.altText,
-            tempPath: img.tempPath,
-            sourcePath: img.sourcePath
+            url: img.url
           });
         }
 
@@ -1680,8 +1678,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride) {
             width: img.width,
             height: img.height,
             altText: img.altText,
-            tempPath: img.tempPath,
-            sourcePath: img.sourcePath
+            url: img.url
           }],
           paraIndex: -1
         });
@@ -1697,8 +1694,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride) {
             top: img.top,
             wrapType: img.wrapType,
             altText: img.altText,
-            tempPath: img.tempPath,
-            sourcePath: img.sourcePath
+            url: img.url
           }],
           paraIndex: -1
         });
@@ -2083,8 +2079,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride) {
             width: img.width,
             height: img.height,
             altText: img.altText,
-            tempPath: img.tempPath,
-            sourcePath: img.sourcePath
+            url: img.url
           });
         }
         for (const img of paraFloatingImages) {
@@ -2096,8 +2091,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride) {
             top: img.top,
             wrapType: img.wrapType,
             altText: img.altText,
-            tempPath: img.tempPath,
-            sourcePath: img.sourcePath
+            url: img.url
           });
         }
 
@@ -2115,8 +2109,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride) {
           width: img.width,
           height: img.height,
           altText: img.altText,
-          tempPath: img.tempPath,
-          sourcePath: img.sourcePath
+          url: img.url
         }],
         paraIndex: -1
       });
@@ -2132,8 +2125,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride) {
           top: img.top,
           wrapType: img.wrapType,
           altText: img.altText,
-          tempPath: img.tempPath,
-          sourcePath: img.sourcePath
+          url: img.url
         }],
         paraIndex: -1
       });
@@ -2156,7 +2148,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride) {
  */
 function insertImage(doc, img, insertPos, maxWidth) {
   try {
-    const imagePath = resolveImagePathForInsert(img.tempPath || img.sourcePath || img.url);
+    const imagePath = resolveImagePathForInsert(img.url);
     if (!imagePath) {
       return 0;
     }
@@ -2659,7 +2651,7 @@ function generateDocxFromJSON(jsonData, doc, insertParaIndex) {
         if (para.runs && para.runs.length > 0) {
           for (const run of para.runs) {
             // 检查是否是图片 run（没有 text 字段）
-            const isImageRun = !run.text && (run.url || run.tempPath || run.sourcePath);
+            const isImageRun = !run.text && run.url;
             if (isImageRun) {
               const imageMaxWidth = Math.max(120, docUsableWidth - indentLeft - indentRight);
               const charAdded = insertImage(doc, run, currentPos, imageMaxWidth);

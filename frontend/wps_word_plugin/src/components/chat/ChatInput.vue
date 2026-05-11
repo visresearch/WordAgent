@@ -39,7 +39,7 @@
           </svg>
         </div>
         <div class="selection-bar-info">
-          <span class="selection-bar-docname" v-if="sel.docName">{{ sel.docName }}</span>
+          <span v-if="sel.docName" class="selection-bar-docname">{{ sel.docName }}</span>
           <span class="selection-bar-preview">{{ sel.startText }} → {{ sel.endText }} (段落 {{ sel.startParaIndex }} - {{ sel.endParaIndex }})</span>
         </div>
         <button class="selection-bar-clear" title="清除选区" @click="$emit('remove-selection', index)">
@@ -195,10 +195,11 @@
             </div>
 
             <!-- 思考模式切换 -->
-            <label class="thinking-toggle" title="启用/禁用深度思考">
+            <label class="thinking-toggle">
               <input
                 :checked="enableThinking"
                 type="checkbox"
+                aria-label="启用或禁用深度思考"
                 @change="$emit('update:enableThinking', $event.target.checked)"
               />
               <span class="thinking-slider"></span>
@@ -236,8 +237,13 @@
               </div>
             </div>
             <div class="btn-wrapper">
-              <button class="add-selection-btn" title="添加文件" @click="triggerFilePicker">
-                <img :src="fileIcon" alt="添加文件" class="toolbar-icon" />
+              <button
+                class="add-selection-btn"
+                type="button"
+                aria-label="添加文件"
+                @click="triggerFilePicker"
+              >
+                <img :src="fileIcon" alt="" class="toolbar-icon" />
               </button>
               <span class="tooltip">添加文件</span>
             </div>
@@ -250,8 +256,13 @@
               @change="handleFileChange"
             />
             <div class="btn-wrapper">
-              <button class="add-selection-btn" title="添加选区" @click="$emit('add-selection')">
-                <img :src="addIcon" alt="添加选区" class="toolbar-icon" />
+              <button
+                class="add-selection-btn"
+                type="button"
+                aria-label="添加选区"
+                @click="$emit('add-selection')"
+              >
+                <img :src="addIcon" alt="" class="toolbar-icon" />
               </button>
               <span class="tooltip">添加选区</span>
             </div>

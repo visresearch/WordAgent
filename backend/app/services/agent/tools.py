@@ -10,7 +10,7 @@
 
 from __future__ import annotations
 
-from app.services.agent.prompts import get_tool_description
+from app.services.tools.prompts import get_tool_description
 from app.services.tools import (
     # callback
     _current_chat_id,

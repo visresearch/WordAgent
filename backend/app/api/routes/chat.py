@@ -394,8 +394,17 @@ async def _run_ws_stream(
                     await _send(
                         json.dumps(
                             {
+                                "type": "status",
+                                "content": "⛔ 网络超时连接，自动断开",
+                            },
+                            ensure_ascii=False,
+                        )
+                    )
+                    await _send(
+                        json.dumps(
+                            {
                                 "type": "error",
-                                "content": f"⏱️ 已超过 {IDLE_ABORT_SECONDS // 60} 分钟无任何输出，已自动停止本次请求。",
+                                "content": "⛔ 网络超时连接，自动断开",
                             },
                             ensure_ascii=False,
                         )
@@ -404,7 +413,7 @@ async def _run_ws_stream(
                 except Exception:
                     pass
                 try:
-                    await websocket.close(code=1011)
+                    await websocket.close(code=1011, reason="idle-timeout")
                 except Exception:
                     pass
 
