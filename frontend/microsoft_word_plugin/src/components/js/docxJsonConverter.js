@@ -256,15 +256,17 @@ function makeCStyle(rowSpan, colSpan, alignment, verticalAlignment) {
 function getAlignmentName(alignment) {
   if (typeof alignment === "string") {
     const lower = alignment.toLowerCase();
-    if (["left", "center", "right", "justify", "distributed"].includes(lower)) {
+    if (["left", "center", "centered", "right", "justify", "justified", "distributed"].includes(lower)) {
       return lower === "distributed" ? "distribute" : lower;
     }
   }
   const map = {
     Left: "left",
     Center: "center",
+    Centered: "center",
     Right: "right",
     Justified: "justify",
+    Justify: "justify",
     Distributed: "distribute",
     0: "left",
     1: "center",
@@ -278,9 +280,11 @@ function getAlignmentName(alignment) {
 function getAlignmentValue(alignment) {
   const map = {
     left: "Left",
-    center: "Center",
+    center: "Centered",
+    centered: "Centered",
     right: "Right",
     justify: "Justified",
+    justified: "Justified",
     distribute: "Distributed",
   };
   return map[alignment] || "Left";
@@ -511,6 +515,52 @@ function resolveImagePathForInsert(pathValue) {
   return normalized;
 }
 
+function getBackendBaseURL() {
+  try {
+    if (typeof window !== "undefined" && window.__WENCE_API_BASE__) {
+      return String(window.__WENCE_API_BASE__).replace(/\/+$/, "");
+    }
+  } catch (e) {}
+
+  try {
+    const cached = localStorage.getItem("wence_api_base");
+    if (cached) {
+      return String(cached).replace(/\/+$/, "");
+    }
+  } catch (e) {}
+
+  return "http://localhost:3880";
+}
+
+function getProjectRelativePath(absPath) {
+  const normalized = String(absPath || "").replace(/\\/g, "/");
+  if (!normalized) {
+    return "";
+  }
+
+  if (normalized.startsWith("uploads/") || normalized.startsWith("temp/")) {
+    return normalized;
+  }
+
+  const lower = normalized.toLowerCase();
+  const marker = "/wence_data/project/";
+  const idx = lower.lastIndexOf(marker);
+  if (idx >= 0) {
+    return normalized.slice(idx + marker.length);
+  }
+
+  return "";
+}
+
+function buildBackendFileUrl(pathValue) {
+  const rel = getProjectRelativePath(pathValue);
+  if (!rel) {
+    return "";
+  }
+  const baseURL = getBackendBaseURL();
+  return `${baseURL}/api/chat/file?path=${encodeURIComponent(rel)}`;
+}
+
 /**
  * 将 InlinePicture 导出为与 WPS exportImageToTemp 等价的 { url, saved }（url 为 data URL，不写入磁盘）。
  */
@@ -607,6 +657,22 @@ async function loadImageAsBase64ForInsert(url) {
   const path = resolveImagePathForInsert(raw);
   if (!path || /^data:image\//i.test(path)) {
     return "";
+  }
+
+  const backendUrl = buildBackendFileUrl(path);
+  if (backendUrl) {
+    try {
+      const res = await fetch(backendUrl);
+      if (!res.ok) {
+        console.warn("[loadImageAsBase64ForInsert] HTTP", res.status, backendUrl);
+        return "";
+      }
+      const buf = await res.arrayBuffer();
+      return uint8ArrayToBase64(new Uint8Array(buf));
+    } catch (e) {
+      console.warn("[loadImageAsBase64ForInsert] 拉取本地图片失败:", e);
+      return "";
+    }
   }
 
   console.warn(
@@ -2502,9 +2568,10 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection") {
 
       if (insertLocation === "before") {
         // 'before' 模式：通过 paraIndex 直接 O(1) 定位到目标段落
-        const paraIndex = jsonData.paraIndex;
-        if (paraIndex === undefined || paraIndex === null || paraIndex < 0) {
-          return { error: "before 模式需要 jsonData.paraIndex（0-based 段落索引）" };
+        const rawParaIndex = jsonData.paraIndex;
+        const paraIndex = Number(rawParaIndex);
+        if (!Number.isFinite(paraIndex) || paraIndex < 0 || !Number.isInteger(paraIndex)) {
+          return { error: "before 模式需要有效的 jsonData.paraIndex（0-based 整数段落索引）" };
         }
         const allParagraphs = context.document.body.paragraphs;
         allParagraphs.load("items");
@@ -2655,7 +2722,7 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection") {
                 continue;
               }
               const endR = newParagraph.getRange("End");
-              const pic = endR.insertInlinePictureFromBase64(b64, Word.InsertLocation.after);
+              const pic = endR.insertInlinePictureFromBase64(b64, Word.InsertLocation.end);
               await context.sync();
               if (run.width) {
                 pic.width = run.width;
@@ -2676,7 +2743,7 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection") {
               runText = run.text || normalizeFormulaTextToLatex(run.text);
             }
             const endR = newParagraph.getRange("End");
-            endR.insertText(runText, Word.InsertLocation.after);
+            endR.insertText(runText, Word.InsertLocation.end);
           }
 
           await context.sync();
@@ -2729,14 +2796,20 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection") {
           }
         } else if (element.type === "table") {
           const tableData = element.data;
+          const rows = Number(tableData.rows);
+          const columns = Number(tableData.columns);
+          if (!Number.isFinite(rows) || rows < 1 || !Number.isFinite(columns) || columns < 1) {
+            console.warn("[generateDocxFromJSON] 跳过无效表格:", tableData);
+            continue;
+          }
           const tStyle = resolveStyle(styles, tableData.tStyle, ["center"]);
 
           // 构建表格数据值数组
           const values = [];
-          for (let row = 0; row < tableData.rows; row++) {
+          for (let row = 0; row < rows; row++) {
             const rowValues = [];
             if (tableData.cells && tableData.cells[row]) {
-              for (let col = 0; col < tableData.columns; col++) {
+              for (let col = 0; col < columns; col++) {
                 const cellData = tableData.cells[row][col];
                 if (cellData) {
                   let cellText = cellData.text || "";
@@ -2755,7 +2828,7 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection") {
               }
             }
             // 补齐列数
-            while (rowValues.length < tableData.columns) {
+            while (rowValues.length < columns) {
               rowValues.push("");
             }
             values.push(rowValues);
@@ -2765,8 +2838,8 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection") {
           let newTable;
           if (insertLocation === "end") {
             newTable = targetRange.insertTable(
-              tableData.rows,
-              tableData.columns,
+              rows,
+              columns,
               Word.InsertLocation.end,
               values
             );
@@ -2774,8 +2847,8 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection") {
             // 在选区后插入一个段落，再在该段落后插入表格
             const tempPara = targetRange.insertParagraph("", Word.InsertLocation.after);
             newTable = tempPara.insertTable(
-              tableData.rows,
-              tableData.columns,
+              rows,
+              columns,
               Word.InsertLocation.after,
               values
             );
@@ -2790,9 +2863,9 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection") {
           await context.sync();
 
           // 设置列宽
-          if (tableData.columnWidths && tableData.columnWidths.length === tableData.columns) {
+          if (tableData.columnWidths && tableData.columnWidths.length === columns) {
             for (let row = 0; row < tableData.cells.length; row++) {
-              for (let col = 0; col < tableData.columns; col++) {
+              for (let col = 0; col < columns; col++) {
                 if (tableData.columnWidths[col] > 0) {
                   try {
                     const cell = newTable.getCell(row, col);
@@ -2805,15 +2878,15 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection") {
           }
 
           // 设置行高
-          if (tableData.rowHeights && tableData.rowHeights.length === tableData.rows) {
-            const rows = newTable.rows;
-            rows.load("items");
+          if (tableData.rowHeights && tableData.rowHeights.length === rows) {
+            const tableRows = newTable.rows;
+            tableRows.load("items");
             await context.sync();
-            for (let r = 0; r < tableData.rows; r++) {
+            for (let r = 0; r < rows; r++) {
               try {
                 const [height] = tableData.rowHeights[r];
                 if (height > 0) {
-                  rows.items[r].preferredHeight = height;
+                  tableRows.items[r].preferredHeight = height;
                 }
               } catch (e) {}
             }
@@ -2943,7 +3016,17 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection") {
       return { success: true, message: `文档生成成功！${paraCount} 段落 / ${tableCount} 表格` };
     });
   } catch (error) {
-    return { error: "生成文档失败: " + error.message };
+    let debugInfo = "";
+    try {
+      if (error && error.debugInfo) {
+        debugInfo = " | " + JSON.stringify(error.debugInfo);
+      }
+    } catch (e) {
+      debugInfo = "";
+    }
+    const errorCode = error && error.code ? `(${error.code}) ` : "";
+    const errorMessage = error && error.message ? error.message : "Unknown";
+    return { error: `生成文档失败: ${errorCode}${errorMessage}${debugInfo}` };
   }
 }
 

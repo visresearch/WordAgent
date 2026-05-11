@@ -10,7 +10,8 @@ import mimetypes
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, UploadFile, File
+from fastapi import APIRouter, UploadFile, File, HTTPException, Query
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from app.core.config import get_upload_dir, get_wence_project_dir
@@ -169,3 +170,28 @@ async def delete_uploaded_file(file_id: str):
         file_path.unlink(missing_ok=True)
         return {"success": True}
     return {"success": False, "error": "文件不存在"}
+
+
+@router.get("/file")
+async def get_uploaded_file(path: str = Query(..., description="Project-relative file path, e.g. uploads/xxx.png")):
+    """读取 project 下的文件（用于 Office 插件拉取图片）。"""
+    raw = path.strip().lstrip("/")
+    if not raw:
+        raise HTTPException(status_code=400, detail="path 不能为空")
+
+    # 仅允许 uploads/temp 目录下的文件
+    if not (raw.startswith("uploads/") or raw.startswith("temp/")):
+        raise HTTPException(status_code=403, detail="不允许访问该路径")
+
+    project_root = get_wence_project_dir().resolve()
+    target = (project_root / raw).resolve()
+    try:
+        target.relative_to(project_root)
+    except Exception:
+        raise HTTPException(status_code=403, detail="非法路径")
+
+    if not target.exists() or not target.is_file():
+        raise HTTPException(status_code=404, detail="文件不存在")
+
+    mime, _ = mimetypes.guess_type(target.name)
+    return FileResponse(path=target, media_type=mime or "application/octet-stream")

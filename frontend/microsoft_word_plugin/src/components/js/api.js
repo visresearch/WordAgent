@@ -29,6 +29,23 @@ const CONFIG = {
   },
 };
 
+function setGlobalBaseURL(value) {
+  const normalized = String(value || "").replace(/\/+$/, "");
+  if (!normalized) {
+    return;
+  }
+  try {
+    if (typeof window !== "undefined") {
+      window.__WENCE_API_BASE__ = normalized;
+    }
+  } catch (e) {}
+  try {
+    localStorage.setItem("wence_api_base", normalized);
+  } catch (e) {}
+}
+
+setGlobalBaseURL(CONFIG.baseURL);
+
 // ============== 工具函数 ==============
 
 /**
@@ -951,6 +968,7 @@ async function deleteSkill(folder) {
 function updateConfig(newConfig) {
   if (newConfig.baseURL) {
     CONFIG.baseURL = newConfig.baseURL;
+    setGlobalBaseURL(CONFIG.baseURL);
   }
   if (newConfig.timeout) {
     CONFIG.timeout = newConfig.timeout;
