@@ -4,6 +4,18 @@
 ## Unrelease
 
 ### Added
+- 添加paraIndex和paraID到json schema
+- 添加版本检查功能
+
+### Fixed
+- 修复深度思考，重复进入深度思考前端不能更新的问题
+
+### Changed
+- 修改深度思考内容展开条件
+
+## [v0.4.0]
+
+### Added
 - WPS Word支持多文档编辑
 - 添加file工具
 

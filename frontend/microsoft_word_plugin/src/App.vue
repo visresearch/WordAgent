@@ -41,6 +41,7 @@
         <img :src="aboutIcon" width="16" height="16" alt="" />
       </a>
       <a
+        v-if="isDev"
         href="#"
         class="nav-btn"
         :class="{ active: $route.path === '/debug', 'nav-btn-disabled': chatState.aiBusy }"
@@ -76,7 +77,8 @@ export default {
       aboutIcon,
       debugIcon,
       sessionState,
-      chatState
+      chatState,
+      isDev: __DEV__
     };
   },
   methods: {

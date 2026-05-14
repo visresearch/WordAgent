@@ -20,24 +20,12 @@
       <img class="empty-icon" src="/images/robot.svg" alt="WenCe AI" />
       <div class="empty-text-container">
         <span class="empty-text">我能做什么</span>
-        <a href="https://visresearch.github.io/WordAgent/" target="_blank" class="help-icon">
-          <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
-            <circle
-              cx="8"
-              cy="8"
-              r="7"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.5"
-            />
-            <path
-              d="M8 12v-1M8 9V8a1.5 1.5 0 0 1 1-1.415A1.5 1.5 0 1 0 6.5 5"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.5"
-              stroke-linecap="round"
-            />
-          </svg>
+        <a
+          class="help-icon"
+          aria-label="使用文档"
+          @click.prevent="openExternalLink('https://visresearch.github.io/WordAgent/guide/how-to-ask.html')"
+        >
+          <span class="help-question-icon" :style="questionIconMaskStyle"></span>
         </a>
       </div>
     </div>
@@ -128,7 +116,13 @@
               </svg>
             </div>
             <!-- eslint-disable-next-line vue/no-v-html -->
-            <div v-show="msg.thinkingExpanded" class="thinking-content markdown-body" v-html="renderMarkdown(msg.thinking)"></div>
+            <div
+              v-show="msg.thinkingExpanded"
+              class="thinking-content markdown-body"
+              :ref="setThinkingContentRef(index)"
+              @scroll="onThinkingContentScroll(index, $event)"
+              v-html="renderMarkdown(msg.thinking)"
+            ></div>
           </div>
           <!-- 用户消息直接显示文本 -->
           <span v-if="msg.role === 'user'">{{ msg.content }}</span>
@@ -288,6 +282,7 @@
 
 <script>
 import MarkdownIt from 'markdown-it';
+import questionIcon from '../../assets/icons/question.svg';
 
 const md = new MarkdownIt({
   html: false,
@@ -323,8 +318,37 @@ export default {
       imgMenuX: 0,
       imgMenuY: 0,
       _contextImg: null,
-      mcpExpandedMap: {}
+      mcpExpandedMap: {},
+      thinkingContentRefs: {},
+      thinkingAutoScrollState: {}
     };
+  },
+  computed: {
+    questionIconMaskStyle() {
+      const u = questionIcon;
+      return {
+        WebkitMaskImage: `url(${u})`,
+        maskImage: `url(${u})`
+      };
+    },
+    thinkingWatchSignature() {
+      return this.messages.map((msg, index) => {
+        const thinkingLength = msg?.thinking ? msg.thinking.length : 0;
+        const expanded = msg?.thinkingExpanded ? 1 : 0;
+        return `${index}:${expanded}:${thinkingLength}`;
+      }).join('|');
+    }
+  },
+  watch: {
+    thinkingWatchSignature() {
+      this.$nextTick(() => {
+        this.messages.forEach((msg, index) => {
+          if (msg?.thinking && msg.thinkingExpanded) {
+            this.scrollThinkingToBottom(index);
+          }
+        });
+      });
+    }
   },
   mounted() {
     this.$refs.messagesContainer?.addEventListener('contextmenu', this.handleImgContextMenu);
@@ -335,6 +359,16 @@ export default {
     document.removeEventListener('click', this.hideImgMenu);
   },
   methods: {
+    openExternalLink(url) {
+      try {
+        const opened = window.open(url, '_blank', 'noopener,noreferrer');
+        if (!opened) {
+          window.location.href = url;
+        }
+      } catch (e) {
+        console.error('打开外部链接失败:', e);
+      }
+    },
     formatFileSize(bytes) {
       if (!bytes || bytes === 0) {
         return '0 B';
@@ -418,6 +452,47 @@ export default {
      */
     toggleThinking(index) {
       this.$emit('toggle-thinking', index);
+      this.$nextTick(() => {
+        if (this.messages[index]?.thinkingExpanded) {
+          this.thinkingAutoScrollState[index] = true;
+          this.scrollThinkingToBottom(index, { force: true });
+        }
+      });
+    },
+
+    onThinkingContentScroll(index, event) {
+      const el = event?.target;
+      if (!el) {
+        return;
+      }
+      const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+      this.thinkingAutoScrollState[index] = distanceToBottom <= 24;
+    },
+
+    scrollThinkingToBottom(index, { force = false } = {}) {
+      const refs = this.thinkingContentRefs[index];
+      const el = Array.isArray(refs) ? refs[0] : refs;
+      if (!el) {
+        return;
+      }
+      if (!force && this.thinkingAutoScrollState[index] === false) {
+        return;
+      }
+      el.scrollTop = el.scrollHeight;
+    },
+
+    setThinkingContentRef(index) {
+      return (el) => {
+        if (el) {
+          this.thinkingContentRefs[index] = el;
+          if (!(index in this.thinkingAutoScrollState)) {
+            this.thinkingAutoScrollState[index] = true;
+          }
+        } else {
+          delete this.thinkingContentRefs[index];
+          delete this.thinkingAutoScrollState[index];
+        }
+      };
     },
 
     _mcpKey(msgIndex, partIndex) {
@@ -541,9 +616,17 @@ export default {
   transform: scale(1.15);
 }
 
-.help-icon svg {
+.help-question-icon {
   width: 100%;
   height: 100%;
+  display: block;
+  background-color: currentColor;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  -webkit-mask-size: contain;
+  mask-repeat: no-repeat;
+  mask-position: center;
+  mask-size: contain;
 }
 
 /* Thinking 思考块样式 */

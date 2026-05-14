@@ -53,6 +53,7 @@ class UserSettings(BaseModel):
     # 个性化设置
     customPrompt: str = ""
     temperature: float = 0.7
+    enableLongTermMemory: bool = False
     # MCP 服务器设置
     mcpServers: list[dict[str, Any]] = []
 

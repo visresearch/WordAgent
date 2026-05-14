@@ -28,11 +28,11 @@
     </div>
 
     <div class="divItem">
-      <h3>🗑️ 按索引删除段落</h3>
+      <h3>🗑️ 按 paraID 删除段落</h3>
       <textarea
         v-model="deletePositionsInput"
         class="json-input"
-        placeholder="输入起始和结束段落索引（0-based），如: 3, 7"
+        placeholder="输入 paraID 列表（逗号分隔），如: 3, 7, 12"
         rows="3"
       ></textarea>
       <div class="button-group" style="margin-top: 8px">
@@ -150,7 +150,7 @@ export default {
 
     async deleteDocxPara() {
       if (!this.deletePositionsInput.trim()) {
-        this.showStatus('请输入起始和结束段落索引', 'error');
+        this.showStatus('请输入要删除的 paraID 列表', 'error');
         return;
       }
 
@@ -172,15 +172,12 @@ export default {
       }
 
       if (indices.length === 0) {
-        this.showStatus('未解析到有效的索引', 'error');
+        this.showStatus('未解析到有效的 paraID', 'error');
         return;
       }
 
-      const startParaIndex = indices[0];
-      const endParaIndex = indices.length > 1 ? indices[1] : startParaIndex;
-
       try {
-        const result = await deleteDocxParaFn(startParaIndex, endParaIndex);
+        const result = await deleteDocxParaFn(indices);
         if (result.success) {
           this.showStatus(result.message, 'success');
         } else {
@@ -239,17 +236,10 @@ export default {
       }
 
       try {
-        let insertLocation = 'end';
-        if (jsonData.insertParaIndex !== null && jsonData.insertParaIndex !== undefined) {
-          if (jsonData.insertParaIndex === -1) {
-            insertLocation = 'end';
-          } else {
-            insertLocation = 'before';
-            jsonData.paraIndex = jsonData.insertParaIndex;
-          }
-        }
-
-        const result = await generateDocxFromJSON(jsonData, insertLocation);
+        const insertParaID = Number.isInteger(jsonData.insertParaID)
+          ? jsonData.insertParaID
+          : null;
+        const result = await generateDocxFromJSON(jsonData, 'selection', insertParaID);
         if (result && result.error) {
           this.showStatus('转换失败: ' + result.error, 'error');
           return;

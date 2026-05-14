@@ -45,6 +45,8 @@ cd backend/deploy
 uv run pyinstaller wence.spec
 ```
 
+`wence.spec` 会在打包时自动执行 `git describe --tags` 生成 `backend/version.txt`，并将其打入程序，用于 GUI 展示当前版本号。
+
 输出在 `backend/deploy/dist` 目录。
 
 | 运行环境 | 输出文件 |

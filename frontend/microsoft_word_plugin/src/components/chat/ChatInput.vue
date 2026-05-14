@@ -253,11 +253,23 @@ export default {
     pendingSummary() {
       const parts = [];
       if (this.pendingDeletes.length > 0) {
-        const totalDeleteParas = this.pendingDeletes.reduce((sum, d) => {
+        const seenParaIds = new Set();
+        let totalDeleteParas = 0;
+        for (const d of this.pendingDeletes) {
+          if (Array.isArray(d?.paraIDs) && d.paraIDs.length > 0) {
+            for (const pid of d.paraIDs) {
+              const num = Number(pid);
+              if (Number.isInteger(num) && !seenParaIds.has(num)) {
+                seenParaIds.add(num);
+                totalDeleteParas += 1;
+              }
+            }
+            continue;
+          }
           const start = d.origStartParaIndex ?? d.startParaIndex ?? 0;
           const end = d.origEndParaIndex ?? d.endParaIndex ?? start;
-          return sum + (end - start + 1);
-        }, 0);
+          totalDeleteParas += (end - start + 1);
+        }
         parts.push(`删除 ${totalDeleteParas} 个段落`);
       }
       if (this.pendingDocument) {

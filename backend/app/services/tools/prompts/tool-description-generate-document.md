@@ -2,15 +2,16 @@ Generate formatted content and insert it into the Word document.
 
 ## Parameters
 - `document` (object): raw `DocumentOutput` object. Do not pass escaped JSON, a string, or `{"document": {...}}` inside this value.
-- `insertParaIndex` (int): insert before this 0-based paragraph index. `-1` appends.
-- `docId` (string/int, optional): target document ID; omit for the active document.
+- `insertParaID` (int, optional): insert after this paragraph ID. Omit for current cursor position.
+- `docId` (int, optional): target document ID; use `0` for the active document.
 
 ## Required payload shape
-- Top-level tool args: `{"document": {...}, "insertParaIndex": -1}`.
+- Top-level tool args: `{"document": {...}, "insertParaID": 123456}`.
 - `document` should include `paragraphs`, `tables` (can be `[]`), and `styles`.
 - Every referenced `pStyle/rStyle/cStyle/tStyle` must exist in `styles`.
 - Never put `\n` inside `run.text`; one visual line is one paragraph.
 - Blank line: `{ "pStyle": "", "runs": [] }`.
+- `insertParaID` must be an existing paragraph ID from recent `read_document`/`search_documnet` results; do not guess IDs.
 
 ## Use
 - New writing, append/insert content, or replacement content after `delete_document`.
@@ -23,8 +24,8 @@ Generate formatted content and insert it into the Word document.
 - Keep image URLs unchanged, including query parameters. `url` may be http/https, file URL, or local/project-relative path.
 - Keep image aspect ratio; omit `width`/`height` to use native size.
 
-## Index drift with `delete_document`
-`generate_document` inserts before `insertParaIndex`. Paragraphs at that index and after move to higher indices. If you inserted above content you later plan to delete, call `read_document` or `search_documnet` before `delete_document` and use the updated indices.
+## ParaID stability with `delete_document`
+Prefer paraID-based workflows: search/read returns paragraph IDs and delete uses paraIDs directly. This avoids index drift after insertion.
 
 ## Minimal example
 ```json
@@ -39,6 +40,6 @@ Generate formatted content and insert it into the Word document.
 			"rS_2": ["宋体", 12, false, false, 0, "#000000", "#000000", 0, false, false, false]
 		}
 	},
-	"insertParaIndex": -1
+	"insertParaID": 123456
 }
 ```

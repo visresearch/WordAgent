@@ -51,6 +51,29 @@ def _normalize_mode(mode: str | None) -> str:
     return "agent"
 
 
+def _normalize_document_range(document_range: list | None) -> list | None:
+    """Strictly normalize documentRange and require each docId to be int-castable."""
+    if document_range is None:
+        return None
+    if not isinstance(document_range, list):
+        raise ValueError("documentRange must be a list")
+
+    normalized: list[dict] = []
+    for idx, item in enumerate(document_range):
+        if not isinstance(item, dict):
+            raise ValueError(f"documentRange[{idx}] must be an object")
+        row = dict(item)
+        raw_doc_id = row.get("docId")
+        if isinstance(raw_doc_id, bool):
+            raise ValueError(f"documentRange[{idx}].docId must be int, got bool")
+        try:
+            row["docId"] = int(raw_doc_id)
+        except (TypeError, ValueError):
+            raise ValueError(f"documentRange[{idx}].docId must be int, got {raw_doc_id!r}") from None
+        normalized.append(row)
+    return normalized
+
+
 # ============== WebSocket 聊天接口 ==============
 
 
@@ -134,8 +157,15 @@ async def chat_websocket(websocket: WebSocket):
                 active_mode = mode  # 记录当前活跃模式，用于后续 tool 回调转发
                 model = data.get("model", "")
                 provider = data.get("provider", "")
-                document_range = data.get("documentRange")
                 document_meta = data.get("documentMeta") or {}
+                try:
+                    document_range = _normalize_document_range(data.get("documentRange"))
+                except ValueError as e:
+                    err = f"documentRange 参数错误: {e}"
+                    print(f"[WebSocket] ⚠️ {err}")
+                    await websocket.send_text(json.dumps({"type": "error", "content": err}, ensure_ascii=False))
+                    await websocket.send_text(json.dumps({"type": "done"}, ensure_ascii=False))
+                    continue
                 history = data.get("history", [])
                 attached_files = data.get("files", [])  # 附件列表 [{file_id, filename, content_type, is_image}, ...]
                 enable_thinking = data.get("enableThinking", True)  # 是否启用深度思考
@@ -479,8 +509,16 @@ async def _run_ws_stream(
             # 异步提取长期记忆（不阻塞前端）
             async def _extract_memory_async():
                 try:
-                    from app.services.memory import extract_and_save_memory, MEMORY_EXTRACT_TEMPERATURE
+                    from app.services.memory import (
+                        extract_and_save_memory,
+                        is_long_term_memory_enabled,
+                        MEMORY_EXTRACT_TEMPERATURE,
+                    )
                     from app.services.llm_client import create_sync_llm_client
+
+                    if not is_long_term_memory_enabled():
+                        print("[WebSocket] 长期记忆开关关闭，跳过自动提取")
+                        return
 
                     # 仅使用本次对话结束后回传的 user/assistant 对，禁止回退到历史记录。
                     if not (

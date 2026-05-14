@@ -16,7 +16,7 @@
 
 /* global Word */
 
-import { parseDocxToJSON } from "./docxJsonConverter.js";
+import { parseDocxToJSON, findParaIndexRangeByParaIDs } from "./docxJsonConverter.js";
 import { executeStyleQuery } from "./docxQuery.js";
 
 // ============== 配置 ==============
@@ -164,10 +164,10 @@ async function getCurrentDocumentMeta() {
         }
       }
 
-      // Microsoft Word 只会有一个活动文档，固定使用 doc_active 作为标识
+      // Microsoft Word 只会有一个活动文档，固定使用 0 作为当前文档ID
       return {
-        documentId: "doc_active",
-        documentName: documentName || 'doc_active',
+        documentId: 0,
+        documentName: documentName || "current_document",
         totalParas: paragraphs.items.length,
         pageCount: 0,
         isReadOnly: false,
@@ -178,8 +178,8 @@ async function getCurrentDocumentMeta() {
   } catch (error) {
     console.warn("[Meta] 获取文档元信息失败:", error);
     return {
-      documentId: "doc_active",
-      documentName: 'doc_active',
+      documentId: 0,
+      documentName: "current_document",
       totalParas: 0,
       pageCount: 0,
       isReadOnly: false,
@@ -412,16 +412,66 @@ const wsManager = {
   /**
    * 处理后端的文档读取请求：使用 Office.js 解析文档并通过 WebSocket 回传
    */
-  async _handleDocumentRequest(startParaIndex = 0, endParaIndex = -1) {
+  async _handleDocumentRequest(startParaIndexOrParams = 0, endParaIndexArg = -1) {
     try {
-      const docData = await parseDocumentRange(startParaIndex, endParaIndex);
+      let startParaIndex = null;
+      let endParaIndex = null;
+      let startParaID = null;
+      let endParaID = null;
+      let docId = 0;
+
+      if (
+        typeof startParaIndexOrParams === "object" &&
+        startParaIndexOrParams !== null &&
+        !Array.isArray(startParaIndexOrParams)
+      ) {
+        startParaIndex =
+          startParaIndexOrParams.startParaIndex === undefined
+            ? null
+            : startParaIndexOrParams.startParaIndex;
+        endParaIndex =
+          startParaIndexOrParams.endParaIndex === undefined
+            ? null
+            : startParaIndexOrParams.endParaIndex;
+        startParaID =
+          startParaIndexOrParams.startParaID === undefined
+            ? null
+            : startParaIndexOrParams.startParaID;
+        endParaID =
+          startParaIndexOrParams.endParaID === undefined
+            ? null
+            : startParaIndexOrParams.endParaID;
+        docId =
+          startParaIndexOrParams.docId === undefined || startParaIndexOrParams.docId === null
+            ? 0
+            : startParaIndexOrParams.docId;
+      } else {
+        startParaIndex =
+          startParaIndexOrParams === undefined || startParaIndexOrParams === null
+            ? 0
+            : startParaIndexOrParams;
+        endParaIndex =
+          endParaIndexArg === undefined || endParaIndexArg === null ? -1 : endParaIndexArg;
+      }
+
+      const docData = await parseDocumentRange(
+        startParaIndex,
+        endParaIndex,
+        docId,
+        startParaID,
+        endParaID
+      );
 
       if (docData.error) {
         throw new Error(docData.error);
       }
 
       // 如果是读取全文（0 到末尾），更新缓存
-      if (startParaIndex === 0 && endParaIndex === -1) {
+      if (
+        (startParaID === null || startParaID === undefined) &&
+        startParaIndex === 0 &&
+        endParaIndex === -1
+      ) {
         this.setCachedDocument(docData);
       }
 
@@ -446,21 +496,29 @@ const wsManager = {
    * 优先使用缓存的文档 JSON，避免重复解析
    * @param {Object} query - Query DSL 对象
    */
-  async _handleQueryRequest(query) {
+  async _handleQueryRequest(query, docId = 0) {
     try {
-      // 优先使用缓存的文档 JSON
-      let docData = this.getCachedDocument();
+      // 仅活动文档使用缓存（Microsoft Word 当前为单文档，但保持兼容）
+      let docData = null;
+      if (docId === null || docId === undefined || Number(docId) === 0) {
+        docData = this.getCachedDocument();
+      }
 
       if (!docData) {
-        console.log("[WebSocket] 文档缓存未命中，解析全文...");
-        docData = await parseDocumentRange(0, -1);
+        console.log(
+          "[WebSocket] 文档缓存未命中，解析全文...",
+          docId ? `docId=${docId}` : "(active)"
+        );
+        docData = await parseDocumentRange(0, -1, docId);
 
         if (docData.error) {
           throw new Error(docData.error);
         }
 
         // 缓存解析结果
-        this.setCachedDocument(docData);
+        if (docId === null || docId === undefined || Number(docId) === 0) {
+          this.setCachedDocument(docData);
+        }
       } else {
         console.log("[WebSocket] 使用缓存的文档进行搜索，段落数:", docData.paragraphs?.length || 0);
       }
@@ -473,15 +531,25 @@ const wsManager = {
             .filter((idx) => Number.isInteger(idx))
         ),
       ].sort((a, b) => a - b);
+      const matchedParaIds = [
+        ...new Set(
+          (result.matches || [])
+            .map((m) => m?.paragraphId)
+            .filter((id) => Number.isInteger(id))
+        ),
+      ].sort((a, b) => a - b);
 
       await this.send({
         type: "query_response",
         matches: result.matches,
         matchCount: result.matchCount,
+        matchedParaIndices,
+        matchedParaIDs: matchedParaIds,
       });
 
       console.log("[WebSocket] 已回传查询结果，匹配数:", result.matchCount);
       console.log("[WebSocket] 匹配段落索引:", matchedParaIndices);
+      console.log("[WebSocket] 匹配段落ID:", matchedParaIds);
     } catch (err) {
       console.error("[WebSocket] 查询文档失败:", err);
       await this.send({
@@ -595,15 +663,38 @@ function chatStream(message, options = {}) {
  * 解析文档（使用 Office.js Word API）
  * 不传参数或传 (0, -1) 时解析全文，传入具体索引则解析指定范围
  *
- * @param {number} [startParaIndex=0] - 起始段落索引（0-based），0 表示文档开头
- * @param {number} [endParaIndex=-1] - 结束段落索引（0-based），-1 表示文档结尾
+ * @param {number|null} [startParaIndex=0] - 起始段落索引（0-based）
+ * @param {number|null} [endParaIndex=-1] - 结束段落索引（0-based）
+ * @param {number|null} [docId=0] - 文档 ID，Microsoft Word 当前固定为 0
+ * @param {number|null} [startParaID=null] - 起始段落 paraID（优先于索引）
+ * @param {number|null} [endParaID=null] - 结束段落 paraID
  * @returns {Promise<Object>} - 解析结果
  */
-async function parseDocumentRange(startParaIndex = 0, endParaIndex = -1) {
+async function parseDocumentRange(
+  startParaIndex = 0,
+  endParaIndex = -1,
+  docId = 0,
+  startParaID = null,
+  endParaID = null
+) {
   try {
+    void docId;
+    const useParaIDMode = startParaID !== null && startParaID !== undefined;
+    let resolvedStartIndex = startParaIndex;
+    let resolvedEndIndex = endParaIndex;
+
+    if (useParaIDMode) {
+      const rangeResult = await findParaIndexRangeByParaIDs(startParaID, endParaID);
+      if (!rangeResult.success) {
+        return { error: rangeResult.error || "按 paraID 定位段落失败" };
+      }
+      resolvedStartIndex = rangeResult.startParaIndex;
+      resolvedEndIndex = rangeResult.endParaIndex;
+    }
+
     // read_document / search_documnet 回包仅返回文档内容，不携带全局 meta。
     // 全局 meta 在 chatStream 中通过 documentMeta 单独发送。
-    const result = await parseDocxToJSON("body", startParaIndex, endParaIndex);
+    const result = await parseDocxToJSON("body", resolvedStartIndex, resolvedEndIndex);
     return result;
   } catch (error) {
     return { error: "解析文档失败: " + error.message };

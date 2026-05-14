@@ -30,7 +30,6 @@ from .document_tools import (
     _delete_document_impl,
     _ensure_image_payload_shape,
     _generate_document_impl,
-    _get_active_doc_id,
     _read_document_impl,
     _search_document_impl,
     build_delete_document,
@@ -98,7 +97,6 @@ __all__ = [
     "_generate_document_impl",
     "_search_document_impl",
     "_delete_document_impl",
-    "_get_active_doc_id",
     "_compact_doc_json",
     "_ensure_image_payload_shape",
     # skill tools

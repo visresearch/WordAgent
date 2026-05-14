@@ -683,10 +683,12 @@ export function executeStyleQuery(docJson, queryDSL) {
 
         if (matchRunFilters(run, filters)) {
           const paraIndex = Number.isInteger(para?.paraIndex) ? para.paraIndex : pi;
+          const paraID = Number.isInteger(para?.paraID) ? para.paraID : null;
 
           matches.push({
             text: run.text,
             paragraphIndex: paraIndex,
+            paragraphId: paraID,
             rStyle: run.rStyle || [],
           });
         }
@@ -702,11 +704,13 @@ export function executeStyleQuery(docJson, queryDSL) {
 
       if (matchParagraphFilters(para, filters)) {
         const paraIndex = Number.isInteger(para?.paraIndex) ? para.paraIndex : pi;
+        const paraID = Number.isInteger(para?.paraID) ? para.paraID : null;
         const paraText = getFieldValue(para, "text");
 
         matches.push({
           text: paraText.substring(0, 200), // 截断过长文本
           paragraphIndex: paraIndex,
+          paragraphId: paraID,
           pStyle: para.pStyle || [],
         });
       }

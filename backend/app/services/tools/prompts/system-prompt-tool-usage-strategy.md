@@ -6,3 +6,4 @@
 - Rewrite/polish/translate existing ranges: delete old content, then generate replacement at the same index.
 - Long writing: batch `generate_document` calls in stable order.
 - Use sub-agents for long source analysis or final review, not for simple/empty-document tasks.
+- `delete_document` is asynchronous/pending-confirmation in frontend. If deleted content still appears immediately, do NOT issue duplicate delete calls for the same paraIDs.

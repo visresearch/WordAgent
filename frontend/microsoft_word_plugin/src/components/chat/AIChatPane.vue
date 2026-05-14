@@ -91,9 +91,9 @@ export default {
       currentSessionTitle: null,
       pendingDocument: null,
       pendingDocumentMsg: null,
-      pendingDeletes: [],  // [{startParaIndex, endParaIndex, preview, msg}] 待确认删除列表
-      pendingInsertions: [], // [{documentJson, docId, insertParaIndex, msg}] 待确认的文档插入列表
-      _streamInsertions: [], // [{insertParaIndex, count, docId}] 当前流式中已执行的插入操作
+      pendingDeletes: [],  // [{paraIDs, docId, preview, msg}] 待确认删除列表
+      pendingInsertions: [], // [{documentJson, docId, insertParaID, msg}] 待确认的文档插入列表
+      _streamInsertions: [], // [{insertParaID, count, docId}] 当前流式中已执行的插入操作
       hasHistory: false,
       historyLoaded: false,
       historyLoading: false,
@@ -552,8 +552,8 @@ export default {
           selection.load("text");
 
           const doc = context.document;
-          // Microsoft Word 只会有一个活动文档，固定使用 doc_active
-          const docId = "doc_active";
+          // Microsoft Word 只会有一个活动文档，固定使用 0 作为当前文档ID
+          const docId = 0;
           const docName = '';
 
           const selParagraphs = selection.paragraphs;
@@ -789,7 +789,7 @@ export default {
         contentParts: [],
         documentJson: null,
         thinking: '',
-        thinkingExpanded: true,
+          thinkingExpanded: false,
         thinkingStartTime: null,
         thinkingDone: false,
         statusText: ''
@@ -861,20 +861,28 @@ export default {
       // 收到非 thinking 事件时，标记思考已结束
       if (data.type !== 'thinking' && msg.thinkingStartTime && !msg.thinkingDone) {
         msg.thinkingDone = true;
-        if (msg.thinkingExpanded) {
-          msg.thinkingExpanded = false;
-        }
       }
 
       // 后端请求读取文档
       if (data.type === 'read_document') {
+        const hasParaIDMode = Number.isInteger(data.startParaID) || Number.isInteger(data.endParaID);
         msg.contentParts.push({
           type: 'status',
-          content: data.content || `📑 正在读取文档(段落 ${data.startParaIndex} - ${data.endParaIndex})`,
+          content: data.content || (
+            hasParaIDMode
+              ? `📑 正在读取文档(段落ID ${data.startParaID ?? ''} - ${data.endParaID ?? data.startParaID ?? ''})`
+              : `📑 正在读取文档(段落 ${data.startParaIndex} - ${data.endParaIndex})`
+          ),
           loading: true
         });
         this.scrollToBottom();
-        api.wsManager._handleDocumentRequest(data.startParaIndex, data.endParaIndex);
+        api.wsManager._handleDocumentRequest({
+          startParaIndex: this._toIntOrNull(data.startParaIndex),
+          endParaIndex: this._toIntOrNull(data.endParaIndex),
+          startParaID: this._toIntOrNull(data.startParaID),
+          endParaID: this._toIntOrNull(data.endParaID),
+          docId: this._toIntOrDefault(data.docId, 0)
+        });
         return;
       }
 
@@ -886,7 +894,7 @@ export default {
           loading: true
         });
         this.scrollToBottom();
-        api.wsManager._handleQueryRequest(data.query);
+        api.wsManager._handleQueryRequest(data.query, this._toIntOrDefault(data.docId, 0));
         return;
       }
 
@@ -937,17 +945,19 @@ export default {
 
       // 后端请求删除文档段落：立即标记删除范围（真正删除在用户确认时执行）
       if (data.type === 'delete_document') {
-        console.log('[AIChatPane] 后端请求删除文档段落, startParaIndex:', data.startParaIndex, 'endParaIndex:', data.endParaIndex, 'docId:', data.docId);
+        const paraIDs = Array.isArray(data.paraIDs)
+          ? data.paraIDs.map(v => Number(v)).filter(v => Number.isInteger(v))
+          : [];
+        console.log('[AIChatPane] 后端请求删除文档段落, paraIDs:', paraIDs, 'docId:', data.docId);
         msg.contentParts.push({
           type: 'status',
-          content: data.content || `🗑️ 准备删除段落(${data.startParaIndex} - ${data.endParaIndex})`,
+          content: data.content || `🗑️ 准备删除段落ID(${paraIDs.join(', ')})`,
           loading: false
         });
         this.scrollToBottom();
         this._applyImmediateDelete({
-          startParaIndex: data.startParaIndex,
-          endParaIndex: data.endParaIndex,
-          docId: data.docId || null
+          paraIDs,
+          docId: this._toIntOrDefault(data.docId, 0)
         });
         return;
       }
@@ -1003,6 +1013,8 @@ export default {
         if (!found) {
           parts.push({ type: 'status', content: data.content || '📝 文档已生成', loading: false });
         }
+        msg._docId = this._toIntOrDefault(data.docId, 0);
+        msg._insertParaID = this._toIntOrNull(data.insertParaID);
         this.scrollToBottom();
         return;
       }
@@ -1080,8 +1092,8 @@ export default {
       } else if (data.type === 'json' && data.content) {
         const insItem = {
           documentJson: data.content,
-          docId: data.docId || data.content.docId || null,
-          insertParaIndex: data.content.insertParaIndex !== undefined ? data.content.insertParaIndex : -1,
+          docId: this._toIntOrDefault(data.docId, this._toIntOrDefault(data.content.docId, 0)),
+          insertParaID: this._toIntOrNull(data.content.insertParaID),
           msg: msg
         };
         this._insertQueue = this._insertQueue
@@ -1107,43 +1119,17 @@ export default {
 
     // ============== 待处理操作确认/取消（与 WPS 行为对齐） ==============
 
-    _normalizeDocId(docId = null) {
-      if (docId === null || docId === undefined || docId === '') {
+    _toIntOrNull(value) {
+      if (value === null || value === undefined || value === '') {
         return null;
       }
-      return String(docId);
+      const n = Number.parseInt(String(value), 10);
+      return Number.isFinite(n) ? n : null;
     },
 
-    _adjustDeleteRangeWithInsertions(startParaIndex, endParaIndex, docId = null) {
-      let adjStart = Number(startParaIndex);
-      let adjEnd = Number(endParaIndex);
-      const normalizedDocId = this._normalizeDocId(docId);
-
-      if (!Number.isFinite(adjStart)) {
-        adjStart = 0;
-      }
-      if (!Number.isFinite(adjEnd)) {
-        adjEnd = adjStart;
-      }
-
-      for (const ins of this._streamInsertions) {
-        const insDocId = this._normalizeDocId(ins.docId);
-        if (insDocId && normalizedDocId && insDocId !== normalizedDocId) {
-          continue;
-        }
-        const insAt = ins.insertParaIndex;
-        if (insAt === -1 || insAt === null || insAt === undefined) {
-          continue;
-        }
-        if (insAt <= adjStart) {
-          adjStart += ins.count;
-          if (adjEnd !== -1) {
-            adjEnd += ins.count;
-          }
-        }
-      }
-
-      return { startParaIndex: adjStart, endParaIndex: adjEnd };
+    _toIntOrDefault(value, defaultValue) {
+      const n = this._toIntOrNull(value);
+      return n === null ? defaultValue : n;
     },
 
     _refreshPendingDocumentSummary() {
@@ -1171,15 +1157,18 @@ export default {
     },
 
     _applyImmediateDelete(payload) {
-      const docId = this._normalizeDocId(payload?.docId || null);
-      const startParaIndex = payload?.startParaIndex;
-      const endParaIndex = payload?.endParaIndex;
+      const docId = this._toIntOrDefault(payload?.docId, 0);
+      const paraIDs = Array.isArray(payload?.paraIDs)
+        ? payload.paraIDs.map(v => Number(v)).filter(v => Number.isInteger(v))
+        : [];
+      if (!paraIDs.length) {
+        return;
+      }
 
       this.pendingDeletes.push({
-        origStartParaIndex: startParaIndex,
-        origEndParaIndex: endParaIndex,
+        paraIDs,
         docId,
-        preview: `AI 准备删除段落（段落 ${startParaIndex} - ${endParaIndex}）`,
+        preview: `AI 准备删除段落（paraID: ${paraIDs.join(', ')}）`,
         _commentAdded: false,
         _markingMode: 'highlight'
       });
@@ -1188,39 +1177,20 @@ export default {
     },
 
     async _applyImmediateInsertion(insItem) {
-      const normalizedDocId = this._normalizeDocId(insItem.docId || null);
-      const rawInsertParaIndex = Number(insItem.insertParaIndex);
-      const requestedInsertParaIndex = Number.isFinite(rawInsertParaIndex) ? rawInsertParaIndex : -1;
-
-      let adjustedInsertParaIndex = requestedInsertParaIndex;
-      if (adjustedInsertParaIndex !== -1) {
-        for (const ins of this._streamInsertions) {
-          const insDocId = this._normalizeDocId(ins.docId);
-          if (insDocId && normalizedDocId && insDocId !== normalizedDocId) {
-            continue;
-          }
-          const insAt = ins.insertParaIndex;
-          if (insAt === -1 || insAt === null || insAt === undefined) {
-            continue;
-          }
-          if (insAt <= adjustedInsertParaIndex) {
-            adjustedInsertParaIndex += ins.count;
-          }
-        }
-      }
-
+      const normalizedDocId = this._toIntOrDefault(insItem.docId, 0);
+      const requestedInsertParaID = this._toIntOrNull(insItem.insertParaID);
       const docPayload = { ...(insItem.documentJson || {}) };
-      if (adjustedInsertParaIndex !== -1) {
-        docPayload.paraIndex = adjustedInsertParaIndex;
-      } else {
-        delete docPayload.paraIndex;
-      }
-      const insertLocation = adjustedInsertParaIndex === -1 ? 'end' : 'before';
-
-      const result = await generateDocxFromJSON(docPayload, insertLocation);
+      const result = await generateDocxFromJSON(docPayload, "selection", requestedInsertParaID);
       if (!result || !result.success) {
         console.error('[AIChatPane] 即时插入失败:', result?.error || '(unknown)');
         return false;
+      }
+      if (result.warning && insItem.msg && Array.isArray(insItem.msg.contentParts)) {
+        insItem.msg.contentParts.push({
+          type: 'status',
+          content: `⚠️ ${result.warning}`,
+          loading: false
+        });
       }
 
       const paraCount = (docPayload.paragraphs || []).length;
@@ -1229,7 +1199,7 @@ export default {
 
       if (shiftCount > 0) {
         this._streamInsertions.push({
-          insertParaIndex: requestedInsertParaIndex,
+          insertParaID: requestedInsertParaID,
           count: shiftCount,
           docId: normalizedDocId
         });
@@ -1238,7 +1208,7 @@ export default {
       let insertStartParaIndex = null;
       let insertEndParaIndex = null;
       if (shiftCount > 0) {
-        if (adjustedInsertParaIndex === -1) {
+        if (requestedInsertParaID === null) {
           const totalParas = await Word.run(async (context) => {
             const paras = context.document.body.paragraphs;
             paras.load('items');
@@ -1248,15 +1218,15 @@ export default {
           insertEndParaIndex = totalParas - 1;
           insertStartParaIndex = Math.max(0, totalParas - shiftCount);
         } else {
-          insertStartParaIndex = adjustedInsertParaIndex;
-          insertEndParaIndex = adjustedInsertParaIndex + shiftCount - 1;
+          insertStartParaIndex = requestedInsertParaID;
+          insertEndParaIndex = requestedInsertParaID + shiftCount - 1;
         }
       }
 
       const pendingItem = {
         ...insItem,
         docId: normalizedDocId,
-        insertParaIndex: requestedInsertParaIndex,
+        insertParaID: requestedInsertParaID,
         insertStartParaIndex,
         insertEndParaIndex,
         _alreadyInserted: true,
@@ -1265,7 +1235,7 @@ export default {
 
       if (pendingItem.msg) {
         pendingItem.msg._docId = normalizedDocId;
-        pendingItem.msg._insertParaIndex = requestedInsertParaIndex;
+        pendingItem.msg._insertParaID = requestedInsertParaID;
         pendingItem.msg.documentJson = docPayload;
         pendingItem.msg.insertStartParaIndex = insertStartParaIndex;
         pendingItem.msg.insertEndParaIndex = insertEndParaIndex;
@@ -1277,9 +1247,8 @@ export default {
 
       console.log(
         '[AIChatPane] 文档已即时插入:',
-        `docId=${normalizedDocId || '(active)'}`,
-        `insertParaIndex=${requestedInsertParaIndex}`,
-        `appliedInsertParaIndex=${adjustedInsertParaIndex}`,
+        `docId=${normalizedDocId}`,
+        `insertParaID=${requestedInsertParaID}`,
         `range=${insertStartParaIndex}-${insertEndParaIndex}`
       );
       return true;
@@ -1309,34 +1278,37 @@ export default {
     },
 
     async _addDeleteComments(docId = null) {
-      const normalizedDocId = this._normalizeDocId(docId);
+      const normalizedDocId = this._toIntOrDefault(docId, 0);
       for (const pd of this.pendingDeletes) {
         if (pd._commentAdded) {
           continue;
         }
-        const pdDocId = this._normalizeDocId(pd.docId);
-        if (normalizedDocId && pdDocId && normalizedDocId !== pdDocId) {
+        const pdDocId = this._toIntOrDefault(pd.docId, 0);
+        if (normalizedDocId !== pdDocId) {
           continue;
         }
-
-        const adjusted = this._adjustDeleteRangeWithInsertions(
-          pd.origStartParaIndex,
-          pd.origEndParaIndex,
-          pd.docId
-        );
+        const paraIDs = Array.isArray(pd.paraIDs)
+          ? pd.paraIDs.map(v => Number(v)).filter(v => Number.isInteger(v))
+          : [];
+        if (!paraIDs.length) {
+          continue;
+        }
+        const sorted = [...paraIDs].sort((a, b) => a - b);
+        const startParaID = sorted[0];
+        const endParaID = sorted[sorted.length - 1];
 
         try {
           // Microsoft Office 统一用高亮标记删除内容（浅蓝）
           const res = await addCommentToParas(
-            adjusted.startParaIndex,
-            adjusted.endParaIndex,
+            startParaID,
+            endParaID,
             '[文策AI-删除] 待删除内容',
             'redblue'
           );
           if (res && res.success) {
             pd._commentAdded = true;
-            pd._adjStartParaIndex = adjusted.startParaIndex;
-            pd._adjEndParaIndex = adjusted.endParaIndex;
+            pd._adjStartParaID = startParaID;
+            pd._adjEndParaID = endParaID;
             pd._markingMode = 'highlight';
           }
         } catch (e) {
@@ -1349,24 +1321,12 @@ export default {
      * 一键确认所有待处理操作（删除 + 生成）
      */
     async confirmPending() {
-      // 1) 删除正文：每次基于原始索引 + 当前插入记录重算，避免索引漂移
-      const deletes = this.pendingDeletes.map((pd) => {
-        const adjusted = this._adjustDeleteRangeWithInsertions(
-          pd.origStartParaIndex,
-          pd.origEndParaIndex,
-          pd.docId
-        );
-        return {
-          ...pd,
-          startParaIndex: adjusted.startParaIndex,
-          endParaIndex: adjusted.endParaIndex
-        };
-      });
-      deletes.sort((a, b) => b.startParaIndex - a.startParaIndex);
+      // 1) 删除正文：按 paraID 删除，不依赖索引偏移
+      const deletes = [...this.pendingDeletes];
       for (const d of deletes) {
-        await this._clearHighlightOnRange(d.startParaIndex, d.endParaIndex);
+        await this._clearHighlightOnParaIDs(d.paraIDs || [], d.docId);
         try {
-          await deleteDocxPara(d.startParaIndex, d.endParaIndex);
+          await deleteDocxPara(d.paraIDs || []);
         } catch (e) {
           console.warn('[AIChatPane] confirmPending 删除失败:', e);
         }
@@ -1397,12 +1357,7 @@ export default {
     async cancelPending() {
       // 1) 取消删除：只清除删除高亮，不删除正文
       for (const pd of this.pendingDeletes) {
-        const adjusted = this._adjustDeleteRangeWithInsertions(
-          pd.origStartParaIndex,
-          pd.origEndParaIndex,
-          pd.docId
-        );
-        await this._clearHighlightOnRange(adjusted.startParaIndex, adjusted.endParaIndex);
+        await this._clearHighlightOnParaIDs(pd.paraIDs || [], pd.docId);
       }
 
       // 2) 取消新增：按倒序删除新增内容，避免位置串扰
@@ -1420,7 +1375,11 @@ export default {
         }
         await this._clearHighlightOnRange(ins.insertStartParaIndex, ins.insertEndParaIndex);
         try {
-          await deleteDocxPara(ins.insertStartParaIndex, ins.insertEndParaIndex);
+          const paraIDs = [];
+          for (let i = ins.insertStartParaIndex; i <= ins.insertEndParaIndex; i++) {
+            paraIDs.push(i);
+          }
+          await deleteDocxPara(paraIDs);
         } catch (e) {
           console.warn('[AIChatPane] cancelPending 回滚新增失败:', e);
         }
@@ -1464,6 +1423,18 @@ export default {
       }
     },
 
+    async _clearHighlightOnParaIDs(paraIDs = [], docId = 0) {
+      const valid = Array.isArray(paraIDs)
+        ? paraIDs.map(v => Number(v)).filter(v => Number.isInteger(v))
+        : [];
+      if (!valid.length) {
+        return;
+      }
+      const sorted = [...new Set(valid)].sort((a, b) => a - b);
+      await this._clearHighlightOnRange(sorted[0], sorted[sorted.length - 1]);
+      void docId;
+    },
+
     /**
      * 还原到某条消息（Microsoft Office 统一走高亮/索引回滚）
      */
@@ -1484,7 +1455,11 @@ export default {
 
       try {
         await this._clearHighlightOnRange(msg.insertStartParaIndex, msg.insertEndParaIndex);
-        const result = await deleteDocxPara(msg.insertStartParaIndex, msg.insertEndParaIndex);
+        const paraIDs = [];
+        for (let i = msg.insertStartParaIndex; i <= msg.insertEndParaIndex; i++) {
+          paraIDs.push(i);
+        }
+        const result = await deleteDocxPara(paraIDs);
         msg.documentReverted = !!result?.success;
       } catch (e) {
         console.warn('[AIChatPane] revertToMessage 回滚失败:', e);
@@ -1511,18 +1486,8 @@ export default {
         }
 
         if (jsonData && (jsonData.paragraphs || jsonData.tables)) {
-          // 统一使用 JSON 中 AI 指定的 insertParaIndex 作为插入位置
-          let insertLocation = 'end';
-          if (jsonData.insertParaIndex !== null && jsonData.insertParaIndex !== undefined) {
-            if (jsonData.insertParaIndex === -1) {
-              insertLocation = 'end';
-            } else {
-              insertLocation = 'before';
-              jsonData.paraIndex = jsonData.insertParaIndex;
-            }
-          }
-
-          const result = await generateDocxFromJSON(jsonData, insertLocation);
+          const insertParaID = this._toIntOrNull(jsonData.insertParaID);
+          const result = await generateDocxFromJSON(jsonData, 'selection', insertParaID);
           if (result?.error) {
             console.error('生成文档失败:', result.error);
             await this._insertPlainText(content);
@@ -1538,11 +1503,11 @@ export default {
 
                   const totalParas = paras.items.length;
                   let startIdx, endIdx;
-                  if (insertLocation === 'end') {
+                  if (insertParaID === null) {
                     endIdx = totalParas - 1;
                     startIdx = totalParas - newParaCount;
                   } else {
-                    startIdx = jsonData.insertParaIndex;
+                    startIdx = insertParaID;
                     endIdx = startIdx + newParaCount - 1;
                   }
                   if (startIdx >= 0 && endIdx < totalParas) {

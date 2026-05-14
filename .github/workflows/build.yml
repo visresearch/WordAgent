@@ -17,6 +17,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # 完整历史 + tag，便于 wence.spec 中 git describe --tags 生成 version.txt
+          fetch-depth: 0
       
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -92,6 +95,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # 与 Linux job 一致：完整历史 + tag，供 PyInstaller 生成 version.txt
+          fetch-depth: 0
       
       - name: Setup Node.js
         uses: actions/setup-node@v4

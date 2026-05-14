@@ -201,6 +201,7 @@ export default {
     const settings = reactive({
       showPanelOnStart: true,
       proofreadMode: 'revision',
+      enableLongTermMemory: false,
       proxy: {
         enabled: false,
         host: '',
@@ -266,6 +267,13 @@ export default {
             settings.proofreadMode = data.proofreadMode;
             settingsState.proofreadMode = data.proofreadMode;
           }
+          if (data.enableLongTermMemory !== undefined) {
+            settings.enableLongTermMemory = !!data.enableLongTermMemory;
+            settingsState.enableLongTermMemory = !!data.enableLongTermMemory;
+          } else {
+            settings.enableLongTermMemory = false;
+            settingsState.enableLongTermMemory = false;
+          }
           if (data.providers) {
             settings.providers = data.providers.map(p => ({
               ...p,
@@ -313,6 +321,7 @@ export default {
         const settingsToSave = {
           showPanelOnStart: settings.showPanelOnStart,
           proofreadMode: settings.proofreadMode,
+          enableLongTermMemory: settings.enableLongTermMemory,
           proxy: { ...settings.proxy },
           providers: settings.providers.map(p => ({
             name: p.name,
@@ -356,6 +365,10 @@ export default {
       settings.showPanelOnStart = newSettings.showPanelOnStart;
       settings.proofreadMode = newSettings.proofreadMode;
       settingsState.proofreadMode = newSettings.proofreadMode;
+      if (newSettings.enableLongTermMemory !== undefined) {
+        settings.enableLongTermMemory = !!newSettings.enableLongTermMemory;
+        settingsState.enableLongTermMemory = !!newSettings.enableLongTermMemory;
+      }
       if (newSettings.proxy) {
         settings.proxy.enabled = newSettings.proxy.enabled;
         settings.proxy.host = newSettings.proxy.host;

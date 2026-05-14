@@ -615,13 +615,14 @@ async def process_writing_request_stream(
     # 构建系统提示
     system_parts = list(get_core_prompts(mode=mode))
 
-    # 注入长期记忆（来自 md 文件）
-    from app.services.memory import build_long_term_memory_prompt
+    # 注入长期记忆（由用户设置开关控制）
+    from app.services.memory import build_long_term_memory_prompt, is_long_term_memory_enabled
 
-    long_term_prompt = build_long_term_memory_prompt()
-    if long_term_prompt:
-        system_parts.append(long_term_prompt)
-        print("[Agent] 已注入长期记忆")
+    if is_long_term_memory_enabled():
+        long_term_prompt = build_long_term_memory_prompt()
+        if long_term_prompt:
+            system_parts.append(long_term_prompt)
+            print("[Agent] 已注入长期记忆")
 
     if mode == "agent":
         mcp_prompt = build_mcp_tools_prompt(mcp_tools)

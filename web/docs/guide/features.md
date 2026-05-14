@@ -31,6 +31,10 @@
 | **delete_document** | 删除 Word 中指定范围的内容 | ✅ | ❌ | ✅ |
 | **runSubAgent** | 调用子智能体完成特定任务 | ✅ | ❌ | ❌ |
 | **mcp_tools** | 调用 MCP 服务器上的工具（如 tavily-search） | ✅ | ❌ | ✅ |
+| **load_skill_context** | 加载技能上下文 | ✅ | ❌ | ✅ |
+| **list_file** | 列出文档中的文件 | ✅ | ❌ | ✅ |
+| **read_file** | 读取文档中的文件 | ✅ | ❌ | ✅ |
+| **edit_file** | 编辑文档中的文件 | ✅ | ❌ | ✅ |
 
 
 ::: info 说明

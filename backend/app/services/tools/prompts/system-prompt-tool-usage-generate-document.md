@@ -5,7 +5,8 @@
 - Output only changed/new content; never re-generate unchanged full documents.
 - Long output: split into ordered batches and keep insertion order deterministic.
 - Keep original style intent unless the user asks for formatting changes.
-- Validate before calling: raw object payload, complete `styles`, valid style references, correct `insertParaIndex`.
+- Validate before calling: raw object payload, complete `styles`, valid style references, correct `insertParaID`.
+- `insertParaID` must come from a real paragraph ID returned by `read_document`/`search_documnet`; do not invent IDs.
 - Images must be inline runs with a single `url`; keep URLs unchanged and preserve aspect ratio.
-- If a prior `generate_document` inserted above content you still plan to delete, re-read/search before `delete_document` because paragraph indices shifted.
+- If paragraph location is uncertain, re-read/search and use paragraph IDs for follow-up delete operations.
 - If deletes are confirmed later by the frontend, continue the full planned workflow; do not wait for per-delete confirmation.

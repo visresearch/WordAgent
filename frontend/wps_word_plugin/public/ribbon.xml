@@ -7,7 +7,7 @@
                     <button id="btnShowSession" label="会话" onAction="ribbon.OnAction" enabled="true" getImage="ribbon.GetImage" visible="true" size="large"/>
                     <button id="btnShowSetting" label="设置" onAction="ribbon.OnAction" enabled="true" getImage="ribbon.GetImage" visible="true" size="large"/>
                     <button id="btnShowAbout" label="关于" onAction="ribbon.OnAction" enabled="true" getImage="ribbon.GetImage" visible="true" size="large"/>
-                    <button id="btnShowDebug" label="调试" onAction="ribbon.OnAction" enabled="true" getImage="ribbon.GetImage" visible="true" size="large"/>
+                    <button id="btnShowDebug" label="调试" onAction="ribbon.OnAction" enabled="true" getImage="ribbon.GetImage" getVisible="ribbon.OnGetVisible" size="large"/>
 				</group>
             </tab>
         </tabs>

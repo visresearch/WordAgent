@@ -171,7 +171,11 @@ function OnGetEnabled(_control) {
   return true;
 }
 
-function OnGetVisible(_control) {
+function OnGetVisible(control) {
+  // 调试按钮只在开发环境显示，打包产物中隐藏
+  if (control?.Id === 'btnShowDebug') {
+    return import.meta.env.DEV;
+  }
   return true;
 }
 

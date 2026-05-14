@@ -137,10 +137,10 @@ export default {
       }, 3000);
     },
 
-    // 按索引删除段落
+    // 按 paraID 删除段落
     deleteDocxPara() {
       if (!this.deletePositionsInput.trim()) {
-        this.showStatus('请输入起始和结束段落索引', 'error');
+        this.showStatus('请输入要删除的 paraID 列表', 'error');
         return;
       }
 
@@ -162,15 +162,12 @@ export default {
       }
 
       if (indices.length === 0) {
-        this.showStatus('未解析到有效的索引', 'error');
+        this.showStatus('未解析到有效的 paraID', 'error');
         return;
       }
 
-      const startParaIndex = indices[0];
-      const endParaIndex = indices.length > 1 ? indices[1] : startParaIndex;
-
       try {
-        const result = deleteDocxParaFn(startParaIndex, endParaIndex);
+        const result = deleteDocxParaFn(indices);
         if (result.success) {
           this.showStatus(result.message, 'success');
         } else {
@@ -277,8 +274,8 @@ export default {
           return;
         }
 
-        const insertParaIndex = jsonData.insertParaIndex ?? null;
-        const result = generateDocxFromJSON(jsonData, doc, insertParaIndex);
+        const insertParaID = jsonData.insertParaID ?? null;
+        const result = generateDocxFromJSON(jsonData, doc, insertParaID);
         if (result && result.error) {
           this.showStatus('转换失败: ' + result.error, 'error');
           return;

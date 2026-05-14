@@ -870,12 +870,13 @@ async def process_writing_request_stream(
 
         memory_context = ""
 
-        from app.services.memory import build_long_term_memory_prompt
+        from app.services.memory import build_long_term_memory_prompt, is_long_term_memory_enabled
 
-        long_term_prompt = build_long_term_memory_prompt()
-        if long_term_prompt:
-            memory_context += long_term_prompt + "\n\n"
-            print("[MultiAgent] Loaded long-term memory")
+        if is_long_term_memory_enabled():
+            long_term_prompt = build_long_term_memory_prompt()
+            if long_term_prompt:
+                memory_context += long_term_prompt + "\n\n"
+                print("[MultiAgent] Loaded long-term memory")
 
         if history:
             from app.services.memory import build_short_term_messages

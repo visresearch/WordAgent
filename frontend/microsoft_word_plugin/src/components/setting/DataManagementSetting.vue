@@ -123,6 +123,14 @@
           </div>
         </div>
 
+        <div class="setting-row">
+          <span class="setting-label">启用长期记忆</span>
+          <label class="switch">
+            <input v-model="enableLongTermMemory" type="checkbox" @change="saveMemoryToggle" />
+            <span class="slider"></span>
+          </label>
+        </div>
+
         <div class="memory-editor-box">
           <div class="json-editor-wrapper">
             <div :ref="setMemoryLineNumberRef" class="json-line-numbers">
@@ -378,6 +386,7 @@ export default {
     const memoryLoading = ref(false);
     const memorySaving = ref(false);
     const memoryHasChanged = ref(false);
+    const enableLongTermMemory = ref(false);
     const memoryTextareaRef = ref(null);
     const memoryLineNumberRef = ref(null);
 
@@ -571,7 +580,36 @@ export default {
       }
     };
 
+    const loadMemoryToggle = async () => {
+      try {
+        const data = await api.getSettings();
+        enableLongTermMemory.value = !!data?.enableLongTermMemory;
+      } catch (error) {
+        console.error('加载长期记忆开关失败:', error);
+        enableLongTermMemory.value = false;
+      }
+    };
+
+    const saveMemoryToggle = async () => {
+      try {
+        await api.saveSettings({ enableLongTermMemory: !!enableLongTermMemory.value });
+        resultMessage.value = `长期记忆已${enableLongTermMemory.value ? '开启' : '关闭'}`;
+        resultSuccess.value = true;
+        setTimeout(() => {
+          resultMessage.value = '';
+        }, 2500);
+      } catch (error) {
+        console.error('保存长期记忆开关失败:', error);
+        resultMessage.value = '保存长期记忆开关失败：' + (error.message || '未知错误');
+        resultSuccess.value = false;
+        setTimeout(() => {
+          resultMessage.value = '';
+        }, 5000);
+      }
+    };
+
     // 初始化时加载记忆
+    loadMemoryToggle();
     loadMemory();
 
     return {
@@ -593,10 +631,12 @@ export default {
       memoryLoading,
       memorySaving,
       memoryHasChanged,
+      enableLongTermMemory,
       memoryLineCount,
       memoryTextareaRef,
       loadMemory,
       saveMemory,
+      saveMemoryToggle,
       setMemoryLineNumberRef,
       syncMemoryLineNumberScroll,
       onMemoryInput
@@ -794,6 +834,62 @@ export default {
   font-size: 12px;
   color: #6b7280;
   margin-bottom: 16px;
+}
+
+.setting-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 2px;
+  margin-bottom: 10px;
+}
+
+.setting-label {
+  font-size: 14px;
+  color: #374151;
+  font-weight: 500;
+}
+
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+}
+
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.slider {
+  position: absolute;
+  cursor: pointer;
+  inset: 0;
+  background-color: #cbd5e1;
+  transition: .2s;
+  border-radius: 24px;
+}
+
+.slider:before {
+  position: absolute;
+  content: "";
+  height: 18px;
+  width: 18px;
+  left: 3px;
+  top: 3px;
+  background-color: white;
+  transition: .2s;
+  border-radius: 50%;
+}
+
+.switch input:checked + .slider {
+  background-color: #667eea;
+}
+
+.switch input:checked + .slider:before {
+  transform: translateX(20px);
 }
 
 .hint-icon {

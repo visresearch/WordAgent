@@ -1,10 +1,3 @@
-"""共享文档工具实现（read / search / generate / delete）。
-
-这里只放纯逻辑函数 + "工厂函数"。每个 agent 模式（agent / multi_agent）
-通过传入自己的 `description` 字符串拿到一份装好 `@tool` 的副本，从而复用
-所有实现，但又能让 LLM 看到不同模式下定制的 prompt 描述。
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -25,7 +18,6 @@ from app.core.config import get_temp_dir, get_wence_data_dir, get_wence_project_
 
 from .callback import (
     _current_chat_id,
-    _current_request_context,
     _pending_loops,
     _pending_tool_requests,
     is_stop_requested,
@@ -35,17 +27,39 @@ from .schemas import DocumentOutput, DocumentQuery
 
 # 返回给 LLM 的文档 JSON 最大字符数（超过则进入精简模式）
 _MAX_DOC_JSON_CHARS = 100_000
-DocIdInput = str | int | None
 
 
-def _normalize_doc_id(doc_id: DocIdInput) -> str | None:
-    """Normalize docId from tool input / frontend metadata to string form."""
-    if doc_id is None:
+DocIdInput = int | str | None
+ParaIdInput = int | str | None
+
+
+def _parse_int_like(value: object) -> int | None:
+    """Parse int-like values from int/str (supports signed numbers)."""
+    if isinstance(value, bool):
         return None
-    if isinstance(doc_id, str):
-        cleaned = doc_id.strip()
-        return cleaned or None
-    return str(doc_id)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        if re.fullmatch(r"[+-]?\d+", text):
+            try:
+                return int(text)
+            except Exception:
+                return None
+    return None
+
+
+def _normalize_doc_id(doc_id: DocIdInput) -> int:
+    """Normalize docId to integer, fallback to 0 (active document)."""
+    parsed = _parse_int_like(doc_id)
+    return parsed if parsed is not None else 0
+
+
+def _normalize_para_id(para_id: ParaIdInput) -> int | None:
+    """Normalize paraID to integer; invalid values return None."""
+    return _parse_int_like(para_id)
 
 
 # region 图片 / 文档辅助
@@ -257,24 +271,6 @@ def _save_generated_document_json(doc_dict: dict) -> str | None:
         return None
 
 
-def _get_active_doc_id() -> str | None:
-    """从请求上下文中获取当前活动文档的 documentId。"""
-    ctx = _current_request_context.get(None)
-    if not ctx:
-        return None
-    document_meta = ctx.get("document_meta")
-    if not document_meta:
-        return None
-    if isinstance(document_meta, list):
-        if document_meta:
-            if isinstance(document_meta[0], dict):
-                return _normalize_doc_id(document_meta[0].get("documentId"))
-            return None
-    elif isinstance(document_meta, dict):
-        return _normalize_doc_id(document_meta.get("documentId"))
-    return None
-
-
 def _compact_doc_json(doc_json: dict) -> str:
     """Compact document JSON to a size the LLM can handle."""
     full = json.dumps(doc_json, ensure_ascii=False)
@@ -285,7 +281,7 @@ def _compact_doc_json(doc_json: dict) -> str:
     for p in doc_json.get("paragraphs", []):
         if not isinstance(p, dict):
             continue
-        para_compact = {"paraIndex": p.get("paraIndex"), "runs": []}
+        para_compact = {"paraIndex": p.get("paraIndex"), "paraID": p.get("paraID"), "runs": []}
         for r in p.get("runs", []):
             if isinstance(r, dict):
                 if r.get("text") is not None:
@@ -350,25 +346,48 @@ def _compact_doc_json(doc_json: dict) -> str:
 # region 工具实现（裸函数 + 工厂）
 
 
-def _read_document_impl(startParaIndex: int, endParaIndex: int, docId: DocIdInput) -> str:
+def _read_document_impl(
+    startParaIndex: int | None,
+    endParaIndex: int | None,
+    startParaID: ParaIdInput,
+    endParaID: ParaIdInput,
+    docId: DocIdInput,
+) -> str:
     """read_document 的核心逻辑，被工厂函数包裹后变成 LangChain @tool。"""
     resolved_doc_id = _normalize_doc_id(docId)
-    if resolved_doc_id is None:
-        resolved_doc_id = _get_active_doc_id()
+    startParaID = _normalize_para_id(startParaID)
+    endParaID = _normalize_para_id(endParaID)
+    use_para_id_mode = startParaID is not None
+    if use_para_id_mode and endParaID is None:
+        endParaID = startParaID
+    if not use_para_id_mode:
+        if startParaIndex is None:
+            startParaIndex = 0
+        if endParaIndex is None:
+            endParaIndex = startParaIndex
+
+    if use_para_id_mode:
+        range_desc = f"段落ID {startParaID} - {endParaID}"
+    else:
+        range_desc = f"段落索引 {startParaIndex} - {endParaIndex}"
 
     writer = get_stream_writer()
     if writer:
         writer(
             {
                 "type": "read_document",
-                "content": f"📑 正在读取文档（段落 {startParaIndex} - {endParaIndex}）",
+                "content": f"📑 正在读取文档（{range_desc}）",
                 "startParaIndex": startParaIndex,
                 "endParaIndex": endParaIndex,
+                "startParaID": startParaID,
+                "endParaID": endParaID,
                 "docId": resolved_doc_id,
             }
         )
     print(
-        f"[read_document] 请求前端发送文档 (startParaIndex={startParaIndex}, endParaIndex={endParaIndex}, docId={resolved_doc_id})"
+        "[read_document] 请求前端发送文档 "
+        f"(startParaIndex={startParaIndex}, endParaIndex={endParaIndex}, "
+        f"startParaID={startParaID}, endParaID={endParaID}, docId={resolved_doc_id})"
     )
 
     chat_id = _current_chat_id.get(None)
@@ -421,7 +440,7 @@ def _read_document_impl(startParaIndex: int, endParaIndex: int, docId: DocIdInpu
                             writer(
                                 {
                                     "type": "read_complete",
-                                    "content": f"📑 文档读取完成（段落 {startParaIndex} - {endParaIndex}）",
+                                    "content": f"📑 文档读取完成（{range_desc}）",
                                     "docId": resolved_doc_id,
                                 }
                             )
@@ -450,11 +469,10 @@ def _read_document_impl(startParaIndex: int, endParaIndex: int, docId: DocIdInpu
     return ""
 
 
-def _generate_document_impl(document: DocumentOutput, docId: DocIdInput, insertParaIndex: int) -> dict:
+def _generate_document_impl(document: DocumentOutput, docId: DocIdInput, insertParaID: ParaIdInput) -> dict:
     """generate_document 的核心逻辑。"""
     resolved_doc_id = _normalize_doc_id(docId)
-    if resolved_doc_id is None:
-        resolved_doc_id = _get_active_doc_id()
+    normalized_insert_para_id = _normalize_para_id(insertParaID)
 
     doc_dict = document.model_dump()
     _ensure_image_payload_shape(doc_dict)
@@ -465,7 +483,7 @@ def _generate_document_impl(document: DocumentOutput, docId: DocIdInput, insertP
             if isinstance(r, dict) and r.get("text") is None:
                 image_count += 1
 
-    doc_dict["insertParaIndex"] = insertParaIndex
+    doc_dict["insertParaID"] = normalized_insert_para_id
     doc_dict["docId"] = resolved_doc_id
 
     writer = get_stream_writer()
@@ -490,8 +508,6 @@ def _generate_document_impl(document: DocumentOutput, docId: DocIdInput, insertP
 def _search_document_impl(query: DocumentQuery, docId: DocIdInput) -> str:
     """search_documnet 的核心逻辑。"""
     resolved_doc_id = _normalize_doc_id(docId)
-    if resolved_doc_id is None:
-        resolved_doc_id = _get_active_doc_id()
 
     query_dict = query.model_dump(exclude_none=True)
     query_type = query_dict.get("type", "run")
@@ -533,24 +549,53 @@ def _search_document_impl(query: DocumentQuery, docId: DocIdInput) -> str:
                     match_count = result.get("matchCount", 0)
 
                     matched_para_indices: list[int] = []
+                    matched_para_ids: list[int] = []
                     for m in matches:
                         if not isinstance(m, dict):
                             continue
                         para_idx = m.get("paragraphIndex")
+                        para_id = m.get("paragraphId")
                         if isinstance(para_idx, int):
                             matched_para_indices.append(para_idx)
+                        if isinstance(para_id, int):
+                            matched_para_ids.append(para_id)
                     matched_para_indices = sorted(set(matched_para_indices))
-                    suggested_read_ranges = [
-                        {"startParaIndex": idx, "endParaIndex": idx} for idx in matched_para_indices[:20]
-                    ]
+                    if isinstance(result.get("matchedParaIDs"), list):
+                        matched_para_ids.extend([pid for pid in result.get("matchedParaIDs") if isinstance(pid, int)])
+                    matched_para_ids = sorted(set(matched_para_ids))
+
+                    suggested_read_ranges: list[dict[str, int]] = []
+                    seen_range_keys: set[tuple[str, int]] = set()
+                    for m in matches:
+                        if not isinstance(m, dict):
+                            continue
+                        para_id = m.get("paragraphId")
+                        para_idx = m.get("paragraphIndex")
+                        if isinstance(para_id, int):
+                            key = ("id", para_id)
+                            if key not in seen_range_keys:
+                                suggested_read_ranges.append({"startParaID": para_id, "endParaID": para_id})
+                                seen_range_keys.add(key)
+                        elif isinstance(para_idx, int):
+                            key = ("idx", para_idx)
+                            if key not in seen_range_keys:
+                                suggested_read_ranges.append({"startParaIndex": para_idx, "endParaIndex": para_idx})
+                                seen_range_keys.add(key)
+                        if len(suggested_read_ranges) >= 20:
+                            break
 
                     if match_count > 0:
-                        print(f"[search_documnet] ✅ 查询完成，匹配 {match_count} 项，涉及段落 {matched_para_indices}")
+                        print(
+                            f"[search_documnet] ✅ 查询完成，匹配 {match_count} 项，"
+                            f"涉及段落索引 {matched_para_indices}，段落ID {matched_para_ids}"
+                        )
                         if writer:
                             writer(
                                 {
                                     "type": "query_complete",
-                                    "content": f"✅ 搜索完成，找到 {match_count} 处匹配（涉及 {len(matched_para_indices)} 个段落）",
+                                    "content": (
+                                        f"✅ 搜索完成，找到 {match_count} 处匹配"
+                                    ),
                                     "docId": resolved_doc_id,
                                 }
                             )
@@ -559,6 +604,7 @@ def _search_document_impl(query: DocumentQuery, docId: DocIdInput) -> str:
                                 "matches": matches,
                                 "matchCount": match_count,
                                 "matchedParaIndices": matched_para_indices,
+                                "matchedParaIDs": matched_para_ids,
                                 "suggestedReadRanges": suggested_read_ranges,
                                 "coverageAdvice": "When multiple candidates are found, read nearby context around each candidate in paragraph-index order, and stop early once evidence is sufficient.",
                             },
@@ -579,6 +625,7 @@ def _search_document_impl(query: DocumentQuery, docId: DocIdInput) -> str:
                             "matches": [],
                             "matchCount": 0,
                             "matchedParaIndices": [],
+                            "matchedParaIDs": [],
                             "suggestedReadRanges": [],
                             "triedQuery": query_dict,
                             "retryAdvice": "Try alternative keywords (synonyms, abbreviations, section names, core terms).",
@@ -598,27 +645,27 @@ def _search_document_impl(query: DocumentQuery, docId: DocIdInput) -> str:
     return '{"matches": [], "matchCount": 0, "error": "non-websocket"}'
 
 
-def _delete_document_impl(startParaIndex: int, endParaIndex: int, docId: DocIdInput) -> str:
+def _delete_document_impl(paraIDs: list[int | str], docId: DocIdInput) -> str:
     """delete_document 的核心逻辑。"""
     resolved_doc_id = _normalize_doc_id(docId)
-    if resolved_doc_id is None:
-        resolved_doc_id = _get_active_doc_id()
+    normalized_para_ids = [_normalize_para_id(pid) for pid in paraIDs]
+    normalized_para_ids = [pid for pid in normalized_para_ids if pid is not None]
+    deduped_para_ids = list(dict.fromkeys(normalized_para_ids))
+    if not deduped_para_ids:
+        return "No valid paraIDs provided for deletion"
 
     writer = get_stream_writer()
     if writer:
         writer(
             {
                 "type": "delete_document",
-                "content": f"🗑️ 准备删除文档段落（{startParaIndex} - {endParaIndex}）",
-                "startParaIndex": startParaIndex,
-                "endParaIndex": endParaIndex,
+                "content": f"🗑️ 准备删除 {len(deduped_para_ids)} 个段落",
+                "paraIDs": deduped_para_ids,
                 "docId": resolved_doc_id,
             }
         )
-    print(
-        f"[delete_document] 请求前端删除文档段落 (startParaIndex={startParaIndex}, endParaIndex={endParaIndex}, docId={resolved_doc_id})"
-    )
-    return f"Frontend notified to mark paragraphs {startParaIndex} - {endParaIndex} for deletion, awaiting user confirmation"
+    print(f"[delete_document] 请求前端删除文档段落 (paraIDs={deduped_para_ids}, docId={resolved_doc_id})")
+    return f"Frontend notified to delete paragraphs by paraIDs: {deduped_para_ids}"
 
 
 # endregion
@@ -631,15 +678,23 @@ def build_read_document(description: str):
     """根据传入的 description 构造 read_document 工具实例。"""
 
     @tool(description=description)
-    def read_document(startParaIndex: int = 0, endParaIndex: int = 49, docId: str | int | None = None) -> str:
+    def read_document(
+        startParaIndex: int | None = None,
+        endParaIndex: int | None = None,
+        startParaID: ParaIdInput = None,
+        endParaID: ParaIdInput = None,
+        docId: DocIdInput = 0,
+    ) -> str:
         """Read document content. Requests the frontend to parse and return the specified paragraph range via WebSocket.
 
         Args:
-            startParaIndex: Starting paragraph index (0-based).
-            endParaIndex: Ending paragraph index (inclusive).
-            docId: Document ID (string or integer). If None, reads the active document.
+            startParaIndex: Starting paragraph index (0-based), used in index mode.
+            endParaIndex: Ending paragraph index (inclusive), used in index mode.
+            startParaID: Starting paragraph ID (int-like, supports signed numeric strings), used in paraID mode.
+            endParaID: Ending paragraph ID (int-like), used in paraID mode. Defaults to startParaID.
+            docId: Document ID (int-like). Positive/negative are both allowed. 0 means current active document.
         """
-        return _read_document_impl(startParaIndex, endParaIndex, docId)
+        return _read_document_impl(startParaIndex, endParaIndex, startParaID, endParaID, docId)
 
     return read_document
 
@@ -650,18 +705,18 @@ def build_generate_document(description: str):
     @tool(description=description)
     def generate_document(
         document: DocumentOutput,
-        docId: str | int | None = None,
-        insertParaIndex: int = -1,
+        docId: DocIdInput = 0,
+        insertParaID: ParaIdInput = None,
     ) -> dict:
         """Generate a formatted document JSON for insertion into the Word document.
 
         Args:
             document: The document content to generate.
-            docId: Document ID (string or integer) to insert into. If None, uses the active document.
-            insertParaIndex: 0-based paragraph index where content will be inserted before.
-                Use -1 for end of document, 0 for beginning.
+            docId: Document ID (int-like). Positive/negative are both allowed. 0 means current active document.
+            insertParaID: Insert after the paragraph whose paraID equals this value (int-like).
+                Omit/None to use current selection position.
         """
-        return _generate_document_impl(document, docId, insertParaIndex)
+        return _generate_document_impl(document, docId, insertParaID)
 
     return generate_document
 
@@ -673,12 +728,12 @@ def build_search_document(description: str):
     """
 
     @tool(description=description)
-    def search_documnet(query: DocumentQuery, docId: str | int | None = None) -> str:
+    def search_documnet(query: DocumentQuery, docId: DocIdInput = 0) -> str:
         """Search document content. Requests the frontend to search for matching content by text or style criteria.
 
         Args:
             query: The search query with filters.
-            docId: Document ID (string or integer) to search in. If None, uses the active document.
+            docId: Document ID (int-like). Positive/negative are both allowed. 0 means current active document.
         """
         return _search_document_impl(query, docId)
 
@@ -689,15 +744,14 @@ def build_delete_document(description: str):
     """根据传入的 description 构造 delete_document 工具实例。"""
 
     @tool(description=description)
-    def delete_document(startParaIndex: int = 0, endParaIndex: int = -1, docId: str | int | None = None) -> str:
-        """Delete a specified range of paragraphs from the document.
+    def delete_document(paraIDs: list[int | str], docId: DocIdInput = 0) -> str:
+        """Delete specified paragraphs from the document by paraID list.
 
         Args:
-            startParaIndex: Starting paragraph index (0-based).
-            endParaIndex: Ending paragraph index (inclusive), -1 for the last paragraph.
-            docId: Document ID (string or integer) to delete from. If None, uses the active document.
+            paraIDs: Paragraph IDs to delete (int-like list). Each paraID is deleted independently (not a range).
+            docId: Document ID (int-like). Positive/negative are both allowed. 0 means current active document.
         """
-        return _delete_document_impl(startParaIndex, endParaIndex, docId)
+        return _delete_document_impl(paraIDs, docId)
 
     return delete_document
 
@@ -715,7 +769,6 @@ __all__ = [
     "_generate_document_impl",
     "_search_document_impl",
     "_delete_document_impl",
-    "_get_active_doc_id",
     "_compact_doc_json",
     "_ensure_image_payload_shape",
 ]

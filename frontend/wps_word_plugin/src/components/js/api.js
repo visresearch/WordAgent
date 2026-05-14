@@ -464,22 +464,28 @@ const wsManager = {
   },
 
   /**
-   * 处理后端的文档读取请求：根据 startParaIndex/endParaIndex 解析文档并通过 WebSocket 回传
-   * @param {number} startParaIndex - 起始段落索引（0-based），0 表示文档开头
-   * @param {number} endParaIndex - 结束段落索引（0-based），-1 表示文档结尾
-   * @param {string|null} docId - 文档 ID，null 表示活动文档
+   * 处理后端的文档读取请求：支持 paraIndex/paraID 二选一
+   * @param {Object} params - {startParaIndex,endParaIndex,startParaID,endParaID,docId}
    */
-  async _handleDocumentRequest(startParaIndex = 0, endParaIndex = -1, docId = null) {
+  async _handleDocumentRequest(params = {}) {
     // 注意：不在这里发送 loading 状态，AIChatPane 在收到 read_document 时已经推入了 loading 状态
     try {
-      const docData = await parseDocumentRange(startParaIndex, endParaIndex, docId);
+      const {
+        startParaIndex = null,
+        endParaIndex = null,
+        startParaID = null,
+        endParaID = null,
+        docId = null
+      } = params || {};
+
+      const docData = await parseDocumentRange(startParaIndex, endParaIndex, docId, startParaID, endParaID);
 
       if (docData.error) {
         throw new Error(docData.error);
       }
 
       // 如果是读取全文（0 到末尾），更新缓存
-      if (startParaIndex === 0 && endParaIndex === -1) {
+      if (startParaIndex === 0 && endParaIndex === -1 && (startParaID === null || startParaID === undefined)) {
         this.setCachedDocument(docData);
       }
 
@@ -506,14 +512,14 @@ const wsManager = {
    * 处理后端的文档查询请求：解析文档后执行 Style Query DSL 并通过 WebSocket 回传匹配结果
    * 优先使用缓存的文档 JSON，避免重复解析
    * @param {Object} query - Query DSL 对象 {type, filters}
-   * @param {string|null} docId - 文档 ID，null 表示活动文档
+   * @param {number|null} docId - 文档 ID，null/0 表示活动文档
    */
   async _handleQueryRequest(query, docId = null) {
     try {
       // 优先使用缓存的文档 JSON（注意：不同文档的缓存需要区分）
       // 如果指定了 docId 且与缓存的 docId 不同，需要重新解析
       let docData = null;
-      if (!docId) {
+      if (docId === null || docId === undefined || Number(docId) === 0) {
         docData = this.getCachedDocument();
       }
 
@@ -527,7 +533,7 @@ const wsManager = {
         }
 
         // 缓存解析结果
-        if (!docId) {
+        if (docId === null || docId === undefined || Number(docId) === 0) {
           this.setCachedDocument(docData);
         }
       } else {
@@ -537,22 +543,30 @@ const wsManager = {
       // 执行样式查询
       const result = executeStyleQuery(docData, query);
 
-      // 提取匹配到的段落索引（去重后）用于调试
+      // 提取匹配到的段落索引/ID（去重后）用于调试
       const matchedParaIndices = [...new Set(
         (result.matches || [])
           .map((m) => m?.paragraphIndex)
           .filter((idx) => Number.isInteger(idx))
+      )].sort((a, b) => a - b);
+      const matchedParaIds = [...new Set(
+        (result.matches || [])
+          .map((m) => m?.paragraphId)
+          .filter((id) => Number.isInteger(id))
       )].sort((a, b) => a - b);
 
       // 通过 WebSocket 回传查询结果
       await this.send({
         type: 'query_response',
         matches: result.matches,
-        matchCount: result.matchCount
+        matchCount: result.matchCount,
+        matchedParaIndices,
+        matchedParaIDs: matchedParaIds
       });
 
       console.log('[WebSocket] 已回传查询结果，匹配数:', result.matchCount);
       console.log('[WebSocket] 匹配段落索引:', matchedParaIndices);
+      console.log('[WebSocket] 匹配段落ID:', matchedParaIds);
 
     } catch (err) {
       console.error('[WebSocket] 查询文档失败:', err);
@@ -684,13 +698,15 @@ function chatStream(message, options = {}) {
  * 异步解析文档范围（推迟到下一个事件循环，避免阻塞 UI）
  * 不传参数或传 (0, -1) 时解析全文，传入具体索引则解析指定范围
  *
- * @param {number} [startParaIndex=0] - 起始段落索引（0-based），0 表示文档开头
- * @param {number} [endParaIndex=-1] - 结束段落索引（0-based），-1 表示文档结尾
+ * @param {number|null} [startParaIndex=0] - 起始段落索引（0-based）
+ * @param {number|null} [endParaIndex=-1] - 结束段落索引（0-based）
+ * @param {number|null} [startParaID=null] - 起始段落ID
+ * @param {number|null} [endParaID=null] - 结束段落ID
  * @returns {Promise<Object>} - 解析结果
  */
 /**
  * 根据 docId 获取文档对象
- * @param {string|null} docId - 文档 ID，如果为 null 则返回活动文档
+ * @param {number|null} docId - 文档 ID，如果为 null/0 则返回活动文档
  * @returns {Object|null} - WPS Document 对象
  */
 function getDocumentById(docId) {
@@ -699,7 +715,7 @@ function getDocumentById(docId) {
     return null;
   }
 
-  if (!docId) {
+  if (docId === null || docId === undefined || Number(docId) === 0) {
     // 返回活动文档
     return app.ActiveDocument;
   }
@@ -712,9 +728,8 @@ function getDocumentById(docId) {
       for (let i = 1; i <= docs.Count; i++) {
         const doc = docs.Item(i);
         const docIdValue = doc.DocID;
-        console.log(`[getDocumentById] 检查文档 ${i}: Name="${doc.Name}", DocID="${docIdValue}" (typeof: ${typeof docIdValue}), 匹配: ${docIdValue == docId}`);
-        // 使用宽松比较，因为 DocID 可能是数字或字符串
-        if (String(docIdValue) === String(docId)) {
+        console.log(`[getDocumentById] 检查文档 ${i}: Name="${doc.Name}", DocID="${docIdValue}" (typeof: ${typeof docIdValue}), 匹配: ${Number(docIdValue) === Number(docId)}`);
+        if (Number(docIdValue) === Number(docId)) {
           console.log(`[getDocumentById] ✅ 找到匹配文档: ${doc.Name}`);
           return doc;
         }
@@ -730,7 +745,7 @@ function getDocumentById(docId) {
   return app.ActiveDocument;
 }
 
-async function parseDocumentRange(startParaIndex = 0, endParaIndex = -1, docId = null) {
+async function parseDocumentRange(startParaIndex = 0, endParaIndex = -1, docId = 0, startParaID = null, endParaID = null) {
   return new Promise((resolve) => {
     // 使用 setTimeout 将任务推迟到下一个事件循环
     // 这样可以让 UI 有时间响应，避免卡顿
@@ -742,7 +757,8 @@ async function parseDocumentRange(startParaIndex = 0, endParaIndex = -1, docId =
           return;
         }
 
-        const isFullDocument = (startParaIndex === 0 && endParaIndex === -1);
+        const useIdMode = startParaID !== null && startParaID !== undefined;
+        const isFullDocument = !useIdMode && (startParaIndex === 0 && endParaIndex === -1);
         let result;
 
         if (isFullDocument) {
@@ -752,10 +768,10 @@ async function parseDocumentRange(startParaIndex = 0, endParaIndex = -1, docId =
             resolve({ error: '无法获取文档内容' });
             return;
           }
-          result = parseDocxToJSON(fullRange, null, null, doc);
+          result = parseDocxToJSON(fullRange, null, null, doc, null, null);
         } else {
-          // 按段落索引范围解析（快速路径），传递 docOverride
-          result = parseDocxToJSON(null, startParaIndex, endParaIndex, doc);
+          // 按段落索引范围或段落ID范围解析（快速路径），传递 docOverride
+          result = parseDocxToJSON(null, startParaIndex, endParaIndex, doc, startParaID, endParaID);
         }
 
         // read_document / search_documnet 回包仅返回文档内容，不携带全局 meta。

@@ -1,9 +1,8 @@
 Delete a paragraph range from the Word document.
 
 ## Parameters
-- `startParaIndex` (int): 0-based inclusive start index.
-- `endParaIndex` (int): 0-based inclusive end index; `-1` means end of document.
-- `docId` (string, optional): target document ID; omit for the active document.
+- `paraIDs` (int[]): paragraph IDs to delete. Each ID is an independent target (NOT a continuous range).
+- `docId` (int, optional): target document ID; use `0` for the active document.
 
 ## Use
 - Delete existing content, or prepare a replacement rewrite before `generate_document`.
@@ -12,4 +11,5 @@ Delete a paragraph range from the Word document.
 ## Critical notes
 - Non-blocking: frontend marks/highlights the range; do not wait for confirmation.
 - Continue the planned workflow after calling this tool, including `generate_document` when needed.
-- Indices must match the current document. If any earlier `generate_document` inserted before the target range, indices shifted upward; call `read_document` or `search_documnet` first to verify the exact paragraphs before deleting.
+- Use paraIDs returned by `search_documnet`/`read_document`. Avoid relying on stale paragraph indices.
+- Deletion is pending until user confirms in Word UI. If content still appears immediately after tool call, do NOT retry the same delete again.

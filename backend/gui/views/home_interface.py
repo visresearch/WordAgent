@@ -1,9 +1,16 @@
 """主页界面 - 使用 qfluentwidgets 组件 + QWidget 基类"""
 
+import json
 import os
+import re
+import sys
+import threading
 import webbrowser
+from pathlib import Path
+from urllib.error import URLError
+from urllib.request import Request, urlopen
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QIcon
 from PySide6.QtWidgets import (
     QWidget,
@@ -21,7 +28,53 @@ from qfluentwidgets import (
     FluentIcon,
     InfoBadge,
     PushButton,
+    InfoBar,
+    InfoBarPosition,
 )
+
+
+def _get_runtime_base() -> Path:
+    """获取 backend 运行时基础目录（兼容 PyInstaller）。"""
+    if getattr(sys, "frozen", False):
+        return Path(getattr(sys, "_MEIPASS", Path(sys.executable).resolve().parent))
+    return Path(__file__).resolve().parents[2]
+
+
+def _read_local_version() -> str:
+    """读取本地版本号，优先使用打包前生成的 version.txt。"""
+    runtime_base = _get_runtime_base()
+    candidates: list[Path] = []
+    if getattr(sys, "frozen", False):
+        candidates.extend(
+            [
+                runtime_base / "version.txt",
+                Path(sys.executable).resolve().parent / "version.txt",
+            ]
+        )
+    else:
+        candidates.extend(
+            [
+                runtime_base / "version.txt",
+                runtime_base.parent / "version.txt",
+            ]
+        )
+
+    for path in candidates:
+        if not path.exists():
+            continue
+        value = path.read_text(encoding="utf-8", errors="ignore").strip()
+        if value:
+            return value
+    return "v0.0.0"
+
+
+def _version_key(version: str) -> tuple[int, ...]:
+    """把版本字符串转换为可比较的数字元组。"""
+    normalized = version.strip()
+    match = re.search(r"(\d+(?:\.\d+)*)", normalized)
+    if not match:
+        return tuple()
+    return tuple(int(part) for part in match.group(1).split("."))
 
 
 class _InfoCard(CardWidget):
@@ -55,12 +108,18 @@ class _InfoCard(CardWidget):
 class HomeInterface(QWidget):
     """主页界面"""
 
+    updateCheckFinished = Signal(dict)
+
     GITHUB_URL = "https://github.com/visresearch/WordAgent"
+    GITHUB_RELEASE_API = "https://api.github.com/repos/visresearch/WordAgent/releases/latest"
     WEBSITE_URL = "https://visresearch.github.io/WordAgent/"
+    RELEASE_URL = "https://github.com/visresearch/WordAgent/releases/latest"
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("homeInterface")
+        self._current_version = _read_local_version()
+        self.updateCheckFinished.connect(self._on_update_check_finished)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(36, 32, 36, 36)
@@ -122,12 +181,21 @@ class HomeInterface(QWidget):
         self._dot.setFixedSize(10, 10)
         sl.addWidget(self._dot, alignment=Qt.AlignVCenter)
 
-        self._status_label = BodyLabel("后端服务运行中", self)
+        self._status_label = BodyLabel("后端服务运行中（正在检查更新）", self)
         sl.addWidget(self._status_label, 1)
 
-        self._version_label = CaptionLabel("v0.2.0", self)
+        self._version_label = CaptionLabel(f"当前版本：{self._current_version}", self)
         self._version_label.setTextColor(QColor("#888888"), QColor("#aaaaaa"))
         sl.addWidget(self._version_label, alignment=Qt.AlignVCenter)
+
+        self._update_label = CaptionLabel("正在检查更新...", self)
+        self._update_label.setTextColor(QColor("#888888"), QColor("#aaaaaa"))
+        sl.addWidget(self._update_label, alignment=Qt.AlignVCenter)
+
+        self._download_button = PushButton("前往下载最新版本", self)
+        self._download_button.clicked.connect(lambda: self._open_url(self.RELEASE_URL))
+        self._download_button.hide()
+        sl.addWidget(self._download_button, alignment=Qt.AlignVCenter)
 
         layout.addWidget(status)
         layout.addSpacing(20)
@@ -175,6 +243,65 @@ class HomeInterface(QWidget):
         layout.addLayout(row2)
 
         layout.addStretch(1)
+        QTimer.singleShot(0, self._check_latest_release_async)
 
     def _open_url(self, url: str):
         webbrowser.open(url)
+
+    def _check_latest_release_async(self):
+        worker = threading.Thread(target=self._check_latest_release_worker, daemon=True)
+        worker.start()
+
+    def _check_latest_release_worker(self):
+        result = {
+            "ok": False,
+            "latest_tag": "",
+            "latest_url": self.GITHUB_URL,
+            "error": "",
+        }
+        try:
+            req = Request(
+                self.GITHUB_RELEASE_API,
+                headers={
+                    "Accept": "application/vnd.github+json",
+                    "User-Agent": "WenCeAI-VersionChecker",
+                },
+            )
+            with urlopen(req, timeout=8) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+            result["latest_tag"] = str(payload.get("tag_name") or "").strip()
+            result["latest_url"] = str(payload.get("html_url") or self.GITHUB_URL).strip()
+            result["ok"] = bool(result["latest_tag"])
+        except (OSError, URLError, TimeoutError, json.JSONDecodeError) as exc:
+            result["error"] = str(exc)
+        self.updateCheckFinished.emit(result)
+
+    def _on_update_check_finished(self, result: dict):
+        latest_tag = str(result.get("latest_tag", "")).strip()
+        if not result.get("ok"):
+            self._update_label.setText("更新检查失败")
+            self._update_label.setTextColor(QColor("#d97706"), QColor("#d97706"))
+            self._status_label.setText("后端服务运行中（未能获取更新信息）")
+            return
+
+        local_key = _version_key(self._current_version)
+        latest_key = _version_key(latest_tag)
+        has_new_version = bool(latest_key) and (not local_key or latest_key > local_key)
+
+        if has_new_version:
+            self._status_label.setText(f"发现新版本：{latest_tag}，请前往官网下载安装")
+            self._update_label.setText(f"有最新版本：{latest_tag}")
+            self._update_label.setTextColor(QColor("#d97706"), QColor("#d97706"))
+            self._download_button.show()
+            InfoBar.warning(
+                title="发现新版本",
+                content=f"检测到最新版本 {latest_tag}，请前往官网下载安装。",
+                parent=self,
+                position=InfoBarPosition.TOP,
+                duration=5000,
+            )
+            return
+
+        self._status_label.setText("后端服务运行中（已是最新版本）")
+        self._update_label.setText("已是最新版本")
+        self._update_label.setTextColor(QColor("#16a34a"), QColor("#16a34a"))

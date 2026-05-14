@@ -6,6 +6,7 @@ PyInstaller 配置文件
 
 import sys
 import os
+import subprocess
 from PyInstaller.utils.hooks import collect_submodules
 
 block_cipher = None
@@ -13,9 +14,39 @@ block_cipher = None
 # 项目根目录（从 deploy 目录向上一级）
 root_dir = os.path.abspath('..')
 
+# 版本文件路径
+version_src = '../version.txt'
+version_path = os.path.abspath(os.path.join(os.path.dirname(SPEC), version_src))
+
+# 打包时自动生成 version.txt（跨平台，不依赖 sh）
+_repo_root = os.path.abspath(os.path.join(os.path.dirname(SPEC), '..', '..'))
+version_value = 'v0.0.0'
+
+# GitHub Actions：在由 tag 触发的构建中，浅克隆下 git describe 可能失败，可直接用 ref 名
+_ref_type = (os.environ.get('GITHUB_REF_TYPE') or '').strip().lower()
+_ref_name = (os.environ.get('GITHUB_REF_NAME') or '').strip()
+if _ref_type == 'tag' and _ref_name:
+    version_value = _ref_name
+else:
+    try:
+        version_value = subprocess.check_output(
+            ['git', 'describe', '--tags'],
+            cwd=_repo_root,
+            text=True,
+        ).strip()
+    except Exception:
+        version_value = 'v0.0.0'
+
+try:
+    with open(version_path, 'w', encoding='utf-8') as f:
+        f.write(f'{version_value}\n')
+except Exception:
+    pass
+
 # 收集所有需要的数据文件
 datas = [
     ('../README.md', '.'),
+    (version_src, '.'),
     # 打包 app 模块（FastAPI 应用）
     ('../app', 'app'),
     # 打包前端构建目录（pnpm build 输出到 dist）

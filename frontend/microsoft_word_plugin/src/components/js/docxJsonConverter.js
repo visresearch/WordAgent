@@ -107,6 +107,31 @@ const DEFAULT_RSTYLE = ["", 12, false, false, 0, "#000000", "#000000", 0, false,
 const DEFAULT_CSTYLE = [1, 1, "left", "center"];
 const DEFAULT_IMAGE_PSTYLE = ["center", 0, 0, 0, 0, 0, 0, "", 0];
 
+/**
+ * 获取段落 paraID（Microsoft Word 当前优先回退到 paraIndex）。
+ * 说明：Office.js 段落对象未稳定暴露可直接用于持久定位的 paraID，
+ * 因此这里先统一输出整数 ID，保证与后端 paraID 协议兼容。
+ */
+function getParagraphParaID(paragraph, fallbackParaIndex = null) {
+  if (!paragraph) {
+    return Number.isInteger(fallbackParaIndex) ? fallbackParaIndex : null;
+  }
+
+  const candidateKeys = ["paragraphId", "paraId", "id", "ID", "uniqueLocalId"];
+  for (const key of candidateKeys) {
+    const value = paragraph?.[key];
+    if (value === undefined || value === null || value === "") {
+      continue;
+    }
+    const parsed = Number.parseInt(String(value), 10);
+    if (Number.isInteger(parsed)) {
+      return parsed;
+    }
+  }
+
+  return Number.isInteger(fallbackParaIndex) ? fallbackParaIndex : null;
+}
+
 // ============== 样式去重与解析 ==============
 
 function createStyleRegistry() {
@@ -1595,7 +1620,9 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
               cells: [],
               tStyle: [getAlignmentName(table.alignment)],
               paraIndex: tpr.start,
+              paraID: tpr.start,
               endParaIndex: tpr.end,
+              endParaID: tpr.end,
             };
 
             const tableRows = table.rows;
@@ -1786,7 +1813,13 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
 
           // 表格内段落
           if (para.tableNestingLevel > 0) {
-            rangeResult.paragraphs.push({ pStyle: "", runs: [], paraIndex: idx, inTable: true });
+            rangeResult.paragraphs.push({
+              pStyle: "",
+              runs: [],
+              paraIndex: idx,
+              paraID: idx,
+              inTable: true,
+            });
             continue;
           }
 
@@ -1797,12 +1830,13 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
             const picRuns = [];
             await appendParagraphInlinePictureRuns(picRuns, para, context);
             if (picRuns.length === 0) {
-              rangeResult.paragraphs.push({ pStyle: "", runs: [], paraIndex: idx });
+              rangeResult.paragraphs.push({ pStyle: "", runs: [], paraIndex: idx, paraID: idx });
             } else {
               rangeResult.paragraphs.push({
                 pStyle: DEFAULT_IMAGE_PSTYLE,
                 runs: picRuns,
                 paraIndex: idx,
+                paraID: idx,
               });
             }
             continue;
@@ -1906,6 +1940,7 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
             ),
             runs: runs,
             paraIndex: idx,
+            paraID: idx,
           });
         }
 
@@ -2247,7 +2282,9 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
 
           for (let ti = 0; ti < result.tables.length && ti < tableParagraphRanges.length; ti++) {
             result.tables[ti].paraIndex = tableParagraphRanges[ti].start;
+            result.tables[ti].paraID = tableParagraphRanges[ti].start;
             result.tables[ti].endParaIndex = tableParagraphRanges[ti].end;
+            result.tables[ti].endParaID = tableParagraphRanges[ti].end;
           }
         }
 
@@ -2318,12 +2355,13 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
             const picRuns = [];
             await appendParagraphInlinePictureRuns(picRuns, para, context);
             if (picRuns.length === 0) {
-              result.paragraphs.push({ pStyle: "", runs: [], paraIndex: _paraIdx });
+              result.paragraphs.push({ pStyle: "", runs: [], paraIndex: _paraIdx, paraID: _paraIdx });
             } else {
               result.paragraphs.push({
                 pStyle: DEFAULT_IMAGE_PSTYLE,
                 runs: picRuns,
                 paraIndex: _paraIdx,
+                paraID: _paraIdx,
               });
             }
             continue;
@@ -2526,6 +2564,7 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
             ),
             runs: runs,
             paraIndex: _paraIdx,
+            paraID: _paraIdx,
           };
 
           if (paragraphData.runs.length > 0) {
@@ -2552,9 +2591,10 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
  *   'selection' - 当前选区之后
  *   'replace'   - 替换当前选区
  *   'before'    - 在 jsonData.paraIndex 指定的段落之前插入（O(1) 定位）
+ * @param {number|null} [insertParaID=null] - 可选，按 paraID 定位插入（高优先级）
  * @returns {Promise<Object>} - 成功返回 {success: true}，失败返回 {error: string}
  */
-async function generateDocxFromJSON(jsonData, insertLocation = "selection") {
+async function generateDocxFromJSON(jsonData, insertLocation = "selection", insertParaID = null) {
   try {
     if (!jsonData || (!jsonData.paragraphs && !jsonData.tables)) {
       return { error: "JSON数据格式不正确" };
@@ -2562,11 +2602,38 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection") {
 
     const styles = jsonData.styles || {};
 
+    let insertFallbackWarning = null;
+
     return await Word.run(async (context) => {
       let targetRange;
       let insertBeforeMode = false;
 
-      if (insertLocation === "before") {
+      if (insertParaID !== null && insertParaID !== undefined) {
+        const allParagraphs = context.document.body.paragraphs;
+        allParagraphs.load("items");
+        await context.sync();
+        const total = allParagraphs.items.length;
+
+        let targetParaIndex = -1;
+        for (let i = 0; i < total; i++) {
+          const paraID = getParagraphParaID(allParagraphs.items[i], i);
+          if (paraID === Number(insertParaID)) {
+            targetParaIndex = i;
+            break;
+          }
+        }
+
+        if (targetParaIndex < 0) {
+          insertFallbackWarning = `insertParaID ${insertParaID} 未找到，已回退到文档末尾`;
+          console.warn(`[generateDocxFromJSON] ${insertFallbackWarning}`);
+          targetRange = context.document.body;
+          insertBeforeMode = false;
+          insertLocation = "end";
+        } else {
+          targetRange = allParagraphs.items[targetParaIndex];
+          insertBeforeMode = true;
+        }
+      } else if (insertLocation === "before") {
         // 'before' 模式：通过 paraIndex 直接 O(1) 定位到目标段落
         const rawParaIndex = jsonData.paraIndex;
         const paraIndex = Number(rawParaIndex);
@@ -3013,7 +3080,11 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection") {
 
       const paraCount = jsonData.paragraphs?.length || 0;
       const tableCount = jsonData.tables?.length || 0;
-      return { success: true, message: `文档生成成功！${paraCount} 段落 / ${tableCount} 表格` };
+      return {
+        success: true,
+        message: `文档生成成功！${paraCount} 段落 / ${tableCount} 表格`,
+        warning: insertFallbackWarning,
+      };
     });
   } catch (error) {
     let debugInfo = "";
@@ -3065,17 +3136,22 @@ function findClosestMatch(items, offset) {
 }
 
 /**
- * 删除指定范围的段落（Office.js 版本）
- * @param {number} startParaIndex - 起始段落索引（0-based）
- * @param {number} [endParaIndex] - 结束段落索引（0-based，含），-1 表示删除到文档末尾
+ * 根据段落ID列表删除文档中的段落（按出现位置逆序删除）
+ * @param {number[]} paraIDs - 待删除段落 paraID 列表
  * @returns {Promise<{ success: boolean, deletedCount: number, message: string }>}
  */
-async function deleteDocxPara(startParaIndex, endParaIndex) {
-  if (startParaIndex === undefined || startParaIndex === null) {
-    return { success: false, deletedCount: 0, message: "未提供有效的 startParaIndex" };
+async function deleteDocxPara(paraIDs) {
+  if (!Array.isArray(paraIDs) || paraIDs.length === 0) {
+    return { success: false, deletedCount: 0, message: "未提供有效的 paraIDs 列表" };
   }
-  if (endParaIndex === undefined || endParaIndex === null) {
-    endParaIndex = startParaIndex;
+
+  const normalizedIDs = [...new Set(
+    paraIDs
+      .map((v) => Number(v))
+      .filter((v) => Number.isInteger(v))
+  )];
+  if (normalizedIDs.length === 0) {
+    return { success: false, deletedCount: 0, message: "paraIDs 中没有有效整数ID" };
   }
 
   try {
@@ -3089,41 +3165,32 @@ async function deleteDocxPara(startParaIndex, endParaIndex) {
         return { success: false, deletedCount: 0, message: "文档中没有段落" };
       }
 
-      if (endParaIndex === -1) {
-        endParaIndex = totalParas - 1;
+      const targets = [];
+      for (let idx = 0; idx < totalParas; idx++) {
+        const paraID = getParagraphParaID(allParas.items[idx], idx);
+        if (normalizedIDs.includes(paraID)) {
+          targets.push({ paraIndex: idx, paraID });
+        }
       }
 
-      if (startParaIndex < 0 || startParaIndex >= totalParas) {
-        return {
-          success: false,
-          deletedCount: 0,
-          message: `startParaIndex ${startParaIndex} 超出范围，文档共 ${totalParas} 段`,
-        };
-      }
-      if (endParaIndex < startParaIndex || endParaIndex >= totalParas) {
-        return { success: false, deletedCount: 0, message: `endParaIndex ${endParaIndex} 无效` };
+      if (targets.length === 0) {
+        return { success: false, deletedCount: 0, message: "未找到匹配 paraIDs 的段落" };
       }
 
-      const deletedCount = endParaIndex - startParaIndex + 1;
-
-      // 整删全部段落：只清空内容（Word 要求至少保留一个空段落）
-      if (startParaIndex === 0 && endParaIndex >= totalParas - 1) {
-        const body = context.document.body;
-        body.clear();
-        await context.sync();
-        return { success: true, deletedCount, message: `成功删除 ${deletedCount} 个段落` };
+      targets.sort((a, b) => b.paraIndex - a.paraIndex);
+      let deletedCount = 0;
+      for (const target of targets) {
+        const para = allParas.items[target.paraIndex];
+        para.delete();
+        deletedCount++;
       }
-
-      // 一次性获取起止段落的范围，合并后整段删除（对标 WPS 的 Range 整段删除）
-      const startPara = allParas.items[startParaIndex];
-      const endPara = allParas.items[endParaIndex];
-      const startRange = startPara.getRange("Start");
-      const endRange = endPara.getRange("End");
-      const fullRange = startRange.expandTo(endRange);
-      fullRange.delete();
       await context.sync();
 
-      return { success: true, deletedCount, message: `成功删除 ${deletedCount} 个段落` };
+      return {
+        success: deletedCount > 0,
+        deletedCount,
+        message: `成功删除 ${deletedCount} 个段落（按 paraID）`,
+      };
     });
   } catch (e) {
     return { success: false, deletedCount: 0, message: `删除失败: ${e.message}` };
@@ -3206,6 +3273,65 @@ async function addCommentToParas(startParaIndex, endParaIndex, text, mode = 'rev
   }
 }
 
+/**
+ * 根据 paraID 定位段落索引范围
+ * @param {number} startParaID
+ * @param {number|null} [endParaID]
+ * @returns {Promise<{success:boolean,startParaIndex:number,endParaIndex:number,error?:string}>}
+ */
+async function findParaIndexRangeByParaIDs(startParaID, endParaID = null) {
+  const startID = Number(startParaID);
+  const endID = endParaID === null || endParaID === undefined ? startID : Number(endParaID);
+  if (!Number.isInteger(startID) || !Number.isInteger(endID)) {
+    return { success: false, error: "startParaID/endParaID 必须是整数" };
+  }
+
+  try {
+    return await Word.run(async (context) => {
+      const allParas = context.document.body.paragraphs;
+      allParas.load("items");
+      await context.sync();
+
+      const total = allParas.items.length;
+      let startParaIndex = -1;
+      let endParaIndex = -1;
+
+      for (let idx = 0; idx < total; idx++) {
+        const paraID = getParagraphParaID(allParas.items[idx], idx);
+        if (startParaIndex < 0 && paraID === startID) {
+          startParaIndex = idx;
+        }
+        if (endParaIndex < 0 && paraID === endID) {
+          endParaIndex = idx;
+        }
+        if (startParaIndex >= 0 && endParaIndex >= 0) {
+          break;
+        }
+      }
+
+      if (startParaIndex < 0) {
+        return { success: false, error: `未找到 startParaID=${startID} 对应段落` };
+      }
+      if (endParaIndex < 0) {
+        endParaIndex = startParaIndex;
+      }
+      if (endParaIndex < startParaIndex) {
+        const tmp = startParaIndex;
+        startParaIndex = endParaIndex;
+        endParaIndex = tmp;
+      }
+
+      return {
+        success: true,
+        startParaIndex,
+        endParaIndex,
+      };
+    });
+  } catch (e) {
+    return { success: false, error: `按 paraID 定位段落失败: ${e.message}` };
+  }
+}
+
 // ============== 导出 ==============
 
 export default {
@@ -3236,6 +3362,8 @@ export default {
   exportImageToTemp,
   appendParagraphInlinePictureRuns,
   loadImageAsBase64ForInsert,
+  getParagraphParaID,
+  findParaIndexRangeByParaIDs,
 };
 
 export {
@@ -3266,4 +3394,6 @@ export {
   exportImageToTemp,
   appendParagraphInlinePictureRuns,
   loadImageAsBase64ForInsert,
+  getParagraphParaID,
+  findParaIndexRangeByParaIDs,
 };

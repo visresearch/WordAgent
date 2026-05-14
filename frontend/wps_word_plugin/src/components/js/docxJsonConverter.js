@@ -8,6 +8,8 @@
  * JSON schema 数据结构（精简版）：
  * {
  *   paragraphs: [{             // 段落数组
+ *     paraID: number,          // 段落唯一标识（int范围内）
+ *     paraIndex: number,       // 段落索引（0-based）
  *     pStyle: [                // 段落样式数组（按顺序）
  *       alignment,             // [0] 对齐: left/center/right/justify
  *       lineSpacing,           // [1] 行间距
@@ -42,7 +44,8 @@
  *     }]
  *   }],
  *   tables: [{                 // 表格数组
- *     rows: number,
+ *     rows: number, *   fields: [],               // 域代码数组
+ *   hasTOC: boolean,          // 是否包含目录
  *     columns: number,
  *     tStyle: [tableAlignment],// 表格样式数组
  *     cells: [[{               // 单元格二维数组
@@ -55,8 +58,6 @@
  *       ]
  *     }]]
  *   }],
- *   fields: [],               // 域代码数组
- *   hasTOC: boolean,          // 是否包含目录
  *   styles: {                 // 样式字典（去重）
  *     pS_1: [...],            // 段落样式，键名 pS_N
  *     rS_1: [...],            // 字符样式，键名 rS_N
@@ -116,6 +117,30 @@ const DEFAULT_IMAGE_PSTYLE = ['center', 0, 0, 0, 0, 0, 0, '', 0];
 
 function isEmptyParagraph(para) {
   return !!(para && Array.isArray(para.runs) && para.runs.length === 0);
+}
+
+function getParagraphParaID(para, fallback = null) {
+  if (!para) {
+    return fallback;
+  }
+
+  try {
+    if (para.ParaID !== undefined && para.ParaID !== null && para.ParaID !== '') {
+      return para.ParaID;
+    }
+  } catch (e) {
+    void e;
+  }
+
+  try {
+    if (para.ID !== undefined && para.ID !== null && para.ID !== '') {
+      return para.ID;
+    }
+  } catch (e) {
+    void e;
+  }
+
+  return fallback;
 }
 
 // ============== 样式去重与解析 ==============
@@ -1011,6 +1036,7 @@ function parseCellParagraphs(cellRange, doc) {
 
         const paraData = {
           text: paraText,
+          paraID: getParagraphParaID(para),
           pStyle: [
             getAlignmentName(para.Format.Alignment),
             para.Format.LineSpacing || 0,
@@ -1308,10 +1334,55 @@ function _findEndParaIndex(paraStartsSorted, tableRangeEnd, totalParaCount) {
  *   传入后走快速路径：O(k) 仅解析指定范围段落，忽略 range 参数
  * @param {number} [endParaIndex] - 可选，结束全文段落索引（0-based，含），
  *   省略时默认等于 startParaIndex（即只解析单段）；-1 表示解析到文档末尾
+ * @param {Object} [docOverride] - 可选，指定文档对象，默认为 ActiveDocument
+ * @param {number|null} [startParaID] - 可选，起始段落 paraID；存在时优先按 paraID 范围解析
+ * @param {number|null} [endParaID] - 可选，结束段落 paraID；省略时默认等于 startParaID
  * @returns {Object} - JSON 数据或错误对象
  */
-function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride) {
+function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride, startParaID = null, endParaID = null) {
   try {
+    // ========== 快速路径：按 paraID 范围解析（优先级高于 paraIndex） ==========
+    if (startParaID !== undefined && startParaID !== null) {
+      const doc = docOverride || window.Application?.ActiveDocument;
+      if (!doc) {
+        return { error: '没有打开的文档' };
+      }
+
+      if (endParaID === undefined || endParaID === null) {
+        endParaID = startParaID;
+      }
+
+      let startIndexByID = -1;
+      let endIndexByID = -1;
+      try {
+        const paras = doc.Paragraphs;
+        for (let i = 1; i <= paras.Count; i++) {
+          const para = paras.Item(i);
+          const pid = getParagraphParaID(para, null);
+          if (pid === startParaID && startIndexByID === -1) {
+            startIndexByID = i - 1;
+          }
+          if (pid === endParaID) {
+            endIndexByID = i - 1;
+          }
+        }
+      } catch (e) {
+        return { error: '按段落ID定位失败: ' + e.message };
+      }
+
+      if (startIndexByID < 0) {
+        return { error: `startParaID ${startParaID} 未找到` };
+      }
+      if (endIndexByID < 0) {
+        return { error: `endParaID ${endParaID} 未找到` };
+      }
+      if (endIndexByID < startIndexByID) {
+        return { error: `endParaID ${endParaID} 早于 startParaID ${startParaID}` };
+      }
+
+      return parseDocxToJSON(null, startIndexByID, endIndexByID, doc, null, null);
+    }
+
     // ========== 快速路径：按 paraIndex 范围解析 ==========
     if (startParaIndex !== undefined && startParaIndex !== null) {
       if (endParaIndex === undefined || endParaIndex === null) {
@@ -1489,6 +1560,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride) {
         const paraRange = para.Range;
         const paraStart = paraRange.Start;
         const paraEnd = paraRange.End;
+        const paraID = getParagraphParaID(para, idx);
 
         // 跳过表格内段落
         let inTable = false;
@@ -1522,13 +1594,13 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride) {
 
         // 空段落但有图片
         if ((!paraText || paraText.match(/^[\r\n\f\u0007]*$/)) && (paraInlineImages.length > 0 || paraFloatingImages.length > 0)) {
-          result.paragraphs.push({ pStyle: DEFAULT_IMAGE_PSTYLE, runs: [], paraIndex: idx });
+          result.paragraphs.push({ pStyle: DEFAULT_IMAGE_PSTYLE, runs: [], paraIndex: idx, paraID });
         }
 
         // 如果是空段落且没有图片
         if (!paraText || paraText.match(/^[\r\n\f\u0007]*$/)) {
           if (paraInlineImages.length === 0 && paraFloatingImages.length === 0) {
-            result.paragraphs.push({ pStyle: '', runs: [], paraIndex: idx });
+            result.paragraphs.push({ pStyle: '', runs: [], paraIndex: idx, paraID });
           }
           continue;
         }
@@ -1552,7 +1624,8 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride) {
             paraFormat.LineSpacingRule || 0
           ],
           runs: [],
-          paraIndex: idx
+          paraIndex: idx,
+          paraID
         };
 
         // 解析 runs
@@ -1680,7 +1753,8 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride) {
             altText: img.altText,
             url: img.url
           }],
-          paraIndex: -1
+          paraIndex: -1,
+          paraID: null
         });
       }
       for (const img of floatingImages) {
@@ -1696,7 +1770,8 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride) {
             altText: img.altText,
             url: img.url
           }],
-          paraIndex: -1
+          paraIndex: -1,
+          paraID: null
         });
       }
 
@@ -1841,6 +1916,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride) {
         const paraRange = para.Range;
         const paraStart = paraRange.Start;
         const paraEnd = paraRange.End;
+        const paraID = getParagraphParaID(para, paraStartToIndex.get(paraStart) ?? null);
 
         // // ====== DEBUG: 输出段落的各种属性 ======
         // try {
@@ -1901,7 +1977,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride) {
         // } catch (debugErr) {
         //   console.log(`  [DEBUG ERROR] 段落 ${i}: ${debugErr.message}`);
         // }
-        // // ====== END DEBUG ======
+        // // // ====== END DEBUG ======
 
         // 跳过表格内段落
         let inTable = false;
@@ -1935,7 +2011,12 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride) {
 
         // 空段落但有图片
         if ((!paraText || paraText.match(/^[\r\n\f\u0007]*$/)) && (paraInlineImages.length > 0 || paraFloatingImages.length > 0)) {
-          result.paragraphs.push({ pStyle: DEFAULT_IMAGE_PSTYLE, runs: [], paraIndex: paraStartToIndex.get(paraStart) ?? -1 });
+          result.paragraphs.push({
+            pStyle: DEFAULT_IMAGE_PSTYLE,
+            runs: [],
+            paraIndex: paraStartToIndex.get(paraStart) ?? -1,
+            paraID
+          });
         }
 
         // 空段落且没有图片
@@ -1944,7 +2025,8 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride) {
             result.paragraphs.push({
               pStyle: '',
               runs: [],
-              paraIndex: paraStartToIndex.get(paraStart) ?? -1
+              paraIndex: paraStartToIndex.get(paraStart) ?? -1,
+              paraID
             });
           }
           continue;
@@ -1970,7 +2052,8 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride) {
             paraFormat.LineSpacingRule || 0
           ],
           runs: [],
-          paraIndex: paraStartToIndex.get(paraStart) ?? -1
+          paraIndex: paraStartToIndex.get(paraStart) ?? -1,
+          paraID
         };
 
         // 解析 runs - 使用Characters确保捕获Tab等特殊字符
@@ -2111,7 +2194,8 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride) {
           altText: img.altText,
           url: img.url
         }],
-        paraIndex: -1
+        paraIndex: -1,
+        paraID: null
       });
     }
     for (const img of floatingImages) {
@@ -2127,7 +2211,8 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride) {
           altText: img.altText,
           url: img.url
         }],
-        paraIndex: -1
+        paraIndex: -1,
+        paraID: null
       });
     }
 
@@ -2482,11 +2567,11 @@ function generateTable(doc, tableData, currentPos, styles) {
  * 从 JSON 数据生成 Word 文档
  * @param {Object} jsonData - JSON 数据
  * @param {Object} doc - 已存在的文档对象（可选，默认创建新文档）
- * @param {number} [insertParaIndex] - 可选，在指定段落索引（0-based）之前插入。
+ * @param {number|null} [insertParaID] - 可选，在指定段落 paraID 之后插入。
  *   省略时在当前选区位置插入。
  * @returns {Object} - 成功返回 {success: true, doc, startPos, endPos}，失败返回 {error: string}
  */
-function generateDocxFromJSON(jsonData, doc, insertParaIndex) {
+function generateDocxFromJSON(jsonData, doc, insertParaID) {
   try {
     if (!jsonData || (!jsonData.paragraphs && !jsonData.tables)) {
       return { error: 'JSON数据格式不正确' };
@@ -2543,17 +2628,28 @@ function generateDocxFromJSON(jsonData, doc, insertParaIndex) {
     }
 
     // 确定插入起始位置
+    let insertFallbackWarning = null;
     let currentPos;
-    if (insertParaIndex === -1) {
-      // -1: 在文档末尾插入
-      currentPos = doc.Content.End - 1;
-    } else if (insertParaIndex !== undefined && insertParaIndex !== null) {
-      // 通过段落索引定位插入位置（在指定段落之前插入）
+    if (insertParaID !== undefined && insertParaID !== null) {
+      // 通过段落ID定位插入位置（在指定段落之后插入）
       const totalParas = doc.Paragraphs.Count;
-      if (insertParaIndex < 0 || insertParaIndex >= totalParas) {
-        return { error: `insertParaIndex ${insertParaIndex} 超出范围，文档共 ${totalParas} 段` };
+      let targetIndex = -1;
+      for (let pi = 1; pi <= totalParas; pi++) {
+        const para = doc.Paragraphs.Item(pi);
+        const pid = getParagraphParaID(para, null);
+        if (pid === insertParaID) {
+          targetIndex = pi;
+          break;
+        }
       }
-      currentPos = doc.Paragraphs.Item(insertParaIndex + 1).Range.Start; // WPS 1-based
+      if (targetIndex < 0) {
+        insertFallbackWarning = `insertParaID ${insertParaID} 未找到，已回退到当前光标位置`;
+        console.warn(`[generateDocxFromJSON] ${insertFallbackWarning}`);
+        const selection = window.Application.Selection;
+        currentPos = selection ? selection.Range.Start : Math.max(0, (doc.Content?.End || 1) - 1);
+      } else {
+        currentPos = doc.Paragraphs.Item(targetIndex).Range.End; // WPS 1-based，插在目标段落后
+      }
     } else {
       // 默认使用当前选区位置
       const selection = window.Application.Selection;
@@ -2574,9 +2670,7 @@ function generateDocxFromJSON(jsonData, doc, insertParaIndex) {
             // 从 insertParaIndex 附近开始扫描，找到第一个在表格后面的段落
             const totalP = doc.Paragraphs.Count;
             let safePos = doc.Content.End - 1; // fallback: 文档末尾
-            const scanStart = (insertParaIndex != null && insertParaIndex >= 0)
-              ? insertParaIndex + 1  // WPS 1-based
-              : 1;
+            const scanStart = 1;
             for (let pi = scanStart; pi <= totalP; pi++) {
               const pStart = doc.Paragraphs.Item(pi).Range.Start;
               if (pStart >= tblRange.End) {
@@ -2832,7 +2926,14 @@ function generateDocxFromJSON(jsonData, doc, insertParaIndex) {
       rgSel.Select();
     }
 
-    return { success: true, message: '文档生成成功！', doc, startPos: insertStartPos, endPos: currentPos };
+    return {
+      success: true,
+      message: '文档生成成功！',
+      doc,
+      startPos: insertStartPos,
+      endPos: currentPos,
+      warning: insertFallbackWarning
+    };
   } catch (error) {
     return { error: '生成文档失败: ' + error.message };
   }
@@ -2841,19 +2942,15 @@ function generateDocxFromJSON(jsonData, doc, insertParaIndex) {
 // ============== 段落删除 ==============
 
 /**
- * 根据段落索引范围批量删除文档中的段落
- * 
- * @param {number} startParaIndex - 起始段落索引（0-based）
- * @param {number} [endParaIndex] - 结束段落索引（0-based，含），省略时默认等于 startParaIndex；-1 表示删除到文档末尾
+ * 根据段落ID列表删除文档中的段落（按出现位置逆序删）
+ *
+ * @param {number[]} paraIDs - 要删除的段落 paraID 列表（每个 ID 对应一个独立段落）
  * @param {Object} [docOverride] - 可选，指定文档对象，默认为 ActiveDocument
  * @returns {{ success: boolean, deletedCount: number, message: string }}
  */
-function deleteDocxPara(startParaIndex, endParaIndex, docOverride) {
-  if (startParaIndex === undefined || startParaIndex === null) {
-    return { success: false, deletedCount: 0, message: '未提供有效的 startParaIndex' };
-  }
-  if (endParaIndex === undefined || endParaIndex === null) {
-    endParaIndex = startParaIndex;
+function deleteDocxPara(paraIDs, docOverride) {
+  if (!Array.isArray(paraIDs) || paraIDs.length === 0) {
+    return { success: false, deletedCount: 0, message: '未提供有效的 paraIDs 列表' };
   }
 
   const doc = docOverride || window.Application?.ActiveDocument;
@@ -2866,44 +2963,55 @@ function deleteDocxPara(startParaIndex, endParaIndex, docOverride) {
     return { success: false, deletedCount: 0, message: '文档中没有段落' };
   }
 
-  // endParaIndex === -1 表示删除到文档末尾
-  if (endParaIndex === -1) {
-    endParaIndex = totalParas - 1;
+  const normalizedIDs = [...new Set(
+    paraIDs
+      .map((v) => Number(v))
+      .filter((v) => Number.isInteger(v))
+  )];
+  if (normalizedIDs.length === 0) {
+    return { success: false, deletedCount: 0, message: 'paraIDs 中没有有效整数ID' };
   }
 
-  if (startParaIndex < 0 || startParaIndex >= totalParas) {
-    return { success: false, deletedCount: 0, message: `startParaIndex ${startParaIndex} 超出范围，文档共 ${totalParas} 段` };
-  }
-  if (endParaIndex < startParaIndex || endParaIndex >= totalParas) {
-    return { success: false, deletedCount: 0, message: `endParaIndex ${endParaIndex} 无效（startParaIndex=${startParaIndex}，文档共 ${totalParas} 段）` };
-  }
-
-  // 一次性计算整个删除范围，然后一次删除（避免逐段删除的索引偏移和残留问题）
-  let deletedCount = endParaIndex - startParaIndex + 1;
-  try {
-    const firstPara = doc.Paragraphs.Item(startParaIndex + 1); // WPS 1-based
-    const lastPara = doc.Paragraphs.Item(endParaIndex + 1);
-    let delStart = firstPara.Range.Start;
-    let delEnd = lastPara.Range.End;
-
-    // 如果删除范围到文档末尾且前面还有段落，向前扩展 1 字符吃掉前段的 \r
-    // 否则如果后面还有内容，段落 Range.End 已包含 \r，直接删即可
-    if (delEnd >= doc.Content.End && delStart > 0) {
-      delStart -= 1;
+  const targets = [];
+  for (let i = 1; i <= totalParas; i++) {
+    const para = doc.Paragraphs.Item(i);
+    const pid = getParagraphParaID(para, null);
+    if (normalizedIDs.includes(pid)) {
+      targets.push({
+        paraIndex: i - 1,
+        start: para.Range.Start,
+        end: para.Range.End,
+        paraID: pid
+      });
     }
+  }
 
-    if (startParaIndex === 0 && endParaIndex >= totalParas - 1) {
-      // 删除全部段落：只清空内容，Word 要求至少保留一个空段落
-      doc.Content.Text = '';
-    } else {
+  if (targets.length === 0) {
+    return { success: false, deletedCount: 0, message: '未找到匹配 paraIDs 的段落' };
+  }
+
+  // 从后往前删，避免位置偏移
+  targets.sort((a, b) => b.start - a.start);
+  let deletedCount = 0;
+  for (const t of targets) {
+    try {
+      let delStart = t.start;
+      const delEnd = t.end;
+      if (delEnd >= doc.Content.End && delStart > 0) {
+        delStart -= 1;
+      }
       doc.Range(delStart, delEnd).Delete();
+      deletedCount++;
+    } catch (e) {
+      console.log('删除段落失败:', e.message);
     }
-  } catch (e) {
-    console.log('删除段落范围失败:', e.message);
-    deletedCount = 0;
   }
 
-  return { success: true, deletedCount, message: `成功删除 ${deletedCount} 个段落` };
+  return {
+    success: deletedCount > 0,
+    deletedCount,
+    message: `成功删除 ${deletedCount} 个段落（按 paraID）`
+  };
 }
 
 // ============== 导出 ==============
@@ -2920,6 +3028,7 @@ export default {
   exportImageToTemp,
   deduplicateStyles,
   resolveStyle,
+  getParagraphParaID,
 
   // 样式数组常量
   PSTYLE,
@@ -2958,6 +3067,7 @@ export {
   exportImageToTemp,
   deduplicateStyles,
   resolveStyle,
+  getParagraphParaID,
   PSTYLE,
   RSTYLE,
   CSTYLE,

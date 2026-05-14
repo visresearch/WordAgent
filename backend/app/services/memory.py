@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import warnings
 from pathlib import Path
@@ -43,13 +44,6 @@ SHORT_TERM_TOKEN_BUDGET = _get_env_int("WORDAGENT_SHORT_TERM_TOKEN_BUDGET", 3000
 
 
 # ============== 长期记忆配置 ==============
-ENABLE_AUTO_MEMORY_EXTRACT = os.environ.get("WORDAGENT_ENABLE_AUTO_MEMORY_EXTRACT", "true").strip().lower() in {
-    "1",
-    "true",
-    "yes",
-    "on",
-}
-
 MEMORY_EXTRACT_TEMPERATURE = _get_env_int("WORDAGENT_MEMORY_EXTRACT_TEMPERATURE", 0.3)
 
 # 长期记忆上限（条数）
@@ -69,6 +63,22 @@ def _get_memory_dir() -> Path:
 def _get_memory_file() -> Path:
     """获取记忆文件路径"""
     return _get_memory_dir() / "memory.md"
+
+
+def is_long_term_memory_enabled() -> bool:
+    """是否启用长期记忆（由用户设置控制，默认关闭）。"""
+    try:
+        from app.core.config import get_user_settings_file
+
+        settings_file = get_user_settings_file()
+        if not settings_file.exists():
+            return False
+        raw = settings_file.read_text(encoding="utf-8")
+        data = json.loads(raw) if raw.strip() else {}
+        return bool(data.get("enableLongTermMemory", False))
+    except Exception as e:
+        print(f"[Memory] 读取长期记忆开关失败，按关闭处理: {e}")
+        return False
 
 
 def _get_all_items() -> list[str]:
@@ -200,6 +210,9 @@ def read_long_term_memory() -> str:
 
 def build_long_term_memory_prompt() -> str:
     """将长期记忆格式化为系统提示词的一部分"""
+    if not is_long_term_memory_enabled():
+        return ""
+
     content = read_long_term_memory()
     if not content:
         return ""
@@ -491,7 +504,6 @@ def _parse_extracted_items(content: str) -> list[str]:
 def extract_and_save_memory(
     conversation: str,
     llm: Any,
-    force: bool = False,
 ) -> dict[str, bool]:
     """
     从对话中提取关键信息并保存到长期记忆。
@@ -504,13 +516,11 @@ def extract_and_save_memory(
     Args:
         conversation: 对话内容
         llm: LLM 实例
-        force: 强制提取，忽略 ENABLE_AUTO_MEMORY_EXTRACT 配置
-
     Returns:
         dict[str, bool]: {"added": True/False}
     """
-    if not force and not ENABLE_AUTO_MEMORY_EXTRACT:
-        print("[Memory] 自动记忆提取已禁用 (WORDAGENT_ENABLE_AUTO_MEMORY_EXTRACT=false)")
+    if not is_long_term_memory_enabled():
+        print("[Memory] 长期记忆开关关闭，跳过自动记忆提取")
         return {"added": False}
 
     if not conversation or not llm:
