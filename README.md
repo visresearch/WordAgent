@@ -37,8 +37,8 @@ Main JSON data structures:
   - **runs**: text-run array, the smallest content unit in this project
     - **text**: text content
     - **rStyle**: character style ID (for example, bold, red)
-  - **paraIndex**: paragraph index, used by the agent to locate and edit a specific paragraph precisely
-  - **paraID**: paragraph ID, used by the agent to locate and edit a specific paragraph precisely
+  - **paraIndex**: paragraph index, used by the agent to locate a specific paragraph precisely
+  - **paraID**: paragraph ID, used by the agent to edit a specific paragraph precisely
 - **styles**: style-definition dictionary that contains all paragraph and character style definitions; the agent references these style IDs to preserve formatting correctness
 
 Compared with many AI writing assistants on the market, WenCe AI provides:

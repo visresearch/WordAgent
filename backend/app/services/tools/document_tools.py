@@ -593,9 +593,7 @@ def _search_document_impl(query: DocumentQuery, docId: DocIdInput) -> str:
                             writer(
                                 {
                                     "type": "query_complete",
-                                    "content": (
-                                        f"✅ 搜索完成，找到 {match_count} 处匹配"
-                                    ),
+                                    "content": (f"✅ 搜索完成，找到 {match_count} 处匹配"),
                                     "docId": resolved_doc_id,
                                 }
                             )

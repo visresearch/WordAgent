@@ -421,7 +421,9 @@ def _wrap_mcp_tool_for_sync(tool, loop: asyncio.AbstractEventLoop, call_timeout_
                     "content": f"MCP 工具 {tool.name} 执行失败",
                 }
             )
-            print(f"[MCP] ❌ {tool.name} 失败，耗时 {_time.time() - t0:.1f}s，错误: {err_text}，已返回错误结果并继续流程")
+            print(
+                f"[MCP] ❌ {tool.name} 失败，耗时 {_time.time() - t0:.1f}s，错误: {err_text}，已返回错误结果并继续流程"
+            )
             return f"MCP tool '{tool.name}' execution failed: {err_text}"
 
     return StructuredTool(

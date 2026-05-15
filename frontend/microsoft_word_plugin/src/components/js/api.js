@@ -46,6 +46,20 @@ function setGlobalBaseURL(value) {
 
 setGlobalBaseURL(CONFIG.baseURL);
 
+function normalizeParaIdValue(value) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed ? trimmed : null;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  return null;
+}
+
 // ============== 工具函数 ==============
 
 /**
@@ -534,10 +548,10 @@ const wsManager = {
       const matchedParaIds = [
         ...new Set(
           (result.matches || [])
-            .map((m) => m?.paragraphId)
-            .filter((id) => Number.isInteger(id))
+            .map((m) => normalizeParaIdValue(m?.paragraphId))
+            .filter((id) => id)
         ),
-      ].sort((a, b) => a - b);
+      ];
 
       await this.send({
         type: "query_response",
@@ -666,8 +680,8 @@ function chatStream(message, options = {}) {
  * @param {number|null} [startParaIndex=0] - 起始段落索引（0-based）
  * @param {number|null} [endParaIndex=-1] - 结束段落索引（0-based）
  * @param {number|null} [docId=0] - 文档 ID，Microsoft Word 当前固定为 0
- * @param {number|null} [startParaID=null] - 起始段落 paraID（优先于索引）
- * @param {number|null} [endParaID=null] - 结束段落 paraID
+ * @param {string|number|null} [startParaID=null] - 起始段落 paraID（优先于索引）
+ * @param {string|number|null} [endParaID=null] - 结束段落 paraID
  * @returns {Promise<Object>} - 解析结果
  */
 async function parseDocumentRange(

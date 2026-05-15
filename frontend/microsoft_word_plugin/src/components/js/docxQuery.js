@@ -15,6 +15,20 @@
 
 import { PSTYLE, RSTYLE } from "./docxJsonConverter.js";
 
+function normalizeParaIdValue(value) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed ? trimmed : null;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  return null;
+}
+
 // ============== Query 执行器 ==============
 
 /**
@@ -683,7 +697,7 @@ export function executeStyleQuery(docJson, queryDSL) {
 
         if (matchRunFilters(run, filters)) {
           const paraIndex = Number.isInteger(para?.paraIndex) ? para.paraIndex : pi;
-          const paraID = Number.isInteger(para?.paraID) ? para.paraID : null;
+          const paraID = normalizeParaIdValue(para?.paraID);
 
           matches.push({
             text: run.text,
@@ -704,7 +718,7 @@ export function executeStyleQuery(docJson, queryDSL) {
 
       if (matchParagraphFilters(para, filters)) {
         const paraIndex = Number.isInteger(para?.paraIndex) ? para.paraIndex : pi;
-        const paraID = Number.isInteger(para?.paraID) ? para.paraID : null;
+        const paraID = normalizeParaIdValue(para?.paraID);
         const paraText = getFieldValue(para, "text");
 
         matches.push({

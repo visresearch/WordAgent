@@ -58,7 +58,7 @@
 
 <script>
 /* global Word */
-import { generateDocxFromJSON, deleteDocxPara, addCommentToParas } from '../js/docxJsonConverter.js';
+import { generateDocxFromJSON, deleteDocxPara, addCommentToParas, resolveParagraphParaIDs } from '../js/docxJsonConverter.js';
 import api from '../js/api.js';
 import ChatMessages from './ChatMessages.vue';
 import ChatInput from './ChatInput.vue';
@@ -734,13 +734,13 @@ export default {
           startParaIndex: s.startParaIndex,
           endParaIndex: s.endParaIndex,
           charCount: s.charCount,
-          docId: s.docId || '',
+          docId: Number.isInteger(s.docId) ? s.docId : 0,
           docName: s.docName || ''
         }));
         documentRange = this.selections.map(s => ({
           startParaIndex: s.startParaIndex,
           endParaIndex: s.endParaIndex,
-          docId: s.docId || '',
+          docId: Number.isInteger(s.docId) ? s.docId : 0,
           docName: s.docName || ''
         }));
         userMsgObj.selectionContext = selectionContext;
@@ -865,7 +865,8 @@ export default {
 
       // 后端请求读取文档
       if (data.type === 'read_document') {
-        const hasParaIDMode = Number.isInteger(data.startParaID) || Number.isInteger(data.endParaID);
+        const hasParaIDMode =
+          this._toParaIdOrNull(data.startParaID) !== null || this._toParaIdOrNull(data.endParaID) !== null;
         msg.contentParts.push({
           type: 'status',
           content: data.content || (
@@ -879,8 +880,8 @@ export default {
         api.wsManager._handleDocumentRequest({
           startParaIndex: this._toIntOrNull(data.startParaIndex),
           endParaIndex: this._toIntOrNull(data.endParaIndex),
-          startParaID: this._toIntOrNull(data.startParaID),
-          endParaID: this._toIntOrNull(data.endParaID),
+          startParaID: this._toParaIdOrNull(data.startParaID),
+          endParaID: this._toParaIdOrNull(data.endParaID),
           docId: this._toIntOrDefault(data.docId, 0)
         });
         return;
@@ -945,9 +946,7 @@ export default {
 
       // 后端请求删除文档段落：立即标记删除范围（真正删除在用户确认时执行）
       if (data.type === 'delete_document') {
-        const paraIDs = Array.isArray(data.paraIDs)
-          ? data.paraIDs.map(v => Number(v)).filter(v => Number.isInteger(v))
-          : [];
+        const paraIDs = this._normalizeParaIdList(data.paraIDs);
         console.log('[AIChatPane] 后端请求删除文档段落, paraIDs:', paraIDs, 'docId:', data.docId);
         msg.contentParts.push({
           type: 'status',
@@ -1014,7 +1013,7 @@ export default {
           parts.push({ type: 'status', content: data.content || '📝 文档已生成', loading: false });
         }
         msg._docId = this._toIntOrDefault(data.docId, 0);
-        msg._insertParaID = this._toIntOrNull(data.insertParaID);
+        msg._insertParaID = this._toParaIdOrNull(data.insertParaID);
         this.scrollToBottom();
         return;
       }
@@ -1093,7 +1092,7 @@ export default {
         const insItem = {
           documentJson: data.content,
           docId: this._toIntOrDefault(data.docId, this._toIntOrDefault(data.content.docId, 0)),
-          insertParaID: this._toIntOrNull(data.content.insertParaID),
+          insertParaID: this._toParaIdOrNull(data.content.insertParaID),
           msg: msg
         };
         this._insertQueue = this._insertQueue
@@ -1127,6 +1126,54 @@ export default {
       return Number.isFinite(n) ? n : null;
     },
 
+    _toParaIdOrNull(value) {
+      if (value === null || value === undefined) {
+        return null;
+      }
+      if (typeof value === 'string') {
+        const trimmed = value.trim();
+        return trimmed ? trimmed : null;
+      }
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        return String(value);
+      }
+      return null;
+    },
+
+    _normalizeParaIdList(values) {
+      if (!Array.isArray(values)) {
+        return [];
+      }
+      const normalized = values
+        .map(v => this._toParaIdOrNull(v))
+        .filter(v => v !== null);
+      return [...new Set(normalized)];
+    },
+
+    async _resolveParaIDsToIndices(paraIDs = []) {
+      const normalized = this._normalizeParaIdList(paraIDs);
+      if (!normalized.length) {
+        return [];
+      }
+
+      return await Word.run(async (context) => {
+        const allParas = context.document.body.paragraphs;
+        allParas.load('items');
+        await context.sync();
+        const allParaIDs = await resolveParagraphParaIDs(context, allParas.items);
+
+        const idSet = new Set(normalized);
+        const indices = [];
+        for (let idx = 0; idx < allParas.items.length; idx++) {
+          const paraID = allParaIDs[idx];
+          if (paraID && idSet.has(paraID)) {
+            indices.push(idx);
+          }
+        }
+        return indices;
+      });
+    },
+
     _toIntOrDefault(value, defaultValue) {
       const n = this._toIntOrNull(value);
       return n === null ? defaultValue : n;
@@ -1158,9 +1205,7 @@ export default {
 
     _applyImmediateDelete(payload) {
       const docId = this._toIntOrDefault(payload?.docId, 0);
-      const paraIDs = Array.isArray(payload?.paraIDs)
-        ? payload.paraIDs.map(v => Number(v)).filter(v => Number.isInteger(v))
-        : [];
+      const paraIDs = this._normalizeParaIdList(payload?.paraIDs);
       if (!paraIDs.length) {
         return;
       }
@@ -1178,7 +1223,7 @@ export default {
 
     async _applyImmediateInsertion(insItem) {
       const normalizedDocId = this._toIntOrDefault(insItem.docId, 0);
-      const requestedInsertParaID = this._toIntOrNull(insItem.insertParaID);
+      const requestedInsertParaID = this._toParaIdOrNull(insItem.insertParaID);
       const docPayload = { ...(insItem.documentJson || {}) };
       const result = await generateDocxFromJSON(docPayload, "selection", requestedInsertParaID);
       if (!result || !result.success) {
@@ -1218,8 +1263,11 @@ export default {
           insertEndParaIndex = totalParas - 1;
           insertStartParaIndex = Math.max(0, totalParas - shiftCount);
         } else {
-          insertStartParaIndex = requestedInsertParaID;
-          insertEndParaIndex = requestedInsertParaID + shiftCount - 1;
+          const indices = await this._resolveParaIDsToIndices([requestedInsertParaID]);
+          if (indices.length > 0) {
+            insertStartParaIndex = indices[0] + 1;
+            insertEndParaIndex = insertStartParaIndex + shiftCount - 1;
+          }
         }
       }
 
@@ -1287,13 +1335,11 @@ export default {
         if (normalizedDocId !== pdDocId) {
           continue;
         }
-        const paraIDs = Array.isArray(pd.paraIDs)
-          ? pd.paraIDs.map(v => Number(v)).filter(v => Number.isInteger(v))
-          : [];
-        if (!paraIDs.length) {
+        const indices = await this._resolveParaIDsToIndices(pd.paraIDs || []);
+        if (!indices.length) {
           continue;
         }
-        const sorted = [...paraIDs].sort((a, b) => a - b);
+        const sorted = [...indices].sort((a, b) => a - b);
         const startParaID = sorted[0];
         const endParaID = sorted[sorted.length - 1];
 
@@ -1424,13 +1470,11 @@ export default {
     },
 
     async _clearHighlightOnParaIDs(paraIDs = [], docId = 0) {
-      const valid = Array.isArray(paraIDs)
-        ? paraIDs.map(v => Number(v)).filter(v => Number.isInteger(v))
-        : [];
-      if (!valid.length) {
+      const indices = await this._resolveParaIDsToIndices(paraIDs);
+      if (!indices.length) {
         return;
       }
-      const sorted = [...new Set(valid)].sort((a, b) => a - b);
+      const sorted = [...new Set(indices)].sort((a, b) => a - b);
       await this._clearHighlightOnRange(sorted[0], sorted[sorted.length - 1]);
       void docId;
     },
@@ -1486,7 +1530,7 @@ export default {
         }
 
         if (jsonData && (jsonData.paragraphs || jsonData.tables)) {
-          const insertParaID = this._toIntOrNull(jsonData.insertParaID);
+          const insertParaID = this._toParaIdOrNull(jsonData.insertParaID);
           const result = await generateDocxFromJSON(jsonData, 'selection', insertParaID);
           if (result?.error) {
             console.error('生成文档失败:', result.error);
@@ -1507,8 +1551,11 @@ export default {
                     endIdx = totalParas - 1;
                     startIdx = totalParas - newParaCount;
                   } else {
-                    startIdx = insertParaID;
-                    endIdx = startIdx + newParaCount - 1;
+                    const indices = await this._resolveParaIDsToIndices([insertParaID]);
+                    if (indices.length > 0) {
+                      startIdx = indices[0] + 1;
+                      endIdx = startIdx + newParaCount - 1;
+                    }
                   }
                   if (startIdx >= 0 && endIdx < totalParas) {
                     msg.insertStartParaIndex = startIdx;

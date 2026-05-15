@@ -21,15 +21,12 @@ const routes = [
     name: "关于",
     component: () => import("../components/about/AboutPane.vue"),
   },
-];
-
-if (__DEV__) {
-  routes.push({
+  {
     path: "/debug",
     name: "调试",
     component: () => import("../components/debug/DebugPane.vue"),
-  });
-}
+  },
+];
 
 const router = createRouter({
   history: createMemoryHistory(),

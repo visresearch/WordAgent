@@ -107,29 +107,199 @@ const DEFAULT_RSTYLE = ["", 12, false, false, 0, "#000000", "#000000", 0, false,
 const DEFAULT_CSTYLE = [1, 1, "left", "center"];
 const DEFAULT_IMAGE_PSTYLE = ["center", 0, 0, 0, 0, 0, 0, "", 0];
 
-/**
- * 获取段落 paraID（Microsoft Word 当前优先回退到 paraIndex）。
- * 说明：Office.js 段落对象未稳定暴露可直接用于持久定位的 paraID，
- * 因此这里先统一输出整数 ID，保证与后端 paraID 协议兼容。
- */
-function getParagraphParaID(paragraph, fallbackParaIndex = null) {
+function normalizeParaIdValue(value) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed ? trimmed : null;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  return null;
+}
+
+function safelyReadParagraphProp(paragraph, propName) {
+  if (!paragraph || !propName) {
+    return null;
+  }
+  try {
+    return paragraph[propName];
+  } catch (e) {
+    // Office.js 代理对象在属性未 load 时会抛异常，这里统一降级处理。
+    return null;
+  }
+}
+
+function getParagraphParaIDFromLoadedProps(paragraph) {
   if (!paragraph) {
-    return Number.isInteger(fallbackParaIndex) ? fallbackParaIndex : null;
+    return null;
   }
 
-  const candidateKeys = ["paragraphId", "paraId", "id", "ID", "uniqueLocalId"];
+  const uniqueLocalId = normalizeParaIdValue(safelyReadParagraphProp(paragraph, "uniqueLocalId"));
+  if (uniqueLocalId) {
+    return uniqueLocalId;
+  }
+
+  const candidateKeys = ["paragraphId", "paraId", "id", "ID"];
   for (const key of candidateKeys) {
-    const value = paragraph?.[key];
-    if (value === undefined || value === null || value === "") {
+    const value = normalizeParaIdValue(safelyReadParagraphProp(paragraph, key));
+    if (value) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function createSignedNineDigitParaID(existingIDs = new Set()) {
+  for (let attempt = 0; attempt < 5000; attempt++) {
+    const absValue = Math.floor(100000000 + Math.random() * 900000000);
+    const sign = Math.random() < 0.5 ? -1 : 1;
+    const id = sign < 0 ? `-${absValue}` : `${absValue}`;
+    if (!existingIDs.has(id)) {
+      return id;
+    }
+  }
+  throw new Error("生成唯一 9 位随机 paraID 失败");
+}
+
+function toHiddenBookmarkNameFromParaID(paraID) {
+  const id = normalizeParaIdValue(paraID);
+  if (!id || !/^-?\d{9}$/.test(id)) {
+    return null;
+  }
+  if (id.startsWith("-")) {
+    return `_${id.slice(1)}_n`;
+  }
+  return `_${id}_p`;
+}
+
+function parseParaIDFromBookmarkName(bookmarkName) {
+  const name = normalizeParaIdValue(bookmarkName);
+  if (!name) {
+    return null;
+  }
+  const direct = /^-?\d{9}$/.test(name) ? name : null;
+  if (direct) {
+    return direct;
+  }
+  const hiddenMatch = name.match(/^_(\d{9})_([np])$/i);
+  if (!hiddenMatch) {
+    return null;
+  }
+  const digits = hiddenMatch[1];
+  const signFlag = hiddenMatch[2].toLowerCase();
+  return signFlag === "n" ? `-${digits}` : digits;
+}
+
+async function ensureAllParagraphsHaveHiddenBookmarks(context) {
+  const allParas = context.document.body.paragraphs;
+  allParas.load("items");
+  await context.sync();
+  const total = allParas.items.length;
+  if (total === 0) {
+    return [];
+  }
+  return await resolveParagraphParaIDs(context, allParas.items);
+}
+
+async function resolveParagraphParaIDs(context, paragraphs) {
+  if (!Array.isArray(paragraphs) || paragraphs.length === 0) {
+    return [];
+  }
+
+  const paraIDs = new Array(paragraphs.length).fill(null);
+  const bookmarkResults = [];
+  const knownIDs = new Set();
+
+  for (let i = 0; i < paragraphs.length; i++) {
+    try {
+      const bookmarks = paragraphs[i].getRange("Whole").getBookmarks(true, true);
+      bookmarkResults.push({ idx: i, bookmarks });
+    } catch (e) {}
+  }
+
+  if (bookmarkResults.length > 0) {
+    await context.sync();
+    for (const item of bookmarkResults) {
+      const names = item.bookmarks?.value || [];
+      for (const name of names) {
+        const paraID = parseParaIDFromBookmarkName(name);
+        if (paraID) {
+          paraIDs[item.idx] = paraID;
+          knownIDs.add(paraID);
+          break;
+        }
+      }
+    }
+  }
+
+  const created = [];
+  for (let i = 0; i < paragraphs.length; i++) {
+    if (paraIDs[i]) {
       continue;
     }
-    const parsed = Number.parseInt(String(value), 10);
-    if (Number.isInteger(parsed)) {
-      return parsed;
+    const paraID = createSignedNineDigitParaID(knownIDs);
+    try {
+      const bookmarkName = toHiddenBookmarkNameFromParaID(paraID);
+      if (!bookmarkName) {
+        throw new Error(`无效 paraID 无法映射书签名: ${paraID}`);
+      }
+      paragraphs[i].getRange("Whole").insertBookmark(bookmarkName);
+      paraIDs[i] = paraID;
+      knownIDs.add(paraID);
+      created.push({ idx: i, paraID });
+    } catch (e) {
+      console.error(`[ParaID API] 创建段落书签失败 idx=${i}, paraID=${paraID}:`, e);
     }
   }
 
-  return Number.isInteger(fallbackParaIndex) ? fallbackParaIndex : null;
+  if (created.length > 0) {
+    await context.sync();
+    console.log(`[ParaID API] 已创建段落书签 paraID 数量: ${created.length}`);
+    console.log(
+      "[ParaID API] 新建 paraID 示例:",
+      created.slice(0, 20).map((x) => `${x.idx}:${x.paraID}`)
+    );
+  }
+
+  const missingIndices = [];
+  for (let i = 0; i < paraIDs.length; i++) {
+    if (!paraIDs[i]) {
+      missingIndices.push(i);
+    }
+  }
+  if (missingIndices.length > 0) {
+    throw new Error(
+      `Office API 未返回段落书签 paraID，缺失 ${missingIndices.length} 个段落（示例相对索引: ${missingIndices
+        .slice(0, 20)
+        .join(", ")}）`
+    );
+  }
+
+  return paraIDs;
+}
+
+/**
+ * 获取段落 paraID（Microsoft Word 当前优先使用 uniqueLocalId）。
+ * 说明：Office.js 段落对象未暴露持久化段落 ID，
+ * 因此 paraID 采用会话内稳定的 uniqueLocalId（字符串）。
+ */
+function getParagraphParaID(paragraph, fallbackParaIndex = null) {
+  void fallbackParaIndex;
+  if (!paragraph) {
+    return null;
+  }
+
+  const directId = getParagraphParaIDFromLoadedProps(paragraph);
+  if (directId) {
+    return directId;
+  }
+
+  return null;
 }
 
 // ============== 样式去重与解析 ==============
@@ -1073,9 +1243,6 @@ function parseRunsFromOoxml(ooxmlString) {
     const parser = new DOMParser();
     const xmlDoc = parser.parseFromString(ooxmlString, "application/xml");
 
-    // DEBUG: 输出原始 OOXML 便于排查
-    console.log("  OOXML 原始内容（前2000字符）:", ooxmlString.substring(0, 2000));
-
     // 找到 <w:p> 段落元素
     const pElements = xmlDoc.getElementsByTagNameNS(NS_W, "p");
     if (pElements.length === 0) return null;
@@ -1106,7 +1273,6 @@ function parseRunsFromOoxml(ooxmlString) {
         }
       }
     } catch (e) {}
-    console.log("  主题字体:", JSON.stringify(themeFonts));
 
     /**
      * 解析主题字体引用为具体字体名
@@ -1311,7 +1477,6 @@ function parseRunsFromOoxml(ooxmlString) {
 
     // 3. 合并继承链：docDefaults → 样式 → (run自身在processRunElement中覆盖)
     const inheritedProps = { ...defaultProps, ...styleProps };
-    console.log("  OOXML 继承属性:", JSON.stringify(inheritedProps));
 
     const runs = [];
 
@@ -1485,7 +1650,6 @@ function parseRunsFromOoxml(ooxmlString) {
 
     return runs.length > 0 ? runs : null;
   } catch (e) {
-    console.log("OOXML runs 解析失败:", e);
     return null;
   }
 }
@@ -1505,6 +1669,7 @@ function parseRunsFromOoxml(ooxmlString) {
 async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex) {
   try {
     return await Word.run(async (context) => {
+      await ensureAllParagraphsHaveHiddenBookmarks(context);
       // ========== 快速路径：按 paraIndex 范围解析 ==========
       if (startParaIndex !== undefined && startParaIndex !== null) {
         // endParaIndex 省略时默认等于 startParaIndex（单段）
@@ -1513,7 +1678,7 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
         }
 
         const allParas = context.document.body.paragraphs;
-        allParas.load("items");
+        allParas.load("items/uniqueLocalId");
         await context.sync();
 
         // endParaIndex === -1 表示解析到文档末尾
@@ -1540,7 +1705,7 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
         // 批量 load 范围内所有段落（完整属性）
         for (let idx = startParaIndex; idx <= endParaIndex; idx++) {
           allParas.items[idx].load(
-            "text,alignment,lineSpacing,firstLineIndent,leftIndent,rightIndent,spaceBefore,spaceAfter,style,isListItem,tableNestingLevel,lineUnitBefore,lineUnitAfter,outlineLevel"
+            "text,alignment,lineSpacing,firstLineIndent,leftIndent,rightIndent,spaceBefore,spaceAfter,style,isListItem,tableNestingLevel,lineUnitBefore,lineUnitAfter,outlineLevel,uniqueLocalId"
           );
         }
         // 范围外段落只需加载 tableNestingLevel（用于全文表格映射）
@@ -1552,6 +1717,14 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
         await context.sync();
 
         const rangeResult = { paragraphs: [], tables: [], fields: [] };
+        // 强制为全文段落补齐隐藏书签，确保每段都具备 paraID
+        const allParaIDs = await resolveParagraphParaIDs(context, allParas.items);
+        const getRangeParaIDByDocIndex = (docIndex) => {
+          if (docIndex < 0 || docIndex >= allParaIDs.length) {
+            throw new Error(`段落索引 ${docIndex} 超出已解析 paraID 范围`);
+          }
+          return allParaIDs[docIndex];
+        };
 
         // 检测范围内的表格段落范围（连续 tableNestingLevel > 0 的段落组）
         const tableParagraphRanges = [];
@@ -1620,9 +1793,9 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
               cells: [],
               tStyle: [getAlignmentName(table.alignment)],
               paraIndex: tpr.start,
-              paraID: tpr.start,
+              paraID: getRangeParaIDByDocIndex(tpr.start),
               endParaIndex: tpr.end,
-              endParaID: tpr.end,
+              endParaID: getRangeParaIDByDocIndex(tpr.end),
             };
 
             const tableRows = table.rows;
@@ -1810,6 +1983,7 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
 
         for (let idx = startParaIndex; idx <= endParaIndex; idx++) {
           const para = allParas.items[idx];
+          const paraID = getRangeParaIDByDocIndex(idx);
 
           // 表格内段落
           if (para.tableNestingLevel > 0) {
@@ -1817,7 +1991,7 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
               pStyle: "",
               runs: [],
               paraIndex: idx,
-              paraID: idx,
+              paraID: paraID,
               inTable: true,
             });
             continue;
@@ -1830,13 +2004,13 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
             const picRuns = [];
             await appendParagraphInlinePictureRuns(picRuns, para, context);
             if (picRuns.length === 0) {
-              rangeResult.paragraphs.push({ pStyle: "", runs: [], paraIndex: idx, paraID: idx });
+              rangeResult.paragraphs.push({ pStyle: "", runs: [], paraIndex: idx, paraID: paraID });
             } else {
               rangeResult.paragraphs.push({
                 pStyle: DEFAULT_IMAGE_PSTYLE,
                 runs: picRuns,
                 paraIndex: idx,
-                paraID: idx,
+                paraID: paraID,
               });
             }
             continue;
@@ -1940,7 +2114,7 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
             ),
             runs: runs,
             paraIndex: idx,
-            paraID: idx,
+            paraID: paraID,
           });
         }
 
@@ -1952,7 +2126,7 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
 
       // 加载段落和表格（核心，不可失败）
       const paragraphs = range.paragraphs;
-      paragraphs.load("items");
+      paragraphs.load("items/uniqueLocalId");
       const tables = range.tables;
       tables.load("items");
       await context.sync();
@@ -2215,7 +2389,7 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
       // === 解析段落 ===
       // 始终从 body.paragraphs 获取段落，数组下标即全文索引
       const bodyParas = context.document.body.paragraphs;
-      bodyParas.load("items");
+      bodyParas.load("items/uniqueLocalId");
       await context.sync();
 
       if (bodyParas.items && bodyParas.items.length > 0) {
@@ -2239,7 +2413,7 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
 
         for (const para of bodyParas.items) {
           para.load(
-            "text,alignment,lineSpacing,firstLineIndent,leftIndent,rightIndent,spaceBefore,spaceAfter,style,isListItem,tableNestingLevel,lineUnitBefore,lineUnitAfter,outlineLevel"
+            "text,alignment,lineSpacing,firstLineIndent,leftIndent,rightIndent,spaceBefore,spaceAfter,style,isListItem,tableNestingLevel,lineUnitBefore,lineUnitAfter,outlineLevel,uniqueLocalId"
           );
         }
         await context.sync();
@@ -2258,6 +2432,8 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
         try {
           await context.sync();
         } catch (e) {}
+
+        const bodyParaIDs = await resolveParagraphParaIDs(context, bodyParas.items);
 
         // === 计算表格 paraIndex / endParaIndex ===
         // 通过 tableNestingLevel 找到连续的表格段落范围，按顺序映射到 result.tables
@@ -2281,10 +2457,12 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
           if (currentTableRange) tableParagraphRanges.push(currentTableRange);
 
           for (let ti = 0; ti < result.tables.length && ti < tableParagraphRanges.length; ti++) {
-            result.tables[ti].paraIndex = tableParagraphRanges[ti].start;
-            result.tables[ti].paraID = tableParagraphRanges[ti].start;
-            result.tables[ti].endParaIndex = tableParagraphRanges[ti].end;
-            result.tables[ti].endParaID = tableParagraphRanges[ti].end;
+            const tableStart = tableParagraphRanges[ti].start;
+            const tableEnd = tableParagraphRanges[ti].end;
+            result.tables[ti].paraIndex = tableStart;
+            result.tables[ti].paraID = bodyParaIDs[tableStart];
+            result.tables[ti].endParaIndex = tableEnd;
+            result.tables[ti].endParaID = bodyParaIDs[tableEnd];
           }
         }
 
@@ -2294,74 +2472,24 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
 
           const para = bodyParas.items[_paraIdx];
 
-          // ====== DEBUG: 输出段落的各种 Office.js API 属性 ======
-          try {
-            console.log(`===== 段落 [第${_paraIdx + 1}个] =====`);
-            console.log(
-              `  文本预览: "${(para.text || "").substring(0, 80).replace(/[\r\n]/g, "\\n")}"`
-            );
-            console.log(`  Style: "${para.style || ""}"`);
-            console.log(`  Alignment: ${para.alignment}`);
-            console.log(`  LineSpacing: ${para.lineSpacing}`);
-            console.log(
-              `  LeftIndent: ${para.leftIndent}, RightIndent: ${para.rightIndent}, FirstLineIndent: ${para.firstLineIndent}`
-            );
-            console.log(`  SpaceBefore: ${para.spaceBefore}, SpaceAfter: ${para.spaceAfter}`);
-            console.log(
-              `  LineUnitBefore: ${para.lineUnitBefore}, LineUnitAfter: ${para.lineUnitAfter}`
-            );
-            try {
-              console.log(`  OutlineLevel: ${para.outlineLevel}`);
-            } catch (e) {}
-            console.log(
-              `  IsListItem: ${para.isListItem}, TableNestingLevel: ${para.tableNestingLevel}`
-            );
-
-            // 列表项属性
-            try {
-              if (para.isListItem) {
-                console.log(`  ListItem.Level: ${para.listItem.level}`);
-                console.log(`  ListItem.ListString: "${para.listItem.listString}"`);
-                console.log(`  ListItem.SiblingIndex: ${para.listItem.siblingIndex}`);
-              }
-            } catch (e) {
-              console.log(`  [ListItem 属性获取失败]: ${e.message}`);
-            }
-
-            // 段落级字体属性
-            try {
-              const pFont = para.font;
-              console.log(`  Font.Name: "${pFont.name}", Font.Size: ${pFont.size}`);
-              console.log(`  Font.Bold: ${pFont.bold}, Font.Italic: ${pFont.italic}`);
-              console.log(`  Font.Underline: ${pFont.underline}, Font.Color: ${pFont.color}`);
-              console.log(`  Font.HighlightColor: ${pFont.highlightColor}`);
-            } catch (e) {
-              console.log(`  [Font 属性获取失败]: ${e.message}`);
-            }
-
-            console.log(`  ---- END 段落 ${_paraIdx + 1} ----`);
-          } catch (debugErr) {
-            console.log(`  [DEBUG ERROR] 段落 ${_paraIdx + 1}: ${debugErr.message}`);
-          }
-          // ====== END DEBUG ======
-
           // 跳过表格内段落
           if (para.tableNestingLevel > 0) continue;
 
           const paraText = cleanText(para.text || "");
           const isBlankText = !paraText || paraText.match(/^[\r\n\f\u0007]*$/);
 
+          const paraID = bodyParaIDs[_paraIdx];
           if (isBlankText) {
             const picRuns = [];
             await appendParagraphInlinePictureRuns(picRuns, para, context);
             if (picRuns.length === 0) {
-              result.paragraphs.push({ pStyle: "", runs: [], paraIndex: _paraIdx, paraID: _paraIdx });
+              result.paragraphs.push({ pStyle: "", runs: [], paraIndex: _paraIdx, paraID: paraID });
             } else {
               result.paragraphs.push({
                 pStyle: DEFAULT_IMAGE_PSTYLE,
                 runs: picRuns,
                 paraIndex: _paraIdx,
-                paraID: _paraIdx,
+                paraID: paraID,
               });
             }
             continue;
@@ -2380,12 +2508,10 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
             const ooxmlRuns = parseRunsFromOoxml(ooxmlResult.value);
             if (ooxmlRuns && ooxmlRuns.length > 0) {
               runs = ooxmlRuns;
-              console.log(`  段落 ${_paraIdx + 1}: OOXML 解析成功，获取 ${runs.length} 个 runs`);
 
               // 如果仍有 run 字体为空，用 Office.js API 按字符偏移获取实际字体
               const hasEmptyFont = runs.some((r) => !r.rStyle[RSTYLE.FONT_NAME]);
               if (hasEmptyFont) {
-                console.log(`  段落 ${_paraIdx + 1}: 部分 run 字体为空，使用 Office.js API 补充`);
                 try {
                   // 获取段落中每个 run 对应的文本范围及其字体
                   const paraRange = para.getRange("Whole");
@@ -2410,9 +2536,6 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
                         await context.sync();
                         if (matchItem.font.name) {
                           run.rStyle[RSTYLE.FONT_NAME] = matchItem.font.name;
-                          console.log(
-                            `    补充字体: "${run.text.substring(0, 20)}..." → "${matchItem.font.name}"`
-                          );
                         }
                       }
                     } catch (searchErr) {
@@ -2430,19 +2553,14 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
                     if (paraFont.name) {
                       for (const run of stillEmpty) {
                         run.rStyle[RSTYLE.FONT_NAME] = paraFont.name;
-                        console.log(
-                          `    段落级字体兜底: "${run.text.substring(0, 20)}..." → "${paraFont.name}"`
-                        );
                       }
                     }
                   }
                 } catch (fontFallbackErr) {
-                  console.log(`    字体补充失败:`, fontFallbackErr.message);
                 }
               }
             }
           } catch (e) {
-            console.log(`  段落 ${_paraIdx + 1}: OOXML 解析失败，降级到 getTextRanges:`, e.message);
           }
 
           // === 降级方案：使用 getTextRanges 拆分 ===
@@ -2564,7 +2682,7 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
             ),
             runs: runs,
             paraIndex: _paraIdx,
-            paraID: _paraIdx,
+            paraID: paraID,
           };
 
           if (paragraphData.runs.length > 0) {
@@ -2591,7 +2709,7 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
  *   'selection' - 当前选区之后
  *   'replace'   - 替换当前选区
  *   'before'    - 在 jsonData.paraIndex 指定的段落之前插入（O(1) 定位）
- * @param {number|null} [insertParaID=null] - 可选，按 paraID 定位插入（高优先级）
+ * @param {string|number|null} [insertParaID=null] - 可选，按 paraID 定位插入（高优先级）
  * @returns {Promise<Object>} - 成功返回 {success: true}，失败返回 {error: string}
  */
 async function generateDocxFromJSON(jsonData, insertLocation = "selection", insertParaID = null) {
@@ -2606,18 +2724,20 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection", inse
 
     return await Word.run(async (context) => {
       let targetRange;
-      let insertBeforeMode = false;
+      let insertAfterMode = false;
 
-      if (insertParaID !== null && insertParaID !== undefined) {
+      const normalizedInsertParaID = normalizeParaIdValue(insertParaID);
+      if (normalizedInsertParaID) {
         const allParagraphs = context.document.body.paragraphs;
-        allParagraphs.load("items");
+        allParagraphs.load("items/uniqueLocalId");
         await context.sync();
         const total = allParagraphs.items.length;
+        const allParaIDs = await resolveParagraphParaIDs(context, allParagraphs.items);
 
         let targetParaIndex = -1;
         for (let i = 0; i < total; i++) {
-          const paraID = getParagraphParaID(allParagraphs.items[i], i);
-          if (paraID === Number(insertParaID)) {
+          const paraID = allParaIDs[i];
+          if (paraID && paraID === normalizedInsertParaID) {
             targetParaIndex = i;
             break;
           }
@@ -2627,11 +2747,11 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection", inse
           insertFallbackWarning = `insertParaID ${insertParaID} 未找到，已回退到文档末尾`;
           console.warn(`[generateDocxFromJSON] ${insertFallbackWarning}`);
           targetRange = context.document.body;
-          insertBeforeMode = false;
+          insertAfterMode = false;
           insertLocation = "end";
         } else {
           targetRange = allParagraphs.items[targetParaIndex];
-          insertBeforeMode = true;
+          insertAfterMode = true;
         }
       } else if (insertLocation === "before") {
         // 'before' 模式：通过 paraIndex 直接 O(1) 定位到目标段落
@@ -2649,7 +2769,7 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection", inse
           };
         }
         targetRange = allParagraphs.items[paraIndex];
-        insertBeforeMode = true;
+        insertAfterMode = false;
 
         // 防御：如果目标段落在表格内部，跳转到表格之后的首个段落
         // 避免新内容（尤其是新表格）被嵌套到旧表格单元格内
@@ -2718,8 +2838,8 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection", inse
       }
 
       // 插入内容
-      const insertLoc = insertBeforeMode
-        ? Word.InsertLocation.before
+      const insertLoc = insertAfterMode
+        ? Word.InsertLocation.after
         : insertLocation === "end"
           ? Word.InsertLocation.end
           : Word.InsertLocation.after;
@@ -2741,12 +2861,14 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection", inse
 
           // 空段落（无 runs）
           if (isEmptyParagraph(para)) {
-            if (insertBeforeMode) {
-              targetRange.insertParagraph("", Word.InsertLocation.before);
+            if (insertAfterMode) {
+              const inserted = targetRange.insertParagraph("", Word.InsertLocation.after);
+              targetRange = inserted;
             } else if (insertLocation === "end") {
               targetRange.insertParagraph("", Word.InsertLocation.end);
             } else {
-              targetRange.insertParagraph("", insertLoc);
+              const inserted = targetRange.insertParagraph("", insertLoc);
+              targetRange = inserted;
             }
             continue;
           }
@@ -2759,8 +2881,8 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection", inse
           }
 
           let newParagraph;
-          if (insertBeforeMode) {
-            newParagraph = targetRange.insertParagraph("", Word.InsertLocation.before);
+          if (insertAfterMode) {
+            newParagraph = targetRange.insertParagraph("", Word.InsertLocation.after);
           } else if (insertLocation === "end") {
             newParagraph = targetRange.insertParagraph("", Word.InsertLocation.end);
           } else {
@@ -2858,7 +2980,7 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection", inse
             }
           }
 
-          if (!insertBeforeMode && insertLocation !== "end") {
+          if (insertAfterMode || insertLocation !== "end") {
             targetRange = newParagraph;
           }
         } else if (element.type === "table") {
@@ -3070,7 +3192,7 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection", inse
             }
           }
 
-          if (!insertBeforeMode && insertLocation !== "end") {
+          if (insertAfterMode || insertLocation !== "end") {
             targetRange = newTable.getRange("After");
           }
         }
@@ -3137,7 +3259,7 @@ function findClosestMatch(items, offset) {
 
 /**
  * 根据段落ID列表删除文档中的段落（按出现位置逆序删除）
- * @param {number[]} paraIDs - 待删除段落 paraID 列表
+ * @param {Array<string|number>} paraIDs - 待删除段落 paraID 列表
  * @returns {Promise<{ success: boolean, deletedCount: number, message: string }>}
  */
 async function deleteDocxPara(paraIDs) {
@@ -3147,18 +3269,19 @@ async function deleteDocxPara(paraIDs) {
 
   const normalizedIDs = [...new Set(
     paraIDs
-      .map((v) => Number(v))
-      .filter((v) => Number.isInteger(v))
+      .map((v) => normalizeParaIdValue(v))
+      .filter((v) => v)
   )];
   if (normalizedIDs.length === 0) {
-    return { success: false, deletedCount: 0, message: "paraIDs 中没有有效整数ID" };
+    return { success: false, deletedCount: 0, message: "paraIDs 中没有有效段落ID" };
   }
 
   try {
     return await Word.run(async (context) => {
       const allParas = context.document.body.paragraphs;
-      allParas.load("items");
+      allParas.load("items/uniqueLocalId");
       await context.sync();
+      const allParaIDs = await resolveParagraphParaIDs(context, allParas.items);
 
       const totalParas = allParas.items.length;
       if (totalParas === 0) {
@@ -3167,8 +3290,8 @@ async function deleteDocxPara(paraIDs) {
 
       const targets = [];
       for (let idx = 0; idx < totalParas; idx++) {
-        const paraID = getParagraphParaID(allParas.items[idx], idx);
-        if (normalizedIDs.includes(paraID)) {
+        const paraID = allParaIDs[idx];
+        if (paraID && normalizedIDs.includes(paraID)) {
           targets.push({ paraIndex: idx, paraID });
         }
       }
@@ -3275,33 +3398,37 @@ async function addCommentToParas(startParaIndex, endParaIndex, text, mode = 'rev
 
 /**
  * 根据 paraID 定位段落索引范围
- * @param {number} startParaID
- * @param {number|null} [endParaID]
+ * @param {string|number} startParaID
+ * @param {string|number|null} [endParaID]
  * @returns {Promise<{success:boolean,startParaIndex:number,endParaIndex:number,error?:string}>}
  */
 async function findParaIndexRangeByParaIDs(startParaID, endParaID = null) {
-  const startID = Number(startParaID);
-  const endID = endParaID === null || endParaID === undefined ? startID : Number(endParaID);
-  if (!Number.isInteger(startID) || !Number.isInteger(endID)) {
-    return { success: false, error: "startParaID/endParaID 必须是整数" };
+  const startID = normalizeParaIdValue(startParaID);
+  let endID = normalizeParaIdValue(endParaID);
+  if (!startID) {
+    return { success: false, error: "startParaID/endParaID 必须是有效段落ID" };
+  }
+  if (!endID) {
+    endID = startID;
   }
 
   try {
     return await Word.run(async (context) => {
       const allParas = context.document.body.paragraphs;
-      allParas.load("items");
+      allParas.load("items/uniqueLocalId");
       await context.sync();
+      const allParaIDs = await resolveParagraphParaIDs(context, allParas.items);
 
       const total = allParas.items.length;
       let startParaIndex = -1;
       let endParaIndex = -1;
 
       for (let idx = 0; idx < total; idx++) {
-        const paraID = getParagraphParaID(allParas.items[idx], idx);
-        if (startParaIndex < 0 && paraID === startID) {
+        const paraID = allParaIDs[idx];
+        if (startParaIndex < 0 && paraID && paraID === startID) {
           startParaIndex = idx;
         }
-        if (endParaIndex < 0 && paraID === endID) {
+        if (endParaIndex < 0 && paraID && paraID === endID) {
           endParaIndex = idx;
         }
         if (startParaIndex >= 0 && endParaIndex >= 0) {
@@ -3396,4 +3523,5 @@ export {
   loadImageAsBase64ForInsert,
   getParagraphParaID,
   findParaIndexRangeByParaIDs,
+  resolveParagraphParaIDs,
 };

@@ -258,9 +258,12 @@ export default {
         for (const d of this.pendingDeletes) {
           if (Array.isArray(d?.paraIDs) && d.paraIDs.length > 0) {
             for (const pid of d.paraIDs) {
-              const num = Number(pid);
-              if (Number.isInteger(num) && !seenParaIds.has(num)) {
-                seenParaIds.add(num);
+              const trimmed = String(pid).trim();
+              if (!trimmed) {
+                continue;
+              }
+              if (!seenParaIds.has(trimmed)) {
+                seenParaIds.add(trimmed);
                 totalDeleteParas += 1;
               }
             }
