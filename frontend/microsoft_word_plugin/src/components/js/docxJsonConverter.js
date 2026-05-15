@@ -106,6 +106,7 @@ const DEFAULT_PSTYLE = ["left", 0, 0, 0, 0, 0, 0, "", 0];
 const DEFAULT_RSTYLE = ["", 12, false, false, 0, "#000000", "#000000", 0, false, false, false];
 const DEFAULT_CSTYLE = [1, 1, "left", "center"];
 const DEFAULT_IMAGE_PSTYLE = ["center", 0, 0, 0, 0, 0, 0, "", 0];
+const DEFAULT_FALLBACK_FONT_NAME = "Calibri";
 
 function normalizeParaIdValue(value) {
   if (value === null || value === undefined) {
@@ -1149,6 +1150,23 @@ function normalizeParsedRun(run) {
   };
 }
 
+function ensureRunsHaveFontName(runs, fallbackFontName = "") {
+  if (!Array.isArray(runs) || runs.length === 0) {
+    return runs;
+  }
+  const fallback = String(fallbackFontName || "").trim() || DEFAULT_FALLBACK_FONT_NAME;
+  for (const run of runs) {
+    if (!run || !Array.isArray(run.rStyle)) {
+      continue;
+    }
+    const current = String(run.rStyle[RSTYLE.FONT_NAME] || "").trim();
+    if (!current) {
+      run.rStyle[RSTYLE.FONT_NAME] = fallback;
+    }
+  }
+  return runs;
+}
+
 // ============== OOXML 解析辅助函数 ==============
 
 const NS_W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
@@ -1306,16 +1324,19 @@ function parseRunsFromOoxml(ooxmlString) {
         const directAscii = getWAttr(rFonts, "ascii");
         const directEastAsia = getWAttr(rFonts, "eastAsia");
         const directHAnsi = getWAttr(rFonts, "hAnsi");
+        const directCs = getWAttr(rFonts, "cs");
 
         // 主题字体引用
         const themeAscii = getWAttr(rFonts, "asciiTheme");
         const themeEastAsia = getWAttr(rFonts, "eastAsiaTheme");
         const themeHAnsi = getWAttr(rFonts, "hAnsiTheme");
+        const themeCs = getWAttr(rFonts, "cstheme");
 
         // 直接字体名优先，否则从主题解析
         props.fontAscii = directAscii || resolveThemeFont(themeAscii) || "";
         props.fontEastAsia = directEastAsia || resolveThemeFont(themeEastAsia) || "";
         props.fontHAnsi = directHAnsi || resolveThemeFont(themeHAnsi) || "";
+        props.fontCs = directCs || resolveThemeFont(themeCs) || "";
       }
 
       const sz = rPr.getElementsByTagNameNS(NS_W, "sz")[0];
@@ -1552,6 +1573,7 @@ function parseRunsFromOoxml(ooxmlString) {
       // 获取不同脚本的字体
       const fontAscii = merged.fontAscii || merged.fontHAnsi || "";
       const fontEastAsia = merged.fontEastAsia || "";
+      const fontCs = merged.fontCs || "";
       const baseFontProps = {
         fontSize: merged.fontSize || 12,
         bold: !!merged.bold,
@@ -1588,7 +1610,7 @@ function parseRunsFromOoxml(ooxmlString) {
         }
       } else {
         // 字体相同或只有一种，直接使用
-        const fontName = fontAscii || fontEastAsia || "";
+        const fontName = fontAscii || fontEastAsia || fontCs || "";
         pushNormalizedRun({
           text,
           rStyle: makeRStyle(
@@ -1645,10 +1667,22 @@ function parseRunsFromOoxml(ooxmlString) {
           merged.push(curr);
         }
       }
-      return merged.length > 0 ? merged : null;
+      const inheritedFont =
+        inheritedProps.fontAscii ||
+        inheritedProps.fontHAnsi ||
+        inheritedProps.fontEastAsia ||
+        inheritedProps.fontCs ||
+        "";
+      return merged.length > 0 ? ensureRunsHaveFontName(merged, inheritedFont) : null;
     }
 
-    return runs.length > 0 ? runs : null;
+    const inheritedFont =
+      inheritedProps.fontAscii ||
+      inheritedProps.fontHAnsi ||
+      inheritedProps.fontEastAsia ||
+      inheritedProps.fontCs ||
+      "";
+    return runs.length > 0 ? ensureRunsHaveFontName(runs, inheritedFont) : null;
   } catch (e) {
     return null;
   }
@@ -1670,6 +1704,16 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
   try {
     return await Word.run(async (context) => {
       await ensureAllParagraphsHaveHiddenBookmarks(context);
+      let documentFallbackFontName = DEFAULT_FALLBACK_FONT_NAME;
+      try {
+        const bodyFont = context.document.body.font;
+        bodyFont.load("name");
+        await context.sync();
+        const bodyFontName = String(bodyFont.name || "").trim();
+        if (bodyFontName) {
+          documentFallbackFontName = bodyFontName;
+        }
+      } catch (e) {}
       // ========== 快速路径：按 paraIndex 范围解析 ==========
       if (startParaIndex !== undefined && startParaIndex !== null) {
         // endParaIndex 省略时默认等于 startParaIndex（单段）
@@ -1917,6 +1961,7 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
                     }
                   }
 
+                  ensureRunsHaveFontName(cellRuns, documentFallbackFontName);
                   if (cellRuns.length > 0) {
                     paragraphsData.push({
                       text: paraText,
@@ -2100,6 +2145,7 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
           }
 
           await appendParagraphInlinePictureRuns(runs, para, context);
+          ensureRunsHaveFontName(runs, documentFallbackFontName);
 
           rangeResult.paragraphs.push({
             pStyle: makePStyle(
@@ -2320,6 +2366,7 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
                   }
                 }
 
+                ensureRunsHaveFontName(runs, documentFallbackFontName);
                 if (runs.length > 0) {
                   paragraphsData.push({
                     text: paraText,
@@ -2668,6 +2715,7 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
             runs = [];
           }
           await appendParagraphInlinePictureRuns(runs, para, context);
+          ensureRunsHaveFontName(runs, documentFallbackFontName);
 
           const paragraphData = {
             pStyle: makePStyle(

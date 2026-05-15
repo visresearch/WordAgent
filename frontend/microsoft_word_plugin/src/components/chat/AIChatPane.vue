@@ -291,7 +291,7 @@ export default {
               documentJson: msg.documentJson || null,
               selectionContext: msg.selectionContext || null,
               thinking: msg.thinking || '',
-              thinkingExpanded: false,
+              thinkingExpanded: !!msg.thinking,
               thinkingDone: true,
               attachedFiles: msg.attachedFiles || null
             }));
@@ -405,7 +405,7 @@ export default {
             documentJson: msg.documentJson || null,
             selectionContext: msg.selectionContext || null,
             thinking: msg.thinking || '',
-            thinkingExpanded: false,
+            thinkingExpanded: !!msg.thinking,
             thinkingDone: true,
             attachedFiles: msg.attachedFiles || null
           }));
@@ -789,7 +789,7 @@ export default {
         contentParts: [],
         documentJson: null,
         thinking: '',
-          thinkingExpanded: false,
+        thinkingExpanded: true,
         thinkingStartTime: null,
         thinkingDone: false,
         statusText: ''
@@ -826,9 +826,6 @@ export default {
 
           if (aiMsg.thinking) {
             aiMsg.thinkingDone = true;
-            if (aiMsg.thinkingExpanded) {
-              aiMsg.thinkingExpanded = false;
-            }
           }
 
           // 使用流开始时的 sessionId 保存消息
@@ -1034,8 +1031,9 @@ export default {
       if (data.type === 'thinking' && data.content) {
         if (!msg.thinkingStartTime) {
           msg.thinkingStartTime = Date.now();
-          msg.thinkingDone = false;
         }
+        // 同一轮对话可能在“已结束”后继续返回思考片段，收到新 thinking 时恢复进行中状态
+        msg.thinkingDone = false;
         msg.thinking += data.content;
         this.scrollToBottom();
         return;
@@ -1171,6 +1169,30 @@ export default {
           }
         }
         return indices;
+      });
+    },
+
+    async _resolveParaIDIndexMap(paraIDs = []) {
+      const normalized = this._normalizeParaIdList(paraIDs);
+      if (!normalized.length) {
+        return new Map();
+      }
+
+      return await Word.run(async (context) => {
+        const allParas = context.document.body.paragraphs;
+        allParas.load('items');
+        await context.sync();
+        const allParaIDs = await resolveParagraphParaIDs(context, allParas.items);
+
+        const wanted = new Set(normalized);
+        const indexMap = new Map();
+        for (let idx = 0; idx < allParas.items.length; idx++) {
+          const paraID = allParaIDs[idx];
+          if (paraID && wanted.has(paraID) && !indexMap.has(paraID)) {
+            indexMap.set(paraID, idx);
+          }
+        }
+        return indexMap;
       });
     },
 
@@ -1335,47 +1357,48 @@ export default {
         if (normalizedDocId !== pdDocId) {
           continue;
         }
-        const indices = await this._resolveParaIDsToIndices(pd.paraIDs || []);
-        if (!indices.length) {
+        const paraIDs = this._normalizeParaIdList(pd.paraIDs || []);
+        if (!paraIDs.length) {
           continue;
         }
-        const sorted = [...indices].sort((a, b) => a - b);
-        const startParaID = sorted[0];
-        const endParaID = sorted[sorted.length - 1];
+        const indexMap = await this._resolveParaIDIndexMap(paraIDs);
+        let markedCount = 0;
 
-        try {
-          // Microsoft Office 统一用高亮标记删除内容（浅蓝）
-          const res = await addCommentToParas(
-            startParaID,
-            endParaID,
-            '[文策AI-删除] 待删除内容',
-            'redblue'
-          );
-          if (res && res.success) {
-            pd._commentAdded = true;
-            pd._adjStartParaID = startParaID;
-            pd._adjEndParaID = endParaID;
-            pd._markingMode = 'highlight';
+        for (const paraID of paraIDs) {
+          const paraIndex = indexMap.get(paraID);
+          if (!Number.isInteger(paraIndex)) {
+            continue;
           }
-        } catch (e) {
-          console.warn('[AIChatPane] 标记删除段落失败:', e);
+          try {
+            // 删除标记严格按 paraID 对应段落逐段高亮，避免区间误标记
+            const res = await addCommentToParas(
+              paraIndex,
+              paraIndex,
+              '[文策AI-删除] 待删除内容',
+              'redblue'
+            );
+            if (res && res.success) {
+              markedCount++;
+            }
+          } catch (e) {
+            console.warn('[AIChatPane] 标记删除段落失败:', paraID, e);
+          }
+        }
+        if (markedCount > 0) {
+          pd._commentAdded = true;
+          pd._markingMode = 'highlight';
         }
       }
     },
 
     /**
-     * 一键确认所有待处理操作（删除 + 生成）
+     * 一键确认所有待处理操作：只清除高亮标记，不改动正文内容。
      */
     async confirmPending() {
-      // 1) 删除正文：按 paraID 删除，不依赖索引偏移
+      // 1) 确认删除建议：只清除删除高亮，实际段落由用户手动删除
       const deletes = [...this.pendingDeletes];
       for (const d of deletes) {
         await this._clearHighlightOnParaIDs(d.paraIDs || [], d.docId);
-        try {
-          await deleteDocxPara(d.paraIDs || []);
-        } catch (e) {
-          console.warn('[AIChatPane] confirmPending 删除失败:', e);
-        }
       }
 
       // 2) 确认新增：仅移除新增高亮，保留内容
@@ -1470,12 +1493,18 @@ export default {
     },
 
     async _clearHighlightOnParaIDs(paraIDs = [], docId = 0) {
-      const indices = await this._resolveParaIDsToIndices(paraIDs);
-      if (!indices.length) {
+      const normalized = this._normalizeParaIdList(paraIDs);
+      if (!normalized.length) {
         return;
       }
-      const sorted = [...new Set(indices)].sort((a, b) => a - b);
-      await this._clearHighlightOnRange(sorted[0], sorted[sorted.length - 1]);
+      const indexMap = await this._resolveParaIDIndexMap(normalized);
+      for (const paraID of normalized) {
+        const paraIndex = indexMap.get(paraID);
+        if (!Number.isInteger(paraIndex)) {
+          continue;
+        }
+        await this._clearHighlightOnRange(paraIndex, paraIndex);
+      }
       void docId;
     },
 

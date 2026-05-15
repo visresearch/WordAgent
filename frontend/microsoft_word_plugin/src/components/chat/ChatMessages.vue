@@ -77,7 +77,7 @@
           <span v-if="msg.statusText" class="typing">{{ msg.statusText }}</span>
           <!-- Thinking 块 -->
           <div v-if="msg.thinking" class="thinking-block" :class="{ expanded: msg.thinkingExpanded }">
-            <div class="thinking-header" @click="$emit('toggle-thinking', index)">
+            <div class="thinking-header" @click="toggleThinking(index)">
               <svg class="thinking-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <circle cx="12" cy="12" r="10" />
                 <path d="M12 6v6l4 2" />
@@ -88,7 +88,13 @@
               </svg>
             </div>
             <!-- eslint-disable-next-line vue/no-v-html -->
-            <div v-show="msg.thinkingExpanded" class="thinking-content markdown-body" v-html="renderMarkdown(msg.thinking)"></div>
+            <div
+              v-show="msg.thinkingExpanded"
+              class="thinking-content markdown-body"
+              :ref="setThinkingContentRef(index)"
+              @scroll="onThinkingContentScroll(index, $event)"
+              v-html="renderMarkdown(msg.thinking)"
+            ></div>
           </div>
           <!-- 用户消息 -->
           <span v-if="msg.role === 'user'">{{ msg.content }}</span>
@@ -207,7 +213,29 @@ export default {
       imgMenuY: 0,
       _contextImg: null,
       mcpExpandedMap: {},
+      thinkingContentRefs: {},
+      thinkingAutoScrollState: {}
     };
+  },
+  computed: {
+    thinkingWatchSignature() {
+      return this.messages.map((msg, index) => {
+        const thinkingLength = msg?.thinking ? msg.thinking.length : 0;
+        const expanded = msg?.thinkingExpanded ? 1 : 0;
+        return `${index}:${expanded}:${thinkingLength}`;
+      }).join('|');
+    }
+  },
+  watch: {
+    thinkingWatchSignature() {
+      this.$nextTick(() => {
+        this.messages.forEach((msg, index) => {
+          if (msg?.thinking && msg.thinkingExpanded) {
+            this.scrollThinkingToBottom(index);
+          }
+        });
+      });
+    }
   },
   mounted() {
     this.$refs.messagesContainer?.addEventListener('contextmenu', this.handleImgContextMenu);
@@ -271,6 +299,41 @@ export default {
     renderMarkdown(content) {
       if (!content) return '';
       return md.render(content);
+    },
+    toggleThinking(index) {
+      this.$emit('toggle-thinking', index);
+      this.$nextTick(() => {
+        if (this.messages[index]?.thinkingExpanded) {
+          this.thinkingAutoScrollState[index] = true;
+          this.scrollThinkingToBottom(index, { force: true });
+        }
+      });
+    },
+    onThinkingContentScroll(index, event) {
+      const el = event?.target;
+      if (!el) return;
+      const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+      this.thinkingAutoScrollState[index] = distanceToBottom <= 24;
+    },
+    scrollThinkingToBottom(index, { force = false } = {}) {
+      const refs = this.thinkingContentRefs[index];
+      const el = Array.isArray(refs) ? refs[0] : refs;
+      if (!el) return;
+      if (!force && this.thinkingAutoScrollState[index] === false) return;
+      el.scrollTop = el.scrollHeight;
+    },
+    setThinkingContentRef(index) {
+      return (el) => {
+        if (el) {
+          this.thinkingContentRefs[index] = el;
+          if (!(index in this.thinkingAutoScrollState)) {
+            this.thinkingAutoScrollState[index] = true;
+          }
+        } else {
+          delete this.thinkingContentRefs[index];
+          delete this.thinkingAutoScrollState[index];
+        }
+      };
     },
     _mcpKey(msgIndex, partIndex) {
       return `${msgIndex}-${partIndex}`;
