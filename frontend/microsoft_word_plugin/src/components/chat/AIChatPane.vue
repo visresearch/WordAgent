@@ -1196,6 +1196,20 @@ export default {
       });
     },
 
+    async _deleteByParaIDsOneByOne(paraIDs = []) {
+      const normalized = this._normalizeParaIdList(paraIDs);
+      if (!normalized.length) {
+        return;
+      }
+      for (const paraID of normalized) {
+        try {
+          await deleteDocxPara([paraID]);
+        } catch (e) {
+          console.warn('[AIChatPane] 按 paraID 单段删除失败:', paraID, e);
+        }
+      }
+    },
+
     _toIntOrDefault(value, defaultValue) {
       const n = this._toIntOrNull(value);
       return n === null ? defaultValue : n;
@@ -1392,13 +1406,14 @@ export default {
     },
 
     /**
-     * 一键确认所有待处理操作：只清除高亮标记，不改动正文内容。
+     * 一键确认所有待处理操作（删除 + 生成）
      */
     async confirmPending() {
-      // 1) 确认删除建议：只清除删除高亮，实际段落由用户手动删除
+      // 1) 删除正文：按 paraID 删除，不依赖索引偏移
       const deletes = [...this.pendingDeletes];
       for (const d of deletes) {
         await this._clearHighlightOnParaIDs(d.paraIDs || [], d.docId);
+        await this._deleteByParaIDsOneByOne(d.paraIDs || []);
       }
 
       // 2) 确认新增：仅移除新增高亮，保留内容
