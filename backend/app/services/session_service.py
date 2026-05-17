@@ -146,6 +146,7 @@ class SessionService:
         content_parts: list[dict] | None = None,
         thinking: str | None = None,
         model: str | None = None,
+        provider: str | None = None,
         mode: str | None = None,
         attached_files: list[dict] | None = None,
     ) -> ChatMessage | None:
@@ -174,6 +175,7 @@ class SessionService:
             content_parts=content_parts,
             thinking=thinking,
             model=model,
+            provider=provider,
             mode=mode,
             attached_files=attached_files,
         )
@@ -209,9 +211,13 @@ class SessionService:
         last_message = result.scalar_one_or_none()
 
         if not last_message:
-            return {"model": None, "mode": None}
+            return {"model": None, "provider": None, "mode": None}
 
-        return {"model": last_message.model, "mode": last_message.mode}
+        return {
+            "model": last_message.model,
+            "provider": last_message.provider,
+            "mode": last_message.mode,
+        }
 
     async def clear_session_messages(self, session_id: int) -> bool:
         """

@@ -72,6 +72,8 @@ class ChatMessage(Base):
     thinking = Column(Text, nullable=True)
     # 使用的模型
     model = Column(String(64), nullable=True)
+    # 使用的提供商
+    provider = Column(String(64), nullable=True)
     # 使用的模式（agent/ask）
     mode = Column(String(20), nullable=True)
     # 附件文件列表（用户上传的文件，可选）
@@ -99,6 +101,7 @@ class ChatMessage(Base):
             "contentParts": self.content_parts,
             "thinking": self.thinking,
             "model": self.model,
+            "provider": self.provider,
             "mode": self.mode,
             "attachedFiles": self.attached_files,
             "createdAt": self.created_at.isoformat() if self.created_at else None,

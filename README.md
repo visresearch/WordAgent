@@ -89,7 +89,7 @@ In addition, the project supports two types of pluggable extensions: **MCP serve
 
 #### Supported Office Suites
 
-- WPS Office (Windows, Linux), version 12.1.25225 and above
+- WPS Office (Windows, Linux), version 12.1.2.24722 and above
 - Microsoft Word (Windows, Web), version 2019/2021 and above
 
 ## 4. System Architecture

@@ -41,6 +41,7 @@ class AddMessageRequest(BaseModel):
     contentParts: list[dict] | None = None
     thinking: str | None = None
     model: str | None = None
+    provider: str | None = None
     mode: str | None = None
     attachedFiles: list[dict] | None = None
 
@@ -68,6 +69,7 @@ class SessionDetailResponse(BaseModel):
     session: dict | None = None
     messages: list[dict] = []
     lastUsedModel: str | None = None
+    lastUsedProvider: str | None = None
     lastUsedMode: str | None = None
     error: str | None = None
 
@@ -78,6 +80,7 @@ class MessagesResponse(BaseModel):
     success: bool
     messages: list[dict] = []
     lastUsedModel: str | None = None
+    lastUsedProvider: str | None = None
     lastUsedMode: str | None = None
     error: str | None = None
 
@@ -169,6 +172,7 @@ async def get_latest_session(
             session=session.to_dict(),
             messages=[m.to_dict() for m in messages],
             lastUsedModel=last_settings.get("model"),
+            lastUsedProvider=last_settings.get("provider"),
             lastUsedMode=last_settings.get("mode"),
         )
     except Exception as e:
@@ -196,6 +200,7 @@ async def get_session(
             session=session.to_dict(),
             messages=[m.to_dict() for m in messages],
             lastUsedModel=last_settings.get("model"),
+            lastUsedProvider=last_settings.get("provider"),
             lastUsedMode=last_settings.get("mode"),
         )
     except Exception as e:
@@ -260,6 +265,7 @@ async def get_session_messages(
             success=True,
             messages=[m.to_dict() for m in messages],
             lastUsedModel=last_settings.get("model"),
+            lastUsedProvider=last_settings.get("provider"),
             lastUsedMode=last_settings.get("mode"),
         )
     except Exception as e:
@@ -288,6 +294,7 @@ async def add_message(
             content_parts=request.contentParts,
             thinking=request.thinking,
             model=request.model,
+            provider=request.provider,
             mode=request.mode,
             attached_files=request.attachedFiles,
         )

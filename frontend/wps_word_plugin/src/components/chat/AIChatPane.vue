@@ -434,6 +434,9 @@ export default {
             if (result.data.lastUsedModel) {
               this.selectedModel = result.data.lastUsedModel;
             }
+            if (result.data.lastUsedProvider) {
+              this.selectedModelProvider = result.data.lastUsedProvider;
+            }
             if (result.data.lastUsedMode) {
               this.mode = result.data.lastUsedMode;
             }
@@ -572,6 +575,9 @@ export default {
           if (result.data.lastUsedModel) {
             this.selectedModel = result.data.lastUsedModel;
           }
+          if (result.data.lastUsedProvider) {
+            this.selectedModelProvider = result.data.lastUsedProvider;
+          }
           if (result.data.lastUsedMode) {
             this.mode = result.data.lastUsedMode;
           }
@@ -684,6 +690,7 @@ export default {
           contentParts,
           thinking,
           model: this.selectedModel || 'auto',
+          provider: this.selectedModelProvider || '',
           mode: this.mode,
           attachedFiles
         });
@@ -711,6 +718,7 @@ export default {
             contentParts,
             thinking,
             model: this.selectedModel || 'auto',
+            provider: this.selectedModelProvider || '',
             mode: this.mode
           });
         }
@@ -782,6 +790,11 @@ export default {
           if (!this.selectedModel) {
             this.selectedModel = result.data.models[0].id;
             this.selectedModelProvider = result.data.models[0].provider || '';
+          } else if (!this.selectedModelProvider) {
+            const matched = result.data.models.find((m) => m.id === this.selectedModel);
+            if (matched) {
+              this.selectedModelProvider = matched.provider || '';
+            }
           }
         } else {
           console.warn('获取模型列表失败:', result.error);

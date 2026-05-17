@@ -87,8 +87,11 @@ async def init_db():
                     if "thinking" not in msg_columns:
                         connection.exec_driver_sql("ALTER TABLE chat_messages ADD COLUMN thinking TEXT")
                         print("✅ 已添加字段: chat_messages.thinking")
+                    if "provider" not in msg_columns:
+                        connection.exec_driver_sql("ALTER TABLE chat_messages ADD COLUMN provider TEXT")
+                        print("✅ 已添加字段: chat_messages.provider")
                 except Exception as e:
-                    print(f"⚠️ 添加 chat_messages.thinking 字段失败: {e}")
+                    print(f"⚠️ 添加 chat_messages 字段失败: {e}")
 
         await conn.run_sync(_check_and_create)
 

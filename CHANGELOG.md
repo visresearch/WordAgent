@@ -6,7 +6,7 @@
 ### Fixed
 - Microsoft word加载项利用隐藏书签的name，随机一个9位uid，作为paraID
 - 删除段落暂时使用用户手动删除方案
-  
+
 ### Changed
 - 修改Microsoft word加载项深度思考内容展开条件
 - 修改文档

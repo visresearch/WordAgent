@@ -98,8 +98,13 @@ def get_enabled_models_from_settings() -> list[ModelInfo]:
     """
     settings_data = load_user_settings()
     enabled_models = []
+    providers = settings_data.get("providers", [])
+    provider_order = {
+        (provider.get("name", "Unknown") or "Unknown"): index
+        for index, provider in enumerate(providers)
+    }
 
-    for provider in settings_data.get("providers", []):
+    for provider in providers:
         if not provider.get("enabled", True):
             continue
 
@@ -112,8 +117,13 @@ def get_enabled_models_from_settings() -> list[ModelInfo]:
 
                 enabled_models.append(ModelInfo(id=model_id, name=model_name, provider=provider_name))
 
-    # 按模型 ID 字母顺序排序
-    enabled_models.sort(key=lambda m: m.id.lower())
+    # 按“提供商添加顺序 -> 模型名称”排序
+    enabled_models.sort(
+        key=lambda m: (
+            provider_order.get(m.provider or "Unknown", len(provider_order)),
+            (m.name or "").lower(),
+        )
+    )
     return enabled_models
 
 

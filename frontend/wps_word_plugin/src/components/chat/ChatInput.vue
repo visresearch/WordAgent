@@ -189,7 +189,7 @@
                   :class="{ active: selectedModel === model.id && selectedModelProvider === model.provider }"
                   @click="selectModel(model.id, model.provider)"
                 >
-                  {{ model.provider || 'Unknown' }}/{{ model.name }}
+                  {{ model.provider || 'Unknown' }} / {{ model.name }}
                 </div>
               </div>
             </div>
@@ -417,9 +417,12 @@ export default {
       }
       const model = this.availableModels.find((m) => m.id === this.selectedModel && m.provider === this.selectedModelProvider);
       if (model) {
-        return `${model.provider || 'Unknown'}/${model.name}`;
+        return `${model.provider || 'Unknown'} / ${model.name}`;
       }
       // 模型不在列表中，显示 ID
+      if (this.selectedModelProvider) {
+        return `${this.selectedModelProvider} / ${this.selectedModel}`;
+      }
       return this.selectedModel;
     },
     pendingSummary() {
