@@ -15,6 +15,7 @@
 paragraphs (段落数组)
 ├── pStyle       段落样式ID（如标题1、标题2、正文等）
 ├── paraIndex    段落索引，用于定位具体段落
+├── paraID       段落唯一标识，用于定位具体段落
 └── runs (文本块数组)
     ├── text     文本内容
     └── rStyle   字符样式ID（如加粗、红色等）
