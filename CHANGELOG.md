@@ -9,7 +9,10 @@
 
 ### Changed
 - 修改Microsoft word加载项深度思考内容展开条件
-- 修改文档
+- 修改文档和官网内容
+
+### Added
+- 添加运行python工具
 
 ## [v0.4.1]
 

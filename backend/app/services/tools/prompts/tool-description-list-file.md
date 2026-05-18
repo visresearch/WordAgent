@@ -1,7 +1,7 @@
-List files and directories under `wence_data/project` (project sandbox only).
+List files and directories in the project sandbox.
 
 ## Parameters
-- `path` (string, optional): Relative path under `wence_data/project`. Default `"."`.
+- `path` (string, optional): Relative path in the project sandbox. Default `"."`.
 - `recursive` (bool, optional): Whether to recursively list subdirectories. Default `false`.
 - `include_hidden` (bool, optional): Whether to include dotfiles/directories. Default `false`.
 
@@ -18,5 +18,5 @@ List files and directories under `wence_data/project` (project sandbox only).
   - `[FILE] relative/path.ext (size bytes)`
 
 ## Security boundary
-- Access is strictly limited to `wence_data/project`.
-- Any path outside this root is rejected.
+- Access is strictly limited to the project sandbox.
+- Any path outside the project root is rejected.

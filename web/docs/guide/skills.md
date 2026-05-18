@@ -85,9 +85,13 @@ Skill 本质上是一组本地 Markdown 规则文件，核心入口是 `SKILL.md
 
 ## 推荐 Skill 下载
 
+魔搭社区在[Skills 中心](https://www.modelscope.cn/skills)中有大量现成的 skill 可以直接使用。
+
 | Skill 名称 | 功能简介 | 相关链接 |
 |---|---|---|
 | writing-assistant-skill | 自媒体写作助手 Skill，帮助完成从选题到发布的完整流程 | https://github.com/Ceeon/writing-assistant-skill
 | 躺平skill | 一个会让 AI 拒绝工作的 skill | https://github.com/TreapGoGo/tangping-skill |
 | 张雪峰skill | 张雪峰的认知操作系统。不是语录合集，是可运行的思维框架 | https://github.com/alchaincyf/zhangxuefeng-skill |
 | Humanizer-zh | AI 写作去痕工具（中文版）| https://github.com/op7418/Humanizer-zh |
+| skill-creator | 创建新技能，修改和改进现有技能，并衡量技能表现。 | https://www.modelscope.cn/skills/@anthropics/skill-creator |
+| ppt大师| 可以直接通过大模型生成ppt文件。支持从 Markdown 大纲自动转换为 PowerPoint 演示文稿。 | https://www.modelscope.cn/skills/@cyangzhou/ppt |

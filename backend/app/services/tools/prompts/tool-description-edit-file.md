@@ -1,7 +1,7 @@
-Create or edit text files under `wence_data/project` (safe sandbox).
+Create or edit text files in the project sandbox.
 
 ## Parameters
-- `path` (string): Relative file path under `wence_data/project`.
+- `path` (string): Relative file path in the project sandbox.
 - `content` (string): Content to write.
 - `append` (bool, optional): If true, append content; otherwise overwrite. Default `false`.
 
@@ -15,5 +15,5 @@ Create or edit text files under `wence_data/project` (safe sandbox).
 - Update project data files after analyzing source inputs.
 
 ## Security boundary
-- Access is strictly limited to `wence_data/project`.
-- Any path outside this root is rejected.
+- Access is strictly limited to the project sandbox.
+- Any path outside the project root is rejected.

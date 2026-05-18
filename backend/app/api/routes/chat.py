@@ -12,8 +12,8 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 # Idle watchdog 阈值（秒）：超过 IDLE_WARN_SECONDS 没有 chunk 时，
 # 给前端一条"正在思考下一步"提示；超过 IDLE_ABORT_SECONDS 仍无 chunk 时，
 # 强制停止 LLM 调用并断开 WebSocket。
-IDLE_WARN_SECONDS = 60
-IDLE_ABORT_SECONDS = 180
+IDLE_WARN_SECONDS = 100
+IDLE_ABORT_SECONDS = 300
 # 应用层 keepalive：长 LLM 思考期间，每隔 KEEPALIVE_INTERVAL 秒推一条 ping
 # 防止 WPS WebView / 中间代理因连接长时间空闲而强制关闭 WebSocket。
 KEEPALIVE_INTERVAL = 20

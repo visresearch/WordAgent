@@ -26,6 +26,7 @@ _SHARED_TOOL_PROMPT_FILES = _SHARED_TOOL_PROMPT_FILES_BEFORE_PROJECT + _SHARED_T
 _AGENT_ONLY_TOOL_PROMPT_FILES = [
     "system-prompt-tool-usage-generate-document.md",
     "system-prompt-tool-usage-delete-document.md",
+    "system-prompt-tool-usage-python-repl.md",
 ]
 
 _SHARED_TOOL_PROMPT_NAMES = frozenset(_SHARED_TOOL_PROMPT_FILES + _AGENT_ONLY_TOOL_PROMPT_FILES)

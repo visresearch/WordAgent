@@ -104,10 +104,10 @@
 
 在后端单智能体架构中，系统设计了一个标准的ReAct智能体循环架构，智能体在每个循环中根据用户输入和当前文档状态进行思考，选择调用哪种工具（如联网搜索工具）还是选择直接结束，选择调用了工具然后再思考，再选择调用哪种工具(如写作工具)或者选择结束，直到智能体选择结束循环。
 
-- **read_document tool**: 负责读取(startPosition, endPosition)范围内的文章内容并转化成特定json格式回传给智能体。
+- **read_document tool**: 负责读取(startParaIndex, endParaIndex)范围内的文章内容并转化成特定json格式回传给智能体。
 - **generate_document tool**: 负责生成特定json格式的文章内容传给前端加载项。
 - **search_document tool**: 负责查询某种格式或文字信息的段落位置并返回给智能体。
-- **web_fetch tool**: 负责根据用户输入的网站链接进行抓取获取信息。
+- **delete_document tool**: 负责根据段落ID删除相应内容。
 
 ### Multi Agent 架构
 

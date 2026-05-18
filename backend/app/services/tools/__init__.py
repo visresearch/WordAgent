@@ -39,6 +39,7 @@ from .document_tools import (
 )
 from .file_tools import build_edit_file, build_list_file, build_read_file
 from .mcp_tools import build_mcp_tools_prompt, load_mcp_tools
+from .python_tools import build_python_repl
 from .schemas import (
     Cell,
     CellParagraph,
@@ -104,6 +105,7 @@ __all__ = [
     # MCP tools
     "load_mcp_tools",
     "build_mcp_tools_prompt",
+    "build_python_repl",
     # agent-only tools
     "build_run_sub_agent",
     # multi-agent-only tools

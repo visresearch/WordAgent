@@ -25,6 +25,7 @@ from app.services.tools import (
     build_list_file,
     build_load_skill_context,
     build_mcp_tools_prompt,
+    build_python_repl,
     build_read_file,
     build_read_document,
     build_run_sub_agent,
@@ -54,6 +55,7 @@ search_documnet = build_search_document(get_tool_description("search_document"))
 delete_document = build_delete_document(get_tool_description("delete_document"))
 load_skill_context = build_load_skill_context(get_tool_description("load_skill_context"))
 run_sub_agent = build_run_sub_agent(get_tool_description("run_sub_agent"))
+python_repl = build_python_repl(get_tool_description("python_repl"))
 list_file = build_list_file(get_tool_description("list_file"))
 read_file = build_read_file(get_tool_description("read_file"))
 edit_file = build_edit_file(get_tool_description("edit_file"))
@@ -70,6 +72,7 @@ AGENT_BASE_TOOLS = [
     search_documnet,
     generate_document,
     delete_document,
+    python_repl,
     list_file,
     read_file,
     edit_file,
@@ -79,7 +82,9 @@ ASK_BASE_TOOLS = [
     load_skill_context,
     read_document,
     search_documnet,
-    run_sub_agent,
+    list_file,
+    read_file,
+    edit_file,
 ]
 
 
@@ -106,6 +111,7 @@ __all__ = [
     "generate_document",
     "list_file",
     "load_skill_context",
+    "python_repl",
     "read_file",
     "read_document",
     "run_sub_agent",

@@ -33,6 +33,7 @@ _TOOL_DESCRIPTION_FILES: dict[str, str] = {
     "run_sub_agent": "tool-description-run-subagent.md",
     "create_workflow": "tool-description-create-workflow.md",
     "review_document": "tool-description-review-document.md",
+    "python_repl": "tool-description-python-repl.md",
 }
 
 

@@ -595,9 +595,9 @@ async def process_writing_request_stream(
     _thinking_enabled = enable_thinking and supports_thinking(model_name)
     llm = init_chat_model_with_reasoning(model_name, enable_thinking=_thinking_enabled)
 
-    # ask 模式禁用 MCP；agent 模式按用户设置加载 MCP 动态工具
+    # agent/ask 模式按用户设置加载 MCP 动态工具
     mcp_clients = []
-    if mode == "agent":
+    if mode in {"agent", "ask"}:
         mcp_tools, mcp_clients, mcp_failed_servers = await load_mcp_tools()
         for failed in mcp_failed_servers:
             server_name = str(failed.get("name") or "未命名服务器")
@@ -624,7 +624,7 @@ async def process_writing_request_stream(
             system_parts.append(long_term_prompt)
             print("[Agent] 已注入长期记忆")
 
-    if mode == "agent":
+    if mode in {"agent", "ask"}:
         mcp_prompt = build_mcp_tools_prompt(mcp_tools)
         if mcp_prompt:
             system_parts.append(mcp_prompt)

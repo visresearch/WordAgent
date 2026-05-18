@@ -62,27 +62,6 @@
 
 ![Skill示例](/skill-example.png)
 
-## 系统架构
-
-### Single Agent loop 架构
-
-![单智能体架构](/single_agent_loop.png)
-
-- **read_document**: 读取指定范围内容并转为 JSON。
-- **generate_document**: 生成结构化 JSON 传给前端。
-- **search_document**: 按格式或关键词定位段落。
-- **web_fetch**: 抓取指定链接内容。
-
-### Multi Agent 架构
-
-![多智能体架构](/multi_agent.png)
-
-- **planner agent**: 编排与调度工作流。
-- **research agent**: 搜集资料信息。
-- **outline agent**: 生成文章大纲。
-- **writer agent**: 生成正文内容。
-- **reviewer agent**: 审阅并提出修改建议。
-
 ## 快速开始
 
 ### 环境配置

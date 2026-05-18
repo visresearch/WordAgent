@@ -106,10 +106,10 @@ The frontend WPS add-in converts the user's request and selected document range 
 
 In the backend single-agent architecture, the system follows a standard ReAct loop. In each round, the agent reasons over user input and current document state, chooses whether to call a tool (such as web search) or finish directly, and continues this tool-use/reasoning loop until completion.
 
-- **read_document tool**: reads content in the `(startPosition, endPosition)` range and returns structured JSON to the agent.
+- **read_document tool**: reads content in the `(startParaIndex, endParaIndex)` range and returns structured JSON to the agent.
 - **generate_document tool**: generates structured JSON document content and returns it to the frontend add-in.
 - **search_document tool**: locates paragraph positions by format or text criteria and returns positions to the agent.
-- **web_fetch tool**: fetches information from user-provided links.
+- **delete_document tool**: deletes content based on paragraph IDs.
 
 ### 4.2 Multi-Agent Architecture
 

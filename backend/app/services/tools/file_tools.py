@@ -19,6 +19,11 @@ _EDITABLE_TEXT_EXTENSIONS = {
     ".yml",
     ".csv",
     ".log",
+    ".html",
+    ".js",
+    ".tx"
+    ".py",
+    ".mdx",
 }
 _MAX_LIST_ENTRIES = 500
 _MAX_READ_CHARS = 80_000

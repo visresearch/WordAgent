@@ -1,7 +1,7 @@
-Read file content from `wence_data/project` (safe sandbox).
+Read file content from the project sandbox.
 
 ## Parameters
-- `path` (string): Relative path under `wence_data/project`.
+- `path` (string): Relative path in the project sandbox.
   - Supports inline line range syntax: `path/to/file:24-25`
 - `start_line` (int, optional): 1-based start line.
 - `end_line` (int, optional): 1-based end line.
@@ -22,5 +22,5 @@ Read file content from `wence_data/project` (safe sandbox).
 - OCR text for image files.
 
 ## Security boundary
-- Access is strictly limited to `wence_data/project`.
-- Any path outside this root is rejected.
+- Access is strictly limited to the project sandbox.
+- Any path outside the project root is rejected.
