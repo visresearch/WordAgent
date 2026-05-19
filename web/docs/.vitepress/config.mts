@@ -18,6 +18,10 @@ export default defineConfig({
       { text: '下载', link: 'https://github.com/visresearch/WordAgent/releases' }
     ],
 
+    search: {
+      provider: 'local'
+    },
+
     sidebar: {
       '/guide/': [
         {

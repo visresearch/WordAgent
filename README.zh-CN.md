@@ -1,6 +1,6 @@
 # Word Agent
 
-![](./web/docs/public/WenceAI_small.png)
+![](./web/docs/public/show.png)
 
 <p align="center">
   <a href="backend/pyproject.toml"><img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white" alt="Python" /></a>
