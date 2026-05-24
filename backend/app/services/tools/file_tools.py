@@ -21,7 +21,7 @@ _EDITABLE_TEXT_EXTENSIONS = {
     ".log",
     ".html",
     ".js",
-    ".tx"
+    ".tx",
     ".py",
     ".mdx",
 }

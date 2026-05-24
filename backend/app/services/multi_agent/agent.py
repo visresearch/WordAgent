@@ -112,13 +112,24 @@ def _try_init_langsmith():
                 continue
             seen.add(resolved)
             if resolved.exists():
+                print(f"[LangSmith] 加载 .env: {resolved}")
                 load_dotenv(resolved, override=False)
 
-        if os.environ.get("LANGSMITH_API_KEY") and os.environ.get("LANGSMITH_PROJECT"):
-            print("[LangSmith] Multi-agent tracing enabled, project =", os.environ.get("LANGSMITH_PROJECT", "default"))
+        api_key = os.environ.get("LANGSMITH_API_KEY")
+        project = os.environ.get("LANGSMITH_PROJECT")
+
+        if api_key and project:
+            os.environ["LANGCHAIN_API_KEY"] = api_key
+            os.environ["LANGCHAIN_PROJECT"] = project
+            os.environ["LANGCHAIN_TRACING_V2"] = "true"
+            print(f"[LangSmith] ✅ 已启用 tracing，project = {project}")
             return True
-    except Exception:
-        pass
+        else:
+            print(
+                f"[LangSmith] ⚠️ 未启用 - API_KEY: {'已设置' if api_key else '未设置'}, PROJECT: {project}"
+            )
+    except Exception as e:
+        print(f"[LangSmith] ⚠️ 初始化失败: {e}")
     return False
 
 
@@ -935,12 +946,21 @@ async def process_writing_request_stream(
                     _current_chat_id.set(chat_id)
                 _current_model_name.set(model_name)
 
+                import uuid as _uuid
+
+                _thread_id = str(_uuid.uuid4())
+                _config = {
+                    "configurable": {"thread_id": _thread_id},
+                    "recursion_limit": _AGENT_RECURSION_LIMIT,
+                }
+                if langsmith_config:
+                    _config.update(langsmith_config)
+
                 stream_kwargs = {
                     "input": initial_state.model_dump(),
                     "stream_mode": ["messages", "custom"],
+                    "config": _config,
                 }
-                if langsmith_config:
-                    stream_kwargs["config"] = langsmith_config
 
                 max_attempts = 2
                 for attempt in range(1, max_attempts + 1):

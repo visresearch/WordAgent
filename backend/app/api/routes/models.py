@@ -99,10 +99,7 @@ def get_enabled_models_from_settings() -> list[ModelInfo]:
     settings_data = load_user_settings()
     enabled_models = []
     providers = settings_data.get("providers", [])
-    provider_order = {
-        (provider.get("name", "Unknown") or "Unknown"): index
-        for index, provider in enumerate(providers)
-    }
+    provider_order = {(provider.get("name", "Unknown") or "Unknown"): index for index, provider in enumerate(providers)}
 
     for provider in providers:
         if not provider.get("enabled", True):
