@@ -1,7 +1,6 @@
 ﻿# Word Agent
 
-
-![](./web/docs/public/show.png)
+![](./web/docs/public/WenceAI_small.png)
 
 <p align="center">
   <a href="backend/pyproject.toml"><img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white" alt="Python" /></a>
@@ -16,6 +15,8 @@
 <p align="center">
   English | <a href="README.zh-CN.md">中文文档</a>
 </p>
+
+![](./web/docs/public/show.png)
 
 ## 1. Overview
 
