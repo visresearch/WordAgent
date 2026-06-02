@@ -324,6 +324,82 @@ def _normalize_history_content(content: Any) -> str:
     return ""
 
 
+def _dump_memory_json(value: Any) -> str:
+    """Compact JSON used in short-term memory while preserving Chinese text."""
+    try:
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    except Exception:
+        return str(value)
+
+
+def _get_history_field(entry: dict, snake_name: str, camel_name: str) -> Any:
+    if snake_name in entry:
+        return entry.get(snake_name)
+    return entry.get(camel_name)
+
+
+def _has_tool_calls(tool_json: Any) -> bool:
+    if isinstance(tool_json, dict) and isinstance(tool_json.get("calls"), list):
+        return len(tool_json.get("calls") or []) > 0
+    return bool(tool_json)
+
+
+def _format_tool_value_for_memory(value: Any, indent: str = "  ") -> str:
+    text = _dump_memory_json(value)
+    if "\n" not in text:
+        return text
+    return "\n" + "\n".join(f"{indent}{line}" for line in text.splitlines())
+
+
+def _format_tool_json_for_memory(tool_json: Any) -> str:
+    """Render tool_json as readable Markdown for short-term memory."""
+    if not isinstance(tool_json, dict):
+        return _dump_memory_json(tool_json)
+
+    calls = tool_json.get("calls")
+    if not isinstance(calls, list):
+        return _dump_memory_json(tool_json)
+
+    lines: list[str] = []
+    for index, call in enumerate(calls, 1):
+        if not isinstance(call, dict):
+            lines.append(f"- tool_call_{index}: {_format_tool_value_for_memory(call)}")
+            continue
+
+        tool_name = str(call.get("tool") or call.get("name") or f"tool_call_{index}")
+        lines.append(f"- tool: {tool_name}")
+
+        if tool_name != "generate_document" and "input" in call:
+            lines.append(f"  - input: {_format_tool_value_for_memory(call.get('input'), indent='    ')}")
+
+        if "output" in call:
+            lines.append(f"  - output: {_format_tool_value_for_memory(call.get('output'), indent='    ')}")
+
+        if call.get("error"):
+            lines.append(f"  - error: {str(call.get('error')).lower()}")
+
+        for key in ("agent", "repaired", "is_mcp"):
+            if key in call and call.get(key) not in (None, False):
+                lines.append(f"  - {key}: {_format_tool_value_for_memory(call.get(key), indent='    ')}")
+
+    return "\n".join(lines)
+
+
+def _format_history_entry(entry: dict) -> str:
+    """Format one DB/front-end compatible history entry for short-term memory."""
+    sections: list[str] = []
+
+    content = _normalize_history_content(entry.get("content")).strip()
+    if content:
+        sections.append(content)
+
+    tool_json = _get_history_field(entry, "tool_json", "toolJson")
+    if _has_tool_calls(tool_json):
+        sections.append("[tool_json]\n" + _format_tool_json_for_memory(tool_json))
+
+    return "\n\n".join(sections)
+
+
 def _pair_history(history: list[dict]) -> list[tuple[str, str]]:
     """将 history 列表配对为 (user_msg, assistant_msg) 元组列表。"""
     pairs: list[tuple[str, str]] = []
@@ -337,7 +413,7 @@ def _pair_history(history: list[dict]) -> list[tuple[str, str]]:
         if role not in ("user", "assistant"):
             continue
 
-        content = _normalize_history_content(entry.get("content")).strip()
+        content = _format_history_entry(entry).strip()
 
         if role == "user" and not content:
             continue

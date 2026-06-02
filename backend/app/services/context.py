@@ -67,7 +67,6 @@ ENABLE_LIGHT_COMPACT = os.environ.get("WORDAGENT_ENABLE_LIGHT_COMPACT", "true").
 }
 LIGHT_COMPACT_PROTECT_TOKENS = _get_env_int("WORDAGENT_LIGHT_COMPACT_PROTECT_TOKENS", 40000)
 LIGHT_COMPACT_MIN_TOOL_RESULTS = _get_env_int("WORDAGENT_LIGHT_COMPACT_MIN_TOOL_RESULTS", 3)
-LIGHT_COMPACT_MIN_SAVINGS = _get_env_int("WORDAGENT_LIGHT_COMPACT_MIN_SAVINGS", 20000)
 
 # 重量压缩 (Heavy Compact) - LLM 生成结构化摘要
 ENABLE_HEAVY_COMPACT = os.environ.get("WORDAGENT_ENABLE_HEAVY_COMPACT", "true").strip().lower() in {
@@ -172,7 +171,6 @@ def _light_compact_tool_results(
     messages: list[SystemMessage | HumanMessage | AIMessage | ToolMessage],
     protect_tokens: int = LIGHT_COMPACT_PROTECT_TOKENS,
     protect_count: int = LIGHT_COMPACT_MIN_TOOL_RESULTS,
-    min_savings: int = LIGHT_COMPACT_MIN_SAVINGS,
 ) -> tuple[list[SystemMessage | HumanMessage | AIMessage | ToolMessage], dict[str, Any]]:
     """
     轻量压缩：清除旧的工具结果，保留最近的工具结果。
@@ -226,8 +224,8 @@ def _light_compact_tool_results(
             clearable_indices.add(idx)
             clearable_tokens += _estimate_messages_tokens([msg])
 
-    if clearable_tokens < min_savings:
-        print(f"[Context] 轻量压缩: 跳过（可节省 {clearable_tokens} tokens < 最低要求 {min_savings}）")
+    if not clearable_indices:
+        print("[Context] 轻量压缩: 跳过（没有可清除的旧工具结果）")
         return messages, meta
 
     result: list[SystemMessage | HumanMessage | AIMessage | ToolMessage] = []
@@ -637,15 +635,19 @@ def compress_conversation_history_if_needed(
     """
     converted = []
     for m in messages:
-        if isinstance(m, (SystemMessage, HumanMessage, AIMessage)):
+        if isinstance(m, (SystemMessage, HumanMessage, AIMessage, ToolMessage)):
             converted.append(m)
         elif isinstance(m, dict):
-            role = m.get("role", "user")
+            role = str(m.get("role", "user")).strip().lower()
             content = m.get("content", "")
             if role == "system":
                 converted.append(SystemMessage(content=content))
             elif role == "user":
                 converted.append(HumanMessage(content=content))
+            elif role == "tool":
+                converted.append(
+                    ToolMessage(content=content, tool_call_id=str(m.get("tool_call_id") or m.get("id") or "tool"))
+                )
             else:
                 converted.append(AIMessage(content=content))
         else:

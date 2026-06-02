@@ -125,9 +125,7 @@ def _try_init_langsmith():
             print(f"[LangSmith] ✅ 已启用 tracing，project = {project}")
             return True
         else:
-            print(
-                f"[LangSmith] ⚠️ 未启用 - API_KEY: {'已设置' if api_key else '未设置'}, PROJECT: {project}"
-            )
+            print(f"[LangSmith] ⚠️ 未启用 - API_KEY: {'已设置' if api_key else '未设置'}, PROJECT: {project}")
     except Exception as e:
         print(f"[LangSmith] ⚠️ 初始化失败: {e}")
     return False
@@ -167,6 +165,7 @@ from app.services.multi_agent.tools import (
 )
 from app.services.tools import _current_model_name
 from app.services.agent.skills import build_skills_prompt
+from app.services.tools.tool_log import append_tool_call, build_tool_json, set_current_tool_log
 
 
 # region State
@@ -279,6 +278,20 @@ def _run_sub_agent(
             return True
         return False
 
+    def _apply_light_compact() -> None:
+        nonlocal messages
+        try:
+            from app.services.context import _light_compact_tool_results
+
+            compacted_messages, light_meta = _light_compact_tool_results(messages)
+            if light_meta.get("light_compact_triggered"):
+                messages = compacted_messages
+                print(
+                    f"  [{agent_name}] Light compact: cleared {light_meta.get('cleared_tool_results', 0)} old tool results"
+                )
+        except Exception as compact_err:
+            print(f"  [{agent_name}] Light compact skipped: {compact_err}")
+
     def _fmt_invalid_tool_call(tc) -> str:
         if isinstance(tc, dict):
             name = tc.get("name", "?")
@@ -367,26 +380,33 @@ def _run_sub_agent(
                 print(f"  [{agent_name}] Repaired invalid tool_call: {tool_name}")
 
                 # 收集所有工具调用结果，用于后续步骤共享
+                is_mcp_tool = tool_name.startswith("mcp_") or tool_name not in (
+                    "search_documnet",
+                    "read_document",
+                    "generate_document",
+                    "delete_document",
+                    "list_file",
+                    "read_file",
+                    "edit_file",
+                    "load_skill_context",
+                    "create_workflow",
+                    "review_document",
+                )
                 _tool_data.append(
                     {
                         "tool": tool_name,
                         "args": normalized_args,
                         "result": content,
-                        "is_mcp": tool_name.startswith("mcp_")
-                        or tool_name
-                        not in (
-                            "search_documnet",
-                            "read_document",
-                            "generate_document",
-                            "delete_document",
-                            "list_file",
-                            "read_file",
-                            "edit_file",
-                            "load_skill_context",
-                            "create_workflow",
-                            "review_document",
-                        ),
+                        "is_mcp": is_mcp_tool,
                     }
+                )
+                append_tool_call(
+                    tool=tool_name,
+                    input=normalized_args,
+                    output=result,
+                    agent=agent_name,
+                    repaired=True,
+                    is_mcp=is_mcp_tool,
                 )
 
                 if agent_name == "writer" and tool_name == "generate_document":
@@ -395,10 +415,19 @@ def _run_sub_agent(
                 err_text = f"Repaired tool '{tool_name}' execution failed: {e}"
                 print(f"  [{agent_name}] Repair failed: {err_text}")
                 repaired_tool_messages.append(ToolMessage(content=err_text, tool_call_id=tool_call_id, name=tool_name))
+                append_tool_call(
+                    tool=tool_name,
+                    input=normalized_args if "normalized_args" in locals() else parsed_args,
+                    output=err_text,
+                    error=True,
+                    agent=agent_name,
+                    repaired=True,
+                )
 
         if repaired_any:
             messages.append(AIMessage(content="", tool_calls=repaired_tool_calls))
             messages.extend(repaired_tool_messages)
+            _apply_light_compact()
 
         return repaired_any
 
@@ -488,30 +517,37 @@ def _run_sub_agent(
                     messages.append(ToolMessage(content=content, tool_call_id=tc["id"], name=tool_name))
 
                     # 收集所有工具调用结果，用于后续步骤共享
+                    is_mcp_tool = tool_name.startswith("mcp_") or tool_name not in (
+                        "search_documnet",
+                        "read_document",
+                        "generate_document",
+                        "delete_document",
+                        "list_file",
+                        "read_file",
+                        "edit_file",
+                        "load_skill_context",
+                        "create_workflow",
+                        "review_document",
+                    )
                     _tool_data.append(
                         {
                             "tool": tool_name,
                             "args": tool_args,
                             "result": content,
-                            "is_mcp": tool_name.startswith("mcp_")
-                            or tool_name
-                            not in (
-                                "search_documnet",
-                                "read_document",
-                                "generate_document",
-                                "delete_document",
-                                "list_file",
-                                "read_file",
-                                "edit_file",
-                                "load_skill_context",
-                                "create_workflow",
-                                "review_document",
-                            ),
+                            "is_mcp": is_mcp_tool,
                         }
+                    )
+                    append_tool_call(
+                        tool=tool_name,
+                        input=tool_args,
+                        output=result,
+                        agent=agent_name,
+                        is_mcp=is_mcp_tool,
                     )
 
                     if agent_name == "writer" and tool_name == "generate_document":
                         _writer_generated = True
+                    _apply_light_compact()
                 except Exception as e:
                     # 为不同工具生成友好的错误消息
                     is_mcp_tool = tool_name.startswith("mcp_") or tool_name not in (
@@ -534,9 +570,19 @@ def _run_sub_agent(
                         err = f"Tool {tool_name} failed: {e}. Please check the parameters and try again."
                     print(f"  [{agent_name}] {err}")
                     messages.append(ToolMessage(content=err, tool_call_id=tc["id"], name=tool_name))
+                    append_tool_call(
+                        tool=tool_name,
+                        input=tc.get("args", {}),
+                        output=err,
+                        error=True,
+                        agent=agent_name,
+                        is_mcp=is_mcp_tool,
+                    )
             else:
-                messages.append(
-                    ToolMessage(content=f"Unknown tool: {tool_name}", tool_call_id=tc["id"], name=tool_name)
+                unknown_err = f"Unknown tool: {tool_name}"
+                messages.append(ToolMessage(content=unknown_err, tool_call_id=tc["id"], name=tool_name))
+                append_tool_call(
+                    tool=tool_name, input=tc.get("args", {}), output=unknown_err, error=True, agent=agent_name
                 )
     else:
         for m in reversed(messages):
@@ -915,6 +961,7 @@ async def process_writing_request_stream(
         )
 
         queue: asyncio.Queue = asyncio.Queue()
+        tool_log: list[dict] = []
         _SUPPRESS_STREAM = {"writer"}
         current_agent = "planner"
         _collected_text_parts: list[str] = []
@@ -944,6 +991,7 @@ async def process_writing_request_stream(
             try:
                 if chat_id:
                     _current_chat_id.set(chat_id)
+                set_current_tool_log(tool_log)
                 _current_model_name.set(model_name)
 
                 import uuid as _uuid
@@ -1138,6 +1186,7 @@ async def process_writing_request_stream(
         # 返回完整对话（供记忆提取使用）
         conversation_for_memory = {"user": user_content, "assistant": assistant_content}
         yield f"__memory_conversation__: {json.dumps(conversation_for_memory, ensure_ascii=False)}\n\n"
+        yield f"__tool_json__: {json.dumps(build_tool_json(tool_log), ensure_ascii=False)}\n\n"
 
     except Exception as e:
         print(f"[MultiAgent Error] {e}")

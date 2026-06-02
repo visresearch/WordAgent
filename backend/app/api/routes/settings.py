@@ -52,7 +52,7 @@ class UserSettings(BaseModel):
     proxy: ProxyConfig = ProxyConfig()
     # 个性化设置
     customPrompt: str = ""
-    temperature: float = 0.7
+    temperature: float = 0.5
     enableLongTermMemory: bool = False
     # MCP 服务器设置
     mcpServers: list[dict[str, Any]] = []

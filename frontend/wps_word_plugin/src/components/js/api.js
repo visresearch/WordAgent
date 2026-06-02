@@ -621,9 +621,9 @@ function chatStream(message, options = {}) {
     model = '',
     provider = '',
     documentRange = null,
-    history = [],
     files = [],
-    enableThinking = true
+    enableThinking = true,
+    sessionId = null
   } = options;
 
   // 重置完成状态
@@ -658,9 +658,9 @@ function chatStream(message, options = {}) {
         mode,
         model,
         provider,
+        sessionId,
         documentRange,
         documentMeta,
-        history,
         files,
         enableThinking,
         timestamp: Date.now()

@@ -136,12 +136,28 @@ class SessionService:
         )
         return list(result.scalars().all())
 
+    async def get_recent_messages(
+        self,
+        session_id: int,
+        limit: int = 200,
+    ) -> list[ChatMessage]:
+        """获取会话最近的消息，并按时间正序返回。"""
+        result = await self.db.execute(
+            select(ChatMessage)
+            .where(ChatMessage.session_id == session_id)
+            .order_by(desc(ChatMessage.created_at))
+            .limit(limit)
+        )
+        messages = list(result.scalars().all())
+        messages.reverse()
+        return messages
+
     async def add_message(
         self,
         session_id: int,
         role: str,
         content: str,
-        document_json: dict | None = None,
+        tool_json: dict | None = None,
         selection_context: list | dict | None = None,
         content_parts: list[dict] | None = None,
         thinking: str | None = None,
@@ -170,7 +186,7 @@ class SessionService:
             session_id=session_id,
             role=role,
             content=content,
-            document_json=document_json,
+            tool_json=tool_json,
             selection_context=selection_context,
             content_parts=content_parts,
             thinking=thinking,

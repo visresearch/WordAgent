@@ -4,8 +4,6 @@
 提供 Session CRUD 和 Session 下的消息操作接口
 """
 
-from typing import Any
-
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,8 +34,8 @@ class AddMessageRequest(BaseModel):
 
     role: str  # user / assistant
     content: str
-    documentJson: Any | None = None
     selectionContext: list | dict | None = None
+    toolJson: dict | None = None
     contentParts: list[dict] | None = None
     thinking: str | None = None
     model: str | None = None
@@ -289,7 +287,7 @@ async def add_message(
             session_id=session_id,
             role=request.role,
             content=request.content,
-            document_json=request.documentJson,
+            tool_json=request.toolJson,
             selection_context=request.selectionContext,
             content_parts=request.contentParts,
             thinking=request.thinking,

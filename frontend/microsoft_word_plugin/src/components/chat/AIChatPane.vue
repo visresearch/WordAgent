@@ -144,6 +144,39 @@ export default {
     }
   },
   methods: {
+    _sanitizeContentParts(parts) {
+      if (!Array.isArray(parts)) {
+        return [];
+      }
+      return parts.map((part) => {
+        const { loading, ...rest } = part || {};
+        return rest;
+      });
+    },
+
+    _extractDocumentJsonFromToolJson(toolJson) {
+      const calls = Array.isArray(toolJson?.calls) ? toolJson.calls : [];
+      for (let i = calls.length - 1; i >= 0; i--) {
+        const call = calls[i];
+        if (call?.tool !== 'generate_document') {
+          continue;
+        }
+        const output = call.output;
+        if (output && typeof output === 'object' && (output.paragraphs || output.tables || output.images)) {
+          return output;
+        }
+        if (typeof output === 'string') {
+          try {
+            const parsed = JSON.parse(output);
+            if (parsed && (parsed.paragraphs || parsed.tables || parsed.images)) {
+              return parsed;
+            }
+          } catch (e) {}
+        }
+      }
+      return null;
+    },
+
     _formatMcpText(value) {
       if (value === null || value === undefined) {
         return "";
@@ -282,19 +315,22 @@ export default {
 
             // 直接使用返回的消息数据
             const messages = result.data.messages || [];
-            this.messages = messages.map((msg) => ({
-              role: msg.role,
-              content: msg.content,
-              contentParts: (msg.contentParts && msg.contentParts.length > 0)
-                ? msg.contentParts
-                : (msg.content ? [{ type: 'text', content: msg.content }] : []),
-              documentJson: msg.documentJson || null,
-              selectionContext: msg.selectionContext || null,
-              thinking: msg.thinking || '',
-              thinkingExpanded: !!msg.thinking,
-              thinkingDone: true,
-              attachedFiles: msg.attachedFiles || null
-            }));
+            this.messages = messages.map((msg) => {
+              const toolJson = msg.toolJson || null;
+              const parts = this._sanitizeContentParts(msg.contentParts);
+              return {
+                role: msg.role,
+                content: msg.content,
+                contentParts: parts.length > 0 ? parts : (msg.content ? [{ type: 'text', content: msg.content }] : []),
+                documentJson: this._extractDocumentJsonFromToolJson(toolJson),
+                toolJson,
+                selectionContext: msg.selectionContext || null,
+                thinking: msg.thinking || '',
+                thinkingExpanded: !!msg.thinking,
+                thinkingDone: true,
+                attachedFiles: msg.attachedFiles || null
+              };
+            });
 
             if (result.data.lastUsedModel) {
               this.selectedModel = result.data.lastUsedModel;
@@ -396,19 +432,22 @@ export default {
           return;
         }
         if (result.success && result.data?.messages) {
-          this.messages = result.data.messages.map((msg) => ({
-            role: msg.role,
-            content: msg.content,
-            contentParts: (msg.contentParts && msg.contentParts.length > 0)
-              ? msg.contentParts
-              : (msg.content ? [{ type: 'text', content: msg.content }] : []),
-            documentJson: msg.documentJson || null,
-            selectionContext: msg.selectionContext || null,
-            thinking: msg.thinking || '',
-            thinkingExpanded: !!msg.thinking,
-            thinkingDone: true,
-            attachedFiles: msg.attachedFiles || null
-          }));
+          this.messages = result.data.messages.map((msg) => {
+            const toolJson = msg.toolJson || null;
+            const parts = this._sanitizeContentParts(msg.contentParts);
+            return {
+              role: msg.role,
+              content: msg.content,
+              contentParts: parts.length > 0 ? parts : (msg.content ? [{ type: 'text', content: msg.content }] : []),
+              documentJson: this._extractDocumentJsonFromToolJson(toolJson),
+              toolJson,
+              selectionContext: msg.selectionContext || null,
+              thinking: msg.thinking || '',
+              thinkingExpanded: !!msg.thinking,
+              thinkingDone: true,
+              attachedFiles: msg.attachedFiles || null
+            };
+          });
 
           if (result.data.lastUsedModel) {
             this.selectedModel = result.data.lastUsedModel;
@@ -471,52 +510,6 @@ export default {
         console.error('[自动创建会话] 失败:', e);
       }
       return null;
-    },
-
-    async saveMessageToHistory(role, content, sessionId = null, documentJson = null, selectionContext = null, contentParts = null, thinking = null, attachedFiles = null) {
-      let targetSessionId = sessionId || this.currentSessionId;
-      if (!targetSessionId) {
-        targetSessionId = await this.ensureSession();
-        if (!targetSessionId) return;
-      }
-
-      try {
-        let saveResult = await api.addSessionMessage(targetSessionId, {
-          role,
-          content,
-          documentJson,
-          selectionContext,
-          contentParts,
-          thinking,
-          model: this.selectedModel || 'auto',
-          mode: this.mode,
-          attachedFiles
-        });
-
-        if (!saveResult?.success && !sessionId) {
-          targetSessionId = await this.ensureSession();
-          if (!targetSessionId) return;
-          saveResult = await api.addSessionMessage(targetSessionId, {
-            role,
-            content,
-            documentJson,
-            selectionContext,
-            contentParts,
-            thinking,
-            model: this.selectedModel || 'auto',
-            mode: this.mode,
-            attachedFiles
-          });
-        }
-
-        if (role === 'user' && (!this.currentSessionTitle || this.currentSessionTitle === '新对话')) {
-          this.currentSessionTitle = content.length > 30 ? content.substring(0, 30) + '...' : content;
-        }
-
-        window.dispatchEvent(new CustomEvent('session-updated'));
-      } catch (e) {
-        console.warn('保存消息失败:', e);
-      }
     },
 
     // ============== 模型加载 ==============
@@ -768,11 +761,13 @@ export default {
       }
 
       this.messages.push(userMsgObj);
+      if (!this.currentSessionTitle || this.currentSessionTitle === '新对话') {
+        this.currentSessionTitle = userMessage.length > 30 ? userMessage.substring(0, 30) + '...' : userMessage;
+      }
       this.historyLoaded = true;
       this.selections = [];
       this.clearAllFiles();
 
-      this.saveMessageToHistory('user', userMessage, null, null, selectionContext, null, null, uploadedFilesMeta.length > 0 ? uploadedFilesMeta : null);
       this._sendStreamRequest(userMessage, documentRange, uploadedFilesMeta);
     },
 
@@ -801,9 +796,10 @@ export default {
         model: this.selectedModel,
         provider: this.selectedModelProvider,
         documentRange: documentRange,
-        history: this.messages.slice(0, -1).slice(-10),
+        history: this.messages.slice(0, -2).slice(-10),
         files: files,
         enableThinking: this.enableThinking,
+        sessionId: streamSessionId,
 
         onMessage: (data) => {
           this._handleStreamMessage(data, aiMsg);
@@ -828,12 +824,8 @@ export default {
             aiMsg.thinkingDone = true;
           }
 
-          // 使用流开始时的 sessionId 保存消息
-          if (aiMsg.content && streamSessionId) {
-            this.saveMessageToHistory('assistant', aiMsg.content, streamSessionId, aiMsg.documentJson, null, aiMsg.contentParts, aiMsg.thinking || null);
-          }
-
           this.scrollToBottom();
+          window.dispatchEvent(new CustomEvent('session-created'));
 
           // 如果只有删除没有插入（无 json 事件），在流结束后补充添加删除批注
           if (this.pendingDeletes.length > 0 && !this.pendingDocumentMsg) {

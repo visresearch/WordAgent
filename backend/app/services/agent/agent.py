@@ -38,6 +38,7 @@ from app.services.agent.tools import (
     register_loop,
 )
 from app.services.agent.skills import build_skills_prompt
+from app.services.tools.tool_log import append_tool_call, build_tool_json, set_current_tool_log
 
 
 def _get_env_int(name: str, default: int) -> int:
@@ -288,7 +289,17 @@ def build_graph(llm_with_tools, all_tools: list):
             print(f"[Agent] ⛔ 收到停止信号，终止 Agent 节点 (session={chat_id})")
             return {"messages": []}
         print("[Agent] 开始处理")
-        response = llm_with_tools.invoke(state["messages"])
+        invoke_messages = state["messages"]
+        try:
+            from app.services.context import _light_compact_tool_results
+
+            compacted_messages, light_meta = _light_compact_tool_results(invoke_messages)
+            if light_meta.get("light_compact_triggered"):
+                print(f"[Agent] 轻量压缩生效: 清除 {light_meta.get('cleared_tool_results', 0)} 个旧工具结果")
+                invoke_messages = compacted_messages
+        except Exception as compact_err:
+            print(f"[Agent] 轻量压缩跳过: {compact_err}")
+        response = llm_with_tools.invoke(invoke_messages)
         return {"messages": [response]}
 
     def tools_node(state: MessagesState) -> dict:
@@ -323,6 +334,12 @@ def build_graph(llm_with_tools, all_tools: list):
                     else:
                         content = str(result)
                     results.append(ToolMessage(content=content, tool_call_id=tool_call["id"], name=tool_name))
+                    append_tool_call(
+                        tool=tool_name,
+                        input=normalized_args,
+                        output=result,
+                        is_mcp=tool_name.startswith("mcp_") or tool_name not in tool_map,
+                    )
                 except Exception as e:
                     # 为不同工具生成友好的错误消息
                     is_mcp_tool = tool_name.startswith("mcp_") or tool_name not in (
@@ -347,13 +364,18 @@ def build_graph(llm_with_tools, all_tools: list):
                         err = f"Tool {tool_name} failed: {e}. Please check the parameters and try again."
                     print(f"[Tools] ❌ {err}")
                     results.append(ToolMessage(content=err, tool_call_id=tool_call["id"], name=tool_name))
+                    append_tool_call(
+                        tool=tool_name,
+                        input=tool_call.get("args", {}),
+                        output=err,
+                        error=True,
+                        is_mcp=is_mcp_tool,
+                    )
             else:
                 print(f"[Tools] ⚠️ 未知工具: {tool_name}")
-                results.append(
-                    ToolMessage(
-                        content=f"Error: unknown tool {tool_name}", tool_call_id=tool_call["id"], name=tool_name
-                    )
-                )
+                unknown_err = f"Error: unknown tool {tool_name}"
+                results.append(ToolMessage(content=unknown_err, tool_call_id=tool_call["id"], name=tool_name))
+                append_tool_call(tool=tool_name, input=tool_call.get("args", {}), output=unknown_err, error=True)
 
         return {"messages": results}
 
@@ -471,12 +493,27 @@ def build_graph(llm_with_tools, all_tools: list):
                 repaired_results.append(
                     ToolMessage(content=content, tool_call_id=tc.get("id", "repaired"), name=tool_name)
                 )
+                append_tool_call(
+                    tool=tool_name,
+                    input=normalized_args,
+                    output=result,
+                    repaired=True,
+                    is_mcp=tool_name.startswith("mcp_") or tool_name not in tool_map,
+                )
                 print(f"[Repair] ✅ 已修复并执行工具: {tool_name}")
             except Exception as e:
                 err_text = f"Repaired tool '{tool_name}' execution failed: {e}"
                 print(f"[Repair] ❌ {err_text}")
                 repaired_results.append(
                     ToolMessage(content=err_text, tool_call_id=tc.get("id", "repaired"), name=tool_name)
+                )
+                append_tool_call(
+                    tool=tool_name,
+                    input=normalized_args,
+                    output=err_text,
+                    error=True,
+                    repaired=True,
+                    is_mcp=tool_name.startswith("mcp_") or tool_name not in tool_map,
                 )
 
         if repaired_tool_calls:
@@ -647,6 +684,7 @@ async def process_writing_request_stream(
     # 使用 bind_tools + build_graph（替代 create_agent）
     llm_with_tools = llm.bind_tools(tools)
     app = build_graph(llm_with_tools, tools)
+    tool_log: list[dict] = []
 
     try:
         # 构建初始消息列表
@@ -815,6 +853,7 @@ async def process_writing_request_stream(
             try:
                 if chat_id:
                     _current_chat_id.set(chat_id)
+                set_current_tool_log(tool_log)
                 _current_model_name.set(model_name)
                 # 设置请求上下文，供工具函数获取 document_meta
                 _current_request_context.set(
@@ -1060,9 +1099,10 @@ async def process_writing_request_stream(
         if not assistant_content:
             assistant_content = "".join(_collected_text_parts).strip()
 
-        # 返回完整对话（供记忆提取使用）
+        # 返回完整对话（供记忆提取使用）和工具日志（供后端持久化使用）
         conversation_for_memory = {"user": user_content, "assistant": assistant_content}
         yield f"__memory_conversation__: {json.dumps(conversation_for_memory, ensure_ascii=False)}\n\n"
+        yield f"__tool_json__: {json.dumps(build_tool_json(tool_log), ensure_ascii=False)}\n\n"
 
     except Exception as e:
         print(f"[Agent Error] {e}")

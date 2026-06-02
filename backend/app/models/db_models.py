@@ -62,8 +62,8 @@ class ChatMessage(Base):
     role = Column(String(20), nullable=False)
     # 消息内容（文本）
     content = Column(Text, nullable=False)
-    # 文档 JSON 数据（AI 返回的结构化文档，可选）
-    document_json = Column(JSON, nullable=True)
+    # Agent 工具调用日志（工具名、输入、输出、错误等）
+    tool_json = Column(JSON, nullable=True)
     # 选区上下文（用户选中的内容信息，可选）
     selection_context = Column(JSON, nullable=True)
     # 结构化消息内容（包含 status 和 text 类型的部分）
@@ -96,7 +96,7 @@ class ChatMessage(Base):
             "id": self.id,
             "role": self.role,
             "content": self.content,
-            "documentJson": self.document_json,
+            "toolJson": self.tool_json,
             "selectionContext": self.selection_context,
             "contentParts": self.content_parts,
             "thinking": self.thinking,

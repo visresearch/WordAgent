@@ -3,6 +3,8 @@
 使用 SQLite + SQLAlchemy 异步（嵌入式，无需用户安装）
 """
 
+import json
+
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import declarative_base
 
@@ -17,6 +19,8 @@ engine = create_async_engine(
     echo=settings.DEBUG,  # 开发时打印 SQL
     pool_pre_ping=True,  # 检查连接是否有效
     pool_recycle=3600,  # 1小时后回收连接
+    json_serializer=lambda obj: json.dumps(obj, ensure_ascii=False),
+    json_deserializer=json.loads,
     # SQLite aiosqlite 不需要 check_same_thread
 )
 
@@ -46,8 +50,7 @@ async def get_db():
 
 async def init_db():
     """
-    初始化数据库，创建所有表
-    如果检测到旧表结构（无 sessions 表），则自动迁移
+    初始化数据库，创建所有表并补齐历史版本缺失列。
     """
     async with engine.begin() as conn:
 
@@ -59,37 +62,31 @@ async def init_db():
 
             Base.metadata.create_all(connection)
 
-            # 清理历史遗留 documents 表
-            if "documents" in tables:
-                try:
-                    connection.exec_driver_sql("DROP TABLE IF EXISTS documents")
-                    print("🧹 已移除遗留表: documents")
-                except Exception as e:
-                    print(f"⚠️ 移除遗留表 documents 失败: {e}")
-
-            # 清理 sessions 表中的历史字段（若存在）
-            try:
-                columns = {col["name"] for col in sa_inspect(connection).get_columns("sessions")}
-                for legacy_col in ("doc_id", "doc_name"):
-                    if legacy_col in columns:
-                        try:
-                            connection.exec_driver_sql(f"ALTER TABLE sessions DROP COLUMN {legacy_col}")
-                            print(f"🧹 已移除历史字段: sessions.{legacy_col}")
-                        except Exception as drop_err:
-                            print(f"⚠️ 移除字段 sessions.{legacy_col} 失败: {drop_err}")
-            except Exception as e:
-                print(f"⚠️ 清理 sessions 历史字段失败: {e}")
-
-            # 迁移：为 chat_messages 添加 thinking 列
             if "chat_messages" in tables:
                 try:
                     msg_columns = {col["name"] for col in sa_inspect(connection).get_columns("chat_messages")}
+                    json_columns = {
+                        "selection_context",
+                        "content_parts",
+                        "attached_files",
+                        "tool_json",
+                    }
+                    for col_name in json_columns:
+                        if col_name not in msg_columns:
+                            connection.exec_driver_sql(f"ALTER TABLE chat_messages ADD COLUMN {col_name} JSON")
+                            print(f"✅ 已添加字段: chat_messages.{col_name}")
                     if "thinking" not in msg_columns:
                         connection.exec_driver_sql("ALTER TABLE chat_messages ADD COLUMN thinking TEXT")
                         print("✅ 已添加字段: chat_messages.thinking")
+                    if "model" not in msg_columns:
+                        connection.exec_driver_sql("ALTER TABLE chat_messages ADD COLUMN model VARCHAR(64)")
+                        print("✅ 已添加字段: chat_messages.model")
                     if "provider" not in msg_columns:
                         connection.exec_driver_sql("ALTER TABLE chat_messages ADD COLUMN provider TEXT")
                         print("✅ 已添加字段: chat_messages.provider")
+                    if "mode" not in msg_columns:
+                        connection.exec_driver_sql("ALTER TABLE chat_messages ADD COLUMN mode VARCHAR(20)")
+                        print("✅ 已添加字段: chat_messages.mode")
                 except Exception as e:
                     print(f"⚠️ 添加 chat_messages 字段失败: {e}")
 

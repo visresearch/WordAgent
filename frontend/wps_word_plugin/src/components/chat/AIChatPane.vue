@@ -161,6 +161,39 @@ export default {
     }
   },
   methods: {
+    _sanitizeContentParts(parts) {
+      if (!Array.isArray(parts)) {
+        return [];
+      }
+      return parts.map((part) => {
+        const { loading, ...rest } = part || {};
+        return rest;
+      });
+    },
+
+    _extractDocumentJsonFromToolJson(toolJson) {
+      const calls = Array.isArray(toolJson?.calls) ? toolJson.calls : [];
+      for (let i = calls.length - 1; i >= 0; i--) {
+        const call = calls[i];
+        if (call?.tool !== 'generate_document') {
+          continue;
+        }
+        const output = call.output;
+        if (output && typeof output === 'object' && (output.paragraphs || output.tables || output.images)) {
+          return output;
+        }
+        if (typeof output === 'string') {
+          try {
+            const parsed = JSON.parse(output);
+            if (parsed && (parsed.paragraphs || parsed.tables || parsed.images)) {
+              return parsed;
+            }
+          } catch (e) {}
+        }
+      }
+      return null;
+    },
+
     _toIntOrNull(value) {
       if (typeof value === 'number' && Number.isInteger(value)) {
         return value;
@@ -417,19 +450,22 @@ export default {
 
             // 直接使用返回的消息数据
             const messages = result.data.messages || [];
-            this.messages = messages.map((msg) => ({
-              role: msg.role,
-              content: msg.content,
-              contentParts: (msg.contentParts && msg.contentParts.length > 0)
-                ? msg.contentParts
-                : (msg.content ? [{ type: 'text', content: msg.content }] : []),
-              documentJson: msg.documentJson || null,
-              selectionContext: msg.selectionContext || null,
-              thinking: msg.thinking || '',
-              thinkingExpanded: !!msg.thinking,
-              thinkingDone: true,
-              attachedFiles: msg.attachedFiles || null
-            }));
+            this.messages = messages.map((msg) => {
+              const toolJson = msg.toolJson || null;
+              const parts = this._sanitizeContentParts(msg.contentParts);
+              return {
+                role: msg.role,
+                content: msg.content,
+                contentParts: parts.length > 0 ? parts : (msg.content ? [{ type: 'text', content: msg.content }] : []),
+                documentJson: this._extractDocumentJsonFromToolJson(toolJson),
+                toolJson,
+                selectionContext: msg.selectionContext || null,
+                thinking: msg.thinking || '',
+                thinkingExpanded: !!msg.thinking,
+                thinkingDone: true,
+                attachedFiles: msg.attachedFiles || null
+              };
+            });
 
             if (result.data.lastUsedModel) {
               this.selectedModel = result.data.lastUsedModel;
@@ -558,19 +594,22 @@ export default {
 
         if (result.success && result.data?.messages) {
           console.log('[加载历史] 消息数量:', result.data.messages.length);
-          this.messages = result.data.messages.map((msg) => ({
-            role: msg.role,
-            content: msg.content,
-            contentParts: (msg.contentParts && msg.contentParts.length > 0)
-              ? msg.contentParts
-              : (msg.content ? [{ type: 'text', content: msg.content }] : []),
-            documentJson: msg.documentJson || null,
-            selectionContext: msg.selectionContext || null,
-            thinking: msg.thinking || '',
-            thinkingExpanded: !!msg.thinking,
-            thinkingDone: true,
-            attachedFiles: msg.attachedFiles || null
-          }));
+          this.messages = result.data.messages.map((msg) => {
+            const toolJson = msg.toolJson || null;
+            const parts = this._sanitizeContentParts(msg.contentParts);
+            return {
+              role: msg.role,
+              content: msg.content,
+              contentParts: parts.length > 0 ? parts : (msg.content ? [{ type: 'text', content: msg.content }] : []),
+              documentJson: this._extractDocumentJsonFromToolJson(toolJson),
+              toolJson,
+              selectionContext: msg.selectionContext || null,
+              thinking: msg.thinking || '',
+              thinkingExpanded: !!msg.thinking,
+              thinkingDone: true,
+              attachedFiles: msg.attachedFiles || null
+            };
+          });
 
           if (result.data.lastUsedModel) {
             this.selectedModel = result.data.lastUsedModel;
@@ -660,87 +699,6 @@ export default {
         console.error('[自动创建会话] 失败:', e);
       }
       return null;
-    },
-
-    /**
-     * 保存消息到后端（基于会话）
-     */
-    async saveMessageToHistory(role, content, sessionId = null, documentJson = null, selectionContext = null, contentParts = null, thinking = null, attachedFiles = null) {
-      let targetSessionId = sessionId || this.currentSessionId;
-      if (!targetSessionId) {
-        targetSessionId = await this.ensureSession();
-        if (!targetSessionId) {
-          console.warn('[保存消息] 无法获取会话ID，消息未保存');
-          return;
-        }
-      }
-
-      console.log('[保存消息]', {
-        sessionId: targetSessionId,
-        role,
-        contentLength: content.length
-      });
-
-      try {
-        let saveResult = await api.addSessionMessage(targetSessionId, {
-          role,
-          content,
-          documentJson,
-          selectionContext,
-          contentParts,
-          thinking,
-          model: this.selectedModel || 'auto',
-          provider: this.selectedModelProvider || '',
-          mode: this.mode,
-          attachedFiles
-        });
-
-        // 兼容旧缓存导致的无效 session_id：自动重建并重试一次（仅当未指定 sessionId 时）
-        if (!saveResult?.success && !sessionId) {
-          console.warn('[保存消息] 会话失效，尝试重建后重试:', saveResult?.error);
-          this.currentSessionId = null;
-          this.currentSessionTitle = null;
-          if (window.Application && window.Application.PluginStorage) {
-            window.Application.PluginStorage.removeItem('current_session_id');
-          }
-
-          targetSessionId = await this.ensureSession();
-          if (!targetSessionId) {
-            console.warn('[保存消息] 重建会话失败，消息未保存');
-            return;
-          }
-
-          saveResult = await api.addSessionMessage(targetSessionId, {
-            role,
-            content,
-            documentJson,
-            selectionContext,
-            contentParts,
-            thinking,
-            model: this.selectedModel || 'auto',
-            provider: this.selectedModelProvider || '',
-            mode: this.mode
-          });
-        }
-
-        if (!saveResult?.success) {
-          console.warn('[保存消息] 最终保存失败:', saveResult?.error);
-          return;
-        }
-
-        console.log('[保存消息] 成功');
-
-        // 第一条用户消息会自动设置会话标题，更新本地标题
-        if (role === 'user' && (!this.currentSessionTitle || this.currentSessionTitle === '新对话')) {
-          const newTitle = content.length > 30 ? content.substring(0, 30) + '...' : content;
-          this.currentSessionTitle = newTitle;
-        }
-
-        // 通知同页面的 SessionPane 更新列表
-        window.dispatchEvent(new CustomEvent('session-updated'));
-      } catch (e) {
-        console.warn('保存消息失败:', e);
-      }
     },
 
     /**
@@ -1110,12 +1068,13 @@ export default {
       }
 
       this.messages.push(userMsgObj);
+      if (!this.currentSessionTitle || this.currentSessionTitle === '新对话') {
+        this.currentSessionTitle = userMessage.length > 30 ? userMessage.substring(0, 30) + '...' : userMessage;
+      }
       this.historyLoaded = true;
 
       this.clearAllSelections();
       this.clearAllFiles();
-
-      this.saveMessageToHistory('user', userMessage, null, null, selectionContext, null, null, uploadedFilesMeta);
 
       this._sendStreamRequest(userMessage, documentRange, uploadedFilesMeta);
     },
@@ -1124,6 +1083,10 @@ export default {
      * 发送流式请求的公共方法
      */
     _sendStreamRequest(userMessage, documentRange, files = []) {
+      this.tokenStats = {
+        current: 0,
+        max: this.tokenStats?.max || 200000
+      };
       this.isLoading = true;
       const streamSessionId = this.currentSessionId;
       this._streamingSessionId = streamSessionId;
@@ -1149,9 +1112,9 @@ export default {
         model: this.selectedModel,
         provider: this.selectedModelProvider,
         documentRange: documentRange,
-        history: this.messages.slice(0, -1).slice(-10),
         files: files,
         enableThinking: this.enableThinking,
+        sessionId: streamSessionId,
 
         onMessage: (data) => {
           this._handleStreamMessage(data, aiMsg);
@@ -1175,13 +1138,8 @@ export default {
             aiMsg.thinkingDone = true;
           }
 
-          // 流完成时用户可能已切到其他 session
-          if (aiMsg.content && streamSessionId) {
-            // 使用流开始时的 sessionId 保存消息
-            this.saveMessageToHistory('assistant', aiMsg.content, streamSessionId, aiMsg.documentJson, null, aiMsg.contentParts, aiMsg.thinking || null);
-          }
-
           this.scrollToBottom();
+          window.dispatchEvent(new CustomEvent('session-created'));
 
           // 清理缓存
           delete this._streamingCache[streamSessionId];

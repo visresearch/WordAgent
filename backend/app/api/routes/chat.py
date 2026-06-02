@@ -9,6 +9,9 @@ import uuid
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from app.core.db import AsyncSessionLocal
+from app.services.session_service import SessionService
+
 # Idle watchdog 阈值（秒）：超过 IDLE_WARN_SECONDS 没有 chunk 时，
 # 给前端一条"正在思考下一步"提示；超过 IDLE_ABORT_SECONDS 仍无 chunk 时，
 # 强制停止 LLM 调用并断开 WebSocket。
@@ -87,7 +90,7 @@ async def chat_websocket(websocket: WebSocket):
 
     消息协议（JSON）：
     前端 → 后端:
-            - {"type": "chat", "message": "...", "mode": "agent|ask|plan", "model": "auto", "documentRange": [...], "documentMeta": {...}, "history": [...]}
+            - {"type": "chat", "message": "...", "mode": "agent|ask|plan", "model": "auto", "sessionId": 1, "documentRange": [...], "documentMeta": {...}}
       - {"type": "document_response", "documentJson": {...}}
       - {"type": "delete_response", "deletedCount": 3} 或 {"type": "delete_response", "cancelled": true}
       - {"type": "stop"}
@@ -157,6 +160,11 @@ async def chat_websocket(websocket: WebSocket):
                 active_mode = mode  # 记录当前活跃模式，用于后续 tool 回调转发
                 model = data.get("model", "")
                 provider = data.get("provider", "")
+                raw_session_id = data.get("sessionId")
+                try:
+                    session_id = int(raw_session_id) if raw_session_id is not None else None
+                except (TypeError, ValueError):
+                    session_id = None
                 document_meta = data.get("documentMeta") or {}
                 try:
                     document_range = _normalize_document_range(data.get("documentRange"))
@@ -166,7 +174,6 @@ async def chat_websocket(websocket: WebSocket):
                     await websocket.send_text(json.dumps({"type": "error", "content": err}, ensure_ascii=False))
                     await websocket.send_text(json.dumps({"type": "done"}, ensure_ascii=False))
                     continue
-                history = data.get("history", [])
                 attached_files = data.get("files", [])  # 附件列表 [{file_id, filename, content_type, is_image}, ...]
                 enable_thinking = data.get("enableThinking", True)  # 是否启用深度思考
 
@@ -176,6 +183,8 @@ async def chat_websocket(websocket: WebSocket):
                 print(f"模式: {mode}")
                 print(f"模型: {model}")
                 print(f"深度思考: {enable_thinking}")
+                if session_id is not None:
+                    print(f"会话ID: {session_id}")
                 if document_range:
                     print(f"文档范围: {document_range}")
                 if document_meta:
@@ -206,9 +215,9 @@ async def chat_websocket(websocket: WebSocket):
                         provider,
                         document_range,
                         document_meta,
-                        history,
                         attached_files,
                         enable_thinking,
+                        session_id,
                     )
                 )
 
@@ -370,6 +379,98 @@ async def _iterate_with_idle_watchdog(aiter, on_warn, on_abort):
             next_task.cancel()
 
 
+async def _load_short_term_history_from_db(session_id: int | None) -> list[dict]:
+    """Load persisted chat history for backend-owned short-term memory injection."""
+    if session_id is None:
+        return []
+
+    try:
+        async with AsyncSessionLocal() as db:
+            service = SessionService(db)
+            messages = await service.get_recent_messages(session_id=session_id, limit=200)
+            history: list[dict] = []
+            for msg in messages:
+                history.append(
+                    {
+                        "role": msg.role,
+                        "content": msg.content or "",
+                        "content_parts": msg.content_parts,
+                        "tool_json": msg.tool_json,
+                    }
+                )
+            if history:
+                print(f"[WebSocket] 已从 DB 加载短期记忆 session={session_id}, messages={len(history)}")
+            return history
+    except Exception as e:
+        print(f"[WebSocket] 加载短期记忆失败 session={session_id}: {e}")
+        traceback.print_exc()
+        return []
+
+
+async def _persist_chat_turn(
+    *,
+    session_id: int | None,
+    user_content: str,
+    assistant_content: str,
+    selection_context: list | dict | None,
+    content_parts: list[dict],
+    thinking: str | None,
+    tool_json: dict | None,
+    model: str,
+    provider: str | None,
+    mode: str,
+    attached_files: list[dict] | None,
+) -> None:
+    """Persist one completed chat turn from backend-owned stream data."""
+    if session_id is None:
+        print("[WebSocket] 跳过会话保存：缺少 sessionId")
+        return
+
+    assistant_text = (assistant_content or "").strip()
+    if not assistant_text and not (tool_json or {}).get("calls"):
+        print("[WebSocket] 跳过会话保存：assistant 内容和 tool_json 都为空")
+        return
+
+    try:
+        async with AsyncSessionLocal() as db:
+            service = SessionService(db)
+            user_msg = await service.add_message(
+                session_id=session_id,
+                role="user",
+                content=user_content or "",
+                selection_context=selection_context,
+                model=model,
+                provider=provider,
+                mode=mode,
+                attached_files=attached_files,
+            )
+            if not user_msg:
+                await db.rollback()
+                print(f"[WebSocket] 会话保存失败：session 不存在 id={session_id}")
+                return
+
+            assistant_msg = await service.add_message(
+                session_id=session_id,
+                role="assistant",
+                content=assistant_text,
+                tool_json=tool_json or {"calls": []},
+                content_parts=content_parts or None,
+                thinking=thinking,
+                model=model,
+                provider=provider,
+                mode=mode,
+            )
+            if not assistant_msg:
+                await db.rollback()
+                print(f"[WebSocket] assistant 保存失败：session 不存在 id={session_id}")
+                return
+            await db.commit()
+            print(f"[WebSocket] 已保存会话消息 session={session_id}, tools={len((tool_json or {}).get('calls', []))}")
+    except Exception as e:
+        print(f"[WebSocket] 保存会话失败: {e}")
+        traceback.print_exc()
+
+
 async def _run_ws_stream(
     websocket: WebSocket,
     chat_id: str,
@@ -379,16 +480,87 @@ async def _run_ws_stream(
     provider: str,
     document_range: list | None,
     document_meta: list | dict | None,  # 支持单个文档（dict）和多个文档（list）
-    history: list,
     attached_files: list | None = None,
     enable_thinking: bool = True,
+    session_id: int | None = None,
 ):
     """在 WebSocket 上运行流式处理，支持上下文超限时自动重试"""
     mode = _normalize_mode(mode)
     stream_fn = multi_agent_stream if mode == "plan" else single_agent_stream
+    history = await _load_short_term_history_from_db(session_id)
 
     # 一把锁串行化所有 WebSocket 发送，避免 keepalive / 主流 / watchdog 并发 send
     send_lock = asyncio.Lock()
+    content_parts: list[dict] = []
+    thinking_parts: list[str] = []
+    assistant_text_parts: list[str] = []
+    tool_json: dict = {"calls": []}
+
+    def _append_text_part(text: str):
+        if not text:
+            return
+        assistant_text_parts.append(text)
+        if content_parts and content_parts[-1].get("type") == "text":
+            content_parts[-1]["content"] = str(content_parts[-1].get("content", "")) + text
+        else:
+            content_parts.append({"type": "text", "content": text})
+
+    def _append_status_part(text: str):
+        if text:
+            content_parts.append({"type": "status", "content": text})
+
+    def _record_payload(payload: dict):
+        ptype = payload.get("type")
+        if ptype == "text":
+            _append_text_part(str(payload.get("content") or ""))
+        elif ptype == "thinking":
+            thinking_parts.append(str(payload.get("content") or ""))
+        elif ptype in {
+            "status",
+            "read_document",
+            "read_complete",
+            "search_document",
+            "query_complete",
+            "delete_document",
+            "delete_complete",
+            "generate_complete",
+        }:
+            _append_status_part(str(payload.get("content") or ""))
+        elif ptype == "tool_compress":
+            content_parts.append({"type": "tool_compress", "content": str(payload.get("content") or "")})
+        elif ptype == "mcp_tool_call":
+            content_parts.append(
+                {
+                    "type": "mcp",
+                    "toolName": payload.get("toolName") or "unknown_tool",
+                    "preview": f"🔧 调用 MCP 工具: {payload.get('toolName') or 'unknown_tool'}",
+                    "argsText": json.dumps(payload.get("args") or {}, ensure_ascii=False),
+                    "outputText": "",
+                    "completed": False,
+                    "isError": False,
+                }
+            )
+        elif ptype == "mcp_tool_result":
+            tool_name = payload.get("toolName") or "unknown_tool"
+            output_text = str(payload.get("outputPreview") or "")
+            for part in reversed(content_parts):
+                if part.get("type") == "mcp" and part.get("toolName") == tool_name and not part.get("completed"):
+                    part["outputText"] = output_text
+                    part["completed"] = True
+                    part["isError"] = bool(payload.get("isError"))
+                    break
+            else:
+                content_parts.append(
+                    {
+                        "type": "mcp",
+                        "toolName": tool_name,
+                        "preview": f"🔧 调用 MCP 工具: {tool_name}",
+                        "argsText": "参数未知",
+                        "outputText": output_text,
+                        "completed": True,
+                        "isError": bool(payload.get("isError")),
+                    }
+                )
 
     async def _send(payload: str):
         async with send_lock:
@@ -486,6 +658,12 @@ async def _run_ws_stream(
                                 await _send(json.dumps({"type": "done"}, ensure_ascii=False))
                                 _done_sent = True
                         else:
+                            try:
+                                parsed_payload = json.loads(payload)
+                                if isinstance(parsed_payload, dict):
+                                    _record_payload(parsed_payload)
+                            except Exception:
+                                pass
                             await _send(payload)
                     elif chunk.startswith("__memory_conversation__:"):
                         raw = chunk.split(":", 1)[1].strip()
@@ -495,6 +673,14 @@ async def _run_ws_stream(
                                 memory_conversation = parsed
                         except Exception as e:
                             print(f"[WebSocket] 解析 memory conversation 失败: {e}")
+                    elif chunk.startswith("__tool_json__:"):
+                        raw = chunk.split(":", 1)[1].strip()
+                        try:
+                            parsed = json.loads(raw)
+                            if isinstance(parsed, dict):
+                                tool_json = parsed
+                        except Exception as e:
+                            print(f"[WebSocket] 解析 tool_json 失败: {e}")
 
                 # 确保发送一次 done（防止 agent 异常时未发送）
                 if not _done_sent:
@@ -542,6 +728,24 @@ async def _run_ws_stream(
 
             # 创建后台任务执行记忆提取，不等待完成
             asyncio.create_task(_extract_memory_async())
+
+            await _persist_chat_turn(
+                session_id=session_id,
+                user_content=message,
+                assistant_content=(
+                    str(memory_conversation.get("assistant") or "")
+                    if isinstance(memory_conversation, dict)
+                    else "".join(assistant_text_parts).strip()
+                ),
+                selection_context=document_range,
+                content_parts=content_parts,
+                thinking="".join(thinking_parts).strip() or None,
+                tool_json=tool_json,
+                model=model or "auto",
+                provider=provider or None,
+                mode=mode,
+                attached_files=attached_files or None,
+            )
 
             return  # 正常结束
         except _IdleAbort:

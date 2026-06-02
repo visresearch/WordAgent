@@ -614,6 +614,7 @@ function chatStream(message, options = {}) {
     history = [],
     files = [],
     enableThinking = true,
+    sessionId = null,
   } = options;
 
   wsManager._completeCalled = false;
@@ -640,6 +641,7 @@ function chatStream(message, options = {}) {
         mode,
         model,
         provider,
+        sessionId,
         documentRange,
         documentMeta,
         history,
