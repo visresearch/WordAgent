@@ -1,6 +1,16 @@
 
 # Changelog
 
+## Unreleased
+
+### Fixed
+- 修复非多模态大模型，输入图片接口报错，应该降级为OCR读取图片
+- 修复chatinput输入框输入文字过长，显示问题
+- 修复前端紧凑列表会显示成一排的bug
+
+### Changed
+- 修改文档和官网内容
+
 ## [v0.4.2]
 
 ### Fixed

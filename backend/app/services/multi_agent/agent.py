@@ -237,7 +237,7 @@ def _create_llm(model_name: str):
 def _run_sub_agent(
     llm,
     agent_name: str,
-    task: str,
+    task: str | list,
     tools: list,
     context: str = "",
     max_iterations: int | None = None,
@@ -258,7 +258,11 @@ def _run_sub_agent(
 
     user_content = task
     if context:
-        user_content = f"{task}\n\n---\nReference materials from previous steps:\n{context}"
+        if isinstance(task, list):
+            user_content = list(task)
+            user_content.append({"type": "text", "text": f"\n\n---\nReference materials from previous steps:\n{context}"})
+        else:
+            user_content = f"{task}\n\n---\nReference materials from previous steps:\n{context}"
     messages.append(HumanMessage(content=user_content))
 
     last_structured_result = None
@@ -436,7 +440,42 @@ def _run_sub_agent(
             text_output = ""
             break
 
-        response = llm_with_tools.invoke(messages)
+        try:
+            response = llm_with_tools.invoke(messages)
+        except Exception as e:
+            from app.services.agent.agent import _is_image_input_unsupported_error
+
+            if not _is_image_input_unsupported_error(e):
+                raise
+
+            stripped_messages = []
+            stripped_any_image = False
+            for message_item in messages:
+                if not isinstance(message_item, HumanMessage) or not isinstance(message_item.content, list):
+                    stripped_messages.append(message_item)
+                    continue
+
+                text_parts: list[str] = []
+                for part in message_item.content:
+                    if isinstance(part, dict) and part.get("type") in {"image_url", "image"}:
+                        stripped_any_image = True
+                        continue
+                    if isinstance(part, dict) and part.get("type") == "text":
+                        text_parts.append(str(part.get("text", "")))
+                    elif isinstance(part, str):
+                        text_parts.append(part)
+
+                text = "\n".join(part for part in text_parts if part).strip()
+                if stripped_any_image:
+                    text += "\n\nImportant: direct image input is unavailable in this retry. Use `read_file(path)` on the image project_path when image content is needed."
+                stripped_messages.append(HumanMessage(content=text))
+
+            if not stripped_any_image:
+                raise
+
+            print(f"  [{agent_name}] 图片接口不可用，回退为文本附件路径")
+            messages = stripped_messages
+            response = llm_with_tools.invoke(messages)
 
         invalid_calls = getattr(response, "invalid_tool_calls", [])
         if invalid_calls:
@@ -705,14 +744,28 @@ def _build_multi_agent_graph(llm, model_name: str, mcp_tools: list = None):
 
         if state.attached_files:
             file_reference_lines: list[str] = []
+            image_content_parts: list[dict] = []
             for f in state.attached_files:
                 filename = f.get("filename", "")
                 is_image = f.get("is_image", False)
                 file_id = f.get("file_id", "")
+                content_type = f.get("content_type", "image/png")
                 project_path = f.get("project_path", f"uploads/{file_id}" if file_id else "")
                 if is_image:
-                    task += f"\n\n[Attached image: {filename}]"
                     file_reference_lines.append(f"- {filename} [image] | project_path={project_path or '(unknown)'}")
+                    try:
+                        from app.api.routes.files import read_file_as_base64
+
+                        b64 = read_file_as_base64(file_id)
+                        if b64:
+                            image_content_parts.append(
+                                {
+                                    "type": "image_url",
+                                    "image_url": {"url": f"data:{content_type};base64,{b64}"},
+                                }
+                            )
+                    except Exception as e:
+                        print(f"[MultiAgent] ⚠️ 图片附件读取失败: {filename}, {e}")
                 else:
                     file_reference_lines.append(f"- {filename} | project_path={project_path or '(unknown)'}")
 
@@ -722,11 +775,20 @@ def _build_multi_agent_graph(llm, model_name: str, mcp_tools: list = None):
                     "\nFiles are uploaded under wence_data/project."
                     "\nDo NOT assume file contents from metadata."
                     "\nOnly project_path is shown; it is relative to that project root."
-                    "\nWhen content is needed, call `read_file` with exactly that project_path."
+                    "\nWhen non-image file content is needed, call `read_file` with exactly that project_path."
                     "\nFor generate_document image runs, url may use the same project-relative path;"
                     " the server resolves it for the Word/WPS client."
                     "\n" + "\n".join(file_reference_lines)
                 )
+            if image_content_parts:
+                task = [
+                    {
+                        "type": "text",
+                        "text": task
+                        + "\nAttached images are also provided as direct model image inputs in this request. Use the visual input directly; do not call `read_file` for these image files unless the user explicitly asks for OCR text or file metadata.",
+                    },
+                    *image_content_parts,
+                ]
 
         context = state.memory_context if state.memory_context else ""
 
@@ -966,6 +1028,7 @@ async def process_writing_request_stream(
         current_agent = "planner"
         _collected_text_parts: list[str] = []
         _assistant_text_for_memory_parts: list[str] = []
+        _pending_text_chunks: list[str] = []
         _last_input_tokens = 0
         _conversation_history: list = []
 
@@ -1106,12 +1169,20 @@ async def process_writing_request_stream(
                     usage = getattr(msg, "usage_metadata", None)
                     if isinstance(usage, dict) and "input_tokens" in usage and usage.get("input_tokens", 0) > 0:
                         _last_input_tokens = int(usage.get("input_tokens", 0))
+                    if getattr(msg, "tool_calls", None):
+                        _pending_text_chunks.clear()
                 elif isinstance(msg, AIMessageChunk):
-                    from app.services.agent.agent import _extract_text_content
+                    from app.services.agent.agent import _extract_tagged_thinking_content, _extract_text_content
 
+                    if getattr(msg, "tool_call_chunks", None) or getattr(msg, "tool_calls", None):
+                        _pending_text_chunks.clear()
+                        continue
+                    tagged_thinking = _extract_tagged_thinking_content(msg.content)
+                    if tagged_thinking:
+                        yield f"data: {json.dumps({'type': 'thinking', 'content': tagged_thinking}, ensure_ascii=False)}\n\n"
                     normalized = _extract_text_content(msg.content)
                     if normalized:
-                        _collected_text_parts.append(normalized)
+                        _pending_text_chunks.append(normalized)
                     usage = getattr(msg, "usage_metadata", None)
                     if isinstance(usage, dict) and "input_tokens" in usage and usage.get("input_tokens", 0) > 0:
                         _last_input_tokens = int(usage.get("input_tokens", 0))
@@ -1120,6 +1191,8 @@ async def process_writing_request_stream(
                         yield f"data: {json.dumps({'type': 'token_stats', 'current_tokens': _last_input_tokens, 'max_tokens': MAX_CONTEXT_TOKENS}, ensure_ascii=False)}\n\n"
 
                 if isinstance(msg, (AIMessage, ToolMessage)):
+                    if isinstance(msg, ToolMessage):
+                        _pending_text_chunks.clear()
                     try:
                         from app.services.context import MAX_CONTEXT_TOKENS
 
@@ -1140,12 +1213,19 @@ async def process_writing_request_stream(
                     if reasoning_content:
                         yield f"data: {json.dumps({'type': 'thinking', 'content': reasoning_content}, ensure_ascii=False)}\n\n"
 
-                if isinstance(msg, AIMessageChunk) and msg.content and current_agent not in _SUPPRESS_STREAM:
-                    from app.services.agent.agent import _extract_text_content
+                if isinstance(msg, AIMessage) and current_agent not in _SUPPRESS_STREAM and not getattr(msg, "tool_calls", None):
+                    from app.services.agent.agent import _extract_tagged_thinking_content, _extract_text_content
 
+                    tagged_thinking = _extract_tagged_thinking_content(msg.content)
+                    if tagged_thinking:
+                        yield f"data: {json.dumps({'type': 'thinking', 'content': tagged_thinking}, ensure_ascii=False)}\n\n"
                     normalized = _extract_text_content(msg.content)
+                    if not normalized and _pending_text_chunks:
+                        normalized = "".join(_pending_text_chunks).strip()
                     if normalized:
+                        _pending_text_chunks.clear()
                         _assistant_text_for_memory_parts.append(normalized)
+                        _collected_text_parts.append(normalized)
                         yield f"data: {json.dumps({'type': 'text', 'content': normalized}, ensure_ascii=False)}\n\n"
 
             elif input_type == "custom" and chunk:
@@ -1156,6 +1236,14 @@ async def process_writing_request_stream(
                     yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
                 else:
                     yield f"data: {json.dumps({'type': 'status', 'content': str(chunk)}, ensure_ascii=False)}\n\n"
+
+        if _pending_text_chunks:
+            pending_text = "".join(_pending_text_chunks).strip()
+            _pending_text_chunks.clear()
+            if pending_text and current_agent not in _SUPPRESS_STREAM:
+                _assistant_text_for_memory_parts.append(pending_text)
+                _collected_text_parts.append(pending_text)
+                yield f"data: {json.dumps({'type': 'text', 'content': pending_text}, ensure_ascii=False)}\n\n"
 
         yield "data: [DONE]\n\n"
 

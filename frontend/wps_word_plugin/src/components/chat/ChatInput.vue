@@ -491,10 +491,14 @@ export default {
   methods: {
     autoResize() {
       const textarea = this.$refs.chatInput;
-      if (textarea) {
-        textarea.style.height = 'auto';
-        textarea.style.height = textarea.scrollHeight + 'px';
+      if (!textarea) {
+        return;
       }
+      const maxHeight = 150;
+      textarea.style.height = 'auto';
+      const nextHeight = Math.min(textarea.scrollHeight, maxHeight);
+      textarea.style.height = nextHeight + 'px';
+      textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden';
     },
 
     triggerFilePicker() {
@@ -783,11 +787,29 @@ export default {
   background: transparent;
   color: #333;
   box-sizing: border-box;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: hidden;
   min-height: 20px;
   max-height: 150px;
   line-height: 1.4;
-  user-select: none;
+  user-select: text;
+}
+
+.chat-input::-webkit-scrollbar {
+  width: 6px;
+}
+
+.chat-input::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-input::-webkit-scrollbar-thumb {
+  background: #d0d0d0;
+  border-radius: 3px;
+}
+
+.chat-input::-webkit-scrollbar-thumb:hover {
+  background: #b8b8b8;
 }
 
 .chat-input::placeholder {

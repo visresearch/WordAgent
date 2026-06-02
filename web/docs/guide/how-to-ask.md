@@ -17,3 +17,12 @@
 - **选中文本再提问**：先在 Word 中选中一段文本，然后提问，智能体会针对选中的内容进行操作
 - **描述尽量具体**：说明你想要的文章类型、风格、字数等，效果更好
 - **分步进行**：对于复杂的长文章，可以先生成大纲，再逐段扩展
+
+## 演示视频
+
+<iframe
+  src="https://player.bilibili.com/player.html?bvid=BV1BYVP6VEyK&page=1&high_quality=1&danmaku=0"
+  title="文策 AI 演示视频"
+  style="width: 100%; aspect-ratio: 16 / 9; border: 0;"
+  allowfullscreen
+></iframe>

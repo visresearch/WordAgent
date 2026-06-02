@@ -7,6 +7,7 @@ import asyncio
 import concurrent.futures
 import json
 import os
+import re
 import sys
 import time
 import traceback
@@ -121,20 +122,52 @@ _langsmith_enabled = _try_init_langsmith()
 # endregion
 
 
+_THINK_TAG_RE = re.compile(r"<think(?:ing)?\b[^>]*>(.*?)</think(?:ing)?>", re.IGNORECASE | re.DOTALL)
+_OPEN_THINK_TAG_RE = re.compile(r"<think(?:ing)?\b[^>]*>(.*)$", re.IGNORECASE | re.DOTALL)
+_CLOSE_THINK_TAG_RE = re.compile(r"</think(?:ing)?>", re.IGNORECASE)
+
+
+def _split_tagged_thinking_text(text: str) -> tuple[str, str]:
+    """Split inline <think>...</think> text from visible assistant content."""
+    if not text:
+        return "", ""
+
+    thinking_parts: list[str] = []
+
+    def _collect(match: re.Match) -> str:
+        inner = match.group(1).strip()
+        if inner:
+            thinking_parts.append(inner)
+        return ""
+
+    visible = _THINK_TAG_RE.sub(_collect, text)
+    open_match = _OPEN_THINK_TAG_RE.search(visible)
+    if open_match:
+        inner = open_match.group(1).strip()
+        if inner:
+            thinking_parts.append(inner)
+        visible = visible[: open_match.start()]
+
+    visible = _CLOSE_THINK_TAG_RE.sub("", visible).strip()
+    thinking = "\n".join(part for part in thinking_parts if part).strip()
+    return visible, thinking
+
+
 def _extract_text_content(content) -> str:
-    """将 LLM 消息内容统一转换为纯文本，兼容 Claude 的结构化 content blocks。"""
+    """将 LLM 消息内容统一转换为纯文本，并剥离内联 thinking 标签。"""
     if content is None:
         return ""
 
     if isinstance(content, str):
-        return content
+        visible, _thinking = _split_tagged_thinking_text(content)
+        return visible
 
     if isinstance(content, dict):
         text = content.get("text")
         if isinstance(text, str):
-            return text
+            return _extract_text_content(text)
         fallback = content.get("content")
-        return fallback if isinstance(fallback, str) else ""
+        return _extract_text_content(fallback) if isinstance(fallback, str) else ""
 
     if isinstance(content, list):
         parts: list[str] = []
@@ -144,6 +177,25 @@ def _extract_text_content(content) -> str:
                 parts.append(item_text)
         return "".join(parts)
 
+    return ""
+
+
+def _extract_tagged_thinking_content(content) -> str:
+    """Extract inline <think>...</think> content from plain text blocks."""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        _visible, thinking = _split_tagged_thinking_text(content)
+        return thinking
+    if isinstance(content, dict):
+        text = content.get("text")
+        if isinstance(text, str):
+            return _extract_tagged_thinking_content(text)
+        fallback = content.get("content")
+        return _extract_tagged_thinking_content(fallback) if isinstance(fallback, str) else ""
+    if isinstance(content, list):
+        parts = [_extract_tagged_thinking_content(item) for item in content]
+        return "\n".join(part for part in parts if part)
     return ""
 
 
@@ -251,8 +303,12 @@ def _is_image_input_unsupported_error(exc: Exception) -> bool:
         "does not support images",
         "image input is not supported",
         "unsupported image input",
+        "unknown variant image_url",
+        "image_url",
+        "expected text",
     ]
     return any(sig in text for sig in image_signals)
+
 
 
 # region LangGraph Agent（ReAct）
@@ -764,6 +820,7 @@ async def process_writing_request_stream(
         # 处理附件
         image_content_parts = []
         file_reference_parts = []
+        attached_image_count = 0
         if attached_files:
             from app.api.routes.files import read_file_as_base64
 
@@ -775,6 +832,7 @@ async def process_writing_request_stream(
                 project_path = f.get("project_path", f"uploads/{file_id}" if file_id else "")
 
                 if is_image:
+                    attached_image_count += 1
                     line = f"- {filename} [image] | project_path={project_path or '(unknown)'}"
                     file_reference_parts.append(line)
 
@@ -798,19 +856,27 @@ async def process_writing_request_stream(
                 "\nFiles are already uploaded under wence_data/project."
                 "\nDo NOT assume file contents from metadata."
                 "\nOnly project_path is shown; it is relative to that project root (e.g. uploads/...)."
-                "\nWhen file content is needed, call `read_file` with exactly that project_path string."
+                "\nWhen non-image file content is needed, call `read_file` with exactly that project_path string."
                 "\nFor generate_document image runs, you may set url to the same project-relative path;"
                 " the server resolves it to an absolute local path for the Word/WPS client."
                 "\n" + "\n".join(file_reference_parts)
             )
 
+        image_user_content = user_content
+        if image_content_parts:
+            image_user_content += "\nAttached images are also provided as direct model image inputs in this request. Use the visual input directly; do not call `read_file` for these image files unless the user explicitly asks for OCR text or file metadata."
+
+        text_only_user_content = user_content
+        if attached_image_count:
+            text_only_user_content += "\nImportant: direct image input is unavailable in this retry. Use `read_file(path)` on the image project_path when image content is needed."
+
         # 构建 HumanMessage
         if image_content_parts:
-            human_content = [{"type": "text", "text": user_content}] + image_content_parts
+            human_content = [{"type": "text", "text": image_user_content}] + image_content_parts
             messages.append(HumanMessage(content=human_content))
         else:
             messages.append(HumanMessage(content=user_content))
-        text_only_messages = list(messages[:-1]) + [HumanMessage(content=user_content)]
+        text_only_messages = list(messages[:-1]) + [HumanMessage(content=text_only_user_content)]
 
         print(f"[Agent] 消息数量: {len(messages)}")
 
@@ -825,6 +891,7 @@ async def process_writing_request_stream(
         _collected_text_parts: list[str] = []
         _assistant_text_for_memory_parts: list[str] = []
         _has_streamed_text_chunks = False
+        _pending_text_chunks: list[str] = []
         _agent_turn_count = 0
         _last_input_tokens = 0
         _conversation_history: list = list(messages)
@@ -997,19 +1064,25 @@ async def process_writing_request_stream(
                         print(f"[Agent] 当前上下文: {tokens_k:.1f}k tokens")
                         yield f"data: {json.dumps({'type': 'token_stats', 'current_tokens': _last_input_tokens, 'max_tokens': MAX_CONTEXT_TOKENS}, ensure_ascii=False)}\n\n"
 
-                # AIMessageChunk：流式中间块，收集文本
+                    if getattr(msg, "tool_calls", None):
+                        _pending_text_chunks.clear()
+                        continue
+
+                # AIMessageChunk：流式中间块，先缓冲文本；如果本轮随后发起工具调用则丢弃
                 if isinstance(msg, AIMessageChunk):
+                    if getattr(msg, "tool_call_chunks", None) or getattr(msg, "tool_calls", None):
+                        _pending_text_chunks.clear()
+                        continue
+                    tagged_thinking = _extract_tagged_thinking_content(msg.content)
+                    if tagged_thinking:
+                        yield f"data: {json.dumps({'type': 'thinking', 'content': tagged_thinking}, ensure_ascii=False)}\n\n"
                     normalized = _extract_text_content(msg.content)
                     if normalized:
-                        _collected_text_parts.append(normalized)
-                        _assistant_text_for_memory_parts.append(normalized)
-                        # 关键：某些模型在流式场景只产出 AIMessageChunk 而不会产出最终 AIMessage。
-                        # 如果不在这里转发 text，前端可能只能看到 thinking，正式输出为空。
-                        _has_streamed_text_chunks = True
-                        yield f"data: {json.dumps({'type': 'text', 'content': normalized}, ensure_ascii=False)}\n\n"
+                        _pending_text_chunks.append(normalized)
 
                 # ToolMessage：工具执行结果
                 if isinstance(msg, ToolMessage):
+                    _pending_text_chunks.clear()
                     _conversation_history.append(msg)
                     _agent_turn_count += 1
                     tool_name = getattr(msg, "name", "")
@@ -1044,17 +1117,28 @@ async def process_writing_request_stream(
                                     continue
 
                                 if block_type in {"text", "output_text"}:
-                                    text = block.get("text", "") or block.get("content", "")
+                                    raw_text = block.get("text", "") or block.get("content", "")
+                                    tagged_thinking = _extract_tagged_thinking_content(raw_text)
+                                    if tagged_thinking:
+                                        yield f"data: {json.dumps({'type': 'thinking', 'content': tagged_thinking}, ensure_ascii=False)}\n\n"
+                                    text = _extract_text_content(raw_text)
                                     if text:
                                         _collected_text_parts.append(text)
                                         if not _has_streamed_text_chunks:
+                                            _pending_text_chunks.clear()
                                             _assistant_text_for_memory_parts.append(text)
                                             yield f"data: {json.dumps({'type': 'text', 'content': text}, ensure_ascii=False)}\n\n"
                         continue
 
                     # 普通文本
+                    tagged_thinking = _extract_tagged_thinking_content(content)
+                    if tagged_thinking:
+                        yield f"data: {json.dumps({'type': 'thinking', 'content': tagged_thinking}, ensure_ascii=False)}\n\n"
                     normalized_text = _extract_text_content(content)
+                    if not normalized_text and _pending_text_chunks:
+                        normalized_text = "".join(_pending_text_chunks).strip()
                     if normalized_text:
+                        _pending_text_chunks.clear()
                         _collected_text_parts.append(normalized_text)
                         if not _has_streamed_text_chunks:
                             _assistant_text_for_memory_parts.append(normalized_text)
@@ -1068,6 +1152,14 @@ async def process_writing_request_stream(
                         yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
                     else:
                         yield f"data: {json.dumps({'type': 'status', 'content': str(chunk)}, ensure_ascii=False)}\n\n"
+
+        if _pending_text_chunks:
+            pending_text = "".join(_pending_text_chunks).strip()
+            _pending_text_chunks.clear()
+            if pending_text:
+                _collected_text_parts.append(pending_text)
+                _assistant_text_for_memory_parts.append(pending_text)
+                yield f"data: {json.dumps({'type': 'text', 'content': pending_text}, ensure_ascii=False)}\n\n"
 
         # 警告
         if mode == "agent" and not has_tool_result and document_range:

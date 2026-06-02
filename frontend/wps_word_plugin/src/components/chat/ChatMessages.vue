@@ -53,7 +53,7 @@
             <span>引用选区 ({{ msg.selectionContext.length }})</span>
           </div>
           <div v-for="(ctx, ctxIdx) in msg.selectionContext" :key="ctxIdx" class="context-item">
-            <span class="context-text">{{ ctx.startText }} → {{ ctx.endText }}</span>
+            <span class="context-text">{{ formatSelectionContextText(ctx) }}</span>
             <span class="context-pos">(段落 {{ ctx.startParaIndex }} - {{ ctx.endParaIndex }})</span>
           </div>
         </div>
@@ -291,6 +291,25 @@ const md = new MarkdownIt({
   typographer: true
 });
 
+function normalizeMarkdownForDisplay(content) {
+  if (!content) {
+    return '';
+  }
+
+  let cleaned = String(content)
+    .replace(/```json\s*```/g, '')
+    .replace(/\r\n?/g, '\n');
+
+  // Markdown requires list markers to start on a new line and usually have a following space.
+  cleaned = cleaned
+    .replace(/([：:])\s*([-*+])(?=\S)/g, '$1\n$2 ')
+    .replace(/([^\n])([-*+])(?=\p{Extended_Pictographic})/gu, '$1\n$2 ')
+    .replace(/^([-*+])(?=\S)/gm, '$1 ')
+    .replace(/([。！？；;])\s*(\d+[.)])(?=\s*\S)/g, '$1\n$2 ');
+
+  return cleaned;
+}
+
 export default {
   name: 'ChatMessages',
   props: {
@@ -369,6 +388,16 @@ export default {
         console.error('打开外部链接失败:', e);
       }
     },
+    formatSelectionContextText(ctx) {
+      if (!ctx) {
+        return '选区';
+      }
+      if (ctx.startText || ctx.endText) {
+        const start = ctx.startText || ctx.preview || ctx.docName || '选区';
+        return ctx.endText ? `${start} → ${ctx.endText}` : start;
+      }
+      return ctx.preview || ctx.docName || '选区';
+    },
     formatFileSize(bytes) {
       if (!bytes || bytes === 0) {
         return '0 B';
@@ -443,7 +472,7 @@ export default {
       if (!content) {
         return '';
       }
-      let cleaned = content.replace(/```json\s*```/g, '');
+      const cleaned = normalizeMarkdownForDisplay(content);
       return md.render(cleaned);
     },
 

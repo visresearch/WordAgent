@@ -166,6 +166,8 @@ async def chat_websocket(websocket: WebSocket):
                 except (TypeError, ValueError):
                     session_id = None
                 document_meta = data.get("documentMeta") or {}
+                raw_selection_context = data.get("selectionContext")
+                selection_context = raw_selection_context if isinstance(raw_selection_context, (list, dict)) else None
                 try:
                     document_range = _normalize_document_range(data.get("documentRange"))
                 except ValueError as e:
@@ -215,6 +217,7 @@ async def chat_websocket(websocket: WebSocket):
                         provider,
                         document_range,
                         document_meta,
+                        selection_context,
                         attached_files,
                         enable_thinking,
                         session_id,
@@ -480,6 +483,7 @@ async def _run_ws_stream(
     provider: str,
     document_range: list | None,
     document_meta: list | dict | None,  # 支持单个文档（dict）和多个文档（list）
+    selection_context: list | dict | None = None,
     attached_files: list | None = None,
     enable_thinking: bool = True,
     session_id: int | None = None,
@@ -737,7 +741,7 @@ async def _run_ws_stream(
                     if isinstance(memory_conversation, dict)
                     else "".join(assistant_text_parts).strip()
                 ),
-                selection_context=document_range,
+                selection_context=selection_context if selection_context is not None else document_range,
                 content_parts=content_parts,
                 thinking="".join(thinking_parts).strip() or None,
                 tool_json=tool_json,

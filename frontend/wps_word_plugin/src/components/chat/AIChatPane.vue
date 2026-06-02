@@ -1076,13 +1076,13 @@ export default {
       this.clearAllSelections();
       this.clearAllFiles();
 
-      this._sendStreamRequest(userMessage, documentRange, uploadedFilesMeta);
+      this._sendStreamRequest(userMessage, documentRange, uploadedFilesMeta, selectionContext);
     },
 
     /**
      * 发送流式请求的公共方法
      */
-    _sendStreamRequest(userMessage, documentRange, files = []) {
+    _sendStreamRequest(userMessage, documentRange, files = [], selectionContext = null) {
       this.tokenStats = {
         current: 0,
         max: this.tokenStats?.max || 200000
@@ -1112,6 +1112,7 @@ export default {
         model: this.selectedModel,
         provider: this.selectedModelProvider,
         documentRange: documentRange,
+        selectionContext: selectionContext,
         files: files,
         enableThinking: this.enableThinking,
         sessionId: streamSessionId,

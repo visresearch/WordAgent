@@ -621,6 +621,7 @@ function chatStream(message, options = {}) {
     model = '',
     provider = '',
     documentRange = null,
+    selectionContext = null,
     files = [],
     enableThinking = true,
     sessionId = null
@@ -660,6 +661,7 @@ function chatStream(message, options = {}) {
         provider,
         sessionId,
         documentRange,
+        selectionContext,
         documentMeta,
         files,
         enableThinking,
