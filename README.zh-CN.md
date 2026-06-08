@@ -1,6 +1,6 @@
 # Word Agent
 
-![](./web/docs/public/WenceAI_small.png)
+![](./web/docs/public/banner.png)
 
 <p align="center">
   <a href="backend/pyproject.toml"><img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white" alt="Python" /></a>
@@ -8,7 +8,7 @@
   <a href="https://www.langchain.com/"><img src="https://img.shields.io/badge/LangChain-Used-1C3C3C?logo=chainlink&logoColor=white" alt="LangChain" /></a>
   <a href="https://www.langchain.com/langgraph"><img src="https://img.shields.io/badge/LangGraph-Multi--Agent-0B3D91" alt="LangGraph" /></a>
   <a href="frontend/microsoft_word_plugin/package.json"><img src="https://img.shields.io/badge/Node.js-v22%2B-339933?logo=node.js&logoColor=white" alt="Node.js" /></a>
-  <a href="README.md"><img src="https://img.shields.io/badge/Version-v1.0.0-orange.svg" alt="Version" /></a>
+  <a href="https://github.com/visresearch/WordAgent/releases"><img src="https://img.shields.io/github/v/release/visresearch/WordAgent?include_prereleases" alt="Version" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License" /></a>
 </p>
 
@@ -24,23 +24,6 @@
 
 > 文策AI（Word Agent）：让写作有策略，让表达更智能
 
-本项目采用FastAPI构建后端API，前端WPS加载项与后端利用流式接口通信，使前端流式显示LLM输出的内容，实现无缝的写作辅助体验。
-
-前端采用Vue3和JavaScript开发，前端主要设计了一个DocxJson双向转化器模块，能够将带格式的Word文档内容与JSON格式进行相互转换。
-
-后端采用Python语言，利用langchain和langraph框架实现智能体的设计和协作，用chatOpenAI接口实现SSE流式输出和工具调用，利用pySide6设计了一个简单的后端服务界面，方便安装加载项和查看终端日志。
-
-不难看出，**生成结构化Word文档**是本项目的核心。项目中定义json schema格式类似于web开发中的html和css格式，将word文章的段落和文本块的style属性都进行了抽象和结构化，方便智能体理解和生成。json主要的数据结构具体为：
-
-- **paragraphs**: word文档段落数组，包含多个run文本块，paragraphs是agent主要修改的对象
-  - **pStyle**: 段落样式ID（如标题1、标题2、正文等）
-  - **runs**: 文本块数组，本项目中定义的文档的最小单位
-    - **text**: 文本内容
-    - **rStyle**: 字符样式ID（如加粗、红色等）
-  - **paraIndex**: 段落索引，智能体可以根据这个索引定位到文档中的具体段落进行读取
-  - **paraID**: 段落唯一标识，智能体可以根据这个标识定位到文档中的具体段落进行修改
-- **styles**: 样式定义字典，包含所有段落样式和字符样式的定义，智能体生成文档时需要引用这些样式ID来保证文档格式正确
-
 对比市面上已有的AI辅助写作工具，文策AI的优势在于：
 
 1. **支持多版本、跨平台适配**：以国民级办公软件为载体，类Copilot风格Word加载项，让普通用户无门槛获得优质的AI写作辅助体验，并且同时支持Windows和Linux系统。
@@ -52,7 +35,7 @@
 
 |WPS加载项界面|后端服务QT界面|
 |--|--|
-|![](./web/docs/public/wps_addon.png)|![](./web/docs/public/pyQt.png)|
+|![](./web/docs/public/wps_addon.png)|![](./web/docs/public/QtGUI.png)|
 
 举个例子，以 WPS 的**单智能体（Single Agent）模式**为例：用户在加载项里输入“帮我把实习目的扩写成 5 点”。智能体会按“**定位 → 读取 → 理解 → 编辑**”的流程完成任务：先调用 `search_document` 定位目标段落，再调用 `read_document` 读取段落内容；在分析理解后，调用 `delete_document` 删除原内容，最后调用 `generate_document` 生成新的扩写结果。前端加载项会以不同颜色的批注方式渲染修改前/修改后内容，便于用户直观看到变更。
 
@@ -131,14 +114,14 @@
 - node v22.12.0
 - wpsjs 2.2.3
 - python 3.11.14
-- Win10/11、Ubuntu22.04
+- Windows10/11、Ubuntu22.04
 
 ### 构建前端加载项
 
 ```bash
 cd frontend/wps_word_plugin       # WPS Word加载项
 cd frontend/microsoft_word_plugin # 或Microsoft Word加载项
-pnpm intsall
+pnpm install
 pnpm build
 ```
 

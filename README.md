@@ -1,6 +1,6 @@
 ﻿# Word Agent
 
-![](./web/docs/public/WenceAI_small.png)
+![](./web/docs/public/banner.png)
 
 <p align="center">
   <a href="backend/pyproject.toml"><img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white" alt="Python" /></a>
@@ -8,7 +8,7 @@
   <a href="https://www.langchain.com/"><img src="https://img.shields.io/badge/LangChain-Used-1C3C3C?logo=chainlink&logoColor=white" alt="LangChain" /></a>
   <a href="https://www.langchain.com/langgraph"><img src="https://img.shields.io/badge/LangGraph-Multi--Agent-0B3D91" alt="LangGraph" /></a>
   <a href="frontend/microsoft_word_plugin/package.json"><img src="https://img.shields.io/badge/Node.js-v22%2B-339933?logo=node.js&logoColor=white" alt="Node.js" /></a>
-  <a href="README.md"><img src="https://img.shields.io/badge/Version-v1.0.0-orange.svg" alt="Version" /></a>
+  <a href="https://github.com/visresearch/WordAgent/releases"><img src="https://img.shields.io/github/v/release/visresearch/WordAgent?include_prereleases" alt="Version" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License" /></a>
 </p>
 
@@ -18,122 +18,103 @@
 
 ![](./web/docs/public/show.png)
 
-## 1. Overview
+## 1. Project Overview
 
-This project is an AI-assisted writing system based on (multi-)agent workflows: **WenCe AI (Word Agent)**. After users install the add-in in office suites (such as WPS and Microsoft Word), they can interact with AI through natural language to get **writing suggestions**, **content generation**, and **structure optimization**.
+This project is an AI-assisted writing system based on (multi-)agent workflows: **WenCe AI**. After installing the **add-in** in office software such as **WPS or Microsoft Word**, users can interact with AI agents through natural language to get **writing suggestions**, **content generation**, **structure optimization**, and more.
 
-> WenCe AI (Word Agent): strategy-driven writing, smarter expression.
+> WenCe AI (Word Agent): strategy-driven writing, smarter expression
 
-The backend is built with FastAPI. The frontend WPS add-in communicates with the backend via streaming APIs, so users can see LLM outputs in real time for a smooth writing-assistant experience.
+Compared with existing AI writing assistants on the market, WenCe AI provides:
 
-The frontend uses Vue 3 and JavaScript. A key module is the DocxJson bidirectional converter, which converts formatted Word content and JSON structures back and forth.
-
-The backend is implemented in Python, using LangChain and LangGraph for agent design and collaboration, ChatOpenAI-compatible APIs for SSE streaming and tool calling, and a lightweight PySide6 desktop panel for add-in installation and terminal log inspection.
-
-At its core, this project focuses on **structured Word document generation**. The project defines a JSON schema conceptually similar to HTML and CSS, abstracting paragraph and text-run style attributes so the agent can better understand and generate well-formatted Word content.
-
-Main JSON data structures:
-
-- **paragraphs**: an array of Word paragraphs containing multiple runs; this is the primary editable object for the agent
-  - **pStyle**: paragraph style ID (for example, Heading 1, Heading 2, Body)
-  - **runs**: text-run array, the smallest content unit in this project
-    - **text**: text content
-    - **rStyle**: character style ID (for example, bold, red)
-  - **paraIndex**: paragraph index, used by the agent to locate a specific paragraph precisely
-  - **paraID**: paragraph ID, used by the agent to edit a specific paragraph precisely
-- **styles**: style-definition dictionary that contains all paragraph and character style definitions; the agent references these style IDs to preserve formatting correctness
-
-Compared with many AI writing assistants on the market, WenCe AI provides:
-
-1. **Cross-version and cross-platform support**: built on mainstream office software with a Copilot-like Word add-in UX, lowering the barrier for general users, and supporting both Windows and Linux.
-2. **Native rich-text editing with style and paragraph awareness**: unlike many Word AI tools, this project can understand Word document structure, autonomously gather online information, and modify both structure and content based on user requirements.
-3. **Efficient editing with multi-agent collaboration**: multiple agents take different **expert roles** and collaborate to produce in-depth long-form writing.
-4. **Open and flexible integration**: supports user-provided API keys and is compatible with most mainstream LLM providers and models.
+1. **Multi-version and cross-platform support**: built on widely used office software with a Copilot-style Word add-in, allowing general users to access high-quality AI writing assistance with a low barrier. It supports both Windows and Linux.
+2. **Native rich text with document styles and paragraph editing**: compared with common AI writing tools in Word, this project allows agents to understand Word document structure, autonomously collect online information, generate content that fits Word document structure, and modify article structure and content according to user needs.
+3. **Efficient editing with multi-agent collaboration**: multiple agents act as different **expert roles** and collaborate to generate in-depth long-form articles.
+4. **Open and flexible, with custom API or local service support**: the LLM API key used by this project is provided by the user. It currently supports most mainstream LLM providers, allowing users to choose different providers and models according to their needs.
 
 ## 2. Project Preview
 
-| WPS Add-in UI | Backend Qt UI |
+| WPS Add-in UI | Backend QT UI |
 | -- | -- |
-| ![](./web/docs/public/wps_addon.png) | ![](./web/docs/public/pyQt.png) |
+| ![](./web/docs/public/wps_addon.png) | ![](./web/docs/public/QtGUI.png) |
 
-For example, in WPS **single-agent mode**, if a user asks: "Expand my internship objective into five points," the agent follows a "**locate → read → understand → edit**" workflow. It calls `search_document` to locate the target paragraph, `read_document` to fetch the content, then performs edits (for example via `delete_document`) and finally calls `generate_document` to produce the rewritten result. The frontend add-in highlights before/after changes with different colors so users can clearly see what was modified.
+For example, in WPS **Single Agent** mode, a user can enter: "Expand my internship objective into five points." The agent completes the task through the "**locate -> read -> understand -> edit**" workflow: it first calls `search_document` to locate the target paragraph, then calls `read_document` to read the paragraph content. After analysis and understanding, it calls `delete_document` to remove the original content, and finally calls `generate_document` to generate the expanded result. The frontend add-in renders the before/after content with different colored annotations, making changes easy to review.
 
 ![](./web/docs/public/preview2.png)
 
-> Note: The output includes not only text content but also matching style metadata (for example headings/body, bold, font, indentation, and line spacing). The frontend add-in renders the final Word-formatted result based on these style definitions.
+> Note: the generated result includes not only text content, but also matching style information such as heading/body style, bold text, font, indentation, and line spacing. The frontend add-in renders the final result according to these styles so that it matches the Word document structure and format.
 
-Another example, switching to **multi-agent mode**: when a user requests to write a long novel with illustrations, each specialized agent works in sequence: the **planner agent** orchestrates the workflow, the **research agent** searches online novels and calls image generation tools, the **outline agent** describes the novel outline, the **writer agent** outputs the article content, and finally the **reviewer agent** reviews paragraphs and suggests revisions.
+As another example, in **Multi Agent** mode, the user can ask the system to write a long novel and create illustrations. Different expert agents work in sequence: the `planner agent` orchestrates the agent workflow, the `research agent` searches online novels and calls text-to-image tools, the `outline agent` describes the novel outline, the `writer agent` outputs the article, and finally the `reviewer agent` reviews the paragraphs and provides revision suggestions.
 
 ![](./web/docs/public/preview3.png)
 
 ![](./web/docs/public/preview4.png)
 
-> Note: Multi-agent mode excels at generating long-form content while staying on-topic and maintaining coherence, but has slightly weaker tool-calling capability compared to single-agent mode.
+> Note: Multi Agent mode is better at generating long-form content while staying on topic and maintaining coherence, but its tool-calling capability is slightly weaker than Single Agent mode.
 
-In addition, the project supports two types of pluggable extensions: **MCP servers** and **Skills**.
+In addition, this project supports two types of pluggable extensions for custom tools: **MCP Server** and **Skill**.
 
-1) **MCP server example (third-party API/service integration)**: users can configure MCP servers so the agent can call third-party APIs as tools. For example, with **Amap (Gaode) Maps MCP** and a **Visualization Chart MCP Server**, when a user asks: "Query Changsha's weather for the next five days, draw a temperature line chart, and write a weather report," the agent can retrieve temperature data via the Amap MCP server, then generate a chart image URL via the chart MCP server and render it in the add-in panel.
+1) **MCP Server example (third-party API/service integration)**: users can configure MCP servers so that agents can call third-party APIs like built-in tools. For example, with **Amap MCP** and a **visualization chart MCP Server**, when a user enters "Query Changsha's weather for the next five days, draw a temperature line chart, and write a weather forecast article," the agent first calls Amap MCP to obtain five-day temperature data, then calls the visualization chart MCP Server to generate a line-chart image URL and render the image in the add-in interface.
 
 ![](./web/docs/public/mcp_example.png)
 
-2) **Skill example (packaged, reusable workflows)**: a Skill bundles reusable capabilities and procedures (for example prompt templates, tool-call orchestration, or domain-specific writing logic). Once loaded, the agent can select and execute the appropriate Skill to complete certain task types more reliably.
+2) **Skill example (capability packaging and reuse)**: Skill is like packaging a reusable capability and workflow, such as prompt templates, tool-call orchestration, or domain-specific writing/processing logic, into a "skill package." After loading, the agent can select and execute the corresponding Skill according to the task requirements, completing specific task types through a more stable path.
 
 ![](./web/docs/public/skill-example.png)
 
 ## 3. Development Plan
 
-- [x] Single-agent mode
-- [x] Multi-agent mode
-- [x] Remote MCP server integration
+- [x] Single Agent mode
+- [x] Multi Agent mode
+- [x] Remote MCP server tool integration
 - [x] Local MCP server and Skill tool integration
-- [x] Context compression support
-- [x] Advanced style editing (tables, illustrations, equations, etc.) — equations are readable but cannot be generated
+- [x] Context compression
+- [x] Complex style editing for tables, illustrations, equations, etc. (equations are readable but cannot be generated)
 
-#### Supported Office Suites
+#### Supported Office Software
 
 - WPS Office (Windows, Linux), version 12.1.2.24722 and above
 - Microsoft Word (Windows, Web), version 2019/2021 and above
 
 ## 4. System Architecture
 
-To better satisfy user needs and improve generation stability and depth, the project provides two agent architectures.
+To better meet user needs and ensure the stability and depth of generated articles, this project designs two agent architectures:
 
-### 4.1 Single-Agent Loop Architecture
+### Single Agent Loop Architecture
 
-#### Architecture Diagram
+#### Overall Architecture Diagram
 
 ![](./web/docs/public/single_agent_loop.png)
 
-The frontend WPS add-in converts the user's request and selected document range into structured JSON and sends it to the backend.
+The frontend WPS add-in converts the user's question and the currently selected document paragraphs into a specific JSON format and sends it to the backend.
 
-In the backend single-agent architecture, the system follows a standard ReAct loop. In each round, the agent reasons over user input and current document state, chooses whether to call a tool (such as web search) or finish directly, and continues this tool-use/reasoning loop until completion.
+In the backend Single Agent architecture, the system uses a standard ReAct agent loop. In each loop, the agent reasons based on the user input and current document state, decides whether to call a tool such as a web search tool or finish directly, then continues reasoning after tool calls and chooses another tool such as a writing tool or finishes, until the agent decides to end the loop.
 
-- **read_document tool**: reads content in the `(startParaIndex, endParaIndex)` range and returns structured JSON to the agent.
-- **generate_document tool**: generates structured JSON document content and returns it to the frontend add-in.
-- **search_document tool**: locates paragraph positions by format or text criteria and returns positions to the agent.
-- **delete_document tool**: deletes content based on paragraph IDs.
+- **read_document tool**: reads article content in the `(startParaIndex, endParaIndex)` range and converts it into a specific JSON format to return to the agent.
+- **generate_document tool**: generates article content in a specific JSON format and sends it to the frontend add-in.
+- **search_document tool**: searches paragraph positions by format or text information and returns them to the agent.
+- **delete_document tool**: deletes corresponding content according to paragraph IDs.
 
-### 4.2 Multi-Agent Architecture
+### Multi Agent Architecture
 
-#### Architecture Diagram
+#### Overall Architecture Diagram
 
 ![](./web/docs/public/multi_agent.png)
 
-The frontend flow is the same as in single-agent mode. In the backend multi-agent workflow, a **planner agent** orchestrates and schedules several specialized agents.
+The frontend part is the same as the Single Agent architecture. In the backend multi-agent collaboration framework, a **planner agent** is designed to orchestrate and schedule the workflow of multiple expert agents.
 
 - **research agent**: collects online reference information
-- **outline agent**: generates an outline based on references and user requirements
-- **writer agent**: writes content based on references and user requirements
-- **reviewer agent**: reviews generated content and provides revision suggestions
+- **outline agent**: generates an article outline based on reference information and user requirements
+- **writer agent**: generates article content based on reference information and user requirements
+- **reviewer agent**: reviews generated articles and provides revision suggestions according to reference information and user requirements
 
 ## 5. Quick Start
 
 ### Environment Setup
 
-- Node v22.12.0
+- node v22.12.0
 - wpsjs 2.2.3
-- Python 3.11.14
-- Windows 10/11 or Ubuntu 22.04
+- python 3.11.14
+- Windows 10/11, Ubuntu 22.04
 
 ### Build Frontend Add-in
 
@@ -153,48 +134,48 @@ uv run python main.py
 
 ### Use LangSmith Tracing
 
-The project also supports LangSmith for tracing and analyzing agent behavior. For setup details, see [backend/README.md](backend/README.md).
+This project also supports LangSmith for tracing and analyzing agent behavior. For configuration, see the instructions in the [backend README](backend/README.md).
 
 ![](./web/docs/public/Langsmith.png)
 
-### Package the Desktop App
+### Package the Software
 
 ```bash
 cd backend/deploy
 uv run pyinstaller wence.spec
 ```
 
-The packaged executable is generated in `backend/deploy/dist`.
+The packaged executable is generated in the `backend/deploy/dist` directory.
 
-If you do not want to package it yourself, you can directly download the packaged archive from Releases and run the executable after extraction.
+If you do not want to package it yourself, you can directly download the packaged archive from the release, extract it, and run the executable.
 
-### Download
+### Software Download
 
-Packaged release files: [Release](https://github.com/visresearch/WordAgent/releases).
+Packaged release files are available in [Release](https://github.com/visresearch/WordAgent/releases).
 
-### Run the App
+### Run the Software
 
-After downloading, run the executable, start the backend service (`wence_word_plugin -> Install`), open Word, trust the add-in, and start using the system.
+After downloading, double-click the executable to start the backend service (`wence_word_plugin -> Install`), open Word, trust the add-in, and start using the service.
 
-You need to configure an LLM API. This project is currently tested with Alibaba Bailian Qwen3.5-Plus APIs.
+You need to configure an LLM API. This project currently uses the Qwen 3.6 Plus series API service from Alibaba Cloud Bailian.
 
 ## 6. LLM API Compatibility
 
-The project has tested part of the mainstream LLM APIs, and compatibility is still expanding:
+This project has tested some LLM APIs and will continue testing and adapting more APIs. Current status:
 
-- [x] Qwen 3.6 Plus (stable)
-- [x] GLM-5.1 (stable)
-- [x] GPT 5.4 (stable)
-- [x] MiniMax M2.5 (stable)
-- [x] Step 3.5 Flash (stable)
-- [x] DeepSeek v4 pro (stable)
-- [x] Claude Sonnet/Opus (stable)
-- [x] MiMo-V2.5 (stable)
+- [x] Qwen 3.6 Plus runs stably
+- [x] GLM-5.1 runs stably
+- [x] GPT 5.4 runs stably
+- [x] MiniMax M2.5 runs stably
+- [x] Step 3.5 Flash runs stably
+- [x] DeepSeek v4 pro runs stably
+- [x] Claude Sonnet/Opus runs stably
+- [x] MiMo-V2.5 runs stably
 - [ ] Gemini 3.1 Pro
 
-> **Recommended**: Use **GPT series** models for best results, followed by **Qwen series** models. See the [evaluation document](./backend/evaluation/README.md) for details.
+> GPT series models are recommended for the best results, followed by Qwen series models. See the [evaluation document](./backend/evaluation/README.md) for details.
 
-Note: part of development used free quotas from [Alibaba Bailian](https://bailian.console.aliyun.com/) and [OpenRouter](https://openrouter.ai/models?q=free).
+Note: this project used some free quotas from [Alibaba Cloud Bailian](https://bailian.console.aliyun.com/) and [OpenRouter](https://openrouter.ai/models?q=free) during development.
 
 ## 7. About
 
