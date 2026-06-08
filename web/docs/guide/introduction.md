@@ -4,7 +4,7 @@
 
 > 文策AI（Word Agent）：让写作有策略，让表达更智能
 
-![文策AI](/WenceAI_small.png)
+![文策AI](/banner.png)
 
 ## 项目概述
 
