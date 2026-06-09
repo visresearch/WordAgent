@@ -352,9 +352,11 @@ def _read_document_impl(
     startParaID: ParaIdInput,
     endParaID: ParaIdInput,
     docId: DocIdInput,
+    mode: str = "full",
 ) -> str:
     """read_document 的核心逻辑，被工厂函数包裹后变成 LangChain @tool。"""
     resolved_doc_id = _normalize_doc_id(docId)
+    read_mode = "lightweight" if mode == "lightweight" else "full"
     startParaID = _normalize_para_id(startParaID)
     endParaID = _normalize_para_id(endParaID)
     use_para_id_mode = startParaID is not None
@@ -382,12 +384,13 @@ def _read_document_impl(
                 "startParaID": startParaID,
                 "endParaID": endParaID,
                 "docId": resolved_doc_id,
+                "mode": read_mode,
             }
         )
     print(
         "[read_document] 请求前端发送文档 "
         f"(startParaIndex={startParaIndex}, endParaIndex={endParaIndex}, "
-        f"startParaID={startParaID}, endParaID={endParaID}, docId={resolved_doc_id})"
+        f"startParaID={startParaID}, endParaID={endParaID}, docId={resolved_doc_id}, mode={read_mode})"
     )
 
     chat_id = _current_chat_id.get(None)
@@ -682,6 +685,7 @@ def build_read_document(description: str):
         startParaID: ParaIdInput = None,
         endParaID: ParaIdInput = None,
         docId: DocIdInput = 0,
+        mode: str = "full",
     ) -> str:
         """Read document content. Requests the frontend to parse and return the specified paragraph range via WebSocket.
 
@@ -691,8 +695,9 @@ def build_read_document(description: str):
             startParaID: Starting paragraph ID (int-like, supports signed numeric strings), used in paraID mode.
             endParaID: Ending paragraph ID (int-like), used in paraID mode. Defaults to startParaID.
             docId: Document ID (int-like). Positive/negative are both allowed. 0 means current active document.
+            mode: Read mode. "lightweight" reads paragraph text and IDs only. "full" reads text, styles, tables, and images.
         """
-        return _read_document_impl(startParaIndex, endParaIndex, startParaID, endParaID, docId)
+        return _read_document_impl(startParaIndex, endParaIndex, startParaID, endParaID, docId, mode)
 
     return read_document
 

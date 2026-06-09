@@ -13,7 +13,7 @@
  * const result = await api.chat(message)
  */
 
-import { parseDocxToJSON } from './docxJsonConverter.js';
+import { cleanText, getParagraphParaID, parseDocxToJSON } from './docxJsonConverter.js';
 import { executeStyleQuery } from './docxQuery.js';
 
 // ============== 配置 ==============
@@ -465,7 +465,7 @@ const wsManager = {
 
   /**
    * 处理后端的文档读取请求：支持 paraIndex/paraID 二选一
-   * @param {Object} params - {startParaIndex,endParaIndex,startParaID,endParaID,docId}
+   * @param {Object} params - {startParaIndex,endParaIndex,startParaID,endParaID,docId,mode}
    */
   async _handleDocumentRequest(params = {}) {
     // 注意：不在这里发送 loading 状态，AIChatPane 在收到 read_document 时已经推入了 loading 状态
@@ -475,10 +475,19 @@ const wsManager = {
         endParaIndex = null,
         startParaID = null,
         endParaID = null,
-        docId = null
+        docId = null,
+        mode = 'full'
       } = params || {};
 
-      const docData = await parseDocumentRange(startParaIndex, endParaIndex, docId, startParaID, endParaID);
+      console.log('[WebSocket][Read] 读取请求模式:', mode, {
+        startParaIndex,
+        endParaIndex,
+        startParaID,
+        endParaID,
+        docId
+      });
+
+      const docData = await parseDocumentRange(startParaIndex, endParaIndex, docId, startParaID, endParaID, mode);
 
       if (docData.error) {
         throw new Error(docData.error);
@@ -516,6 +525,44 @@ const wsManager = {
    */
   async _handleQueryRequest(query, docId = null) {
     try {
+      if (canUseLightweightTextQuery(query)) {
+        console.log('[WebSocket][Search] 使用轻量搜索：仅扫描段落文本/ParaID，不解析完整 JSON', {
+          docId,
+          query
+        });
+        const result = executeLightweightTextQuery(query, docId);
+        if (result.error) {
+          throw new Error(result.error);
+        }
+
+        const matchedParaIndices = [...new Set(
+          (result.matches || [])
+            .map((m) => m?.paragraphIndex)
+            .filter((idx) => Number.isInteger(idx))
+        )].sort((a, b) => a - b);
+        const matchedParaIds = [...new Set(
+          (result.matches || [])
+            .map((m) => m?.paragraphId)
+            .filter((id) => Number.isInteger(id))
+        )].sort((a, b) => a - b);
+
+        await this.send({
+          type: 'query_response',
+          matches: result.matches,
+          matchCount: result.matchCount,
+          matchedParaIndices,
+          matchedParaIDs: matchedParaIds
+        });
+
+        console.log('[WebSocket][Search] 轻量搜索完成:', result.searchMode, `matches=${result.matchCount}`);
+        return;
+      }
+
+      console.log('[WebSocket][Search] 使用完整搜索：需要文档 JSON / 样式信息', {
+        docId,
+        query
+      });
+
       // 优先使用缓存的文档 JSON（注意：不同文档的缓存需要区分）
       // 如果指定了 docId 且与缓存的 docId 不同，需要重新解析
       let docData = null;
@@ -747,11 +794,145 @@ function getDocumentById(docId) {
   return app.ActiveDocument;
 }
 
-async function parseDocumentRange(startParaIndex = 0, endParaIndex = -1, docId = 0, startParaID = null, endParaID = null) {
+function canUseLightweightTextQuery(query) {
+  const filters = query?.filters || {};
+  const keys = Object.keys(filters);
+  if (keys.length === 0) {
+    return false;
+  }
+  return keys.every((key) => ['text', 'regex', 'regexFlags'].includes(key)) && (filters.text || filters.regex);
+}
+
+function buildSearchRegex(filters) {
+  if (filters.regex) {
+    try {
+      return new RegExp(String(filters.regex), String(filters.regexFlags || 'i'));
+    } catch (err) {
+      throw new Error(`Invalid regex: ${err?.message || String(err)}`);
+    }
+  }
+  const escaped = String(filters.text || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(escaped, 'i');
+}
+
+function executeLightweightTextQuery(query, docId = 0) {
+  const doc = getDocumentById(docId);
+  if (!doc) {
+    return { matches: [], matchCount: 0, error: 'No active document' };
+  }
+
+  const filters = query?.filters || {};
+  const pattern = buildSearchRegex(filters);
+  const matches = [];
+  const MAX_MATCHES = 100;
+  const totalParas = doc.Paragraphs?.Count || 0;
+
+  for (let i = 1; i <= totalParas && matches.length < MAX_MATCHES; i++) {
+    const para = doc.Paragraphs.Item(i);
+    const text = cleanText(para?.Range?.Text || '');
+    if (!text) {
+      continue;
+    }
+
+    pattern.lastIndex = 0;
+    if (!pattern.test(text)) {
+      continue;
+    }
+
+    matches.push({
+      text: text.substring(0, 200),
+      paragraphIndex: i - 1,
+      paragraphId: getParagraphParaID(para, null)
+    });
+  }
+
+  return {
+    matches,
+    matchCount: matches.length,
+    searchMode: filters.regex ? 'lightweight-regex' : 'lightweight-text'
+  };
+}
+
+const LIGHTWEIGHT_READ_CHUNK_SIZE = 25;
+
+function waitForNextTick() {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+async function parseDocumentRangeLightweight(doc, startParaIndex, endParaIndex) {
+  const result = { paragraphs: [], tables: [], fields: [], _lightweight: true };
+  const total = endParaIndex - startParaIndex + 1;
+  const startedAt = Date.now();
+
+  console.log('[WebSocket][Read] 使用轻量文本读取：仅读取段落文本/ParaID，不解析字符样式', {
+    startParaIndex,
+    endParaIndex,
+    total,
+    chunkSize: LIGHTWEIGHT_READ_CHUNK_SIZE
+  });
+
+  for (let idx = startParaIndex; idx <= endParaIndex; idx++) {
+    const para = doc.Paragraphs.Item(idx + 1);
+    const text = cleanText(para?.Range?.Text || '');
+    const paraID = getParagraphParaID(para, idx);
+
+    result.paragraphs.push({
+      pStyle: '',
+      runs: text ? [{ text, rStyle: '' }] : [],
+      paraIndex: idx,
+      paraID
+    });
+
+    const parsed = idx - startParaIndex + 1;
+    if (parsed % LIGHTWEIGHT_READ_CHUNK_SIZE === 0 && idx < endParaIndex) {
+      console.log('[WebSocket][Read] 轻量文本读取进度', { parsed, total });
+      await waitForNextTick();
+    }
+  }
+
+  console.log('[WebSocket][Read] 轻量文本读取完成', {
+    total,
+    elapsedMs: Date.now() - startedAt
+  });
+
+  return result;
+}
+
+function resolveParaIDRangeToIndices(doc, startParaID, endParaID) {
+  let startIndex = -1;
+  let endIndex = -1;
+  const totalParas = doc.Paragraphs?.Count || 0;
+  const normalizedEndParaID = endParaID ?? startParaID;
+
+  for (let i = 1; i <= totalParas; i++) {
+    const para = doc.Paragraphs.Item(i);
+    const pid = getParagraphParaID(para, null);
+    if (pid === startParaID && startIndex === -1) {
+      startIndex = i - 1;
+    }
+    if (pid === normalizedEndParaID) {
+      endIndex = i - 1;
+    }
+  }
+
+  if (startIndex < 0) {
+    return { error: `startParaID ${startParaID} 未找到` };
+  }
+  if (endIndex < 0) {
+    return { error: `endParaID ${normalizedEndParaID} 未找到` };
+  }
+  if (endIndex < startIndex) {
+    return { error: `endParaID ${normalizedEndParaID} 早于 startParaID ${startParaID}` };
+  }
+
+  return { startIndex, endIndex };
+}
+
+async function parseDocumentRange(startParaIndex = 0, endParaIndex = -1, docId = 0, startParaID = null, endParaID = null, mode = 'full') {
   return new Promise((resolve) => {
     // 使用 setTimeout 将任务推迟到下一个事件循环
     // 这样可以让 UI 有时间响应，避免卡顿
-    setTimeout(() => {
+    setTimeout(async () => {
       try {
         const doc = getDocumentById(docId);
         if (!doc) {
@@ -760,10 +941,28 @@ async function parseDocumentRange(startParaIndex = 0, endParaIndex = -1, docId =
         }
 
         const useIdMode = startParaID !== null && startParaID !== undefined;
+        const totalParas = doc.Paragraphs?.Count || 0;
+        const normalizedStartIndex = startParaIndex ?? 0;
+        const normalizedEndIndex = endParaIndex === -1 ? totalParas - 1 : (endParaIndex ?? normalizedStartIndex);
+        const shouldUseLightweightRead = mode === 'lightweight';
         const isFullDocument = !useIdMode && (startParaIndex === 0 && endParaIndex === -1);
         let result;
 
-        if (isFullDocument) {
+        if (shouldUseLightweightRead) {
+          if (useIdMode) {
+            const resolved = resolveParaIDRangeToIndices(doc, startParaID, endParaID);
+            if (resolved.error) {
+              resolve({ error: resolved.error });
+              return;
+            }
+            result = await parseDocumentRangeLightweight(doc, resolved.startIndex, resolved.endIndex);
+          } else if (normalizedStartIndex >= 0 && normalizedEndIndex >= normalizedStartIndex) {
+            result = await parseDocumentRangeLightweight(doc, normalizedStartIndex, normalizedEndIndex);
+          } else {
+            resolve({ error: `轻量读取范围无效：startParaIndex=${startParaIndex}, endParaIndex=${endParaIndex}` });
+            return;
+          }
+        } else if (isFullDocument) {
           // 解析全文
           const fullRange = doc.Content;
           if (!fullRange) {

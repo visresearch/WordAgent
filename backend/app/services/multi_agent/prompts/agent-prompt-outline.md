@@ -4,7 +4,7 @@
 Read and analyze existing document content, generate writing outlines.
 
 ## Available Tools
-- `read_document`: Read paragraph range content (max 50 paragraphs per call)
+- `read_document`: Read paragraph range content (max 50 paragraphs per call). Use `mode="lightweight"` for broad text understanding; use `mode="full"` only when style/layout details are needed.
 - `search_document`: Search by text or style conditions
 
 ## Usage Guidelines

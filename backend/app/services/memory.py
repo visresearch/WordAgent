@@ -41,6 +41,8 @@ def _get_env_int(name: str, default: int) -> int:
 
 # ============ 短期记忆 Token 预算（类 Claude Code 风格） ============
 SHORT_TERM_TOKEN_BUDGET = _get_env_int("WORDAGENT_SHORT_TERM_TOKEN_BUDGET", 30000)
+SHORT_TERM_MIN_TURNS = _get_env_int("WORDAGENT_SHORT_TERM_MIN_TURNS", 3)
+SHORT_TERM_LARGE_TOOL_OUTPUT_TOKENS = _get_env_int("WORDAGENT_SHORT_TERM_LARGE_TOOL_OUTPUT_TOKENS", 2000)
 
 
 # ============== 长期记忆配置 ==============
@@ -251,32 +253,97 @@ def build_short_term_messages(
     if not pairs:
         return []
 
-    selected_pairs: list[tuple[str, str]] = []
+    def _render_pair(pair: tuple[dict, dict], include_tool_outputs: bool) -> tuple[str, str]:
+        user_entry, ai_entry = pair
+        return (
+            _format_history_entry(user_entry, include_tool_outputs=include_tool_outputs).strip(),
+            _format_history_entry(ai_entry, include_tool_outputs=include_tool_outputs).strip(),
+        )
+
+    def _pair_token_count(rendered_pair: tuple[str, str]) -> int:
+        user_msg, ai_msg = rendered_pair
+        return _estimate_token_count(user_msg) + _estimate_token_count(ai_msg) + 40
+
+    min_turns = min(SHORT_TERM_MIN_TURNS, len(pairs))
+    selected: list[dict[str, Any]] = []
     total_tokens = 0
 
-    for user_msg, ai_msg in reversed(pairs):
-        user_tokens = _estimate_token_count(user_msg) + 20
-        ai_tokens = _estimate_token_count(ai_msg) + 20
-        pair_tokens = user_tokens + ai_tokens
+    for pair in pairs[-min_turns:]:
+        rendered = _render_pair(pair, include_tool_outputs=True)
+        pair_tokens = _pair_token_count(rendered)
+        selected.append(
+            {
+                "pair": pair,
+                "rendered": rendered,
+                "include_outputs": True,
+                "tokens": pair_tokens,
+            }
+        )
+        total_tokens += pair_tokens
 
-        if total_tokens + pair_tokens <= budget:
-            selected_pairs.insert(0, (user_msg, ai_msg))
-            total_tokens += pair_tokens
-        else:
-            if not selected_pairs:
-                max_chars = int(budget * 2)
-                truncated_user = _truncate_text(user_msg, max_chars)
-                if _estimate_token_count(truncated_user) <= budget:
-                    selected_pairs.append((truncated_user, ""))
+    # If the selected window is over budget, remove tool outputs from the oldest
+    # selected turns first. Keep tool names and input parameters.
+    stripped_outputs = 0
+    for item in selected:
+        if total_tokens <= budget:
             break
+        if not item["include_outputs"]:
+            continue
+        stripped = _render_pair(item["pair"], include_tool_outputs=False)
+        stripped_tokens = _pair_token_count(stripped)
+        total_tokens -= item["tokens"] - stripped_tokens
+        item["rendered"] = stripped
+        item["tokens"] = stripped_tokens
+        item["include_outputs"] = False
+        stripped_outputs += 1
+
+    older_pairs = pairs[: len(pairs) - min_turns]
+    for pair in reversed(older_pairs):
+        rendered = _render_pair(pair, include_tool_outputs=True)
+        pair_tokens = _pair_token_count(rendered)
+        if total_tokens + pair_tokens <= budget:
+            selected.insert(
+                0,
+                {
+                    "pair": pair,
+                    "rendered": rendered,
+                    "include_outputs": True,
+                    "tokens": pair_tokens,
+                },
+            )
+            total_tokens += pair_tokens
+            continue
+
+        stripped = _render_pair(pair, include_tool_outputs=False)
+        stripped_tokens = _pair_token_count(stripped)
+        if total_tokens + stripped_tokens <= budget:
+            selected.insert(
+                0,
+                {
+                    "pair": pair,
+                    "rendered": stripped,
+                    "include_outputs": False,
+                    "tokens": stripped_tokens,
+                },
+            )
+            total_tokens += stripped_tokens
+            stripped_outputs += 1
+            continue
+
+        break
 
     result: list[HumanMessage | AIMessage] = []
-    for user_msg, ai_msg in selected_pairs:
+    for item in selected:
+        user_msg, ai_msg = item["rendered"]
         result.append(HumanMessage(content=user_msg))
         if ai_msg:
             result.append(AIMessage(content=ai_msg))
 
-    print(f"[Memory] 短期记忆: 保留 {len(selected_pairs)} 轮对话, ~{total_tokens} tokens")
+    over_budget_note = " (over budget after stripping tool outputs)" if total_tokens > budget else ""
+    print(
+        f"[Memory] 短期记忆: 保留 {len(selected)} 轮对话, "
+        f"剥离工具输出 {stripped_outputs} 轮, ~{total_tokens} tokens{over_budget_note}"
+    )
     return result
 
 
@@ -351,7 +418,21 @@ def _format_tool_value_for_memory(value: Any, indent: str = "  ") -> str:
     return "\n" + "\n".join(f"{indent}{line}" for line in text.splitlines())
 
 
-def _format_tool_json_for_memory(tool_json: Any) -> str:
+def _format_tool_output_for_memory(value: Any, indent: str = "  ") -> str:
+    text = _dump_memory_json(value)
+    token_count = _estimate_token_count(text)
+    if token_count > SHORT_TERM_LARGE_TOOL_OUTPUT_TOKENS:
+        max_chars = max(500, SHORT_TERM_LARGE_TOOL_OUTPUT_TOKENS * 2)
+        text = (
+            f"[tool output preview: original ~{token_count} tokens, "
+            f"threshold={SHORT_TERM_LARGE_TOOL_OUTPUT_TOKENS}]\n" + _truncate_text(text, max_chars)
+        )
+    if "\n" not in text:
+        return text
+    return "\n" + "\n".join(f"{indent}{line}" for line in text.splitlines())
+
+
+def _format_tool_json_for_memory(tool_json: Any, include_outputs: bool = True) -> str:
     """Render tool_json as readable Markdown for short-term memory."""
     if not isinstance(tool_json, dict):
         return _dump_memory_json(tool_json)
@@ -372,8 +453,8 @@ def _format_tool_json_for_memory(tool_json: Any) -> str:
         if tool_name != "generate_document" and "input" in call:
             lines.append(f"  - input: {_format_tool_value_for_memory(call.get('input'), indent='    ')}")
 
-        if "output" in call:
-            lines.append(f"  - output: {_format_tool_value_for_memory(call.get('output'), indent='    ')}")
+        if include_outputs and "output" in call:
+            lines.append(f"  - output: {_format_tool_output_for_memory(call.get('output'), indent='    ')}")
 
         if call.get("error"):
             lines.append(f"  - error: {str(call.get('error')).lower()}")
@@ -385,7 +466,7 @@ def _format_tool_json_for_memory(tool_json: Any) -> str:
     return "\n".join(lines)
 
 
-def _format_history_entry(entry: dict) -> str:
+def _format_history_entry(entry: dict, include_tool_outputs: bool = True) -> str:
     """Format one DB/front-end compatible history entry for short-term memory."""
     sections: list[str] = []
 
@@ -395,16 +476,16 @@ def _format_history_entry(entry: dict) -> str:
 
     tool_json = _get_history_field(entry, "tool_json", "toolJson")
     if _has_tool_calls(tool_json):
-        sections.append("[tool_json]\n" + _format_tool_json_for_memory(tool_json))
+        sections.append("[tool_json]\n" + _format_tool_json_for_memory(tool_json, include_outputs=include_tool_outputs))
 
     return "\n\n".join(sections)
 
 
-def _pair_history(history: list[dict]) -> list[tuple[str, str]]:
-    """将 history 列表配对为 (user_msg, assistant_msg) 元组列表。"""
-    pairs: list[tuple[str, str]] = []
+def _pair_history(history: list[dict]) -> list[tuple[dict, dict]]:
+    """将 history 列表配对为 (user_entry, assistant_entry) 元组列表。"""
+    pairs: list[tuple[dict, dict]] = []
     i = 0
-    valid: list[dict[str, str]] = []
+    valid: list[dict[str, Any]] = []
     for entry in history:
         if not isinstance(entry, dict):
             continue
@@ -413,20 +494,20 @@ def _pair_history(history: list[dict]) -> list[tuple[str, str]]:
         if role not in ("user", "assistant"):
             continue
 
-        content = _format_history_entry(entry).strip()
+        content = _format_history_entry(entry, include_tool_outputs=False).strip()
 
         if role == "user" and not content:
             continue
         if role == "assistant" and not content:
             continue
 
-        valid.append({"role": role, "content": content})
+        valid.append({"role": role, "entry": entry})
 
     print(f"[Memory] _pair_history: 原始 history={len(history)}, 过滤后 valid={len(valid)}")
 
     while i < len(valid) - 1:
         if valid[i]["role"] == "user" and valid[i + 1]["role"] == "assistant":
-            pairs.append((valid[i]["content"], valid[i + 1]["content"]))
+            pairs.append((valid[i]["entry"], valid[i + 1]["entry"]))
             i += 2
         else:
             i += 1

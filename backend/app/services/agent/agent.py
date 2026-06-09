@@ -148,7 +148,7 @@ def _split_tagged_thinking_text(text: str) -> tuple[str, str]:
             thinking_parts.append(inner)
         visible = visible[: open_match.start()]
 
-    visible = _CLOSE_THINK_TAG_RE.sub("", visible).strip()
+    visible = _CLOSE_THINK_TAG_RE.sub("", visible)
     thinking = "\n".join(part for part in thinking_parts if part).strip()
     return visible, thinking
 
@@ -308,7 +308,6 @@ def _is_image_input_unsupported_error(exc: Exception) -> bool:
         "expected text",
     ]
     return any(sig in text for sig in image_signals)
-
 
 
 # region LangGraph Agent（ReAct）
@@ -764,9 +763,10 @@ async def process_writing_request_stream(
             range_lines = []
             for r in document_range:
                 doc_name = r.get("docName", "")
+                doc_id = r.get("docId", 0)
                 start = r.get("startParaIndex", 0)
                 end = r.get("endParaIndex", -1)
-                range_str = f"《{doc_name}》paragraphs {start} to {end}"
+                range_str = f"《{doc_name}》docId={doc_id}, selected paragraphIndex {start} to {end}"
                 range_lines.append(range_str)
 
             if mode == "ask":
@@ -1174,9 +1174,10 @@ async def process_writing_request_stream(
             range_lines = []
             for r in document_range:
                 doc_name = r.get("docName", "")
+                doc_id = r.get("docId", 0)
                 start = r.get("startParaIndex", 0)
                 end = r.get("endParaIndex", -1)
-                range_lines.append(f"《{doc_name}》paragraphs {start} to {end}")
+                range_lines.append(f"《{doc_name}》docId={doc_id}, selected paragraphIndex {start} to {end}")
             user_content = f"{message}\n\nPlease process based on the user-selected document content:\n" + "\n".join(
                 f"  - {line}" for line in range_lines
             )

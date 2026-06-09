@@ -118,8 +118,8 @@
             <!-- eslint-disable-next-line vue/no-v-html -->
             <div
               v-show="msg.thinkingExpanded"
-              class="thinking-content markdown-body"
               :ref="setThinkingContentRef(index)"
+              class="thinking-content markdown-body"
               @scroll="onThinkingContentScroll(index, $event)"
               v-html="renderMarkdown(msg.thinking)"
             ></div>
@@ -291,25 +291,6 @@ const md = new MarkdownIt({
   typographer: true
 });
 
-function normalizeMarkdownForDisplay(content) {
-  if (!content) {
-    return '';
-  }
-
-  let cleaned = String(content)
-    .replace(/```json\s*```/g, '')
-    .replace(/\r\n?/g, '\n');
-
-  // Markdown requires list markers to start on a new line and usually have a following space.
-  cleaned = cleaned
-    .replace(/([：:])\s*([-*+])(?=\S)/g, '$1\n$2 ')
-    .replace(/([^\n])([-*+])(?=\p{Extended_Pictographic})/gu, '$1\n$2 ')
-    .replace(/^([-*+])(?=\S)/gm, '$1 ')
-    .replace(/([。！？；;])\s*(\d+[.)])(?=\s*\S)/g, '$1\n$2 ');
-
-  return cleaned;
-}
-
 export default {
   name: 'ChatMessages',
   props: {
@@ -472,8 +453,7 @@ export default {
       if (!content) {
         return '';
       }
-      const cleaned = normalizeMarkdownForDisplay(content);
-      return md.render(cleaned);
+      return md.render(String(content).replace(/\r\n?/g, '\n'));
     },
 
     /**
@@ -906,8 +886,12 @@ export default {
 
 /* Markdown 渲染样式 - 使用 :deep() 穿透 scoped 限制 */
 .message-content :deep(.markdown-body) {
+  display: block;
   font-size: 12px;
   line-height: 1.6;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .message-content :deep(.markdown-body) img {
@@ -1015,7 +999,10 @@ export default {
 
 .message-content :deep(.markdown-body) table {
   border-collapse: collapse;
+  display: block;
   margin: 8px 0;
+  max-width: 100%;
+  overflow-x: auto;
   width: 100%;
 }
 

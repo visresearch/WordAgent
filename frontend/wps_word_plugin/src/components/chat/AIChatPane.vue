@@ -1183,7 +1183,8 @@ export default {
           'endParaIndex:', data.endParaIndex,
           'startParaID:', data.startParaID,
           'endParaID:', data.endParaID,
-          'docId:', data.docId
+          'docId:', data.docId,
+          'mode:', data.mode
         );
         const hasParaIDMode = Number.isInteger(data.startParaID) || Number.isInteger(data.endParaID);
         msg.contentParts.push({
@@ -1201,7 +1202,8 @@ export default {
           endParaIndex: this._toIntOrNull(data.endParaIndex),
           startParaID: this._toIntOrNull(data.startParaID),
           endParaID: this._toIntOrNull(data.endParaID),
-          docId: this._toIntOrDefault(data.docId, 0)
+          docId: this._toIntOrDefault(data.docId, 0),
+          mode: data.mode === 'lightweight' ? 'lightweight' : 'full'
         });
         return;
       }

@@ -1,7 +1,22 @@
 
 # Changelog
 
-## Unreleased
+## [v0.4.5]
+
+### Added
+- read_document工具添加mode参数，适配轻量读取模式
+
+### Fixed
+- 优化前端wps插件search_document工具调用，添加原生的轻量搜索
+- 修复后端传输的原始LLM信息
+- 优化搜索工具解析全文导致WPS UI暂时卡死的问题
+- 修复短期记忆的bug
+
+### Changed
+- 修改README和文档内容
+
+
+## [v0.4.2]
 
 ### Fixed
 - 修复非多模态大模型，输入图片接口报错，应该降级为OCR读取图片

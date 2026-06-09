@@ -260,7 +260,9 @@ def _run_sub_agent(
     if context:
         if isinstance(task, list):
             user_content = list(task)
-            user_content.append({"type": "text", "text": f"\n\n---\nReference materials from previous steps:\n{context}"})
+            user_content.append(
+                {"type": "text", "text": f"\n\n---\nReference materials from previous steps:\n{context}"}
+            )
         else:
             user_content = f"{task}\n\n---\nReference materials from previous steps:\n{context}"
     messages.append(HumanMessage(content=user_content))
@@ -725,9 +727,10 @@ def _build_multi_agent_graph(llm, model_name: str, mcp_tools: list = None):
             range_lines = []
             for r in state.document_range:
                 doc_name = r.get("docName", "")
+                doc_id = r.get("docId", 0)
                 start = r.get("startParaIndex", 0)
                 end = r.get("endParaIndex", -1)
-                range_str = f"「{doc_name}」paragraphs {start} to {end}"
+                range_str = f"「{doc_name}」docId={doc_id}, selected paragraphIndex {start} to {end}"
                 range_lines.append(range_str)
             task += f"\n\nUser has selected the following document content:\n" + "\n".join(
                 f"  - {line}" for line in range_lines
@@ -1213,7 +1216,11 @@ async def process_writing_request_stream(
                     if reasoning_content:
                         yield f"data: {json.dumps({'type': 'thinking', 'content': reasoning_content}, ensure_ascii=False)}\n\n"
 
-                if isinstance(msg, AIMessage) and current_agent not in _SUPPRESS_STREAM and not getattr(msg, "tool_calls", None):
+                if (
+                    isinstance(msg, AIMessage)
+                    and current_agent not in _SUPPRESS_STREAM
+                    and not getattr(msg, "tool_calls", None)
+                ):
                     from app.services.agent.agent import _extract_tagged_thinking_content, _extract_text_content
 
                     tagged_thinking = _extract_tagged_thinking_content(msg.content)
@@ -1254,9 +1261,10 @@ async def process_writing_request_stream(
             range_lines = []
             for r in document_range:
                 doc_name = r.get("docName", "")
+                doc_id = r.get("docId", 0)
                 start = r.get("startParaIndex", 0)
                 end = r.get("endParaIndex", -1)
-                range_lines.append(f"《{doc_name}》paragraphs {start} to {end}")
+                range_lines.append(f"《{doc_name}》docId={doc_id}, selected paragraphIndex {start} to {end}")
             user_content = f"{message}\n\nPlease process based on the user-selected document content:\n" + "\n".join(
                 f"  - {line}" for line in range_lines
             )

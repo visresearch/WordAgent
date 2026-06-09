@@ -1448,7 +1448,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride, start
       // 解析范围内的表格（表格起始位置落在请求范围内）
       const parsedTableRanges = new Set();
       for (const tObj of tableObjects) {
-        if (tObj.rangeStart >= rangeStart && tObj.rangeStart < rangeEnd) {
+        if (tObj.rangeStart >= rangeStart && tObj.rangeEnd <= rangeEnd) {
           try {
             const tableData = parseTable(tObj.table);
             tableData.paraIndex = paraStartToIndex.get(tObj.rangeStart) ?? -1;
@@ -1565,7 +1565,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride, start
         // 跳过表格内段落
         let inTable = false;
         for (const tr of tableRanges) {
-          if (paraStart >= tr.start && paraEnd <= tr.end) {
+          if (parsedTableRanges.has(tr.start) && paraStart >= tr.start && paraEnd <= tr.end) {
             inTable = true;
             break;
           }
