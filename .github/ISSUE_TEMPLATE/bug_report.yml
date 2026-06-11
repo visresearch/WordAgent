@@ -1,0 +1,102 @@
+name: 问题反馈
+description: 反馈 Word Agent 使用过程中遇到的问题
+title: "[Bug]: "
+labels: ["Triage | 待检查"]
+
+body:
+  - type: input
+    id: version
+    attributes:
+      label: 代码版本
+      description: 请填写 Release 版本号、commit hash，或你正在使用的分支名称。
+      placeholder: "例如：v0.1.0 / main@abcdef1"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: issue-type
+    attributes:
+      label: 问题类型
+      description: 请选择最符合当前情况的问题类型。
+      multiple: true
+      options:
+        - Bug
+        - 安装或启动失败
+        - 配置问题
+        - 性能问题
+        - 文档问题
+        - 其他
+    validations:
+      required: true
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: 问题范围
+      description: 问题主要出现在哪个模块？
+      multiple: true
+      options:
+        - WPS 加载项
+        - Microsoft Word 加载项
+        - 后端服务
+        - 单智能体模式
+        - 多智能体模式
+        - MCP Server 或 Skill
+        - 文档编辑与格式渲染
+        - 打包、安装或部署
+        - 其他
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: 问题描述
+      description: 请详细描述问题现象，以及它对正常使用造成的影响。
+      placeholder: "例如：在 WPS 加载项中输入写作请求后，后端返回成功，但文档内容没有被插入。"
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 请提供能稳定复现问题的操作步骤。如果无法稳定复现，也请说明触发频率。
+      placeholder: |
+        1. 启动后端服务
+        2. 打开 WPS 或 Microsoft Word 并加载插件
+        3. 输入 ...
+        4. 观察到 ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望行为
+      description: 请说明你认为正确的结果应该是什么。
+      placeholder: "例如：选中段落应被扩写，并保留原有标题和正文样式。"
+    validations:
+      required: true
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: 截图或录屏
+      description: 如涉及界面、文档渲染、报错弹窗或操作流程，请上传截图或录屏。
+      placeholder: "请拖拽上传图片、录屏或相关附件。"
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 运行日志
+      description: 请粘贴关键日志，或上传日志文件。注意隐藏 API Key、Token、账号、隐私文档内容等敏感信息。
+      render: shell
+      placeholder: "请粘贴后端、前端控制台、浏览器开发者工具或插件运行内容。"
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: 补充信息
+      description: 其他有助于定位问题的信息，例如配置文件片段、最小复现文档、相关链接或临时解决方法。
+      placeholder: "你的补充信息"

@@ -68,12 +68,14 @@ In addition, this project supports two types of pluggable extensions for custom 
 - [x] Remote MCP server tool integration
 - [x] Local MCP server and Skill tool integration
 - [x] Context compression
+- [x] Short-term and long-term memory
 - [x] Complex style editing for tables, illustrations, equations, etc. (equations are readable but cannot be generated)
+- [ ] LAN access and cloud deployment beyond localhost
 
 #### Supported Office Software
 
 - WPS Office (Windows, Linux), version 12.1.2.24722 and above
-- Microsoft Word (Windows, Web), version 2019/2021 and above
+- Microsoft Word (Windows, Web), version 2019/2021 and above (maintenance paused since release 0.4.0)
 
 ## 4. System Architecture
 
@@ -156,8 +158,6 @@ Packaged release files are available in [Release](https://github.com/visresearch
 ### Run the Software
 
 After downloading, double-click the executable to start the backend service (`wence_word_plugin -> Install`), open Word, trust the add-in, and start using the service.
-
-You need to configure an LLM API. This project currently uses the Qwen 3.6 Plus series API service from Alibaba Cloud Bailian.
 
 ## 6. LLM API Compatibility
 
