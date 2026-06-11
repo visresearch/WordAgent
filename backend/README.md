@@ -42,10 +42,10 @@ ruff format  # Format
 
 ```bash
 cd backend/deploy
-uv run pyinstaller wence.spec
+uv run pyinstaller package.spec
 ```
 
-`wence.spec` 会在打包时自动执行 `git describe --tags` 生成 `backend/version.txt`，并将其打入程序，用于 GUI 展示当前版本号。
+`package.spec` 会从 `APP_VERSION` 环境变量读取版本号；发布构建中由 Git tag 注入该环境变量，并写入打包运行时 `.env`，供 GUI 和 API 展示当前版本号。
 
 输出在 `backend/deploy/dist` 目录。
 

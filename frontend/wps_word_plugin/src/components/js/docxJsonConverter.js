@@ -189,6 +189,71 @@ function resolveStyle(styles, ref, defaultStyle) {
   return defaultStyle;
 }
 
+function normalizeDocumentJsonInput(jsonData) {
+  if (
+    jsonData &&
+    typeof jsonData === 'object' &&
+    !jsonData.paragraphs &&
+    !jsonData.tables &&
+    jsonData.document &&
+    typeof jsonData.document === 'object'
+  ) {
+    return {
+      ...jsonData.document,
+      insertParaID: jsonData.insertParaID ?? jsonData.document.insertParaID,
+      docId: jsonData.docId ?? jsonData.document.docId
+    };
+  }
+  return jsonData;
+}
+
+function revealInsertedRange(doc, startPos, endPos) {
+  try {
+    const safeEnd = Math.max(startPos, endPos - 1);
+    const insertedRange = doc.Range(startPos, safeEnd);
+    insertedRange.Select();
+
+    try {
+      const activeWindow = window.Application?.ActiveWindow;
+      if (activeWindow?.ScrollIntoView) {
+        activeWindow.ScrollIntoView(insertedRange, true);
+      }
+    } catch (e) {
+      void e;
+    }
+  } catch (e) {
+    console.warn('[generateDocxFromJSON] 定位到新插入内容失败:', e);
+  }
+}
+
+function isBlankWpsText(text) {
+  return String(text || '').replace(/[\r\n\u0007]/g, '').trim() === '';
+}
+
+function isEffectivelyEmptyDocument(doc) {
+  try {
+    const tableCount = doc.Tables?.Count ?? doc.Content?.Tables?.Count ?? 0;
+    if (tableCount > 0) {
+      return false;
+    }
+
+    const paraCount = doc.Paragraphs?.Count ?? 0;
+    if (paraCount === 0) {
+      return true;
+    }
+    if (paraCount > 1) {
+      return false;
+    }
+
+    const firstPara = doc.Paragraphs.Item(1);
+    const paraText = firstPara?.Range?.Text ?? '';
+    const contentText = doc.Content?.Text ?? paraText;
+    return isBlankWpsText(paraText) && isBlankWpsText(contentText);
+  } catch (e) {
+    return false;
+  }
+}
+
 /**
  * 对 parseDocxToJSON 的结果进行样式去重
  */
@@ -281,8 +346,11 @@ function getAlignmentName(alignment) {
  * 对齐方式：名称 -> 值
  */
 function getAlignmentValue(alignment) {
+  if (typeof alignment === 'number') {
+    return alignment;
+  }
   const map = { left: 0, center: 1, right: 2, justify: 3, distribute: 4 };
-  return map[alignment] || 0;
+  return map[alignment] ?? 0;
 }
 
 /**
@@ -297,8 +365,11 @@ function getTableAlignmentName(alignment) {
  * 表格对齐方式：名称 -> 值
  */
 function getTableAlignmentValue(alignment) {
+  if (typeof alignment === 'number') {
+    return alignment;
+  }
   const map = { left: 0, center: 1, right: 2 };
-  return map[alignment] || 1;
+  return map[alignment] ?? 1;
 }
 
 /**
@@ -313,8 +384,11 @@ function getCellVerticalAlignmentName(alignment) {
  * 单元格垂直对齐：名称 -> 值
  */
 function getCellVerticalAlignmentValue(alignment) {
+  if (typeof alignment === 'number') {
+    return alignment;
+  }
   const map = { top: 0, center: 1, bottom: 2 };
-  return map[alignment] || 1;
+  return map[alignment] ?? 1;
 }
 
 /**
@@ -2355,7 +2429,7 @@ function generateTable(doc, tableData, currentPos, styles) {
 
     // 表格对齐
     const tStyle = resolveStyle(styles, tableData.tStyle, ['center']);
-    table.Rows.Alignment = getTableAlignmentValue(tStyle[0] || 'center');
+    table.Rows.Alignment = getTableAlignmentValue(tStyle[0] ?? 'center');
   } catch (e) {}
 
   // 还原行高
@@ -2512,7 +2586,7 @@ function generateTable(doc, tableData, currentPos, styles) {
           // 设置段落格式（对齐、行距、缩进、段间距）
           try {
             const pf = cellRange.ParagraphFormat;
-            pf.Alignment = getAlignmentValue(cStyle[CSTYLE.ALIGNMENT] || 'center');
+            pf.Alignment = getAlignmentValue(cStyle[CSTYLE.ALIGNMENT] ?? 'center');
             pf.LeftIndent = 0;
             pf.RightIndent = 0;
             pf.FirstLineIndent = 0;
@@ -2521,7 +2595,7 @@ function generateTable(doc, tableData, currentPos, styles) {
           } catch (e) {}
         }
 
-        cell.VerticalAlignment = getCellVerticalAlignmentValue(cStyle[CSTYLE.VERTICAL_ALIGNMENT] || 'center');
+        cell.VerticalAlignment = getCellVerticalAlignmentValue(cStyle[CSTYLE.VERTICAL_ALIGNMENT] ?? 'center');
       } catch (e) {}
     }
   }
@@ -2573,6 +2647,8 @@ function generateTable(doc, tableData, currentPos, styles) {
  */
 function generateDocxFromJSON(jsonData, doc, insertParaID) {
   try {
+    jsonData = normalizeDocumentJsonInput(jsonData);
+
     if (!jsonData || (!jsonData.paragraphs && !jsonData.tables)) {
       return { error: 'JSON数据格式不正确' };
     }
@@ -2586,6 +2662,14 @@ function generateDocxFromJSON(jsonData, doc, insertParaID) {
         return { error: '无法创建新文档' };
       }
     }
+
+    const tableCountBefore = (() => {
+      try {
+        return doc.Tables?.Count ?? doc.Content?.Tables?.Count ?? null;
+      } catch (e) {
+        return null;
+      }
+    })();
 
     // 合并段落和表格，按位置排序
     const elements = [];
@@ -2630,7 +2714,14 @@ function generateDocxFromJSON(jsonData, doc, insertParaID) {
     // 确定插入起始位置
     let insertFallbackWarning = null;
     let currentPos;
-    if (insertParaID !== undefined && insertParaID !== null) {
+    if (isEffectivelyEmptyDocument(doc)) {
+      try {
+        currentPos = doc.Paragraphs.Item(1).Range.Start;
+      } catch (e) {
+        currentPos = 0;
+      }
+      console.log('[generateDocxFromJSON] 检测到空文档，占位段落将从文档起点插入');
+    } else if (insertParaID !== undefined && insertParaID !== null) {
       // 通过段落ID定位插入位置（在指定段落之后插入）
       const totalParas = doc.Paragraphs.Count;
       let targetIndex = -1;
@@ -2920,10 +3011,18 @@ function generateDocxFromJSON(jsonData, doc, insertParaID) {
       currentPos += 1;
     }
 
-    // 触发重绘
-    const rgSel = window.Application.Selection.Range;
-    if (rgSel) {
-      rgSel.Select();
+    revealInsertedRange(doc, insertStartPos, currentPos);
+
+    try {
+      const tableCountAfter = doc.Tables?.Count ?? doc.Content?.Tables?.Count ?? null;
+      console.log(
+        '[generateDocxFromJSON] 插入完成:',
+        `range=${insertStartPos}-${currentPos}`,
+        `elements=${processedElements.length}`,
+        `tables=${tableCountBefore ?? '?'}->${tableCountAfter ?? '?'}`
+      );
+    } catch (e) {
+      void e;
     }
 
     return {

@@ -11,9 +11,6 @@ import platform
 # QtWebEngine (Chromium) 不兼容 QT_OPENGL=software
 os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", "--disable-gpu")
 
-# QtWebEngineWidgets 必须在 QApplication 创建之前 import
-import PySide6.QtWebEngineWidgets  # noqa: F401
-
 from PySide6.QtWidgets import QApplication
 from qfluentwidgets import setTheme, Theme
 

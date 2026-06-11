@@ -69,6 +69,7 @@ module.exports = async (env, options) => {
         __VUE_PROD_DEVTOOLS__: false,
         __VUE_PROD_HYDRATION_MISMATCH_DETAILS__: false,
         __DEV__: JSON.stringify(dev),
+        "process.env.APP_VERSION": JSON.stringify(process.env.APP_VERSION || ""),
       }),
       new VueLoaderPlugin(),
       new HtmlWebpackPlugin({

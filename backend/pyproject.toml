@@ -1,6 +1,6 @@
 [project]
 name = "WordAgent"
-version = "0.1.0"
+version = "1.0.0"
 description = "WenCe AI Writing Assistant - 智能写作助手"
 readme = "README.md"
 requires-python = ">=3.11"

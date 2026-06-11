@@ -109,7 +109,7 @@ export default {
   name: 'AboutPane',
   data() {
     return {
-      version: '1.0.0',
+      version: process.env.APP_VERSION || '未知版本',
       githubIcon,
       webIcon,
       helpIcon,
@@ -117,17 +117,7 @@ export default {
       sponsorIcon
     };
   },
-  mounted() {
-    this.loadVersion();
-  },
   methods: {
-    loadVersion() {
-      try {
-        this.version = process.env.npm_package_version || '1.0.0';
-      } catch (e) {
-        console.log('无法加载版本信息');
-      }
-    },
     openExternalLink(url) {
       try {
         const opened = window.open(url, '_blank', 'noopener,noreferrer');

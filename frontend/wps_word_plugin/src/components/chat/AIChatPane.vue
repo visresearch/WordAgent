@@ -172,6 +172,23 @@ export default {
     },
 
     _extractDocumentJsonFromToolJson(toolJson) {
+      const normalizeToolOutput = (output) => {
+        if (!output || typeof output !== 'object') {
+          return null;
+        }
+        if (output.paragraphs || output.tables || output.images) {
+          return output;
+        }
+        if (
+          output.document &&
+          typeof output.document === 'object' &&
+          (output.document.paragraphs || output.document.tables || output.document.images)
+        ) {
+          return output.document;
+        }
+        return null;
+      };
+
       const calls = Array.isArray(toolJson?.calls) ? toolJson.calls : [];
       for (let i = calls.length - 1; i >= 0; i--) {
         const call = calls[i];
@@ -179,14 +196,16 @@ export default {
           continue;
         }
         const output = call.output;
-        if (output && typeof output === 'object' && (output.paragraphs || output.tables || output.images)) {
-          return output;
+        const normalizedOutput = normalizeToolOutput(output);
+        if (normalizedOutput) {
+          return normalizedOutput;
         }
         if (typeof output === 'string') {
           try {
             const parsed = JSON.parse(output);
-            if (parsed && (parsed.paragraphs || parsed.tables || parsed.images)) {
-              return parsed;
+            const normalizedParsed = normalizeToolOutput(parsed);
+            if (normalizedParsed) {
+              return normalizedParsed;
             }
           } catch (e) {}
         }
@@ -1448,10 +1467,16 @@ export default {
 
         this.scrollToBottom();
       } else if (data.type === 'json' && data.content) {
+        const documentJson =
+          data.content.document &&
+          typeof data.content.document === 'object' &&
+          (data.content.document.paragraphs || data.content.document.tables || data.content.document.images)
+            ? data.content.document
+            : data.content;
         const insItem = {
-          documentJson: data.content,
-          docId: this._toIntOrDefault(data.docId, this._toIntOrDefault(data.content.docId, 0)),
-          insertParaID: this._toIntOrNull(data.content.insertParaID),
+          documentJson,
+          docId: this._toIntOrDefault(data.docId, this._toIntOrDefault(data.content.docId ?? documentJson.docId, 0)),
+          insertParaID: this._toIntOrNull(data.content.insertParaID ?? documentJson.insertParaID),
           msg: msg,
           insertStartPos: null,
           insertEndPos: null
@@ -1812,6 +1837,15 @@ export default {
             ins._markingMode = 'highlight';
             console.warn('[AIChatPane] 批注失败，降级到浅红色高亮:', commentErr);
           }
+        }
+        try {
+          insertedRange.Select();
+          const activeWindow = window.Application?.ActiveWindow;
+          if (activeWindow?.ScrollIntoView) {
+            activeWindow.ScrollIntoView(insertedRange, true);
+          }
+        } catch (revealErr) {
+          void revealErr;
         }
       } catch (e) {
         console.warn('[AIChatPane] 添加插入批注失败:', e);

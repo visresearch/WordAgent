@@ -1117,6 +1117,18 @@ async function clearAllSessions() {
 }
 
 /**
+ * 获取后端应用版本号
+ *
+ * @returns {Promise<Object>} - 版本响应
+ */
+async function getAppVersion() {
+  return await request('/api/version', {
+    method: 'GET',
+    timeout: 5000
+  });
+}
+
+/**
  * 更新配置
  * @param {Object} newConfig - 新的配置项
  */
@@ -1443,6 +1455,7 @@ export default {
   getSessionMessages,
   addSessionMessage,
   clearAllSessions,
+  getAppVersion,
 
   // 设置管理 API
   getSettings,
@@ -1493,6 +1506,7 @@ export {
   getSessionMessages,
   addSessionMessage,
   clearAllSessions,
+  getAppVersion,
 
   getSettings,
   saveSettings,

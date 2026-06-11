@@ -104,12 +104,13 @@ import webIcon from '../../assets/icons/web.svg';
 import helpIcon from '../../assets/icons/help.svg';
 import issueIcon from '../../assets/icons/issue.svg';
 import sponsorIcon from '../../assets/icons/sponsor.svg';
+import api from '../js/api.js';
 
 export default {
   name: 'AboutPane',
   data() {
     return {
-      version: '1.0.0',
+      version: '未知版本',
       githubIcon,
       webIcon,
       helpIcon,
@@ -118,26 +119,22 @@ export default {
     };
   },
   mounted() {
-    // 可以从 package.json 获取版本号
     this.loadVersion();
   },
   methods: {
+    async loadVersion() {
+      const result = await api.getAppVersion();
+      const version = result.success ? result.data?.version : '';
+      if (version) {
+        this.version = version;
+      }
+    },
     closeDialog() {
       // 关闭 WPS 对话框
       try {
         window.close();
       } catch (e) {
         console.error('关闭对话框失败:', e);
-      }
-    },
-    loadVersion() {
-      // 尝试从全局或配置中获取版本号
-      // 实际项目中可以通过 API 或导入 package.json 获取
-      try {
-        // 这里可以通过 Vite 的环境变量或其他方式获取版本
-        this.version = import.meta.env.VITE_APP_VERSION || '1.0.0';
-      } catch (e) {
-        console.log('无法加载版本信息');
       }
     },
     openExternalLink(url) {

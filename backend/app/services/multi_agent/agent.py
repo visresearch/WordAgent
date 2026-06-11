@@ -115,11 +115,13 @@ def _try_init_langsmith():
                 print(f"[LangSmith] 加载 .env: {resolved}")
                 load_dotenv(resolved, override=False)
 
-        api_key = os.environ.get("LANGSMITH_API_KEY")
-        project = os.environ.get("LANGSMITH_PROJECT")
+        api_key = os.environ.get("LANGSMITH_API_KEY") or ""
+        endpoint = os.environ.get("LANGSMITH_ENDPOINT") or "https://api.smith.langchain.com"
+        project = os.environ.get("LANGSMITH_PROJECT") or "WordAgent"
 
         if api_key and project:
             os.environ["LANGCHAIN_API_KEY"] = api_key
+            os.environ["LANGCHAIN_ENDPOINT"] = endpoint
             os.environ["LANGCHAIN_PROJECT"] = project
             os.environ["LANGCHAIN_TRACING_V2"] = "true"
             print(f"[LangSmith] ✅ 已启用 tracing，project = {project}")
@@ -132,7 +134,7 @@ def _try_init_langsmith():
 
 
 _langsmith_enabled = _try_init_langsmith()
-_AGENT_RECURSION_LIMIT = _get_env_int("WORDAGENT_AGENT_RECURSION_LIMIT", 25)
+_AGENT_RECURSION_LIMIT = _get_env_int("WORDAGENT_AGENT_RECURSION_LIMIT", 100)
 
 from langchain_core.messages import (
     AIMessage,
@@ -743,7 +745,11 @@ def _build_multi_agent_graph(llm, model_name: str, mcp_tools: list = None):
                 ensure_ascii=False,
                 separators=(",", ":"),
             )
-            task += f"\n\n[Document Global Metadata]\nThe following fields come from frontend document state and are not body content.\n{meta_json}\nUse these metadata fields in task analysis. The first document in the array is the active document the user is currently viewing."
+            task += (
+                f"\n\n[Document Global Metadata]\nThe following fields come from frontend document state and are not body content.\n{meta_json}"
+                "\nUse these metadata fields in task analysis. The first document in the array is the active document the user is currently viewing."
+                "\nIf the active document has isEmpty=true, treat it as a blank/new document: for the first generate_document call, use the active documentId as docId and omit insertParaID. Do not call read_document just to obtain the empty placeholder paragraph ID."
+            )
 
         if state.attached_files:
             file_reference_lines: list[str] = []

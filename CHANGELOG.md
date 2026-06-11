@@ -1,5 +1,16 @@
-
 # Changelog
+
+## [v0.4.6]
+
+### Fixed
+- json schema样式已经变更，同步表格cell的情况
+- 修复wps空文章，导致插入第一个段落出现段落对象无法显示的问题
+
+### Added
+- 添加前端获取当前版本号的接口，在about中显示版本号
+
+### Changed
+- 修改README和文档内容
 
 ## [v0.4.5]
 

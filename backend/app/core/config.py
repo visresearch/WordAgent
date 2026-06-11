@@ -98,7 +98,7 @@ class Settings(BaseSettings):
 
     # 基本信息
     APP_NAME: str = "WenCe AI Writing Assistant API"
-    VERSION: str = "1.0.0"
+    VERSION: str = "1.0.0"  # 默认版本，用户可见版本优先使用 APP_VERSION
     API_PREFIX: str = "/api"
 
     # 服务配置

@@ -54,7 +54,7 @@ def _get_env_int(name: str, default: int) -> int:
         return default
 
 
-_AGENT_RECURSION_LIMIT = _get_env_int("WORDAGENT_AGENT_RECURSION_LIMIT", 25)
+_AGENT_RECURSION_LIMIT = _get_env_int("WORDAGENT_AGENT_RECURSION_LIMIT", 100)
 
 
 class ContextOverflowError(Exception):
@@ -100,11 +100,13 @@ def _try_init_langsmith():
                 print(f"[LangSmith] 加载 .env: {resolved}")
                 load_dotenv(resolved, override=False)
 
-        api_key = os.environ.get("LANGSMITH_API_KEY")
-        project = os.environ.get("LANGSMITH_PROJECT")
+        api_key = os.environ.get("LANGSMITH_API_KEY") or ""
+        endpoint = os.environ.get("LANGSMITH_ENDPOINT") or "https://api.smith.langchain.com"
+        project = os.environ.get("LANGSMITH_PROJECT") or "WordAgent"
 
         if api_key and project:
             os.environ["LANGCHAIN_API_KEY"] = api_key
+            os.environ["LANGCHAIN_ENDPOINT"] = endpoint
             os.environ["LANGCHAIN_PROJECT"] = project
             os.environ["LANGCHAIN_TRACING_V2"] = "true"
             print(f"[LangSmith] ✅ 已启用 tracing，project = {project}")
@@ -592,7 +594,8 @@ def build_graph(llm_with_tools, all_tools: list):
                         "1) document 参数必须是 JSON 对象，不是字符串；"
                         "2) 不要使用 json.dumps() 或 escape quotes；"
                         "3) 段落样式使用 pStyle ID（如 pS_1），字符样式使用 rStyle ID（如 rS_2）；"
-                        "4) 文本内容中如需引号，请使用中文引号或正确转义。"
+                        "4) 文本内容中如需引号，请使用中文引号或正确转义；"
+                        "5) 如果文档只有 runs: [] 的空占位段落，省略 insertParaID。"
                     )
                 ),
             ]
@@ -799,6 +802,7 @@ async def process_writing_request_stream(
                 "\nThe following fields come from frontend document state and are not body content."
                 f"\n{meta_json}"
                 "\nUse these metadata fields in task analysis. The first document in the array is the active document the user is currently viewing."
+                "\nIf the active document has isEmpty=true, treat it as a blank/new document: for the first generate_document call, use the active documentId as docId and omit insertParaID. Do not call read_document just to obtain the empty placeholder paragraph ID."
             )
             # print(
             #     "[Agent] 文档元信息:",

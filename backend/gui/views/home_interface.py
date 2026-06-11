@@ -3,10 +3,8 @@
 import json
 import os
 import re
-import sys
 import threading
 import webbrowser
-from pathlib import Path
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
@@ -33,39 +31,9 @@ from qfluentwidgets import (
 )
 
 
-def _get_runtime_base() -> Path:
-    """获取 backend 运行时基础目录（兼容 PyInstaller）。"""
-    if getattr(sys, "frozen", False):
-        return Path(getattr(sys, "_MEIPASS", Path(sys.executable).resolve().parent))
-    return Path(__file__).resolve().parents[2]
-
-
 def _read_local_version() -> str:
-    """读取本地版本号，优先使用打包前生成的 version.txt。"""
-    runtime_base = _get_runtime_base()
-    candidates: list[Path] = []
-    if getattr(sys, "frozen", False):
-        candidates.extend(
-            [
-                runtime_base / "version.txt",
-                Path(sys.executable).resolve().parent / "version.txt",
-            ]
-        )
-    else:
-        candidates.extend(
-            [
-                runtime_base / "version.txt",
-                runtime_base.parent / "version.txt",
-            ]
-        )
-
-    for path in candidates:
-        if not path.exists():
-            continue
-        value = path.read_text(encoding="utf-8", errors="ignore").strip()
-        if value:
-            return value
-    return "v0.0.0"
+    """从环境变量读取本地版本号。"""
+    return os.environ.get("APP_VERSION") or ""
 
 
 def _version_key(version: str) -> tuple[int, ...]:
@@ -184,7 +152,7 @@ class HomeInterface(QWidget):
         self._status_label = BodyLabel("后端服务运行中（正在检查更新）", self)
         sl.addWidget(self._status_label, 1)
 
-        self._version_label = CaptionLabel(f"当前版本：{self._current_version}", self)
+        self._version_label = CaptionLabel(f"当前版本：{self._current_version or '未知版本'}", self)
         self._version_label.setTextColor(QColor("#888888"), QColor("#aaaaaa"))
         sl.addWidget(self._version_label, alignment=Qt.AlignVCenter)
 

@@ -17,4 +17,6 @@
 - 在 QT 界面中重新点击安装加载项
 - 重启 Word 软件，并在弹出的信任提示中选择信任
 
+## 你有其他问题？
 
+欢迎提出[问题反馈和建议](https://github.com/visresearch/WordAgent/issues)

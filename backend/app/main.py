@@ -18,6 +18,11 @@ from app.core.config import settings
 from app.core.db import close_db, init_db
 
 
+def get_app_version() -> str:
+    """用户可见版本优先使用发布环境变量，缺省时使用配置默认版本。"""
+    return os.environ.get("APP_VERSION") or settings.VERSION
+
+
 def get_static_dir() -> Path:
     """获取静态文件目录"""
     # 环境变量优先
@@ -73,7 +78,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.APP_NAME,
     description="文策 AI 写作助手后端服务",
-    version=settings.VERSION,
+    version=get_app_version(),
     lifespan=lifespan,
 )
 
@@ -88,6 +93,13 @@ app.add_middleware(
 
 # 注册 API 路由
 app.include_router(api_router, prefix=settings.API_PREFIX)
+
+
+@app.get(f"{settings.API_PREFIX}/version")
+async def get_version():
+    """获取用户可见的应用版本号。"""
+    return {"version": get_app_version()}
+
 
 # 挂载静态文件（打包后使用）
 STATIC_DIR = get_static_dir()

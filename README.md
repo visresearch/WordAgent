@@ -144,7 +144,7 @@ This project also supports LangSmith for tracing and analyzing agent behavior. F
 
 ```bash
 cd backend/deploy
-uv run pyinstaller wence.spec
+uv run pyinstaller package.spec
 ```
 
 The packaged executable is generated in the `backend/deploy/dist` directory.

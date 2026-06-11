@@ -2,7 +2,7 @@ Generate formatted content and insert it into the Word document.
 
 ## Parameters
 - `document` (object): raw `DocumentOutput` object. Do not pass escaped JSON, a string, or `{"document": {...}}` inside this value.
-- `insertParaID` (int, optional): insert after this paragraph ID. Omit for current cursor position.
+- `insertParaID` (int, optional): insert after this paragraph ID. Omit for current cursor position. For a blank/new document, omit it.
 - `docId` (int, optional): target document ID; use `0` for the active document.
 
 ## Required payload shape
@@ -12,6 +12,7 @@ Generate formatted content and insert it into the Word document.
 - Never put `\n` inside `run.text`; one visual line is one paragraph.
 - Blank line: `{ "pStyle": "", "runs": [] }`.
 - `insertParaID` must be an existing paragraph ID from recent `read_document`/`search_documnet` results; do not guess IDs.
+- If `read_document` returns only one empty placeholder paragraph such as `runs: []`, treat the document as blank and omit `insertParaID`.
 
 ## Use
 - New writing, append/insert content, or replacement content after `delete_document`.
@@ -41,5 +42,24 @@ Prefer paraID-based workflows: search/read returns paragraph IDs and delete uses
 		}
 	},
 	"insertParaID": 123456
+}
+```
+
+## Blank document first write
+If document metadata says the active document is empty, e.g. `{"documentId":1265989210,"isEmpty":true,"totalParas":1}`, the first write should omit `insertParaID` and target the active document:
+
+```json
+{
+	"document": {
+		"paragraphs": [
+			{ "pStyle": "pS_1", "runs": [{ "text": "标题", "rStyle": "rS_1" }] }
+		],
+		"tables": [],
+		"styles": {
+			"pS_1": ["center", 0, 0, 0, 0, 12, 6, "标题", 1],
+			"rS_1": ["黑体", 16, true, false, 0, "#000000", "#000000", 0, false, false, false]
+		}
+	},
+	"docId": 1265989210
 }
 ```

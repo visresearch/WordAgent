@@ -39,14 +39,26 @@ def _get_env_int(name: str, default: int) -> int:
         return default
 
 
+def _get_env_float(name: str, default: float) -> float:
+    """Read positive float env value with fallback."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        val = float(str(raw).strip())
+        return val if val > 0 else default
+    except Exception:
+        return default
+
+
 # ============ 短期记忆 Token 预算（类 Claude Code 风格） ============
-SHORT_TERM_TOKEN_BUDGET = _get_env_int("WORDAGENT_SHORT_TERM_TOKEN_BUDGET", 30000)
+SHORT_TERM_TOKEN_BUDGET = _get_env_int("WORDAGENT_SHORT_TERM_TOKEN_BUDGET", 50000)
 SHORT_TERM_MIN_TURNS = _get_env_int("WORDAGENT_SHORT_TERM_MIN_TURNS", 3)
 SHORT_TERM_LARGE_TOOL_OUTPUT_TOKENS = _get_env_int("WORDAGENT_SHORT_TERM_LARGE_TOOL_OUTPUT_TOKENS", 2000)
 
 
 # ============== 长期记忆配置 ==============
-MEMORY_EXTRACT_TEMPERATURE = _get_env_int("WORDAGENT_MEMORY_EXTRACT_TEMPERATURE", 0.3)
+MEMORY_EXTRACT_TEMPERATURE = _get_env_float("WORDAGENT_MEMORY_EXTRACT_TEMPERATURE", 0.1)
 
 # 长期记忆上限（条数）
 MAX_MEMORY_ITEMS = _get_env_int("WORDAGENT_MEMORY_MAX_ITEMS", 20)

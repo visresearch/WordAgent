@@ -14,45 +14,51 @@ block_cipher = None
 # 项目根目录（从 deploy 目录向上一级）
 root_dir = os.path.abspath('..')
 
-# 版本文件路径
-version_src = '../version.txt'
-version_path = os.path.abspath(os.path.join(os.path.dirname(SPEC), version_src))
-
-# 打包时自动生成 version.txt（跨平台，不依赖 sh）
+# 发布版本只从环境变量或 Git tag 获取，并通过运行时 .env 注入给应用。
 _repo_root = os.path.abspath(os.path.join(os.path.dirname(SPEC), '..', '..'))
-version_value = 'v0.0.0'
 
-# GitHub Actions：在由 tag 触发的构建中，浅克隆下 git describe 可能失败，可直接用 ref 名
-_ref_type = (os.environ.get('GITHUB_REF_TYPE') or '').strip().lower()
-_ref_name = (os.environ.get('GITHUB_REF_NAME') or '').strip()
-if _ref_type == 'tag' and _ref_name:
-    version_value = _ref_name
-else:
+
+def _release_version():
+    version = (os.environ.get('APP_VERSION') or '').strip()
+    if version:
+        return version
+
+    ref_type = (os.environ.get('GITHUB_REF_TYPE') or '').strip().lower()
+    ref_name = (os.environ.get('GITHUB_REF_NAME') or '').strip()
+    if ref_type == 'tag' and ref_name:
+        return ref_name
+
     try:
-        version_value = subprocess.check_output(
+        return subprocess.check_output(
             ['git', 'describe', '--tags'],
             cwd=_repo_root,
             text=True,
         ).strip()
     except Exception:
-        version_value = 'v0.0.0'
+        return ''
 
-try:
-    with open(version_path, 'w', encoding='utf-8') as f:
-        f.write(f'{version_value}\n')
-except Exception:
-    pass
+
+version_value = _release_version()
+generated_env_path = ''
+if version_value:
+    os.environ.setdefault('APP_VERSION', version_value)
+    generated_env_dir = os.path.abspath(os.path.join(os.path.dirname(SPEC), 'build', 'runtime_env'))
+    generated_env_path = os.path.join(generated_env_dir, '.env')
+    os.makedirs(generated_env_dir, exist_ok=True)
+    with open(generated_env_path, 'w', encoding='utf-8') as f:
+        f.write(f'APP_VERSION={version_value}\n')
 
 # 收集所有需要的数据文件
 datas = [
     ('../README.md', '.'),
-    (version_src, '.'),
     # 打包 app 模块（FastAPI 应用）
     ('../app', 'app'),
     # 打包前端构建目录（pnpm build 输出到 dist）
     ('../../frontend/wps_word_plugin/dist', 'frontend'),
     ('../../frontend/microsoft_word_plugin/dist', 'msoffice'),
 ]
+if generated_env_path:
+    datas.append((generated_env_path, '.'))
 
 # 可选数据文件（不一定存在于 CI 环境）
 optional_dirs = [

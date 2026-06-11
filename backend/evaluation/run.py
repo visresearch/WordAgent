@@ -22,18 +22,20 @@ from evaluation.utils import plot_task_success, plot_quality_with_tool_usage, pl
 load_dotenv()
 
 # Configuration（必须在设置 tracing 环境变量之前定义）
-LANGSMITH_API_KEY = os.getenv("LANGSMITH_API_KEY") or os.getenv("LANGCHAIN_API_KEY")
+LANGSMITH_API_KEY = os.getenv("LANGSMITH_API_KEY") or os.getenv("LANGCHAIN_API_KEY") or ""
+LANGSMITH_ENDPOINT = os.getenv("LANGSMITH_ENDPOINT") or "https://api.smith.langchain.com"
 LANGSMITH_PROJECT = os.getenv("LANGSMITH_EVALUATION_PROJECT") or "WordAgent_evaluation"
-DATASET_NAME = os.getenv("LANGSMITH_DATASET_NAME") or "WordAgent_test"
+DATASET_NAME = os.getenv("LANGSMITH_DATASET_NAME") or "WordAgent_dataset"
 
 # 启用 LangChain/LangSmith tracing（必须在使用 LANGSMITH_PROJECT 之后）
 os.environ["LANGCHAIN_TRACING_V2"] = "true"
+os.environ["LANGCHAIN_ENDPOINT"] = LANGSMITH_ENDPOINT
 os.environ["LANGCHAIN_PROJECT"] = LANGSMITH_PROJECT
 
 # 使用百炼的 API（OpenAI 兼容端点）
-EVAL_OPENAI_MODEL = os.getenv("EVAL_OPENAI_MODEL")
-EVAL_OPENAI_API_KEY = os.getenv("EVAL_OPENAI_API_KEY")
-EVAL_OPENAI_BASE_URL = os.getenv("EVAL_OPENAI_BASE_URL")
+EVAL_OPENAI_MODEL = os.getenv("EVAL_OPENAI_MODEL") or "gpt-5.1"
+EVAL_OPENAI_API_KEY = os.getenv("EVAL_OPENAI_API_KEY") or ""
+EVAL_OPENAI_BASE_URL = os.getenv("EVAL_OPENAI_BASE_URL") or "https://api.openai.com/v1"
 
 EVAL_CONCURRENCY = int(os.getenv("EVAL_CONCURRENCY") or "5")
 

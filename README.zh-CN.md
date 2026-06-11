@@ -144,7 +144,7 @@ uv run python main.py
 
 ```bash
 cd backend/deploy
-uv run pyinstaller wence.spec
+uv run pyinstaller package.spec
 ```
 打包生成的可执行文件在`backend/deploy/dist`目录下
 

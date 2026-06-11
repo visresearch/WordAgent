@@ -15,8 +15,8 @@ from langsmith import Client as LangSmithClient
 load_dotenv()
 
 # Configuration
-LANGSMITH_API_KEY = os.getenv("LANGSMITH_API_KEY")
-DATASET_NAME = os.getenv("LANGSMITH_DATASET_NAME", "WordAgent_test")
+LANGSMITH_API_KEY = os.getenv("LANGSMITH_API_KEY") or ""
+DATASET_NAME = os.getenv("LANGSMITH_DATASET_NAME", "WordAgent_dataset")
 
 
 def fetch_dataset(dataset_name: str = DATASET_NAME, output_path: Optional[str] = None):
