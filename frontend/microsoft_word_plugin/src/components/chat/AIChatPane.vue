@@ -58,7 +58,14 @@
 
 <script>
 /* global Word */
-import { generateDocxFromJSON, deleteDocxPara, addCommentToParas, resolveParagraphParaIDs } from '../js/docxJsonConverter.js';
+import {
+  generateDocxFromJSON,
+  deleteDocxPara,
+  addCommentToParas,
+  addCommentToParaIDs,
+  clearWenceCommentsByParaIDs,
+  resolveParagraphParaIDs
+} from '../js/docxJsonConverter.js';
 import api from '../js/api.js';
 import ChatMessages from './ChatMessages.vue';
 import ChatInput from './ChatInput.vue';
@@ -152,6 +159,19 @@ export default {
         const { loading, ...rest } = part || {};
         return rest;
       });
+    },
+
+    _normalizeSelectionContext(selectionContext) {
+      if (!selectionContext) {
+        return null;
+      }
+      if (Array.isArray(selectionContext)) {
+        return selectionContext.filter(Boolean);
+      }
+      if (typeof selectionContext === 'object') {
+        return [selectionContext];
+      }
+      return null;
     },
 
     _extractDocumentJsonFromToolJson(toolJson) {
@@ -324,7 +344,7 @@ export default {
                 contentParts: parts.length > 0 ? parts : (msg.content ? [{ type: 'text', content: msg.content }] : []),
                 documentJson: this._extractDocumentJsonFromToolJson(toolJson),
                 toolJson,
-                selectionContext: msg.selectionContext || null,
+                selectionContext: this._normalizeSelectionContext(msg.selectionContext),
                 thinking: msg.thinking || '',
                 thinkingExpanded: !!msg.thinking,
                 thinkingDone: true,
@@ -334,6 +354,9 @@ export default {
 
             if (result.data.lastUsedModel) {
               this.selectedModel = result.data.lastUsedModel;
+            }
+            if (result.data.lastUsedProvider) {
+              this.selectedModelProvider = result.data.lastUsedProvider;
             }
             if (result.data.lastUsedMode) {
               this.mode = result.data.lastUsedMode;
@@ -441,7 +464,7 @@ export default {
               contentParts: parts.length > 0 ? parts : (msg.content ? [{ type: 'text', content: msg.content }] : []),
               documentJson: this._extractDocumentJsonFromToolJson(toolJson),
               toolJson,
-              selectionContext: msg.selectionContext || null,
+              selectionContext: this._normalizeSelectionContext(msg.selectionContext),
               thinking: msg.thinking || '',
               thinkingExpanded: !!msg.thinking,
               thinkingDone: true,
@@ -451,6 +474,9 @@ export default {
 
           if (result.data.lastUsedModel) {
             this.selectedModel = result.data.lastUsedModel;
+          }
+          if (result.data.lastUsedProvider) {
+            this.selectedModelProvider = result.data.lastUsedProvider;
           }
           if (result.data.lastUsedMode) {
             this.mode = result.data.lastUsedMode;
@@ -520,18 +546,35 @@ export default {
         const result = await api.getModels();
         if (result.success && result.data?.models && result.data.models.length > 0) {
           this.availableModels = result.data.models;
-          const modelExists = this.availableModels.some(m => m.id === this.selectedModel);
-          if (!modelExists) {
-            this.selectedModel = 'auto';
+          if (!this.selectedModel) {
+            this.selectedModel = result.data.models[0].id;
+            this.selectedModelProvider = result.data.models[0].provider || '';
+          } else if (!this.selectedModelProvider) {
+            const matched = this.availableModels.find((m) => m.id === this.selectedModel);
+            if (matched) {
+              this.selectedModelProvider = matched.provider || '';
+            }
+          } else {
+            const modelExists = this.availableModels.some(
+              (m) => m.id === this.selectedModel && m.provider === this.selectedModelProvider
+            );
+            if (!modelExists) {
+              const matched = this.availableModels.find((m) => m.id === this.selectedModel);
+              if (matched) {
+                this.selectedModelProvider = matched.provider || '';
+              }
+            }
           }
         } else {
           this.availableModels = [{ id: 'auto', name: 'Auto' }];
           this.selectedModel = 'auto';
+          this.selectedModelProvider = '';
         }
       } catch (error) {
         console.error('加载模型列表失败:', error);
         this.availableModels = [{ id: 'auto', name: 'Auto' }];
         this.selectedModel = 'auto';
+        this.selectedModelProvider = '';
       }
       this.modelsLoading = false;
     },
@@ -768,10 +811,10 @@ export default {
       this.selections = [];
       this.clearAllFiles();
 
-      this._sendStreamRequest(userMessage, documentRange, uploadedFilesMeta);
+      this._sendStreamRequest(userMessage, documentRange, uploadedFilesMeta, selectionContext);
     },
 
-    _sendStreamRequest(userMessage, documentRange, files = []) {
+    _sendStreamRequest(userMessage, documentRange, files = [], selectionContext = null) {
       this.isLoading = true;
       const streamSessionId = this.currentSessionId;
       this._streamingSessionId = streamSessionId;
@@ -796,6 +839,7 @@ export default {
         model: this.selectedModel,
         provider: this.selectedModelProvider,
         documentRange: documentRange,
+        selectionContext: selectionContext,
         history: this.messages.slice(0, -2).slice(-10),
         files: files,
         enableThinking: this.enableThinking,
@@ -943,10 +987,14 @@ export default {
           loading: false
         });
         this.scrollToBottom();
-        this._applyImmediateDelete({
-          paraIDs,
-          docId: this._toIntOrDefault(data.docId, 0)
-        });
+        this._insertQueue = this._insertQueue
+          .then(() => this._applyImmediateDelete({
+            paraIDs,
+            docId: this._toIntOrDefault(data.docId, 0)
+          }))
+          .catch((e) => {
+            console.warn("[AIChatPane] apply immediate delete failed:", e);
+          });
         return;
       }
 
@@ -1120,12 +1168,15 @@ export default {
       if (value === null || value === undefined) {
         return null;
       }
+      const normalize = (raw) => {
+        const trimmed = String(raw).trim();
+        return /^(0|[1-9]\d*)$/.test(trimmed) ? String(Number(trimmed)) : null;
+      };
       if (typeof value === 'string') {
-        const trimmed = value.trim();
-        return trimmed ? trimmed : null;
+        return normalize(value);
       }
       if (typeof value === 'number' && Number.isFinite(value)) {
-        return String(value);
+        return normalize(value);
       }
       return null;
     },
@@ -1193,13 +1244,45 @@ export default {
       if (!normalized.length) {
         return;
       }
-      for (const paraID of normalized) {
-        try {
-          await deleteDocxPara([paraID]);
-        } catch (e) {
-          console.warn('[AIChatPane] 按 paraID 单段删除失败:', paraID, e);
-        }
+      try {
+        await deleteDocxPara(normalized);
+      } catch (e) {
+        console.warn("[AIChatPane] delete by paraIDs failed:", normalized, e);
       }
+    },
+
+    _shiftParaIndexIDsForInsertions(paraIDs = [], docId = 0) {
+      const normalizedDocId = this._toIntOrDefault(docId, 0);
+      const insertionRanges = this.pendingInsertions
+        .filter((ins) => this._toIntOrDefault(ins.docId, 0) === normalizedDocId)
+        .map((ins) => {
+          const start = Number(ins.insertStartParaIndex);
+          const end = Number(ins.insertEndParaIndex);
+          if (Number.isInteger(start) && Number.isInteger(end) && end >= start) {
+            return { start, count: end - start + 1 };
+          }
+          const insertedCount = this._normalizeParaIdList(ins.insertedParaIDs || []).length;
+          return Number.isInteger(start) && insertedCount > 0
+            ? { start, count: insertedCount }
+            : null;
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.start - b.start);
+
+      return [...new Set(
+        this._normalizeParaIdList(paraIDs)
+          .map((paraID) => Number(paraID))
+          .filter((idx) => Number.isInteger(idx) && idx >= 0)
+          .map((originalIndex) => {
+            let shiftedIndex = originalIndex;
+            for (const range of insertionRanges) {
+              if (range.start <= shiftedIndex) {
+                shiftedIndex += range.count;
+              }
+            }
+            return String(shiftedIndex);
+          })
+      )];
     },
 
     _toIntOrDefault(value, defaultValue) {
@@ -1231,7 +1314,7 @@ export default {
       this.pendingDocumentMsg = this.pendingInsertions[this.pendingInsertions.length - 1]?.msg || null;
     },
 
-    _applyImmediateDelete(payload) {
+    async _applyImmediateDelete(payload) {
       const docId = this._toIntOrDefault(payload?.docId, 0);
       const paraIDs = this._normalizeParaIdList(payload?.paraIDs);
       if (!paraIDs.length) {
@@ -1243,9 +1326,9 @@ export default {
         docId,
         preview: `AI 准备删除段落（paraID: ${paraIDs.join(', ')}）`,
         _commentAdded: false,
-        _markingMode: 'highlight'
+        _markingMode: 'comment'
       });
-      // Microsoft Office 统一使用高亮标记，不使用批注。
+      // Microsoft Office 使用 Word 批注标记待删除段落。
       this._addDeleteComments(docId);
     },
 
@@ -1269,6 +1352,7 @@ export default {
       const paraCount = (docPayload.paragraphs || []).length;
       const tableCount = (docPayload.tables || []).length;
       const shiftCount = paraCount + tableCount;
+      const insertedParaIDs = this._normalizeParaIdList(result.insertedParaIDs || []);
 
       if (shiftCount > 0) {
         this._streamInsertions.push({
@@ -1305,8 +1389,9 @@ export default {
         insertParaID: requestedInsertParaID,
         insertStartParaIndex,
         insertEndParaIndex,
+        insertedParaIDs,
         _alreadyInserted: true,
-        _markingMode: 'highlight'
+        _markingMode: 'comment'
       };
 
       if (pendingItem.msg) {
@@ -1315,6 +1400,7 @@ export default {
         pendingItem.msg.documentJson = docPayload;
         pendingItem.msg.insertStartParaIndex = insertStartParaIndex;
         pendingItem.msg.insertEndParaIndex = insertEndParaIndex;
+        pendingItem.msg.insertedParaIDs = insertedParaIDs;
       }
 
       this.pendingInsertions.push(pendingItem);
@@ -1331,6 +1417,37 @@ export default {
     },
 
     async _markInsertHighlight(insItem) {
+      const insertedParaIDs = this._normalizeParaIdList(insItem.insertedParaIDs || []);
+      if (insertedParaIDs.length > 0) {
+        try {
+          const res = await addCommentToParaIDs(insertedParaIDs, '文策AI-添加');
+          if (res && res.success) {
+            insItem._markingMode = res.mode || 'comment';
+          } else {
+            console.warn('[AIChatPane] 标记新增段落批注未成功:', JSON.stringify(res || {}, null, 2));
+            if (
+              insItem.insertStartParaIndex !== null &&
+              insItem.insertStartParaIndex !== undefined &&
+              insItem.insertEndParaIndex !== null &&
+              insItem.insertEndParaIndex !== undefined
+            ) {
+              const fallback = await addCommentToParas(
+                insItem.insertStartParaIndex,
+                insItem.insertEndParaIndex,
+                '文策AI-添加',
+                'revision'
+              );
+              if (fallback && fallback.success) {
+                insItem._markingMode = fallback.mode || 'highlight';
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('[AIChatPane] 标记新增段落批注失败:', e);
+        }
+        return;
+      }
+
       if (
         insItem.insertStartParaIndex === null ||
         insItem.insertStartParaIndex === undefined ||
@@ -1340,14 +1457,14 @@ export default {
         return;
       }
       try {
-        // Microsoft Office 统一用高亮标记新增内容（浅红）
+        // 旧记录缺少 insertedParaIDs 时，退回到索引范围添加批注。
         await addCommentToParas(
           insItem.insertStartParaIndex,
           insItem.insertEndParaIndex,
-          '[文策AI] 待添加内容',
-          'redblue'
+          '文策AI-添加',
+          'revision'
         );
-        insItem._markingMode = 'highlight';
+        insItem._markingMode = 'comment';
       } catch (e) {
         console.warn('[AIChatPane] 标记新增内容失败:', e);
       }
@@ -1367,33 +1484,18 @@ export default {
         if (!paraIDs.length) {
           continue;
         }
-        const indexMap = await this._resolveParaIDIndexMap(paraIDs);
-        let markedCount = 0;
-
-        for (const paraID of paraIDs) {
-          const paraIndex = indexMap.get(paraID);
-          if (!Number.isInteger(paraIndex)) {
-            continue;
+        try {
+          const res = await addCommentToParaIDs(paraIDs, '文策AI-删除');
+          if (res && res.success) {
+            pd._commentAdded = true;
+            pd._markingMode = res.mode || 'comment';
+          } else {
+            console.warn('[AIChatPane] 标记删除段落批注未成功:', paraIDs, JSON.stringify(res || {}, null, 2));
           }
-          try {
-            // 删除标记严格按 paraID 对应段落逐段高亮，避免区间误标记
-            const res = await addCommentToParas(
-              paraIndex,
-              paraIndex,
-              '[文策AI-删除] 待删除内容',
-              'redblue'
-            );
-            if (res && res.success) {
-              markedCount++;
-            }
-          } catch (e) {
-            console.warn('[AIChatPane] 标记删除段落失败:', paraID, e);
-          }
+        } catch (e) {
+          console.warn('[AIChatPane] 标记删除段落批注失败:', paraIDs, e);
         }
-        if (markedCount > 0) {
-          pd._commentAdded = true;
-          pd._markingMode = 'highlight';
-        }
+        continue;
       }
     },
 
@@ -1401,16 +1503,29 @@ export default {
      * 一键确认所有待处理操作（删除 + 生成）
      */
     async confirmPending() {
-      // 1) 删除正文：按 paraID 删除，不依赖索引偏移
-      const deletes = [...this.pendingDeletes];
-      for (const d of deletes) {
-        await this._clearHighlightOnParaIDs(d.paraIDs || [], d.docId);
-        await this._deleteByParaIDsOneByOne(d.paraIDs || []);
+      try {
+        await this._insertQueue;
+      } catch (e) {
+        console.warn("[AIChatPane] pending operation queue failed before confirm:", e);
       }
 
-      // 2) 确认新增：仅移除新增高亮，保留内容
+      const deletesById = [...this.pendingDeletes];
+      for (const d of deletesById) {
+        const deleteIDs = this._shiftParaIndexIDsForInsertions(d.paraIDs || [], d.docId);
+        console.log("[AIChatPane] confirm delete shifted paraIndex IDs:", {
+          original: d.paraIDs || [],
+          shifted: deleteIDs,
+        });
+        await this._deleteByParaIDsOneByOne(deleteIDs);
+      }
+
       for (const ins of this.pendingInsertions) {
-        if (
+        const insertedParaIDs = this._normalizeParaIdList(ins.insertedParaIDs || []);
+        if (ins._markingMode === 'highlight') {
+          await this._clearHighlightOnRange(ins.insertStartParaIndex, ins.insertEndParaIndex);
+        } else if (insertedParaIDs.length > 0) {
+          await clearWenceCommentsByParaIDs(insertedParaIDs, ['文策AI-添加']);
+        } else if (
           ins.insertStartParaIndex !== null &&
           ins.insertStartParaIndex !== undefined &&
           ins.insertEndParaIndex !== null &&
@@ -1431,34 +1546,24 @@ export default {
      * 一键取消所有待处理操作（移除删除标记 + 回滚新增）
      */
     async cancelPending() {
-      // 1) 取消删除：只清除删除高亮，不删除正文
-      for (const pd of this.pendingDeletes) {
-        await this._clearHighlightOnParaIDs(pd.paraIDs || [], pd.docId);
+      try {
+        await this._insertQueue;
+      } catch (e) {
+        console.warn("[AIChatPane] pending operation queue failed before cancel:", e);
       }
 
-      // 2) 取消新增：按倒序删除新增内容，避免位置串扰
-      const inserts = [...this.pendingInsertions].sort(
-        (a, b) => (b.insertStartParaIndex ?? -1) - (a.insertStartParaIndex ?? -1)
-      );
-      for (const ins of inserts) {
-        if (
-          ins.insertStartParaIndex === null ||
-          ins.insertStartParaIndex === undefined ||
-          ins.insertEndParaIndex === null ||
-          ins.insertEndParaIndex === undefined
-        ) {
+      for (const pd of this.pendingDeletes) {
+        await clearWenceCommentsByParaIDs(pd.paraIDs || [], ['文策AI-删除']);
+      }
+
+      const insertsById = [...this.pendingInsertions].reverse();
+      for (const ins of insertsById) {
+        const insertedParaIDs = this._normalizeParaIdList(ins.insertedParaIDs || []);
+        if (!insertedParaIDs.length) {
           continue;
         }
-        await this._clearHighlightOnRange(ins.insertStartParaIndex, ins.insertEndParaIndex);
-        try {
-          const paraIDs = [];
-          for (let i = ins.insertStartParaIndex; i <= ins.insertEndParaIndex; i++) {
-            paraIDs.push(i);
-          }
-          await deleteDocxPara(paraIDs);
-        } catch (e) {
-          console.warn('[AIChatPane] cancelPending 回滚新增失败:', e);
-        }
+        await clearWenceCommentsByParaIDs(insertedParaIDs, ['文策AI-添加']);
+        await deleteDocxPara(insertedParaIDs);
       }
 
       this.pendingDeletes = [];
@@ -1516,12 +1621,25 @@ export default {
     },
 
     /**
-     * 还原到某条消息（Microsoft Office 统一走高亮/索引回滚）
+     * 还原到某条消息（优先按隐藏书签 paraID 回滚）
      */
     async revertToMessage(messageIndex) {
       if (this.isLoading) return;
       const msg = this.messages[messageIndex];
       if (!msg) return;
+
+      const insertedParaIDs = this._normalizeParaIdList(msg.insertedParaIDs || []);
+      if (insertedParaIDs.length > 0) {
+        try {
+          await clearWenceCommentsByParaIDs(insertedParaIDs, ['文策AI-添加']);
+          const result = await deleteDocxPara(insertedParaIDs);
+          msg.documentReverted = !!result?.success;
+        } catch (e) {
+          console.warn('[AIChatPane] revertToMessage 按 paraID 回滚失败:', e);
+          msg.documentReverted = false;
+        }
+        return;
+      }
 
       if (
         msg.insertStartParaIndex === null ||
@@ -1535,12 +1653,7 @@ export default {
 
       try {
         await this._clearHighlightOnRange(msg.insertStartParaIndex, msg.insertEndParaIndex);
-        const paraIDs = [];
-        for (let i = msg.insertStartParaIndex; i <= msg.insertEndParaIndex; i++) {
-          paraIDs.push(i);
-        }
-        const result = await deleteDocxPara(paraIDs);
-        msg.documentReverted = !!result?.success;
+        msg.documentReverted = false;
       } catch (e) {
         console.warn('[AIChatPane] revertToMessage 回滚失败:', e);
         msg.documentReverted = false;
@@ -1568,6 +1681,7 @@ export default {
         if (jsonData && (jsonData.paragraphs || jsonData.tables)) {
           const insertParaID = this._toParaIdOrNull(jsonData.insertParaID);
           const result = await generateDocxFromJSON(jsonData, 'selection', insertParaID);
+          msg.insertedParaIDs = this._normalizeParaIdList(result?.insertedParaIDs || []);
           if (result?.error) {
             console.error('生成文档失败:', result.error);
             await this._insertPlainText(content);

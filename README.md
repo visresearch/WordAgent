@@ -75,7 +75,7 @@ In addition, this project supports two types of pluggable extensions for custom 
 #### Supported Office Software
 
 - WPS Office (Windows, Linux), version 12.1.2.24722 and above
-- Microsoft Word (Windows, Web), version 2019/2021 and above (maintenance paused since release 0.4.0)
+- Microsoft Word (Windows, Web), version 2019/2021 and above (may be unstable)
 
 ## 4. System Architecture
 

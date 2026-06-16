@@ -75,7 +75,7 @@
 #### 本项目支持的办公软件
 
 - WPS Office（Windows、Linux）版本 12.1.2.24722及以上
-- Microsoft Word（Windows、Web）版本 2019/2021及以上(从release 0.4.0开始暂停维护)
+- Microsoft Word（Windows、Web）版本 2019/2021及以上(可能不稳定)
 
 ## 四、系统架构
 

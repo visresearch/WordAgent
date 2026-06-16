@@ -45,7 +45,7 @@
             <span>引用选区 ({{ msg.selectionContext.length }})</span>
           </div>
           <div v-for="(ctx, ctxIdx) in msg.selectionContext" :key="ctxIdx" class="context-item">
-            <span class="context-text">{{ ctx.startText }} → {{ ctx.endText }}</span>
+            <span class="context-text">{{ formatSelectionContextText(ctx) }}</span>
             <span v-if="ctx.startParaIndex !== undefined" class="context-pos">(段落 {{ ctx.startParaIndex }} - {{ ctx.endParaIndex }})</span>
           </div>
         </div>
@@ -67,6 +67,7 @@
           </div>
           <div v-for="(file, fileIdx) in msg.attachedFiles" :key="fileIdx" class="context-item">
             <span class="context-text">{{ file.filename || file.name || '未知文件' }}</span>
+            <span v-if="file.size" class="context-pos">({{ formatFileSize(file.size) }})</span>
           </div>
         </div>
         <div class="message-content">
@@ -246,6 +247,25 @@ export default {
     document.removeEventListener('click', this.hideImgMenu);
   },
   methods: {
+    formatSelectionContextText(ctx) {
+      if (!ctx) {
+        return '选区';
+      }
+      if (ctx.startText || ctx.endText) {
+        const start = ctx.startText || ctx.preview || ctx.docName || '选区';
+        return ctx.endText ? `${start} → ${ctx.endText}` : start;
+      }
+      return ctx.preview || ctx.docName || '选区';
+    },
+    formatFileSize(bytes) {
+      if (!bytes || bytes === 0) {
+        return '0 B';
+      }
+      const k = 1024;
+      const sizes = ['B', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+    },
     handleImgContextMenu(e) {
       const img = e.target.closest('img');
       if (!img || !img.closest('.markdown-body')) return;

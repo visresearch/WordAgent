@@ -107,6 +107,7 @@ const DEFAULT_RSTYLE = ["", 12, false, false, 0, "#000000", "#000000", 0, false,
 const DEFAULT_CSTYLE = [1, 1, "left", "center"];
 const DEFAULT_IMAGE_PSTYLE = ["center", 0, 0, 0, 0, 0, 0, "", 0];
 const DEFAULT_FALLBACK_FONT_NAME = "Calibri";
+const PARA_ID_PATTERN = /^(0|[1-9]\d*)$/;
 
 function normalizeParaIdValue(value) {
   if (value === null || value === undefined) {
@@ -122,37 +123,9 @@ function normalizeParaIdValue(value) {
   return null;
 }
 
-function safelyReadParagraphProp(paragraph, propName) {
-  if (!paragraph || !propName) {
-    return null;
-  }
-  try {
-    return paragraph[propName];
-  } catch (e) {
-    // Office.js 代理对象在属性未 load 时会抛异常，这里统一降级处理。
-    return null;
-  }
-}
-
-function getParagraphParaIDFromLoadedProps(paragraph) {
-  if (!paragraph) {
-    return null;
-  }
-
-  const uniqueLocalId = normalizeParaIdValue(safelyReadParagraphProp(paragraph, "uniqueLocalId"));
-  if (uniqueLocalId) {
-    return uniqueLocalId;
-  }
-
-  const candidateKeys = ["paragraphId", "paraId", "id", "ID"];
-  for (const key of candidateKeys) {
-    const value = normalizeParaIdValue(safelyReadParagraphProp(paragraph, key));
-    if (value) {
-      return value;
-    }
-  }
-
-  return null;
+function normalizeParaID(value) {
+  const id = normalizeParaIdValue(value);
+  return id && PARA_ID_PATTERN.test(id) ? String(Number(id)) : null;
 }
 
 function createSignedNineDigitParaID(existingIDs = new Set()) {
@@ -168,8 +141,8 @@ function createSignedNineDigitParaID(existingIDs = new Set()) {
 }
 
 function toHiddenBookmarkNameFromParaID(paraID) {
-  const id = normalizeParaIdValue(paraID);
-  if (!id || !/^-?\d{9}$/.test(id)) {
+  const id = normalizeParaID(paraID);
+  if (!id) {
     return null;
   }
   if (id.startsWith("-")) {
@@ -183,7 +156,7 @@ function parseParaIDFromBookmarkName(bookmarkName) {
   if (!name) {
     return null;
   }
-  const direct = /^-?\d{9}$/.test(name) ? name : null;
+  const direct = PARA_ID_PATTERN.test(name) ? name : null;
   if (direct) {
     return direct;
   }
@@ -207,16 +180,59 @@ async function ensureAllParagraphsHaveHiddenBookmarks(context) {
   return await resolveParagraphParaIDs(context, allParas.items);
 }
 
-async function resolveParagraphParaIDs(context, paragraphs) {
+async function resolveParagraphParaIDs(context, paragraphs, seedKnownIDs = []) {
+  void context;
+  void seedKnownIDs;
+  if (!Array.isArray(paragraphs) || paragraphs.length === 0) {
+    return [];
+  }
+  return paragraphs.map((_, idx) => String(idx));
+
   if (!Array.isArray(paragraphs) || paragraphs.length === 0) {
     return [];
   }
 
   const paraIDs = new Array(paragraphs.length).fill(null);
+  const contentControlResults = [];
   const bookmarkResults = [];
-  const knownIDs = new Set();
+  const knownIDs = new Set(
+    Array.from(seedKnownIDs instanceof Set ? seedKnownIDs : seedKnownIDs || [])
+      .map((id) => normalizeParaID(id))
+      .filter((id) => id)
+  );
+  const legacyControlsToRemove = [];
+  const legacyParaIDIndexes = new Set();
 
   for (let i = 0; i < paragraphs.length; i++) {
+    try {
+      const contentControl = paragraphs[i].getRange("Whole").parentContentControlOrNullObject;
+      contentControl.load("isNullObject,tag,title");
+      contentControlResults.push({ idx: i, contentControl });
+    } catch (e) {}
+  }
+
+  if (contentControlResults.length > 0) {
+    await context.sync();
+    for (const item of contentControlResults) {
+      if (item.contentControl.isNullObject) {
+        continue;
+      }
+      const paraID =
+        parseParaIDFromContentControlMeta(item.contentControl.tag) ||
+        parseParaIDFromContentControlMeta(item.contentControl.title);
+      if (paraID) {
+        paraIDs[item.idx] = paraID;
+        knownIDs.add(paraID);
+        legacyControlsToRemove.push(item.contentControl);
+        legacyParaIDIndexes.add(item.idx);
+      }
+    }
+  }
+
+  for (let i = 0; i < paragraphs.length; i++) {
+    if (paraIDs[i]) {
+      continue;
+    }
     try {
       const bookmarks = paragraphs[i].getRange("Whole").getBookmarks(true, true);
       bookmarkResults.push({ idx: i, bookmarks });
@@ -241,6 +257,14 @@ async function resolveParagraphParaIDs(context, paragraphs) {
   const created = [];
   for (let i = 0; i < paragraphs.length; i++) {
     if (paraIDs[i]) {
+      if (legacyParaIDIndexes.has(i)) {
+        try {
+          const bookmarkName = toHiddenBookmarkNameFromParaID(paraIDs[i]);
+          if (bookmarkName) {
+            paragraphs[i].getRange("Whole").insertBookmark(bookmarkName);
+          }
+        } catch (e) {}
+      }
       continue;
     }
     const paraID = createSignedNineDigitParaID(knownIDs);
@@ -258,8 +282,21 @@ async function resolveParagraphParaIDs(context, paragraphs) {
     }
   }
 
-  if (created.length > 0) {
+  if (created.length > 0 || legacyControlsToRemove.length > 0) {
     await context.sync();
+  }
+
+  if (legacyControlsToRemove.length > 0) {
+    for (const contentControl of legacyControlsToRemove) {
+      try {
+        contentControl.delete(false);
+      } catch (e) {}
+    }
+    await context.sync();
+    console.log(`[ParaID API] removed legacy paragraph content controls: ${legacyControlsToRemove.length}`);
+  }
+
+  if (created.length > 0) {
     console.log(`[ParaID API] 已创建段落书签 paraID 数量: ${created.length}`);
     console.log(
       "[ParaID API] 新建 paraID 示例:",
@@ -284,23 +321,23 @@ async function resolveParagraphParaIDs(context, paragraphs) {
   return paraIDs;
 }
 
-/**
- * 获取段落 paraID（Microsoft Word 当前优先使用 uniqueLocalId）。
- * 说明：Office.js 段落对象未暴露持久化段落 ID，
- * 因此 paraID 采用会话内稳定的 uniqueLocalId（字符串）。
- */
-function getParagraphParaID(paragraph, fallbackParaIndex = null) {
-  void fallbackParaIndex;
-  if (!paragraph) {
-    return null;
-  }
+function assignParagraphBookmarkID(paragraph, existingIDs, requestedID = null) {
+  void paragraph;
+  void existingIDs;
+  return normalizeParaID(requestedID);
 
-  const directId = getParagraphParaIDFromLoadedProps(paragraph);
-  if (directId) {
-    return directId;
+  const preferredID = normalizeParaID(requestedID);
+  const paraID =
+    preferredID && !existingIDs.has(preferredID)
+      ? preferredID
+      : createSignedNineDigitParaID(existingIDs);
+  const bookmarkName = toHiddenBookmarkNameFromParaID(paraID);
+  if (!bookmarkName) {
+    throw new Error(`invalid paraID bookmark name: ${paraID}`);
   }
-
-  return null;
+  paragraph.getRange("Whole").insertBookmark(bookmarkName);
+  existingIDs.add(paraID);
+  return paraID;
 }
 
 // ============== 样式去重与解析 ==============
@@ -600,11 +637,6 @@ function cleanCellText(text) {
 }
 
 // ============== 图片路径（与 WPS docxJsonConverter 对齐）==============
-
-function parsePositiveNumber(value) {
-  const n = Number(value);
-  return Number.isFinite(n) && n > 0 ? n : null;
-}
 
 function isLikelyAbsolutePath(path) {
   if (!path) {
@@ -2773,8 +2805,13 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection", inse
     return await Word.run(async (context) => {
       let targetRange;
       let insertAfterMode = false;
+      const existingParaIDs = new Set(await ensureAllParagraphsHaveHiddenBookmarks(context));
+      const insertedParaIDs = [];
+      const originalParaCount = existingParaIDs.size;
+      let insertStartParaIndex = null;
+      let insertedParagraphCount = 0;
 
-      const normalizedInsertParaID = normalizeParaIdValue(insertParaID);
+      const normalizedInsertParaID = normalizeParaID(insertParaID);
       if (normalizedInsertParaID) {
         const allParagraphs = context.document.body.paragraphs;
         allParagraphs.load("items/uniqueLocalId");
@@ -2800,6 +2837,7 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection", inse
         } else {
           targetRange = allParagraphs.items[targetParaIndex];
           insertAfterMode = true;
+          insertStartParaIndex = targetParaIndex + 1;
         }
       } else if (insertLocation === "before") {
         // 'before' 模式：通过 paraIndex 直接 O(1) 定位到目标段落
@@ -2818,6 +2856,7 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection", inse
         }
         targetRange = allParagraphs.items[paraIndex];
         insertAfterMode = false;
+        insertStartParaIndex = paraIndex;
 
         // 防御：如果目标段落在表格内部，跳转到表格之后的首个段落
         // 避免新内容（尤其是新表格）被嵌套到旧表格单元格内
@@ -2847,6 +2886,7 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection", inse
         }
       } else if (insertLocation === "end") {
         targetRange = context.document.body;
+        insertStartParaIndex = originalParaCount;
       } else {
         targetRange = context.document.getSelection();
       }
@@ -2909,15 +2949,17 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection", inse
 
           // 空段落（无 runs）
           if (isEmptyParagraph(para)) {
+            let inserted;
             if (insertAfterMode) {
-              const inserted = targetRange.insertParagraph("", Word.InsertLocation.after);
+              inserted = targetRange.insertParagraph("", Word.InsertLocation.after);
               targetRange = inserted;
             } else if (insertLocation === "end") {
-              targetRange.insertParagraph("", Word.InsertLocation.end);
+              inserted = targetRange.insertParagraph("", Word.InsertLocation.end);
             } else {
-              const inserted = targetRange.insertParagraph("", insertLoc);
+              inserted = targetRange.insertParagraph("", insertLoc);
               targetRange = inserted;
             }
+            insertedParagraphCount++;
             continue;
           }
 
@@ -3005,7 +3047,7 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection", inse
                   matchCase: true,
                   matchWholeWord: false,
                 });
-                searchResults.load("items");
+                searchResults.load("items/text");
                 await context.sync();
 
                 if (searchResults.items.length > 0) {
@@ -3027,6 +3069,8 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection", inse
               applyRunStyle(newParagraph.font, rStyle);
             }
           }
+
+          insertedParagraphCount++;
 
           if (insertAfterMode || insertLocation !== "end") {
             targetRange = newParagraph;
@@ -3247,6 +3291,19 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection", inse
       }
 
       await context.sync();
+      await ensureAllParagraphsHaveHiddenBookmarks(context);
+      if (insertedParagraphCount > 0) {
+        let startIndex = Number.isInteger(insertStartParaIndex) ? insertStartParaIndex : null;
+        if (startIndex === null) {
+          const allParagraphs = context.document.body.paragraphs;
+          allParagraphs.load("items");
+          await context.sync();
+          startIndex = Math.max(0, allParagraphs.items.length - insertedParagraphCount);
+        }
+        for (let i = 0; i < insertedParagraphCount; i++) {
+          insertedParaIDs.push(String(startIndex + i));
+        }
+      }
 
       const paraCount = jsonData.paragraphs?.length || 0;
       const tableCount = jsonData.tables?.length || 0;
@@ -3254,6 +3311,7 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection", inse
         success: true,
         message: `文档生成成功！${paraCount} 段落 / ${tableCount} 表格`,
         warning: insertFallbackWarning,
+        insertedParaIDs,
       };
     });
   } catch (error) {
@@ -3302,7 +3360,87 @@ function applyRunStyle(font, rStyle) {
 }
 
 function findClosestMatch(items, offset) {
-  return 0; // 简化实现，返回第一个匹配
+  if (!Array.isArray(items) || items.length <= 1) {
+    return 0;
+  }
+
+  const targetOffset = Math.max(0, Number(offset) || 0);
+  let runningOffset = 0;
+  for (let i = 0; i < items.length; i++) {
+    const textLength = String(items[i]?.text || "").length || 1;
+    if (runningOffset >= targetOffset) {
+      return i;
+    }
+    runningOffset += textLength;
+  }
+  return items.length - 1;
+}
+
+function normalizeParaIDList(paraIDs) {
+  return [
+    ...new Set(
+      (Array.isArray(paraIDs) ? paraIDs : [])
+        .map((v) => normalizeParaID(v))
+        .filter((v) => v)
+    ),
+  ];
+}
+
+function getOfficeErrorMessage(error) {
+  if (!error) {
+    return "Unknown error";
+  }
+  const code = error.code ? `(${error.code}) ` : "";
+  const message = error.message || String(error);
+  let debugInfo = "";
+  try {
+    if (error.debugInfo) {
+      debugInfo = ` | ${JSON.stringify(error.debugInfo)}`;
+    }
+  } catch (e) {
+    debugInfo = "";
+  }
+  return `${code}${message}${debugInfo}`;
+}
+
+function getProofreadHighlightColor(text) {
+  return /删除|鍒犻櫎/.test(String(text || "")) ? "Turquoise" : "Pink";
+}
+
+async function applyHighlightToRange(context, rangeFactory, text) {
+  try {
+    const range = rangeFactory();
+    range.font.highlightColor = getProofreadHighlightColor(text);
+    await context.sync();
+    return { success: true, mode: "highlight" };
+  } catch (e) {
+    return { success: false, error: getOfficeErrorMessage(e) };
+  }
+}
+
+async function insertCommentWithFallbackRanges(context, rangeFactories, text) {
+  const commentText = String(text || "").trim();
+  if (!commentText) {
+    return { success: false, error: "comment text is empty" };
+  }
+
+  let lastError = "";
+  for (const createRange of rangeFactories) {
+    try {
+      const range = createRange();
+      if (!range || typeof range.insertComment !== "function") {
+        lastError = "Range.insertComment is unavailable";
+        continue;
+      }
+      range.insertComment(commentText);
+      await context.sync();
+      return { success: true, mode: "comment" };
+    } catch (e) {
+      lastError = getOfficeErrorMessage(e);
+    }
+  }
+
+  return { success: false, error: lastError || "insertComment failed" };
 }
 
 /**
@@ -3315,11 +3453,7 @@ async function deleteDocxPara(paraIDs) {
     return { success: false, deletedCount: 0, message: "未提供有效的 paraIDs 列表" };
   }
 
-  const normalizedIDs = [...new Set(
-    paraIDs
-      .map((v) => normalizeParaIdValue(v))
-      .filter((v) => v)
-  )];
+  const normalizedIDs = normalizeParaIDList(paraIDs);
   if (normalizedIDs.length === 0) {
     return { success: false, deletedCount: 0, message: "paraIDs 中没有有效段落ID" };
   }
@@ -3348,8 +3482,8 @@ async function deleteDocxPara(paraIDs) {
         return { success: false, deletedCount: 0, message: "未找到匹配 paraIDs 的段落" };
       }
 
-      targets.sort((a, b) => b.paraIndex - a.paraIndex);
       let deletedCount = 0;
+      targets.sort((a, b) => b.paraIndex - a.paraIndex);
       for (const target of targets) {
         const para = allParas.items[target.paraIndex];
         para.delete();
@@ -3373,7 +3507,7 @@ async function deleteDocxPara(paraIDs) {
  * @param {number} startParaIndex - 起始段落索引（0-based）
  * @param {number} endParaIndex - 结束段落索引（0-based，含），-1 表示到文档末尾
  * @param {string} text - 批注文本
- * @param {string} mode - 标注模式: 'revision'=批注, 'redblue'=红蓝高亮
+ * @param {string} mode - 兼容旧调用，当前始终使用 Word 批注
  * @returns {Promise<{ success: boolean, mode: string }>}
  */
 async function addCommentToParas(startParaIndex, endParaIndex, text, mode = 'revision') {
@@ -3399,48 +3533,39 @@ async function addCommentToParas(startParaIndex, endParaIndex, text, mode = 'rev
       const startPara = allParas.items[startParaIndex];
       const endPara = allParas.items[endParaIndex];
 
-      // 获取起止段落的 range 然后合并
-      const startRange = startPara.getRange("Start");
-      const endRange = endPara.getRange("End");
-      const fullRange = startRange.expandTo(endRange);
+      void mode;
 
-      const isDelete = text.includes('删除');
+      const result = await insertCommentWithFallbackRanges(
+        context,
+        [
+          () => startPara.getRange("Content").expandTo(endPara.getRange("Content")),
+          () => startPara.getRange("Start").expandTo(endPara.getRange("End")),
+          () => startPara.getRange("Whole").expandTo(endPara.getRange("Whole")),
+        ],
+        text
+      );
 
-      if (mode === 'redblue') {
-        // 红蓝高亮模式：浅红=添加, 浅蓝=删除
-        try {
-          fullRange.font.highlightColor = isDelete ? 'Turquoise' : 'Pink';
-          await context.sync();
-          console.log("[addCommentToParas] 高亮标记成功:", isDelete ? '浅蓝(删除)' : '浅红(添加)', "范围:", startParaIndex, "-", endParaIndex);
-          return { success: true, mode: 'highlight' };
-        } catch (hlErr) {
-          console.error("[addCommentToParas] 高亮失败:", hlErr.message);
-          return { success: false, error: hlErr.message };
-        }
-      }
-
-      // 批注模式（revision）：尝试 insertComment，失败则降级高亮
-      try {
-        fullRange.insertComment(text);
-        await context.sync();
+      if (result.success) {
         console.log("[addCommentToParas] 批注添加成功:", text, "范围:", startParaIndex, "-", endParaIndex);
-        return { success: true, mode: 'comment' };
-      } catch (commentErr) {
-        console.warn("[addCommentToParas] insertComment 不可用，降级高亮:", commentErr.message);
-        try {
-          fullRange.font.highlightColor = isDelete ? 'Turquoise' : 'Pink';
-          await context.sync();
-          console.log("[addCommentToParas] 已降级为高亮");
-          return { success: true, mode: 'highlight' };
-        } catch (hlErr) {
-          console.error("[addCommentToParas] 高亮也失败:", hlErr.message);
-          return { success: false, error: commentErr.message };
-        }
+        return result;
       }
+
+      const highlightResult = await applyHighlightToRange(
+        context,
+        () => startPara.getRange("Content").expandTo(endPara.getRange("Content")),
+        text
+      );
+      if (highlightResult.success) {
+        console.warn("[addCommentToParas] insertComment 不可用，已降级为高亮:", result.error);
+        return highlightResult;
+      }
+
+      console.warn("[addCommentToParas] 批注添加失败:", result.error);
+      return result;
     });
   } catch (e) {
     console.error("添加批注失败:", e);
-    return { success: false, error: e.message };
+    return { success: false, error: getOfficeErrorMessage(e) };
   }
 }
 
@@ -3450,9 +3575,124 @@ async function addCommentToParas(startParaIndex, endParaIndex, text, mode = 'rev
  * @param {string|number|null} [endParaID]
  * @returns {Promise<{success:boolean,startParaIndex:number,endParaIndex:number,error?:string}>}
  */
+async function addCommentToParaIDs(paraIDs, text) {
+  const normalizedIDs = normalizeParaIDList(paraIDs);
+  if (normalizedIDs.length === 0) {
+    return { success: false, commentedCount: 0, message: "未提供有效 paraIDs" };
+  }
+
+  try {
+    return await Word.run(async (context) => {
+      const allParas = context.document.body.paragraphs;
+      allParas.load("items");
+      await context.sync();
+
+      const allParaIDs = await resolveParagraphParaIDs(context, allParas.items);
+      const wanted = new Set(normalizedIDs);
+      const matchedIDs = new Set();
+      let commentedCount = 0;
+      let highlightedCount = 0;
+      const failures = [];
+
+      for (let idx = 0; idx < allParas.items.length; idx++) {
+        const paraID = allParaIDs[idx];
+        if (!paraID || !wanted.has(paraID)) {
+          continue;
+        }
+        matchedIDs.add(paraID);
+
+        const para = allParas.items[idx];
+        const result = await insertCommentWithFallbackRanges(
+          context,
+          [
+            () => para.getRange("Content"),
+            () => para.getRange("Whole"),
+          ],
+          text
+        );
+        if (result.success) {
+          commentedCount++;
+        } else {
+          const highlightResult = await applyHighlightToRange(context, () => para.getRange("Whole"), text);
+          if (highlightResult.success) {
+            highlightedCount++;
+          } else {
+            failures.push({
+              paraID,
+              paraIndex: idx,
+              error: result.error,
+              highlightError: highlightResult.error,
+            });
+          }
+        }
+      }
+
+      return {
+        success: commentedCount > 0 || highlightedCount > 0,
+        commentedCount,
+        highlightedCount,
+        matchedCount: matchedIDs.size,
+        missingParaIDs: normalizedIDs.filter((paraID) => !matchedIDs.has(paraID)),
+        failedCount: failures.length,
+        failures,
+        mode: commentedCount > 0 ? "comment" : "highlight",
+        message: `已添加 ${commentedCount} 条批注 / ${highlightedCount} 条高亮`,
+      };
+    });
+  } catch (e) {
+    return { success: false, commentedCount: 0, message: `添加批注失败: ${getOfficeErrorMessage(e)}` };
+  }
+}
+
+async function clearWenceCommentsByParaIDs(paraIDs, markers = ["文策AI-添加", "文策AI-删除"]) {
+  const normalizedIDs = normalizeParaIDList(paraIDs);
+  if (normalizedIDs.length === 0) {
+    return { success: false, deletedCount: 0, message: "未提供有效 paraIDs" };
+  }
+  try {
+    return await Word.run(async (context) => {
+      const allParas = context.document.body.paragraphs;
+      allParas.load("items");
+      await context.sync();
+
+      const allParaIDs = await resolveParagraphParaIDs(context, allParas.items);
+      const wanted = new Set(normalizedIDs);
+      let deletedCount = 0;
+
+      for (let idx = 0; idx < allParas.items.length; idx++) {
+        const paraID = allParaIDs[idx];
+        if (!paraID || !wanted.has(paraID)) {
+          continue;
+        }
+
+        const comments = allParas.items[idx].getRange("Whole").getComments();
+        comments.load("items/content");
+        await context.sync();
+
+        for (const comment of comments.items) {
+          const content = String(comment.content || "");
+          if (markers.some((marker) => content.includes(marker))) {
+            comment.delete();
+            deletedCount++;
+          }
+        }
+      }
+
+      await context.sync();
+      return {
+        success: deletedCount > 0,
+        deletedCount,
+        message: `已清理 ${deletedCount} 条文策AI批注`,
+      };
+    });
+  } catch (e) {
+    return { success: false, deletedCount: 0, message: `清理批注失败: ${getOfficeErrorMessage(e)}` };
+  }
+}
+
 async function findParaIndexRangeByParaIDs(startParaID, endParaID = null) {
-  const startID = normalizeParaIdValue(startParaID);
-  let endID = normalizeParaIdValue(endParaID);
+  const startID = normalizeParaID(startParaID);
+  let endID = normalizeParaID(endParaID);
   if (!startID) {
     return { success: false, error: "startParaID/endParaID 必须是有效段落ID" };
   }
@@ -3463,7 +3703,7 @@ async function findParaIndexRangeByParaIDs(startParaID, endParaID = null) {
   try {
     return await Word.run(async (context) => {
       const allParas = context.document.body.paragraphs;
-      allParas.load("items/uniqueLocalId");
+      allParas.load("items");
       await context.sync();
       const allParaIDs = await resolveParagraphParaIDs(context, allParas.items);
 
@@ -3514,6 +3754,8 @@ export default {
   generateDocxFromJSON,
   deleteDocxPara,
   addCommentToParas,
+  addCommentToParaIDs,
+  clearWenceCommentsByParaIDs,
   cleanText,
   deduplicateStyles,
   resolveStyle,
@@ -3537,7 +3779,6 @@ export default {
   exportImageToTemp,
   appendParagraphInlinePictureRuns,
   loadImageAsBase64ForInsert,
-  getParagraphParaID,
   findParaIndexRangeByParaIDs,
 };
 
@@ -3546,6 +3787,8 @@ export {
   generateDocxFromJSON,
   deleteDocxPara,
   addCommentToParas,
+  addCommentToParaIDs,
+  clearWenceCommentsByParaIDs,
   cleanText,
   deduplicateStyles,
   resolveStyle,
@@ -3569,7 +3812,6 @@ export {
   exportImageToTemp,
   appendParagraphInlinePictureRuns,
   loadImageAsBase64ForInsert,
-  getParagraphParaID,
   findParaIndexRangeByParaIDs,
   resolveParagraphParaIDs,
 };
