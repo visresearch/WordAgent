@@ -143,10 +143,29 @@ uv run python main.py
 ### 项目软件打包
 
 ```bash
-cd backend/deploy
-uv run pyinstaller package.spec
+cd backend
+uv run pyinstaller ../packaging/pyinstaller/package.spec --clean --noconfirm
 ```
-打包生成的可执行文件在`backend/deploy/dist`目录下
+通用应用目录会生成到 `backend/dist/wence_ai`。
+
+Linux 使用 fpm 打包：
+
+```bash
+bash packaging/linux/build-deb.sh
+```
+
+Windows 使用 Inno Setup 打包：
+
+```powershell
+.\packaging\windows\build-installer.ps1
+```
+
+GitHub Actions 会生成平台安装包，并保留完整压缩包：
+
+- `wence_ai-linux-x86_64.deb`
+- `wence_ai-linux-x86_64-full.zip`
+- `wence_ai-windows-x86_64-installer.exe`
+- `wence_ai-windows-x86_64-full.zip`
 
 如果你不想自己打包，可以直接下载release中打包的压缩包，解压后点击exe文件即可使用。
 

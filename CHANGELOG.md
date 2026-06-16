@@ -1,5 +1,18 @@
 # Changelog
 
+## [v0.4.7]
+
+### Added
+- 添加新版打包脚本，生成installer.exe和deb包
+- 添加issue模板和pull request模板
+
+### Fixed
+- 修复microsoft word加载项的paraID的问题，用paraIndex充当paraID，使用索引漂移补偿的方式
+- 修复microsoft word选区preview等小问题
+
+### Changed
+- 修改文档和官网内容
+
 ## [v0.4.6]
 
 ### Fixed

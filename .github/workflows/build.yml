@@ -7,76 +7,94 @@ on:
   workflow_dispatch:
 
 env:
-  # Tag 构建时注入 release 版本号；手动非 tag 构建不注入版本号。
   APP_VERSION: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
 
 jobs:
   build-linux:
-    name: Build Linux Binary
-    runs-on: ubuntu-22.04  # 使用 Ubuntu 22.04 以兼容更多系统 (glibc 2.31)
-    
+    name: Build Linux packages
+    runs-on: ubuntu-22.04
+
     permissions:
       contents: write
-    
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          # 供 git describe 从 Git tag 解析打包版本号。
           fetch-depth: 0
-      
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-      
+          node-version: '22'
+
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 9
-      
-      - name: Build Frontend
+
+      - name: Build WPS frontend
         working-directory: frontend/wps_word_plugin
         run: |
           pnpm install
           pnpm build
 
-      - name: Build MS Office Frontend
+      - name: Build MS Office frontend
         working-directory: frontend/microsoft_word_plugin
         run: |
           pnpm install
           pnpm build
-      
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      
+
       - name: Install uv
         run: |
           curl -LsSf https://astral.sh/uv/install.sh | sh
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-      
-      - name: Install dependencies
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Install Python dependencies
         working-directory: backend
         run: |
           uv sync
           uv pip install pyinstaller pyside6
-      
-      - name: Build binary with PyInstaller
+
+      - name: Build app directory with PyInstaller
         working-directory: backend
         run: |
           mkdir -p config
           echo '{}' > config/config.json
           echo '{}' > config/user_settings.json
-          uv run pyinstaller deploy/package.spec --clean --noconfirm
-      
-      - name: Package binary
+          uv run pyinstaller ../packaging/pyinstaller/package.spec --clean --noconfirm
+
+      - name: Create full zip
         working-directory: backend
         run: |
           mkdir -p package
           chmod +x dist/wence_ai/wence_ai
-          tar -czf package/wence_ai-linux-x86_64.tar.gz -C dist wence_ai
+          cd dist
+          zip -r ../package/wence_ai-linux-x86_64-full.zip wence_ai
+
+      - name: Setup Ruby for fpm
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+
+      - name: Install fpm
+        run: gem install --no-document fpm
+
+      - name: Build deb with fpm
+        run: bash packaging/linux/build-deb.sh
+
+      - name: Upload Linux workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wordagent-linux-packages
+          path: |
+            backend/package/wence_ai-linux-x86_64.deb
+            backend/package/wence_ai-linux-x86_64-full.zip
 
       - name: Extract changelog for current tag
         if: startsWith(github.ref, 'refs/tags/')
@@ -107,83 +125,98 @@ jobs:
           if [ ! -s release_notes.md ]; then
             echo "No changelog found for ${VERSION}" > release_notes.md
           fi
-      
+
       - name: Upload to Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: backend/package/wence_ai-linux-x86_64.tar.gz
+          files: |
+            backend/package/wence_ai-linux-x86_64.deb
+            backend/package/wence_ai-linux-x86_64-full.zip
           body_path: release_notes.md
           draft: false
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  
+
   build-windows:
-    name: Build Windows Binary
+    name: Build Windows packages
     runs-on: windows-latest
-    
+
     permissions:
       contents: write
-    
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          # 供 git describe 从 Git tag 解析打包版本号。
           fetch-depth: 0
-      
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-      
+          node-version: '22'
+
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 9
-      
-      - name: Build Frontend
+
+      - name: Build WPS frontend
         working-directory: frontend/wps_word_plugin
         run: |
           pnpm install
           pnpm build
 
-      - name: Build MS Office Frontend
+      - name: Build MS Office frontend
         working-directory: frontend/microsoft_word_plugin
         run: |
           pnpm install
           pnpm build
-      
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      
+
       - name: Install uv
         run: |
           irm https://astral.sh/uv/install.ps1 | iex
           echo "$env:USERPROFILE\.cargo\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-      
-      - name: Install dependencies
+
+      - name: Install Python dependencies
         working-directory: backend
         run: |
           uv sync
           uv pip install pyinstaller pyside6
-      
-      - name: Build binary with PyInstaller
+
+      - name: Build app directory with PyInstaller
         working-directory: backend
         run: |
           New-Item -ItemType Directory -Force -Path config
           '{}' | Out-File -Encoding utf8 config/config.json
           '{}' | Out-File -Encoding utf8 config/user_settings.json
-          uv run pyinstaller deploy/package.spec --clean --noconfirm
-      
-      - name: Package binary
+          uv run pyinstaller ..\packaging\pyinstaller\package.spec --clean --noconfirm
+
+      - name: Create full zip
         working-directory: backend
         run: |
           New-Item -ItemType Directory -Force -Path package
-          Compress-Archive -Path dist/wence_ai -DestinationPath package/wence_ai-windows-x86_64.zip
+          Compress-Archive -Path dist\wence_ai -DestinationPath package\wence_ai-windows-x86_64-full.zip -Force
+
+      - name: Install Inno Setup
+        run: choco install innosetup --yes --no-progress
+
+      - name: Build installer with Inno Setup
+        run: .\packaging\windows\build-installer.ps1
+
+      - name: Upload Windows workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wordagent-windows-packages
+          path: |
+            backend/package/wence_ai-windows-x86_64-installer.exe
+            backend/package/wence_ai-windows-x86_64-full.zip
 
       - name: Extract changelog for current tag
         if: startsWith(github.ref, 'refs/tags/')
@@ -215,12 +248,14 @@ jobs:
           if [ ! -s release_notes.md ]; then
             echo "No changelog found for ${VERSION}" > release_notes.md
           fi
-      
+
       - name: Upload to Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: backend/package/wence_ai-windows-x86_64.zip
+          files: |
+            backend/package/wence_ai-windows-x86_64-installer.exe
+            backend/package/wence_ai-windows-x86_64-full.zip
           body_path: release_notes.md
           draft: false
           prerelease: false

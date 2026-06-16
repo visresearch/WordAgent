@@ -143,11 +143,30 @@ This project also supports LangSmith for tracing and analyzing agent behavior. F
 ### Package the Software
 
 ```bash
-cd backend/deploy
-uv run pyinstaller package.spec
+cd backend
+uv run pyinstaller ../packaging/pyinstaller/package.spec --clean --noconfirm
 ```
 
-The packaged executable is generated in the `backend/deploy/dist` directory.
+The shared app directory is generated in `backend/dist/wence_ai`.
+
+Linux releases are built with fpm:
+
+```bash
+bash packaging/linux/build-deb.sh
+```
+
+Windows releases are built with Inno Setup:
+
+```powershell
+.\packaging\windows\build-installer.ps1
+```
+
+GitHub Actions builds the platform packages and keeps the full archives:
+
+- `wence_ai-linux-x86_64.deb`
+- `wence_ai-linux-x86_64-full.zip`
+- `wence_ai-windows-x86_64-installer.exe`
+- `wence_ai-windows-x86_64-full.zip`
 
 If you do not want to package it yourself, you can directly download the packaged archive from the release, extract it, and run the executable.
 
