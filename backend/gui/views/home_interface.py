@@ -123,7 +123,7 @@ class HomeInterface(QWidget):
         github_button.clicked.connect(lambda: self._open_url(self.GITHUB_URL))
         button_row.addWidget(github_button)
 
-        website_button = PushButton("官网", self)
+        website_button = PushButton("官网文档", self)
         website_icon_path = os.path.join(os.path.dirname(__file__), "..", "resources", "icon", "Web.svg")
         website_icon_path = os.path.normpath(website_icon_path)
         if os.path.exists(website_icon_path):

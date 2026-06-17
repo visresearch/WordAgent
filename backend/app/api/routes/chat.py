@@ -10,17 +10,7 @@ import uuid
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.core.db import AsyncSessionLocal
-from app.services.session_service import SessionService
-
-# Idle watchdog 阈值（秒）：超过 IDLE_WARN_SECONDS 没有 chunk 时，
-# 给前端一条"正在思考下一步"提示；超过 IDLE_ABORT_SECONDS 仍无 chunk 时，
-# 强制停止 LLM 调用并断开 WebSocket。
-IDLE_WARN_SECONDS = 100
-IDLE_ABORT_SECONDS = 300
-# 应用层 keepalive：长 LLM 思考期间，每隔 KEEPALIVE_INTERVAL 秒推一条 ping
-# 防止 WPS WebView / 中间代理因连接长时间空闲而强制关闭 WebSocket。
-KEEPALIVE_INTERVAL = 20
-
+from app.core.logging import get_logger
 from app.services.agent.agent import (
     ContextOverflowError,
     process_writing_request_stream as single_agent_stream,
@@ -42,8 +32,19 @@ from app.services.multi_agent.tools import (
     request_stop as ma_request_stop,
     clear_stop as ma_clear_stop,
 )
+from app.services.session_service import SessionService
 
+logger = get_logger(__name__)
 router = APIRouter()
+
+# Idle watchdog 阈值（秒）：超过 IDLE_WARN_SECONDS 没有 chunk 时，
+# 给前端一条"正在思考下一步"提示；超过 IDLE_ABORT_SECONDS 仍无 chunk 时，
+# 强制停止 LLM 调用并断开 WebSocket。
+IDLE_WARN_SECONDS = 100
+IDLE_ABORT_SECONDS = 300
+# 应用层 keepalive：长 LLM 思考期间，每隔 KEEPALIVE_INTERVAL 秒推一条 ping
+# 防止 WPS WebView / 中间代理因连接长时间空闲而强制关闭 WebSocket。
+KEEPALIVE_INTERVAL = 20
 
 
 def _normalize_mode(mode: str | None) -> str:
@@ -106,7 +107,7 @@ async def chat_websocket(websocket: WebSocket):
     """
     await websocket.accept()
     chat_id = str(uuid.uuid4())
-    print(f"[WebSocket] 连接建立 session={chat_id}")
+    logger.info(f"[WebSocket] 连接建立 session={chat_id}")
 
     # 为此会话创建工具回调队列（单智能体 + 多智能体）
     create_tool_request(chat_id)
@@ -127,12 +128,12 @@ async def chat_websocket(websocket: WebSocket):
                 try:
                     await msg_queue.put(json.loads(raw))
                 except (json.JSONDecodeError, ValueError) as e:
-                    print(f"[WebSocket] ⚠️ JSON 解析失败，跳过此消息: {e}")
+                    logger.error(f"[WebSocket] ⚠️ JSON 解析失败，跳过此消息: {e}")
                     continue
         except WebSocketDisconnect:
             await msg_queue.put(None)
         except Exception as e:
-            print(f"[WebSocket] ⚠️ 接收协程异常: {e}")
+            logger.error(f"[WebSocket] ⚠️ 接收协程异常: {e}")
             await msg_queue.put(None)
 
     recv_task = asyncio.create_task(_receiver())
@@ -172,30 +173,30 @@ async def chat_websocket(websocket: WebSocket):
                     document_range = _normalize_document_range(data.get("documentRange"))
                 except ValueError as e:
                     err = f"documentRange 参数错误: {e}"
-                    print(f"[WebSocket] ⚠️ {err}")
+                    logger.warning(f"[WebSocket] ⚠️ {err}")
                     await websocket.send_text(json.dumps({"type": "error", "content": err}, ensure_ascii=False))
                     await websocket.send_text(json.dumps({"type": "done"}, ensure_ascii=False))
                     continue
                 attached_files = data.get("files", [])  # 附件列表 [{file_id, filename, content_type, is_image}, ...]
                 enable_thinking = data.get("enableThinking", True)  # 是否启用深度思考
 
-                print("=" * 50)
-                print("收到 WebSocket 聊天请求:")
-                print(f"用户消息: {message}")
-                print(f"模式: {mode}")
-                print(f"模型: {model}")
-                print(f"深度思考: {enable_thinking}")
+                logger.info("=" * 50)
+                logger.info("收到 WebSocket 聊天请求:")
+                logger.info(f"用户消息: {message}")
+                logger.info(f"模式: {mode}")
+                logger.info(f"模型: {model}")
+                logger.info(f"深度思考: {enable_thinking}")
                 if session_id is not None:
-                    print(f"会话ID: {session_id}")
+                    logger.info(f"会话ID: {session_id}")
                 if document_range:
-                    print(f"文档范围: {document_range}")
+                    logger.info(f"文档范围: {document_range}")
                 if document_meta:
                     # 支持单个文档和多个文档的打印
                     if isinstance(document_meta, list):
-                        print(f"文档元信息: {document_meta}")
+                        logger.info(f"文档元信息: {document_meta}")
                     else:
-                        print(
-                            "文档元信息:",
+                        logger.info(
+                            "文档元信息: %s",
                             {
                                 "documentName": document_meta.get("documentName", ""),
                                 "totalParas": document_meta.get("totalParas", 0),
@@ -203,8 +204,8 @@ async def chat_websocket(websocket: WebSocket):
                             },
                         )
                 if attached_files:
-                    print(f"附件: {[f.get('filename', '?') for f in attached_files]}")
-                print("=" * 50)
+                    logger.error(f"附件: {[f.get('filename', '?') for f in attached_files]}")
+                logger.info("=" * 50)
 
                 # 启动流式处理
                 stream_task = asyncio.create_task(
@@ -231,7 +232,7 @@ async def chat_websocket(websocket: WebSocket):
                         if incoming is None:
                             # 连接断开 - 必须通知 agent 线程停止，
                             # 否则 ThreadPoolExecutor 里的 LangGraph 会变成孤儿继续跑
-                            print(f"[WebSocket] 客户端断开，停止 agent (session={chat_id})")
+                            logger.info(f"[WebSocket] 客户端断开，停止 agent (session={chat_id})")
                             request_stop(chat_id)
                             ma_request_stop(chat_id)
                             stream_task.cancel()
@@ -242,22 +243,22 @@ async def chat_websocket(websocket: WebSocket):
                             return
                         incoming_type = incoming.get("type", "")
                         if incoming_type == "document_response":
-                            print(f"[WebSocket] 收到前端回传文档")
+                            logger.info(f"[WebSocket] 收到前端回传文档")
                             if active_mode == "plan":
                                 await ma_submit_tool_response(chat_id, incoming)
                             else:
                                 await submit_tool_response(chat_id, incoming)
                         elif incoming_type == "query_response":
-                            print(f"[WebSocket] 收到前端回传查询结果")
+                            logger.info(f"[WebSocket] 收到前端回传查询结果")
                             if active_mode == "plan":
                                 await ma_submit_tool_response(chat_id, incoming)
                             else:
                                 await submit_tool_response(chat_id, incoming)
                         elif incoming_type == "delete_response":
                             # delete_document 为非阻塞工具，不再等待前端回传，仅记录日志
-                            print(f"[WebSocket] 收到前端删除结果（仅记录）: {incoming}")
+                            logger.info(f"[WebSocket] 收到前端删除结果（仅记录）: {incoming}")
                         elif incoming_type == "stop":
-                            print(f"[WebSocket] 收到停止请求")
+                            logger.info(f"[WebSocket] 收到停止请求")
                             request_stop(chat_id)
                             ma_request_stop(chat_id)
                             stream_task.cancel()
@@ -292,14 +293,14 @@ async def chat_websocket(websocket: WebSocket):
                     await submit_tool_response(chat_id, data)
 
             elif msg_type == "stop":
-                print(f"[WebSocket] 收到停止请求(空闲态)")
+                logger.info(f"[WebSocket] 收到停止请求(空闲态)")
                 request_stop(chat_id)
                 ma_request_stop(chat_id)
 
     except WebSocketDisconnect:
-        print(f"[WebSocket] 连接断开 session={chat_id}")
+        logger.info(f"[WebSocket] 连接断开 session={chat_id}")
     except Exception as e:
-        print(f"[WebSocket] 错误: {e}")
+        logger.error(f"[WebSocket] 错误: {e}")
         import traceback
 
         traceback.print_exc()
@@ -317,7 +318,7 @@ async def chat_websocket(websocket: WebSocket):
         recv_task.cancel()
         cleanup_tool_request(chat_id)
         ma_cleanup_tool_request(chat_id)
-        print(f"[WebSocket] 清理完成 session={chat_id}")
+        logger.info(f"[WebSocket] 清理完成 session={chat_id}")
 
 
 from app.services.agent.agent import ContextOverflowError
@@ -355,11 +356,11 @@ async def _iterate_with_idle_watchdog(aiter, on_warn, on_abort):
                     try:
                         await on_warn()
                     except Exception as cb_err:
-                        print(f"[Watchdog] on_warn 异常: {cb_err}")
+                        logger.warning(f"[Watchdog] on_warn 异常: {cb_err}")
                     warned = True
                     continue
                 if idle >= IDLE_ABORT_SECONDS:
-                    print(f"[Watchdog] ⛔ 已静默 {idle:.0f}s，达到 abort 阈值")
+                    logger.info(f"[Watchdog] ⛔ 已静默 {idle:.0f}s，达到 abort 阈值")
                     next_task.cancel()
                     try:
                         await next_task
@@ -369,7 +370,7 @@ async def _iterate_with_idle_watchdog(aiter, on_warn, on_abort):
                     try:
                         await on_abort()
                     except Exception as cb_err:
-                        print(f"[Watchdog] on_abort 异常: {cb_err}")
+                        logger.error(f"[Watchdog] on_abort 异常: {cb_err}")
                     raise _IdleAbort()
                 continue
 
@@ -402,10 +403,10 @@ async def _load_short_term_history_from_db(session_id: int | None) -> list[dict]
                     }
                 )
             if history:
-                print(f"[WebSocket] 已从 DB 加载短期记忆 session={session_id}, messages={len(history)}")
+                logger.info(f"[WebSocket] 已从 DB 加载短期记忆 session={session_id}, messages={len(history)}")
             return history
     except Exception as e:
-        print(f"[WebSocket] 加载短期记忆失败 session={session_id}: {e}")
+        logger.error(f"[WebSocket] 加载短期记忆失败 session={session_id}: {e}")
         traceback.print_exc()
         return []
 
@@ -426,12 +427,12 @@ async def _persist_chat_turn(
 ) -> None:
     """Persist one completed chat turn from backend-owned stream data."""
     if session_id is None:
-        print("[WebSocket] 跳过会话保存：缺少 sessionId")
+        logger.info("[WebSocket] 跳过会话保存：缺少 sessionId")
         return
 
     assistant_text = (assistant_content or "").strip()
     if not assistant_text and not (tool_json or {}).get("calls"):
-        print("[WebSocket] 跳过会话保存：assistant 内容和 tool_json 都为空")
+        logger.info("[WebSocket] 跳过会话保存：assistant 内容和 tool_json 都为空")
         return
 
     try:
@@ -449,7 +450,7 @@ async def _persist_chat_turn(
             )
             if not user_msg:
                 await db.rollback()
-                print(f"[WebSocket] 会话保存失败：session 不存在 id={session_id}")
+                logger.error(f"[WebSocket] 会话保存失败：session 不存在 id={session_id}")
                 return
 
             assistant_msg = await service.add_message(
@@ -465,12 +466,14 @@ async def _persist_chat_turn(
             )
             if not assistant_msg:
                 await db.rollback()
-                print(f"[WebSocket] assistant 保存失败：session 不存在 id={session_id}")
+                logger.error(f"[WebSocket] assistant 保存失败：session 不存在 id={session_id}")
                 return
             await db.commit()
-            print(f"[WebSocket] 已保存会话消息 session={session_id}, tools={len((tool_json or {}).get('calls', []))}")
+            logger.info(
+                f"[WebSocket] 已保存会话消息 session={session_id}, tools={len((tool_json or {}).get('calls', []))}"
+            )
     except Exception as e:
-        print(f"[WebSocket] 保存会话失败: {e}")
+        logger.error(f"[WebSocket] 保存会话失败: {e}")
         traceback.print_exc()
 
 
@@ -584,13 +587,13 @@ async def _run_ws_stream(
                             ensure_ascii=False,
                         )
                     )
-                    print(f"[Watchdog] ⏳ 已静默 {IDLE_WARN_SECONDS}s，已通知前端")
+                    logger.warning(f"[Watchdog] ⏳ 已静默 {IDLE_WARN_SECONDS}s，已通知前端")
                 except Exception:
                     pass
 
             async def _on_idle_abort():
                 # 180s 仍无 chunk：通知 agent 停止 + 告知前端 + 关闭连接
-                print(f"[Watchdog] ⛔ 已静默 {IDLE_ABORT_SECONDS}s，停止 agent 并断开 session={chat_id}")
+                logger.info(f"[Watchdog] ⛔ 已静默 {IDLE_ABORT_SECONDS}s，停止 agent 并断开 session={chat_id}")
                 try:
                     request_stop(chat_id)
                     ma_request_stop(chat_id)
@@ -676,7 +679,7 @@ async def _run_ws_stream(
                             if isinstance(parsed, dict):
                                 memory_conversation = parsed
                         except Exception as e:
-                            print(f"[WebSocket] 解析 memory conversation 失败: {e}")
+                            logger.error(f"[WebSocket] 解析 memory conversation 失败: {e}")
                     elif chunk.startswith("__tool_json__:"):
                         raw = chunk.split(":", 1)[1].strip()
                         try:
@@ -684,7 +687,7 @@ async def _run_ws_stream(
                             if isinstance(parsed, dict):
                                 tool_json = parsed
                         except Exception as e:
-                            print(f"[WebSocket] 解析 tool_json 失败: {e}")
+                            logger.error(f"[WebSocket] 解析 tool_json 失败: {e}")
 
                 # 确保发送一次 done（防止 agent 异常时未发送）
                 if not _done_sent:
@@ -707,7 +710,7 @@ async def _run_ws_stream(
                     from app.services.llm_client import create_sync_llm_client
 
                     if not is_long_term_memory_enabled():
-                        print("[WebSocket] 长期记忆开关关闭，跳过自动提取")
+                        logger.info("[WebSocket] 长期记忆开关关闭，跳过自动提取")
                         return
 
                     # 仅使用本次对话结束后回传的 user/assistant 对，禁止回退到历史记录。
@@ -716,7 +719,7 @@ async def _run_ws_stream(
                         and str(memory_conversation.get("user", "")).strip()
                         and str(memory_conversation.get("assistant", "")).strip()
                     ):
-                        print("[WebSocket] 跳过长期记忆提取：未收到本轮完整 user/assistant 对话")
+                        logger.info("[WebSocket] 跳过长期记忆提取：未收到本轮完整 user/assistant 对话")
                         return
 
                     conversation = (
@@ -728,7 +731,7 @@ async def _run_ws_stream(
                     if sync_llm:
                         extract_and_save_memory(conversation, sync_llm)
                 except Exception as e:
-                    print(f"[WebSocket] 长期记忆提取失败: {e}")
+                    logger.error(f"[WebSocket] 长期记忆提取失败: {e}")
 
             # 创建后台任务执行记忆提取，不等待完成
             asyncio.create_task(_extract_memory_async())
@@ -756,7 +759,7 @@ async def _run_ws_stream(
             # 看门狗已经处理了通知和 agent 停止，这里直接退出，不重试
             return
         except ContextOverflowError as e:
-            print(
+            logger.info(
                 f"[WebSocket] 上下文超限，尝试重试（{attempt + 1}/{max_retries}），压缩后 {len(e.compressed_history)} 条历史"
             )
             history = e.compressed_history  # 更新 history，用压缩后的历史重试
@@ -769,7 +772,7 @@ async def _run_ws_stream(
                 pass
             continue
         except Exception as e:
-            print(f"[WebSocket Stream] 错误: {e}")
+            logger.error(f"[WebSocket Stream] 错误: {e}")
             traceback.print_exc()
             try:
                 await websocket.send_text(json.dumps({"type": "error", "content": str(e)}, ensure_ascii=False))

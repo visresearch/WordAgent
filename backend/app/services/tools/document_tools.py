@@ -15,6 +15,7 @@ from langchain_core.tools import tool
 from langgraph.config import get_stream_writer
 
 from app.core.config import get_temp_dir, get_wence_data_dir, get_wence_project_dir
+from app.core.logging import get_logger
 
 from .callback import (
     _current_chat_id,
@@ -23,6 +24,8 @@ from .callback import (
     is_stop_requested,
 )
 from .schemas import DocumentOutput, DocumentQuery
+
+logger = get_logger(__name__)
 
 
 # 返回给 LLM 的文档 JSON 最大字符数（超过则进入精简模式）
@@ -82,7 +85,7 @@ def _download_remote_image(url: str) -> str | None:
             file_path.write_bytes(resp.read())
         return str(file_path)
     except Exception as e:
-        print(f"[generate_document] ⚠️ 下载图片失败: {e}")
+        logger.error(f"[generate_document] ⚠️ 下载图片失败: {e}")
         return None
 
 
@@ -112,7 +115,7 @@ def _save_data_image(data_url: str) -> str | None:
         file_path.write_bytes(raw)
         return str(file_path)
     except Exception as e:
-        print(f"[generate_document] ⚠️ 保存 base64 图片失败: {e}")
+        logger.error(f"[generate_document] ⚠️ 保存 base64 图片失败: {e}")
         return None
 
 
@@ -220,7 +223,7 @@ def _ensure_image_payload_shape(doc_dict: dict) -> None:
                 run.pop("url", None)
 
             if run.get("url") and _resolve_local_image_path(str(run.get("url") or "")) is None:
-                print(f"[generate_document] ⚠️ 图片未获取到本地路径，可能插入失败: url={run.get('url')}")
+                logger.error(f"[generate_document] ⚠️ 图片未获取到本地路径，可能插入失败: url={run.get('url')}")
 
             # 若宽高缺失，则按原图尺寸/比例补齐，避免拉伸变形
             width_value = _to_positive_float(run.get("width"))
@@ -267,7 +270,7 @@ def _save_generated_document_json(doc_dict: dict) -> str | None:
         file_path.write_text(json_str, encoding="utf-8")
         return str(file_path)
     except Exception as e:
-        print(f"[generate_document] ⚠️ 保存 JSON 文件失败: {e}")
+        logger.error(f"[generate_document] ⚠️ 保存 JSON 文件失败: {e}")
         return None
 
 
@@ -336,7 +339,7 @@ def _compact_doc_json(doc_json: dict) -> str:
             compact["tables"].append(table_compact)
 
     result = json.dumps(compact, ensure_ascii=False)
-    print(f"[read_document] 📦 文档过大 ({len(full)} chars)，已精简为 {len(result)} chars（纯文本模式）")
+    logger.info(f"[read_document] 📦 文档过大 ({len(full)} chars)，已精简为 {len(result)} chars（纯文本模式）")
     return result
 
 
@@ -387,7 +390,7 @@ def _read_document_impl(
                 "mode": read_mode,
             }
         )
-    print(
+    logger.info(
         "[read_document] 请求前端发送文档 "
         f"(startParaIndex={startParaIndex}, endParaIndex={endParaIndex}, "
         f"startParaID={startParaID}, endParaID={endParaID}, docId={resolved_doc_id}, mode={read_mode})"
@@ -395,13 +398,15 @@ def _read_document_impl(
 
     chat_id = _current_chat_id.get(None)
     if is_stop_requested(chat_id):
-        print("[read_document] ⛔ 检测到停止请求，终止读取")
+        logger.info("[read_document] ⛔ 检测到停止请求，终止读取")
         return ""
 
     if chat_id:
         q = _pending_tool_requests.get(chat_id)
         if q:
-            print(f"[read_document] WebSocket 模式，等待前端回传文档 (session={chat_id}, 队列现有 {q.qsize()} 条)")
+            logger.info(
+                f"[read_document] WebSocket 模式，等待前端回传文档 (session={chat_id}, 队列现有 {q.qsize()} 条)"
+            )
             loop = _pending_loops.get(chat_id)
             if loop:
                 future = asyncio.run_coroutine_threadsafe(
@@ -411,13 +416,13 @@ def _read_document_impl(
                 try:
                     result = future.result(timeout=65)
                     result_type = result.get("type", "?")
-                    print(f"[read_document] 收到回传: type={result_type}, keys={list(result.keys())}")
+                    logger.info(f"[read_document] 收到回传: type={result_type}, keys={list(result.keys())}")
                     if result_type == "stop" or result.get("error") == "stopped_by_user":
-                        print("[read_document] ⛔ 用户已停止，终止读取")
+                        logger.info("[read_document] ⛔ 用户已停止，终止读取")
                         return ""
                     if result.get("error"):
                         err_msg = result.get("error")
-                        print(f"[read_document] ⚠️ 前端读取失败: {err_msg}")
+                        logger.error(f"[read_document] ⚠️ 前端读取失败: {err_msg}")
                         if writer:
                             writer({"type": "status", "content": f"⚠️ 读取文档失败: {err_msg}"})
                         return ""
@@ -436,7 +441,7 @@ def _read_document_impl(
                     if has_content:
                         para_count = len(doc_json.get("paragraphs", []))
                         table_count = len(doc_json.get("tables", []))
-                        print(
+                        logger.info(
                             f"[read_document] ✅ 收到文档，段落数: {para_count}，表格数: {table_count}，图片数: {image_count}"
                         )
                         if writer:
@@ -448,7 +453,7 @@ def _read_document_impl(
                                 }
                             )
                         return _compact_doc_json(doc_json)
-                    print(
+                    logger.warning(
                         "[read_document] ⚠️ 收到空文档 "
                         f"(documentJson keys={list(doc_json.keys()) if isinstance(doc_json, dict) else type(doc_json).__name__})"
                     )
@@ -456,19 +461,19 @@ def _read_document_impl(
                         writer({"type": "status", "content": "⚠️ 文档为空"})
                     return ""
                 except (TimeoutError, concurrent.futures.TimeoutError):
-                    print("[read_document] ⏰ 等待文档超时")
+                    logger.warning("[read_document] ⏰ 等待文档超时")
                     if writer:
                         writer({"type": "status", "content": "⏰ 等待文档超时"})
                     return ""
                 except Exception as e:
-                    print(f"[read_document] ❌ 等待文档出错: {repr(e)}")
+                    logger.error(f"[read_document] ❌ 等待文档出错: {repr(e)}")
                     return ""
             else:
-                print(f"[read_document] ⚠️ 找不到事件循环 (session={chat_id})")
+                logger.warning(f"[read_document] ⚠️ 找不到事件循环 (session={chat_id})")
         else:
-            print(f"[read_document] ⚠️ 找不到等待队列 (session={chat_id})")
+            logger.warning(f"[read_document] ⚠️ 找不到等待队列 (session={chat_id})")
 
-    print(f"[read_document] ⚠️ 非 WebSocket 模式，无法请求文档 (chat_id={chat_id})")
+    logger.warning(f"[read_document] ⚠️ 非 WebSocket 模式，无法请求文档 (chat_id={chat_id})")
     return ""
 
 
@@ -526,17 +531,17 @@ def _search_document_impl(query: DocumentQuery, docId: DocIdInput) -> str:
                 "docId": resolved_doc_id,
             }
         )
-    print(f"[search_documnet] 请求前端搜索文档 (type={query_type}, filters={filters}, docId={resolved_doc_id})")
+    logger.info(f"[search_documnet] 请求前端搜索文档 (type={query_type}, filters={filters}, docId={resolved_doc_id})")
 
     chat_id = _current_chat_id.get(None)
     if is_stop_requested(chat_id):
-        print("[search_documnet] ⛔ 检测到停止请求，终止搜索")
+        logger.info("[search_documnet] ⛔ 检测到停止请求，终止搜索")
         return '{"matches": [], "matchCount": 0, "error": "stopped_by_user"}'
 
     if chat_id:
         q = _pending_tool_requests.get(chat_id)
         if q:
-            print(f"[search_documnet] WebSocket 模式，等待前端回传查询结果 (session={chat_id})")
+            logger.info(f"[search_documnet] WebSocket 模式，等待前端回传查询结果 (session={chat_id})")
             loop = _pending_loops.get(chat_id)
             if loop:
                 future = asyncio.run_coroutine_threadsafe(
@@ -546,7 +551,7 @@ def _search_document_impl(query: DocumentQuery, docId: DocIdInput) -> str:
                 try:
                     result = future.result(timeout=35)
                     if result.get("type") == "stop" or result.get("error") == "stopped_by_user":
-                        print("[search_documnet] ⛔ 用户已停止，终止搜索")
+                        logger.info("[search_documnet] ⛔ 用户已停止，终止搜索")
                         return '{"matches": [], "matchCount": 0, "error": "stopped_by_user"}'
                     matches = result.get("matches", [])
                     match_count = result.get("matchCount", 0)
@@ -588,7 +593,7 @@ def _search_document_impl(query: DocumentQuery, docId: DocIdInput) -> str:
                             break
 
                     if match_count > 0:
-                        print(
+                        logger.info(
                             f"[search_documnet] ✅ 查询完成，匹配 {match_count} 项，"
                             f"涉及段落索引 {matched_para_indices}，段落ID {matched_para_ids}"
                         )
@@ -612,7 +617,7 @@ def _search_document_impl(query: DocumentQuery, docId: DocIdInput) -> str:
                             ensure_ascii=False,
                         )
 
-                    print("[search_documnet] ⚠️ 未找到匹配项")
+                    logger.warning("[search_documnet] ⚠️ 未找到匹配项")
                     if writer:
                         writer(
                             {
@@ -634,15 +639,15 @@ def _search_document_impl(query: DocumentQuery, docId: DocIdInput) -> str:
                         ensure_ascii=False,
                     )
                 except (TimeoutError, concurrent.futures.TimeoutError):
-                    print("[search_documnet] ⏰ 等待查询结果超时")
+                    logger.warning("[search_documnet] ⏰ 等待查询结果超时")
                     if writer:
                         writer({"type": "status", "content": "⏰ 搜索超时", "docId": resolved_doc_id})
                     return '{"matches": [], "matchCount": 0, "error": "timeout"}'
                 except Exception as e:
-                    print(f"[search_documnet] ❌ 等待查询结果出错: {e}")
+                    logger.error(f"[search_documnet] ❌ 等待查询结果出错: {e}")
                     return '{"matches": [], "matchCount": 0, "error": "' + str(e) + '"}'
 
-    print("[search_documnet] ⚠️ 非 WebSocket 模式，无法执行查询")
+    logger.warning("[search_documnet] ⚠️ 非 WebSocket 模式，无法执行查询")
     return '{"matches": [], "matchCount": 0, "error": "non-websocket"}'
 
 
@@ -665,7 +670,7 @@ def _delete_document_impl(paraIDs: list[int | str], docId: DocIdInput) -> str:
                 "docId": resolved_doc_id,
             }
         )
-    print(f"[delete_document] 请求前端删除文档段落 (paraIDs={deduped_para_ids}, docId={resolved_doc_id})")
+    logger.info(f"[delete_document] 请求前端删除文档段落 (paraIDs={deduped_para_ids}, docId={resolved_doc_id})")
     return f"Frontend notified to delete paragraphs by paraIDs: {deduped_para_ids}"
 
 

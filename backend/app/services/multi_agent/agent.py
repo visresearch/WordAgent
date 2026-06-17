@@ -13,6 +13,10 @@ import time
 import traceback
 from collections.abc import AsyncGenerator
 
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
+
 
 def _get_env_int(name: str, default: int) -> int:
     """Read positive int env var with fallback."""
@@ -112,7 +116,7 @@ def _try_init_langsmith():
                 continue
             seen.add(resolved)
             if resolved.exists():
-                print(f"[LangSmith] 加载 .env: {resolved}")
+                logger.info(f"[LangSmith] 加载 .env: {resolved}")
                 load_dotenv(resolved, override=False)
 
         api_key = os.environ.get("LANGSMITH_API_KEY") or ""
@@ -124,12 +128,12 @@ def _try_init_langsmith():
             os.environ["LANGCHAIN_ENDPOINT"] = endpoint
             os.environ["LANGCHAIN_PROJECT"] = project
             os.environ["LANGCHAIN_TRACING_V2"] = "true"
-            print(f"[LangSmith] ✅ 已启用 tracing，project = {project}")
+            logger.info(f"[LangSmith] ✅ 已启用 tracing，project = {project}")
             return True
         else:
-            print(f"[LangSmith] ⚠️ 未启用 - API_KEY: {'已设置' if api_key else '未设置'}, PROJECT: {project}")
+            logger.warning(f"[LangSmith] ⚠️ 未启用 - API_KEY: {'已设置' if api_key else '未设置'}, PROJECT: {project}")
     except Exception as e:
-        print(f"[LangSmith] ⚠️ 初始化失败: {e}")
+        logger.error(f"[LangSmith] ⚠️ 初始化失败: {e}")
     return False
 
 
@@ -278,11 +282,11 @@ def _run_sub_agent(
     chat_id = _current_chat_id.get(None)
     if max_iterations is None:
         max_iterations = _AGENT_RECURSION_LIMIT
-    print(f"[MultiAgent] {agent_name} sub-agent max_iterations={max_iterations}")
+    logger.info(f"[MultiAgent] {agent_name} sub-agent max_iterations={max_iterations}")
 
     def _should_stop() -> bool:
         if is_stop_requested(chat_id):
-            print(f"  [{agent_name}] Stop requested, terminating (session={chat_id})")
+            logger.info(f"  [{agent_name}] Stop requested, terminating (session={chat_id})")
             return True
         return False
 
@@ -294,11 +298,11 @@ def _run_sub_agent(
             compacted_messages, light_meta = _light_compact_tool_results(messages)
             if light_meta.get("light_compact_triggered"):
                 messages = compacted_messages
-                print(
+                logger.info(
                     f"  [{agent_name}] Light compact: cleared {light_meta.get('cleared_tool_results', 0)} old tool results"
                 )
         except Exception as compact_err:
-            print(f"  [{agent_name}] Light compact skipped: {compact_err}")
+            logger.info(f"  [{agent_name}] Light compact skipped: {compact_err}")
 
     def _fmt_invalid_tool_call(tc) -> str:
         if isinstance(tc, dict):
@@ -385,7 +389,7 @@ def _run_sub_agent(
                 )
                 repaired_tool_messages.append(ToolMessage(content=content, tool_call_id=tool_call_id, name=tool_name))
                 repaired_any = True
-                print(f"  [{agent_name}] Repaired invalid tool_call: {tool_name}")
+                logger.info(f"  [{agent_name}] Repaired invalid tool_call: {tool_name}")
 
                 # 收集所有工具调用结果，用于后续步骤共享
                 is_mcp_tool = tool_name.startswith("mcp_") or tool_name not in (
@@ -421,7 +425,7 @@ def _run_sub_agent(
                     _writer_generated = True
             except Exception as e:
                 err_text = f"Repaired tool '{tool_name}' execution failed: {e}"
-                print(f"  [{agent_name}] Repair failed: {err_text}")
+                logger.info(f"  [{agent_name}] Repair failed: {err_text}")
                 repaired_tool_messages.append(ToolMessage(content=err_text, tool_call_id=tool_call_id, name=tool_name))
                 append_tool_call(
                     tool=tool_name,
@@ -477,7 +481,7 @@ def _run_sub_agent(
             if not stripped_any_image:
                 raise
 
-            print(f"  [{agent_name}] 图片接口不可用，回退为文本附件路径")
+            logger.warning(f"  [{agent_name}] 图片接口不可用，回退为文本附件路径")
             messages = stripped_messages
             response = llm_with_tools.invoke(messages)
 
@@ -489,16 +493,16 @@ def _run_sub_agent(
 
             if not hasattr(response, "tool_calls") or not response.tool_calls:
                 if _try_repair_and_execute_invalid_calls(invalid_calls):
-                    print(f"  [{agent_name}] Invalid tool_calls auto-repaired, continuing")
+                    logger.info(f"  [{agent_name}] Invalid tool_calls auto-repaired, continuing")
                     continue
 
                 _retry_count += 1
                 invalid_names = [
                     tc.get("name", "?") if isinstance(tc, dict) else getattr(tc, "name", "?") for tc in invalid_calls
                 ]
-                print(f"  [{agent_name}] Invalid tool calls: {invalid_names}, retry ({_retry_count})")
+                logger.info(f"  [{agent_name}] Invalid tool calls: {invalid_names}, retry ({_retry_count})")
                 for idx, tc in enumerate(invalid_calls, 1):
-                    print(f"  [{agent_name}]    invalid#{idx}: {_fmt_invalid_tool_call(tc)}")
+                    logger.info(f"  [{agent_name}]    invalid#{idx}: {_fmt_invalid_tool_call(tc)}")
 
                 if _retry_count <= 2:
                     if _should_stop():
@@ -512,12 +516,12 @@ def _run_sub_agent(
                     continue
                 else:
                     text_output = response.content or ""
-                    print(f"  [{agent_name}] Retry limit exceeded, giving up")
+                    logger.info(f"  [{agent_name}] Retry limit exceeded, giving up")
                     break
             else:
-                print(f"  [{agent_name}] Filtering invalid tool calls, keeping valid ones")
+                logger.info(f"  [{agent_name}] Filtering invalid tool calls, keeping valid ones")
                 for idx, tc in enumerate(invalid_calls, 1):
-                    print(f"  [{agent_name}]    dropped_invalid#{idx}: {_fmt_invalid_tool_call(tc)}")
+                    logger.info(f"  [{agent_name}]    dropped_invalid#{idx}: {_fmt_invalid_tool_call(tc)}")
                 response = AIMessage(content=response.content, tool_calls=response.tool_calls)
 
         messages.append(response)
@@ -537,7 +541,7 @@ def _run_sub_agent(
             if _should_stop():
                 break
             tool_name = tc["name"]
-            print(f"  [{agent_name}] Calling tool: {tool_name}")
+            logger.info(f"  [{agent_name}] Calling tool: {tool_name}")
             tool_fn = tool_map.get(tool_name)
             if tool_fn:
                 try:
@@ -611,7 +615,7 @@ def _run_sub_agent(
                         err = f"Tool {tool_name} failed: {e}. Use correct schema format. For generate_document, document must be an object, not a JSON string."
                     else:
                         err = f"Tool {tool_name} failed: {e}. Please check the parameters and try again."
-                    print(f"  [{agent_name}] {err}")
+                    logger.info(f"  [{agent_name}] {err}")
                     messages.append(ToolMessage(content=err, tool_call_id=tc["id"], name=tool_name))
                     append_tool_call(
                         tool=tool_name,
@@ -716,12 +720,12 @@ def _build_multi_agent_graph(llm, model_name: str, mcp_tools: list = None):
     def planner_node(state: MultiAgentState) -> dict:
         chat_id = _current_chat_id.get(None)
         if is_stop_requested(chat_id):
-            print(f"[MultiAgent] Planner 收到停止信号，终止 (session={chat_id})")
+            logger.info(f"[MultiAgent] Planner 收到停止信号，终止 (session={chat_id})")
             return {}
 
         writer = get_stream_writer()
         writer({"type": "status", "content": "🧠 开始分析任务"})
-        print("[MultiAgent] Planner 开始规划")
+        logger.info("[MultiAgent] Planner 开始规划")
 
         task = state.user_message
         if state.document_range:
@@ -774,7 +778,7 @@ def _build_multi_agent_graph(llm, model_name: str, mcp_tools: list = None):
                                 }
                             )
                     except Exception as e:
-                        print(f"[MultiAgent] ⚠️ 图片附件读取失败: {filename}, {e}")
+                        logger.error(f"[MultiAgent] ⚠️ 图片附件读取失败: {filename}, {e}")
                 else:
                     file_reference_lines.append(f"- {filename} | project_path={project_path or '(unknown)'}")
 
@@ -811,14 +815,14 @@ def _build_multi_agent_graph(llm, model_name: str, mcp_tools: list = None):
                 {"type": "status", "content": f"Workflow planned: {step_count} steps - {workflow.get('summary', '')}"}
             )
         else:
-            print("[MultiAgent] Planner did not create workflow, direct text output")
+            logger.info("[MultiAgent] Planner did not create workflow, direct text output")
 
         return {"workflow": workflow, "messages": [{"role": "planner", "content": text}]}
 
     def execute_workflow_node(state: MultiAgentState) -> dict:
         chat_id = _current_chat_id.get(None)
         if is_stop_requested(chat_id):
-            print(f"[MultiAgent] ⛔ 工作流收到停止信号，终止 (session={chat_id})")
+            logger.info(f"[MultiAgent] ⛔ 工作流收到停止信号，终止 (session={chat_id})")
             return {}
 
         writer = get_stream_writer()
@@ -837,7 +841,7 @@ def _build_multi_agent_graph(llm, model_name: str, mcp_tools: list = None):
 
         for i, step in enumerate(steps):
             if is_stop_requested(chat_id):
-                print(f"[MultiAgent] ⛔ 用户停止，结束后续步骤 (session={chat_id})")
+                logger.info(f"[MultiAgent] ⛔ 用户停止，结束后续步骤 (session={chat_id})")
                 break
 
             agent_name = step["agent"]
@@ -859,7 +863,7 @@ def _build_multi_agent_graph(llm, model_name: str, mcp_tools: list = None):
             }.get(agent_name, agent_name)
             writer({"type": "__phase", "agent": agent_name})
             writer({"type": "status", "content": f"⚙️ 步骤 {i + 1}/{len(steps)}: {agent_cn} 开始执行"})
-            print(f"[MultiAgent] 步骤 {i + 1}: {agent_name} - {task[:50]}")
+            logger.info(f"[MultiAgent] 步骤 {i + 1}: {agent_name} - {task[:50]}")
 
             context_parts = []
 
@@ -957,8 +961,8 @@ async def process_writing_request_stream(
     enable_thinking: bool = True,
 ) -> AsyncGenerator[str, None]:
     """Multi-agent streaming handler (compatible with single agent interface)."""
-    print("[MultiAgent] Starting request")
-    print(f"[MultiAgent] Deep thinking: {enable_thinking}")
+    logger.info("[MultiAgent] Starting request")
+    logger.info(f"[MultiAgent] Deep thinking: {enable_thinking}")
 
     model_name = resolve_model(model or "auto", provider or "")
     llm = _create_llm(model_name)
@@ -974,7 +978,7 @@ async def process_writing_request_stream(
                 error_text = error_text[:300] + "..."
             yield f"data: {json.dumps({'type': 'status', 'content': f'⚠️ MCP 服务器 {server_name} 加载失败: {error_text}'}, ensure_ascii=False)}\n\n"
     if mcp_tools:
-        print(f"[MultiAgent] MCP tools loaded: {[t.name for t in mcp_tools]}")
+        logger.info(f"[MultiAgent] MCP tools loaded: {[t.name for t in mcp_tools]}")
         # Build and cache MCP tools prompt for research agent
         mcp_prompt = build_mcp_tools_prompt(mcp_tools)
         from app.services.multi_agent.prompts import update_mcp_tools_prompt
@@ -1004,7 +1008,7 @@ async def process_writing_request_stream(
             long_term_prompt = build_long_term_memory_prompt()
             if long_term_prompt:
                 memory_context += long_term_prompt + "\n\n"
-                print("[MultiAgent] Loaded long-term memory")
+                logger.info("[MultiAgent] Loaded long-term memory")
 
         if history:
             from app.services.memory import build_short_term_messages
@@ -1021,7 +1025,7 @@ async def process_writing_request_stream(
                         parts.append(f"[Assistant] {m.content}")
                 if parts:
                     memory_context += "## Recent Conversation\n" + "\n\n".join(parts) + "\n\n"
-                    print(f"[MultiAgent] Built short-term memory: {len(parts)} messages")
+                    logger.info(f"[MultiAgent] Built short-term memory: {len(parts)} messages")
 
         initial_state = MultiAgentState(
             user_message=message,
@@ -1090,18 +1094,18 @@ async def process_writing_request_stream(
                         for stream_item in response:
                             has_any_stream_item = True
                             if chat_id and is_stop_requested(chat_id):
-                                print(f"[MultiAgent] Stop requested, ending stream (session={chat_id})")
+                                logger.info(f"[MultiAgent] Stop requested, ending stream (session={chat_id})")
                                 break
                             asyncio.run_coroutine_threadsafe(queue.put(stream_item), loop)
                         asyncio.run_coroutine_threadsafe(queue.put(None), loop)
                         return
                     except Exception as e:
                         if _is_context_overflow_error(e):
-                            print(f"[MultiAgent] Context overflow, triggering heavy compaction")
+                            logger.info(f"[MultiAgent] Context overflow, triggering heavy compaction")
                             asyncio.run_coroutine_threadsafe(queue.put(("context_overflow", str(e))), loop)
                             raise
                         if attempt < max_attempts and (not has_any_stream_item) and _is_transient_stream_error(e):
-                            print(f"[MultiAgent] Streaming error ({attempt}): {e}, retrying")
+                            logger.error(f"[MultiAgent] Streaming error ({attempt}): {e}, retrying")
                             time.sleep(0.5)
                             continue
                         raise
@@ -1121,7 +1125,7 @@ async def process_writing_request_stream(
                 raise Exception(stream_item[1])
 
             if isinstance(stream_item, tuple) and stream_item[0] == "context_overflow":
-                print(f"[MultiAgent] Context overflow, triggering passive heavy compaction")
+                logger.info(f"[MultiAgent] Context overflow, triggering passive heavy compaction")
                 from app.services.context import (
                     compress_conversation_history_if_needed,
                     _estimate_messages_tokens,
@@ -1141,7 +1145,7 @@ async def process_writing_request_stream(
                 if heavy_meta.get("heavy_compact_triggered"):
                     before = heavy_meta.get("before_tokens", current_tokens)
                     after = heavy_meta.get("after_tokens", 0)
-                    print(f"[MultiAgent] Heavy compaction done: {before} -> {after} tokens")
+                    logger.info(f"[MultiAgent] Heavy compaction done: {before} -> {after} tokens")
                     updated_history = []
                     for m in compressed:
                         role = {"HumanMessage": "user", "AIMessage": "assistant", "SystemMessage": "system"}.get(
@@ -1160,7 +1164,7 @@ async def process_writing_request_stream(
                             updated_history.append({"role": role, "content": str(content_val)})
                     raise ContextOverflowError("Context overflow, heavy compaction triggered", updated_history)
                 else:
-                    print("[MultiAgent] Heavy compaction failed")
+                    logger.info("[MultiAgent] Heavy compaction failed")
                     raise Exception("Context overflow but heavy compaction failed")
 
             if not isinstance(stream_item, tuple):
@@ -1210,9 +1214,6 @@ async def process_writing_request_stream(
                             if _last_input_tokens > 0
                             else _estimate_messages_tokens(_conversation_history)
                         )
-                        tokens_k = current_tokens / 1000
-                        max_tokens_k = MAX_CONTEXT_TOKENS / 1000
-                        # print(f"[MultiAgent] Context: {tokens_k:.1f}k tokens")
                         yield f"data: {json.dumps({'type': 'token_stats', 'current_tokens': current_tokens, 'max_tokens': MAX_CONTEXT_TOKENS}, ensure_ascii=False)}\n\n"
                     except Exception:
                         pass
@@ -1291,7 +1292,7 @@ async def process_writing_request_stream(
         yield f"__tool_json__: {json.dumps(build_tool_json(tool_log), ensure_ascii=False)}\n\n"
 
     except Exception as e:
-        print(f"[MultiAgent Error] {e}")
+        logger.error(f"[MultiAgent Error] {e}")
         traceback.print_exc()
         yield f"data: {json.dumps({'type': 'text', 'content': f'Error: {str(e)}'}, ensure_ascii=False)}\n\n"
         yield "data: [DONE]\n\n"

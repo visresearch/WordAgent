@@ -11,12 +11,15 @@ from langchain.agents import create_agent
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
+from app.core.logging import get_logger
 from app.services.agent.tools import (
     _current_chat_id,
     _current_model_name,
     is_stop_requested,
 )
 from app.services.llm_client import resolve_model, init_chat_model_with_reasoning
+
+logger = get_logger(__name__)
 
 # ---------------------------------------------------------------------------
 # 配置
@@ -130,7 +133,7 @@ def run_sub_agent_task(
     # 状态消息
     emojis = {"reviewer": "🔍", "explore": "🗺️", "plan": "📋", "general-purpose": "🤖"}
     writer({"type": "status", "content": f"{emojis.get(agent_type, '🤖')} 启动 {agent_type}: {description}"})
-    print(f"[SubAgent] 启动 {agent_type}: {description}")
+    logger.info(f"[SubAgent] 启动 {agent_type}: {description}")
 
     # 解析工具
     tools, _ = resolve_sub_agent_tools(agent_type)
@@ -161,7 +164,7 @@ def run_sub_agent_task(
         for stream_item in app.stream(input={"messages": messages}, stream_mode=["values", "custom"], config=config):
             chat_id = _current_chat_id.get(None)
             if is_stop_requested(chat_id):
-                print(f"[SubAgent] ⛔ 停止信号")
+                logger.info(f"[SubAgent] ⛔ 停止信号")
                 break
 
             if not isinstance(stream_item, tuple):
@@ -190,10 +193,10 @@ def run_sub_agent_task(
         writer(
             {"type": "status", "content": f"✅ {agent_type} 完成，耗时 {duration:.1f}s，工具调用 {tool_call_count} 次"}
         )
-        print(f"[SubAgent] ✅ {agent_type} 完成")
+        logger.info(f"[SubAgent] ✅ {agent_type} 完成")
 
     except Exception as e:
-        print(f"[SubAgent] ❌ 失败: {e}")
+        logger.error(f"[SubAgent] ❌ 失败: {e}")
         traceback.print_exc()
         return f"Sub-agent failed: {e}"
 

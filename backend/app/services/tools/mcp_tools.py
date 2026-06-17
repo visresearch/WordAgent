@@ -12,6 +12,9 @@ from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 from app.core.config import get_user_settings_file
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 def _apply_proxy_to_environ() -> None:
@@ -331,7 +334,7 @@ def _load_mcp_server_configs() -> dict[str, dict[str, Any]]:
             entry["command"] = command
             if isinstance(config.get("args"), list):
                 entry["args"] = config["args"]
-            print(f"[MCP] 🔧 {name}: command={command} args={entry.get('args')}")
+            logger.info(f"[MCP] 🔧 {name}: command={command} args={entry.get('args')}")
 
             entry["transport"] = transport or "stdio"
 
@@ -364,7 +367,7 @@ def _wrap_mcp_tool_for_sync(tool, loop: asyncio.AbstractEventLoop, call_timeout_
     def sync_fn(**kwargs):
         import time as _time
 
-        print(f"[MCP] ▶ 调用 {tool.name}，参数: {list(kwargs.keys())}")
+        logger.info(f"[MCP] ▶ 调用 {tool.name}，参数: {list(kwargs.keys())}")
         _emit_stream_event(
             {
                 "type": "mcp_tool_call",
@@ -390,7 +393,7 @@ def _wrap_mcp_tool_for_sync(tool, loop: asyncio.AbstractEventLoop, call_timeout_
                     "content": f"MCP 工具 {tool.name} 已返回结果",
                 }
             )
-            print(f"[MCP] ✅ {tool.name} 完成，耗时 {_time.time() - t0:.1f}s")
+            logger.info(f"[MCP] ✅ {tool.name} 完成，耗时 {_time.time() - t0:.1f}s")
             return model_output
         except concurrent.futures.TimeoutError:
             future.cancel()
@@ -406,7 +409,7 @@ def _wrap_mcp_tool_for_sync(tool, loop: asyncio.AbstractEventLoop, call_timeout_
                     "content": f"MCP 工具 {tool.name} 执行超时",
                 }
             )
-            print(f"[MCP] ❌ {tool.name} 超时，耗时 {_time.time() - t0:.1f}s，已返回错误结果并继续流程")
+            logger.error(f"[MCP] ❌ {tool.name} 超时，耗时 {_time.time() - t0:.1f}s，已返回错误结果并继续流程")
             return timeout_msg
         except Exception as e:
             err_text = _format_mcp_exception(e)
@@ -421,7 +424,7 @@ def _wrap_mcp_tool_for_sync(tool, loop: asyncio.AbstractEventLoop, call_timeout_
                     "content": f"MCP 工具 {tool.name} 执行失败",
                 }
             )
-            print(
+            logger.error(
                 f"[MCP] ❌ {tool.name} 失败，耗时 {_time.time() - t0:.1f}s，错误: {err_text}，已返回错误结果并继续流程"
             )
             return f"MCP tool '{tool.name}' execution failed: {err_text}"
@@ -447,13 +450,13 @@ async def load_mcp_tools() -> tuple[list, list, list[dict[str, str]]]:
 
     config = _load_mcp_server_configs()
     if not config:
-        print("[MCP] ℹ️ 未配置 MCP 服务器，跳过加载")
+        logger.info("[MCP] ℹ️ 未配置 MCP 服务器，跳过加载")
         return [], [], []
 
     try:
         from langchain_mcp_adapters.client import MultiServerMCPClient
     except ImportError:
-        print("[MCP] ⚠️ langchain-mcp-adapters 未安装，跳过 MCP 工具加载")
+        logger.warning("[MCP] ⚠️ langchain-mcp-adapters 未安装，跳过 MCP 工具加载")
         return [], [], [{"name": "MCP", "error": "缺少依赖 langchain-mcp-adapters"}]
 
     loop = asyncio.get_running_loop()
@@ -468,7 +471,7 @@ async def load_mcp_tools() -> tuple[list, list, list[dict[str, str]]]:
             wrapped = [_wrap_mcp_tool_for_sync(t, loop) for t in raw_tools]
             all_tools.extend(wrapped)
             live_clients.append(client)
-            print(f"[MCP] ✅ {name}: 已加载 {len(wrapped)} 个工具 {[t.name for t in wrapped]}")
+            logger.info(f"[MCP] ✅ {name}: 已加载 {len(wrapped)} 个工具 {[t.name for t in wrapped]}")
         except Exception as e1:
             # SSE 连接失败时，尝试以 streamable_http 重试
             if server_cfg.get("transport") == "sse":
@@ -479,22 +482,22 @@ async def load_mcp_tools() -> tuple[list, list, list[dict[str, str]]]:
                     wrapped = [_wrap_mcp_tool_for_sync(t, loop) for t in raw_tools]
                     all_tools.extend(wrapped)
                     live_clients.append(client)
-                    print(f"[MCP] ✅ {name}: 已加载 {len(wrapped)} 个工具 (streamable_http 回退)")
+                    logger.info(f"[MCP] ✅ {name}: 已加载 {len(wrapped)} 个工具 (streamable_http 回退)")
                     continue
                 except Exception as e2:
-                    print(f"[MCP] ❌ {name}: 加载失败 (含 streamable_http 回退): {e2}")
+                    logger.error(f"[MCP] ❌ {name}: 加载失败 (含 streamable_http 回退): {e2}")
                     failed_servers.append({"name": name, "error": str(e2)})
             else:
                 import traceback
 
-                print(f"[MCP] ❌ {name}: 加载失败")
+                logger.error(f"[MCP] ❌ {name}: 加载失败")
                 traceback.print_exc()
                 failed_servers.append({"name": name, "error": str(e1)})
 
     if all_tools:
-        print(f"[MCP] 📊 共加载 {len(all_tools)} 个工具 (来自 {len(live_clients)} 个服务器)")
+        logger.info(f"[MCP] 📊 共加载 {len(all_tools)} 个工具 (来自 {len(live_clients)} 个服务器)")
     else:
-        print("[MCP] ⚠️ 所有 MCP 服务器均加载失败，无可用工具")
+        logger.error("[MCP] ⚠️ 所有 MCP 服务器均加载失败，无可用工具")
 
     return all_tools, live_clients, failed_servers
 

@@ -14,8 +14,10 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.core.config import get_user_settings_file, get_temp_dir, get_upload_dir
+from app.core.logging import get_logger
 from app.services.memory import read_long_term_memory, _get_memory_file
 
+logger = get_logger(__name__)
 router = APIRouter()
 
 # 设置文件路径
@@ -76,7 +78,7 @@ async def get_settings():
         # 返回默认设置
         return UserSettings()
     except Exception as e:
-        print(f"读取设置失败: {e}")
+        logger.error(f"读取设置失败: {e}")
         return UserSettings()
 
 
@@ -110,7 +112,7 @@ async def save_settings(settings: UserSettings):
 
         return {"message": "设置保存成功"}
     except Exception as e:
-        print(f"保存设置失败: {e}")
+        logger.error(f"保存设置失败: {e}")
         raise HTTPException(status_code=500, detail=f"保存设置失败: {str(e)}")
 
 
@@ -240,7 +242,7 @@ async def scan_cache():
             count += 1
             total_size += f.stat().st_size
         except Exception as e:
-            print(f"读取缓存文件大小失败 {f}: {e}")
+            logger.error(f"读取缓存文件大小失败 {f}: {e}")
 
     dirs_str = "；".join(str(d) for d in cache_dirs)
     return {
@@ -265,7 +267,7 @@ async def clear_cache():
             f.unlink()
             deleted += 1
         except Exception as e:
-            print(f"删除缓存文件失败 {f.name}: {e}")
+            logger.error(f"删除缓存文件失败 {f.name}: {e}")
 
     for cache_dir in existing_dirs:
         for d in sorted(cache_dir.rglob("*"), key=lambda p: len(p.parts), reverse=True):

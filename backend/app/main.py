@@ -16,6 +16,9 @@ from fastapi.staticfiles import StaticFiles
 from app.api import api_router
 from app.core.config import settings
 from app.core.db import close_db, init_db
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 def get_app_version() -> str:
@@ -57,12 +60,9 @@ async def lifespan(app: FastAPI):
     try:
         # 启动时初始化数据库
         await init_db()
-        print("✅ 数据库初始化完成")
+        logger.info("数据库初始化完成")
     except Exception as e:
-        print(f"❌ 数据库初始化失败: {e}")
-        import traceback
-
-        traceback.print_exc()
+        logger.exception("数据库初始化失败: %s", e)
         raise
 
     yield
@@ -70,9 +70,9 @@ async def lifespan(app: FastAPI):
     try:
         # 关闭时清理资源
         await close_db()
-        print("✅ 数据库连接已关闭")
+        logger.info("数据库连接已关闭")
     except Exception as e:
-        print(f"⚠️ 数据库关闭出错: {e}")
+        logger.warning("数据库关闭出错: %s", e)
 
 
 app = FastAPI(
@@ -129,9 +129,9 @@ if FRONTEND_DIST_DIR.exists():
         return response
 
     app.mount("/jsplugindir", StaticFiles(directory=str(FRONTEND_DIST_DIR), html=True), name="jsplugindir")
-    print(f"📂 前端插件已挂载: /jsplugindir/ -> {FRONTEND_DIST_DIR}")
+    logger.info("前端插件已挂载: /jsplugindir/ -> %s", FRONTEND_DIST_DIR)
 else:
-    print(f"⚠️  前端 dist 目录不存在: {FRONTEND_DIST_DIR}")
+    logger.warning("前端 dist 目录不存在: %s", FRONTEND_DIST_DIR)
 
 
 @app.get("/publish")

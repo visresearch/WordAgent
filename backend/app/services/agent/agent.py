@@ -24,6 +24,7 @@ from langchain_core.messages import (
 )
 from langgraph.graph import END, START, MessagesState, StateGraph
 
+from app.core.logging import get_logger
 from app.services.llm_client import resolve_model, supports_thinking, init_chat_model_with_reasoning
 from app.services.agent.prompts import get_core_prompts
 from app.services.utils import normalize_tool_args
@@ -40,6 +41,8 @@ from app.services.agent.tools import (
 )
 from app.services.agent.skills import build_skills_prompt
 from app.services.tools.tool_log import append_tool_call, build_tool_json, set_current_tool_log
+
+logger = get_logger(__name__)
 
 
 def _get_env_int(name: str, default: int) -> int:
@@ -97,7 +100,7 @@ def _try_init_langsmith():
                 continue
             seen.add(resolved)
             if resolved.exists():
-                print(f"[LangSmith] 加载 .env: {resolved}")
+                logger.info(f"[LangSmith] 加载 .env: {resolved}")
                 load_dotenv(resolved, override=False)
 
         api_key = os.environ.get("LANGSMITH_API_KEY") or ""
@@ -109,12 +112,12 @@ def _try_init_langsmith():
             os.environ["LANGCHAIN_ENDPOINT"] = endpoint
             os.environ["LANGCHAIN_PROJECT"] = project
             os.environ["LANGCHAIN_TRACING_V2"] = "true"
-            print(f"[LangSmith] ✅ 已启用 tracing，project = {project}")
+            logger.info(f"[LangSmith] ✅ 已启用 tracing，project = {project}")
             return True
         else:
-            print(f"[LangSmith] ⚠️ 未启用 - API_KEY: {'已设置' if api_key else '未设置'}, PROJECT: {project}")
+            logger.warning(f"[LangSmith] ⚠️ 未启用 - API_KEY: {'已设置' if api_key else '未设置'}, PROJECT: {project}")
     except Exception as e:
-        print(f"[LangSmith] ⚠️ 初始化失败: {e}")
+        logger.error(f"[LangSmith] ⚠️ 初始化失败: {e}")
     return False
 
 
@@ -343,19 +346,19 @@ def build_graph(llm_with_tools, all_tools: list):
         """单一 Agent 节点 - 决定下一步行动或直接回复"""
         chat_id = _current_chat_id.get(None)
         if is_stop_requested(chat_id):
-            print(f"[Agent] ⛔ 收到停止信号，终止 Agent 节点 (session={chat_id})")
+            logger.info(f"[Agent] ⛔ 收到停止信号，终止 Agent 节点 (session={chat_id})")
             return {"messages": []}
-        print("[Agent] 开始处理")
+        logger.info("[Agent] 开始处理")
         invoke_messages = state["messages"]
         try:
             from app.services.context import _light_compact_tool_results
 
             compacted_messages, light_meta = _light_compact_tool_results(invoke_messages)
             if light_meta.get("light_compact_triggered"):
-                print(f"[Agent] 轻量压缩生效: 清除 {light_meta.get('cleared_tool_results', 0)} 个旧工具结果")
+                logger.info(f"[Agent] 轻量压缩生效: 清除 {light_meta.get('cleared_tool_results', 0)} 个旧工具结果")
                 invoke_messages = compacted_messages
         except Exception as compact_err:
-            print(f"[Agent] 轻量压缩跳过: {compact_err}")
+            logger.info(f"[Agent] 轻量压缩跳过: {compact_err}")
         response = llm_with_tools.invoke(invoke_messages)
         return {"messages": [response]}
 
@@ -367,20 +370,20 @@ def build_graph(llm_with_tools, all_tools: list):
 
         for tool_call in last_message.tool_calls:
             if is_stop_requested(chat_id):
-                print(f"[Tools] ⛔ 收到停止信号，终止后续工具执行 (session={chat_id})")
+                logger.info(f"[Tools] ⛔ 收到停止信号，终止后续工具执行 (session={chat_id})")
                 break
             tool_name = tool_call["name"]
-            print(f"[Tools] 执行工具: {tool_name}")
+            logger.info(f"[Tools] 执行工具: {tool_name}")
 
             tool_fn = tool_map.get(tool_name)
             if tool_fn:
                 try:
-                    print(
+                    logger.info(
                         f"[Tools] 调用 normalize_tool_args 前，args 类型={type(tool_call['args'])}, keys={list(tool_call['args'].keys()) if isinstance(tool_call['args'], dict) else 'N/A'}"
                     )
                     # 用 normalize_tool_args 预处理参数，修复 JSON 字符串转义等问题
                     normalized_args = normalize_tool_args(tool_name, tool_call["args"])
-                    print(
+                    logger.info(
                         f"[Tools] normalize_tool_args 返回，类型={type(normalized_args)}, keys={list(normalized_args.keys()) if isinstance(normalized_args, dict) else 'N/A'}"
                     )
                     result = tool_fn.invoke(normalized_args)
@@ -419,7 +422,7 @@ def build_graph(llm_with_tools, all_tools: list):
                         err = f"Tool {tool_name} failed: {e}. Use correct schema format. For generate_document, document must be an object, not a JSON string."
                     else:
                         err = f"Tool {tool_name} failed: {e}. Please check the parameters and try again."
-                    print(f"[Tools] ❌ {err}")
+                    logger.error(f"[Tools] ❌ {err}")
                     results.append(ToolMessage(content=err, tool_call_id=tool_call["id"], name=tool_name))
                     append_tool_call(
                         tool=tool_name,
@@ -429,7 +432,7 @@ def build_graph(llm_with_tools, all_tools: list):
                         is_mcp=is_mcp_tool,
                     )
             else:
-                print(f"[Tools] ⚠️ 未知工具: {tool_name}")
+                logger.warning(f"[Tools] ⚠️ 未知工具: {tool_name}")
                 unknown_err = f"Error: unknown tool {tool_name}"
                 results.append(ToolMessage(content=unknown_err, tool_call_id=tool_call["id"], name=tool_name))
                 append_tool_call(tool=tool_name, input=tool_call.get("args", {}), output=unknown_err, error=True)
@@ -453,20 +456,20 @@ def build_graph(llm_with_tools, all_tools: list):
 
         for tc in invalid_calls:
             if is_stop_requested(chat_id):
-                print(f"[Repair] ⛔ 收到停止信号，终止修复执行 (session={chat_id})")
+                logger.info(f"[Repair] ⛔ 收到停止信号，终止修复执行 (session={chat_id})")
                 break
 
             tool_name = tc.get("name", "")
             tool_fn = tool_map.get(tool_name)
             if not tool_fn:
-                print(f"[Repair] ⚠️ 未知工具跳过: {tool_name}")
+                logger.warning(f"[Repair] ⚠️ 未知工具跳过: {tool_name}")
                 continue
 
             raw_args = tc.get("args", "")
             error_msg = tc.get("error", "")
-            print(f"[Repair] 尝试修复工具: {tool_name}")
-            print(f"[Repair] 原始错误: {error_msg}")
-            print(f"[Repair] 原始 args: {str(raw_args)[:200]}...")
+            logger.info(f"[Repair] 尝试修复工具: {tool_name}")
+            logger.error(f"[Repair] 原始错误: {error_msg}")
+            logger.info(f"[Repair] 原始 args: {str(raw_args)[:200]}...")
 
             parsed_args = None
             for attempt in range(3):
@@ -475,27 +478,27 @@ def build_graph(llm_with_tools, all_tools: list):
                     try:
                         parsed = json.loads(raw_args_stripped)
                         raw_args = parsed
-                        print(f"[Repair] ✅ JSON 解析成功")
+                        logger.info(f"[Repair] ✅ JSON 解析成功")
                     except json.JSONDecodeError:
                         try:
                             import ast
 
                             parsed = ast.literal_eval(raw_args_stripped)
                             raw_args = parsed
-                            print(f"[Repair] ✅ ast.literal_eval 解析成功")
+                            logger.info(f"[Repair] ✅ ast.literal_eval 解析成功")
                         except Exception as e:
-                            print(f"[Repair] ⚠️ 解析失败: {e}")
+                            logger.error(f"[Repair] ⚠️ 解析失败: {e}")
 
                 if isinstance(raw_args, dict):
                     # 如果 document 是字符串，尝试解析
                     if "document" in raw_args and isinstance(raw_args.get("document"), str):
                         doc_str = raw_args["document"]
-                        print(f"[Repair] document 是字符串，尝试解析，长度={len(doc_str)}")
+                        logger.info(f"[Repair] document 是字符串，尝试解析，长度={len(doc_str)}")
                         try:
                             # 尝试直接解析
                             doc_parsed = json.loads(doc_str)
                             raw_args = {**raw_args, "document": doc_parsed}
-                            print(f"[Repair] ✅ document JSON 解析成功")
+                            logger.info(f"[Repair] ✅ document JSON 解析成功")
                         except json.JSONDecodeError:
                             try:
                                 import ast
@@ -503,9 +506,9 @@ def build_graph(llm_with_tools, all_tools: list):
                                 doc_parsed = ast.literal_eval(doc_str)
                                 if isinstance(doc_parsed, dict):
                                     raw_args = {**raw_args, "document": doc_parsed}
-                                    print(f"[Repair] ✅ document ast.literal_eval 解析成功")
+                                    logger.info(f"[Repair] ✅ document ast.literal_eval 解析成功")
                             except Exception as e:
-                                print(f"[Repair] ⚠️ document 解析失败: {e}")
+                                logger.error(f"[Repair] ⚠️ document 解析失败: {e}")
 
                     # 检查 document 是否已正确解析
                     if isinstance(raw_args.get("document"), dict):
@@ -521,13 +524,13 @@ def build_graph(llm_with_tools, all_tools: list):
                 break
 
             if parsed_args is None:
-                print(f"[Repair] ❌ 无法解析工具参数: {tool_name}")
+                logger.error(f"[Repair] ❌ 无法解析工具参数: {tool_name}")
                 continue
 
             try:
                 normalized_args = normalize_tool_args(tool_name, parsed_args)
             except Exception as norm_err:
-                print(f"[Repair] ⚠️ normalize_tool_args 失败: {norm_err}，使用原始参数")
+                logger.error(f"[Repair] ⚠️ normalize_tool_args 失败: {norm_err}，使用原始参数")
                 normalized_args = parsed_args
 
             try:
@@ -557,10 +560,10 @@ def build_graph(llm_with_tools, all_tools: list):
                     repaired=True,
                     is_mcp=tool_name.startswith("mcp_") or tool_name not in tool_map,
                 )
-                print(f"[Repair] ✅ 已修复并执行工具: {tool_name}")
+                logger.info(f"[Repair] ✅ 已修复并执行工具: {tool_name}")
             except Exception as e:
                 err_text = f"Repaired tool '{tool_name}' execution failed: {e}"
-                print(f"[Repair] ❌ {err_text}")
+                logger.error(f"[Repair] ❌ {err_text}")
                 repaired_results.append(
                     ToolMessage(content=err_text, tool_call_id=tc.get("id", "repaired"), name=tool_name)
                 )
@@ -574,7 +577,7 @@ def build_graph(llm_with_tools, all_tools: list):
                 )
 
         if repaired_tool_calls:
-            print(f"[Repair] ✅ 成功修复 {len(repaired_tool_calls)} 个工具调用")
+            logger.info(f"[Repair] ✅ 成功修复 {len(repaired_tool_calls)} 个工具调用")
             return {
                 "messages": [
                     RemoveMessage(id=last_message.id),
@@ -583,7 +586,7 @@ def build_graph(llm_with_tools, all_tools: list):
                 ]
             }
 
-        print("[Repair] ⚠️ 无法自动修复，提示模型重试")
+        logger.warning("[Repair] ⚠️ 无法自动修复，提示模型重试")
         return {
             "messages": [
                 RemoveMessage(id=last_message.id),
@@ -607,28 +610,28 @@ def build_graph(llm_with_tools, all_tools: list):
         """判断 Agent 是否还需要调用工具"""
         chat_id = _current_chat_id.get(None)
         if is_stop_requested(chat_id):
-            print("[Router] -> END (用户停止)")
+            logger.info("[Router] -> END (用户停止)")
             return END
 
         last_message = state["messages"][-1]
 
         if hasattr(last_message, "tool_calls") and last_message.tool_calls:
-            print(f"[Router] -> tools (有 {len(last_message.tool_calls)} 个有效工具调用)")
+            logger.info(f"[Router] -> tools (有 {len(last_message.tool_calls)} 个有效工具调用)")
             return "tools"
 
         invalid_calls = getattr(last_message, "invalid_tool_calls", []) or []
         if invalid_calls:
             tool_names = [tc.get("name", "?") for tc in invalid_calls]
-            print(f"[Router] ⚠️ 检测到无效工具调用: {tool_names}")
+            logger.warning(f"[Router] ⚠️ 检测到无效工具调用: {tool_names}")
             for idx, tc in enumerate(invalid_calls, 1):
-                print(
+                logger.error(
                     f"[Router] invalid_tool_call[{idx}] name={tc.get('name', '?')} "
                     f"error={tc.get('error', '?')} args={str(tc.get('args', ''))[:100]}"
                 )
-            print("[Router] -> repair")
+            logger.info("[Router] -> repair")
             return "repair"
 
-        print("[Router] -> END")
+        logger.info("[Router] -> END")
         return END
 
     # ---- 构建图 ----
@@ -681,10 +684,18 @@ async def process_writing_request_stream(
     elif mode not in {"agent", "ask"}:
         mode = "agent"
 
-    print("[Agent] 开始处理请求")
-    print(f"[Agent] 模式: {mode}")
-    print(f"[Agent] 深度思考: {enable_thinking}")
-    print("[Agent] 配置: recursion_limit =", _AGENT_RECURSION_LIMIT)
+    logger.info("[Agent] 开始处理请求")
+    logger.info(f"[Agent] 模式: {mode}")
+    logger.info(f"[Agent] 深度思考: {enable_thinking}")
+    logger.info(
+        " ".join(
+            str(value)
+            for value in (
+                "[Agent] 配置: recursion_limit =",
+                _AGENT_RECURSION_LIMIT,
+            )
+        )
+    )
 
     model_name = resolve_model(model or "auto", provider or "")
     _thinking_enabled = enable_thinking and supports_thinking(model_name)
@@ -705,7 +716,7 @@ async def process_writing_request_stream(
         mcp_failed_servers = []
     mcp_tool_names = {t.name for t in mcp_tools}
     tools = get_base_tools_for_mode(mode) + mcp_tools
-    print(f"[Agent] 已绑定 {[t.name for t in tools]}")
+    logger.info(f"[Agent] 已绑定 {[t.name for t in tools]}")
 
     # 构建系统提示
     system_parts = list(get_core_prompts(mode=mode))
@@ -717,7 +728,7 @@ async def process_writing_request_stream(
         long_term_prompt = build_long_term_memory_prompt()
         if long_term_prompt:
             system_parts.append(long_term_prompt)
-            print("[Agent] 已注入长期记忆")
+            logger.info("[Agent] 已注入长期记忆")
 
     if mode in {"agent", "ask"}:
         mcp_prompt = build_mcp_tools_prompt(mcp_tools)
@@ -757,7 +768,7 @@ async def process_writing_request_stream(
         short_term = build_short_term_messages(history)
         if short_term:
             messages.extend(short_term)
-            print(f"[Agent] 注入 {len(short_term)} 条短期记忆")
+            logger.info(f"[Agent] 注入 {len(short_term)} 条短期记忆")
 
         # 构建用户消息
         user_content = message
@@ -785,7 +796,7 @@ async def process_writing_request_stream(
                     f"Please process based on the user-selected document content:\n"
                     + "\n".join(f"  - {line}" for line in range_lines)
                 )
-            print(f"[Agent] 文档范围: {document_range}")
+            logger.info(f"[Agent] 文档范围: {document_range}")
 
         # 注入文档全局元信息（支持多文档）
         if document_meta:
@@ -804,23 +815,6 @@ async def process_writing_request_stream(
                 "\nUse these metadata fields in task analysis. The first document in the array is the active document the user is currently viewing."
                 "\nIf the active document has isEmpty=true, treat it as a blank/new document: for the first generate_document call, use the active documentId as docId and omit insertParaID. Do not call read_document just to obtain the empty placeholder paragraph ID."
             )
-            # print(
-            #     "[Agent] 文档元信息:",
-            #     {
-            #         "totalDocuments": len(meta_list),
-            #         "activeDocument": meta_list[0].get("documentName", "") if meta_list else "",
-            #         "documents": [
-            #             {
-            #                 "documentId": m.get("documentId", ""),
-            #                 "documentName": m.get("documentName", ""),
-            #                 "totalParas": m.get("totalParas", 0),
-            #                 "isEmpty": m.get("isEmpty", False),
-            #             }
-            #             for m in meta_list
-            #         ],
-            #     },
-            # )
-
         # 处理附件
         image_content_parts = []
         file_reference_parts = []
@@ -848,11 +842,11 @@ async def process_writing_request_stream(
                                 "image_url": {"url": f"data:{content_type};base64,{b64}"},
                             }
                         )
-                        print(f"[Agent] 🖼️ 附件图片: {filename}")
+                        logger.info(f"[Agent] 🖼️ 附件图片: {filename}")
                 else:
                     line = f"- {filename} | project_path={project_path or '(unknown)'}"
                     file_reference_parts.append(line)
-                    print(f"[Agent] 📄 附件文件引用: {filename} -> {project_path}")
+                    logger.info(f"[Agent] 📄 附件文件引用: {filename} -> {project_path}")
 
         if file_reference_parts:
             user_content += (
@@ -882,7 +876,7 @@ async def process_writing_request_stream(
             messages.append(HumanMessage(content=user_content))
         text_only_messages = list(messages[:-1]) + [HumanMessage(content=text_only_user_content)]
 
-        print(f"[Agent] 消息数量: {len(messages)}")
+        logger.info(f"[Agent] 消息数量: {len(messages)}")
 
         # 获取事件循环
         loop = asyncio.get_running_loop()
@@ -960,7 +954,7 @@ async def process_writing_request_stream(
                         for stream_item in response:
                             has_any_stream_item = True
                             if chat_id and is_stop_requested(chat_id):
-                                print(f"[Agent] ⛔ 检测到停止信号，结束流式处理 (session={chat_id})")
+                                logger.info(f"[Agent] ⛔ 检测到停止信号，结束流式处理 (session={chat_id})")
                                 break
                             asyncio.run_coroutine_threadsafe(queue.put(stream_item), loop)
 
@@ -969,16 +963,16 @@ async def process_writing_request_stream(
                     except Exception as e:
                         if image_content_parts and not image_fallback_applied and _is_image_input_unsupported_error(e):
                             image_fallback_applied = True
-                            print("[Agent] ⚠️ 当前端点不支持图像输入，自动降级为文本模式重试")
+                            logger.warning("[Agent] ⚠️ 当前端点不支持图像输入，自动降级为文本模式重试")
                             stream_kwargs["input"] = {"messages": text_only_messages}
                             continue
 
                         if _is_context_overflow_error(e):
-                            print(f"[Agent] ⚠️ 上下文超限错误（{e}），触发被动重量重压缩")
+                            logger.error(f"[Agent] ⚠️ 上下文超限错误（{e}），触发被动重量重压缩")
                             asyncio.run_coroutine_threadsafe(queue.put(("context_overflow", str(e))), loop)
                             raise
                         if attempt < max_attempts and (not has_any_stream_item) and _is_transient_stream_error(e):
-                            print(f"[Agent] ⚠️ 流式连接异常（第 {attempt} 次）: {e}，准备重试")
+                            logger.error(f"[Agent] ⚠️ 流式连接异常（第 {attempt} 次）: {e}，准备重试")
                             time.sleep(0.5)
                             continue
                         raise
@@ -1001,7 +995,7 @@ async def process_writing_request_stream(
 
             # 上下文超限被动重压缩
             if isinstance(stream_item, tuple) and stream_item[0] == "context_overflow":
-                print(f"[Agent] ⚠️ 收到上下文超限信号，触发被动重量重压缩")
+                logger.warning(f"[Agent] ⚠️ 收到上下文超限信号，触发被动重量重压缩")
                 from app.services.context import compress_conversation_history_if_needed, _estimate_messages_tokens
 
                 current_tokens = _estimate_messages_tokens(_conversation_history)
@@ -1016,7 +1010,7 @@ async def process_writing_request_stream(
                 if heavy_meta.get("heavy_compact_triggered"):
                     before = heavy_meta.get("before_tokens", current_tokens)
                     after = heavy_meta.get("after_tokens", 0)
-                    print(f"[Agent] 🗜️ 被动重量重压缩完成: {before} -> {after} tokens")
+                    logger.info(f"[Agent] 🗜️ 被动重量重压缩完成: {before} -> {after} tokens")
                     updated_history = []
                     for m in compressed:
                         role = {"HumanMessage": "user", "AIMessage": "assistant", "SystemMessage": "system"}.get(
@@ -1035,7 +1029,7 @@ async def process_writing_request_stream(
                             updated_history.append({"role": role, "content": str(content_val)})
                     raise ContextOverflowError("上下文超限，已触发重量重压缩", updated_history)
                 else:
-                    print("[Agent] ⚠️ 被动重量重压缩失败，无法生成摘要")
+                    logger.error("[Agent] ⚠️ 被动重量重压缩失败，无法生成摘要")
                     raise Exception("上下文超限但重量重压缩失败，请手动减少对话历史")
 
             if not isinstance(stream_item, tuple):
@@ -1065,7 +1059,7 @@ async def process_writing_request_stream(
 
                         tokens_k = _last_input_tokens / 1000
                         max_tokens_k = MAX_CONTEXT_TOKENS / 1000
-                        print(f"[Agent] 当前上下文: {tokens_k:.1f}k tokens")
+                        logger.info(f"[Agent] 当前上下文: {tokens_k:.1f}k tokens")
                         yield f"data: {json.dumps({'type': 'token_stats', 'current_tokens': _last_input_tokens, 'max_tokens': MAX_CONTEXT_TOKENS}, ensure_ascii=False)}\n\n"
 
                     if getattr(msg, "tool_calls", None):
@@ -1093,7 +1087,7 @@ async def process_writing_request_stream(
                     has_tool_result = True
 
                     if tool_name == "run_sub_agent":
-                        print(f"[Agent] ⏭️ 跳过 run_sub_agent 工具返回值")
+                        logger.info(f"[Agent] ⏭️ 跳过 run_sub_agent 工具返回值")
                         if isinstance(content, str) and content.startswith("Sub-agent execution failed"):
                             yield f"data: {json.dumps({'type': 'status', 'content': content}, ensure_ascii=False)}\n\n"
                         elif isinstance(content, str) and content:
@@ -1102,7 +1096,7 @@ async def process_writing_request_stream(
 
                     # MCP 工具日志
                     if tool_name in mcp_tool_names:
-                        print(
+                        logger.info(
                             f"[Agent] MCP 工具 {tool_name} 返回类型: {type(content).__name__}, 预览: {str(content)[:200]}"
                         )
                     continue
@@ -1150,7 +1144,7 @@ async def process_writing_request_stream(
 
             elif input_type == "custom":
                 # stream_writer 输出（工具状态消息）
-                print(f"[Agent] 自定义输出: {chunk}")
+                logger.info(f"[Agent] 自定义输出: {chunk}")
                 if chunk:
                     if isinstance(chunk, dict):
                         yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
@@ -1202,7 +1196,7 @@ async def process_writing_request_stream(
         yield f"__tool_json__: {json.dumps(build_tool_json(tool_log), ensure_ascii=False)}\n\n"
 
     except Exception as e:
-        print(f"[Agent Error] {e}")
+        logger.error(f"[Agent Error] {e}")
         traceback.print_exc()
         yield f"data: {json.dumps({'type': 'text', 'content': f'Error: {str(e)}'}, ensure_ascii=False)}\n\n"
         yield "data: [DONE]\n\n"

@@ -9,6 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.orm import declarative_base
 
 from app.core.config import settings
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 # 获取数据库 URL（动态，支持打包后运行）
 DATABASE_URL = settings.database_url
@@ -16,7 +19,7 @@ DATABASE_URL = settings.database_url
 # 创建异步引擎（SQLite 配置）
 engine = create_async_engine(
     DATABASE_URL,
-    echo=settings.DEBUG,  # 开发时打印 SQL
+    echo=False,  # SQL 日志统一交给 logging 管理，避免 SQLAlchemy echo 重复输出
     pool_pre_ping=True,  # 检查连接是否有效
     pool_recycle=3600,  # 1小时后回收连接
     json_serializer=lambda obj: json.dumps(obj, ensure_ascii=False),
@@ -74,21 +77,21 @@ async def init_db():
                     for col_name in json_columns:
                         if col_name not in msg_columns:
                             connection.exec_driver_sql(f"ALTER TABLE chat_messages ADD COLUMN {col_name} JSON")
-                            print(f"✅ 已添加字段: chat_messages.{col_name}")
+                            logger.info("已添加字段: chat_messages.%s", col_name)
                     if "thinking" not in msg_columns:
                         connection.exec_driver_sql("ALTER TABLE chat_messages ADD COLUMN thinking TEXT")
-                        print("✅ 已添加字段: chat_messages.thinking")
+                        logger.info("已添加字段: chat_messages.thinking")
                     if "model" not in msg_columns:
                         connection.exec_driver_sql("ALTER TABLE chat_messages ADD COLUMN model VARCHAR(64)")
-                        print("✅ 已添加字段: chat_messages.model")
+                        logger.info("已添加字段: chat_messages.model")
                     if "provider" not in msg_columns:
                         connection.exec_driver_sql("ALTER TABLE chat_messages ADD COLUMN provider TEXT")
-                        print("✅ 已添加字段: chat_messages.provider")
+                        logger.info("已添加字段: chat_messages.provider")
                     if "mode" not in msg_columns:
                         connection.exec_driver_sql("ALTER TABLE chat_messages ADD COLUMN mode VARCHAR(20)")
-                        print("✅ 已添加字段: chat_messages.mode")
+                        logger.info("已添加字段: chat_messages.mode")
                 except Exception as e:
-                    print(f"⚠️ 添加 chat_messages 字段失败: {e}")
+                    logger.warning("添加 chat_messages 字段失败: %s", e)
 
         await conn.run_sync(_check_and_create)
 

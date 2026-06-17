@@ -11,12 +11,12 @@ import os
 from pathlib import Path
 
 
-def _load_runtime_env() -> None:
+def _load_runtime_env() -> list[Path]:
     """加载运行时 .env（优先可执行文件同目录），兼容 PyInstaller 与开发环境。"""
     try:
         from dotenv import load_dotenv
     except Exception:
-        return
+        return []
 
     candidates: list[Path] = []
 
@@ -33,7 +33,7 @@ def _load_runtime_env() -> None:
     # 通用兜底：当前工作目录 .env
     candidates.append(Path.cwd() / ".env")
 
-    loaded = False
+    loaded_paths: list[Path] = []
     seen: set[Path] = set()
     for env_path in candidates:
         try:
@@ -46,11 +46,8 @@ def _load_runtime_env() -> None:
 
         if resolved.exists():
             load_dotenv(resolved, override=False)
-            loaded = True
-            print(f"[Env] 已加载配置: {resolved}")
-
-    if not loaded:
-        print("[Env] 未找到 .env，继续使用系统环境变量")
+            loaded_paths.append(resolved)
+    return loaded_paths
 
 
 def get_base_path():
@@ -68,10 +65,12 @@ def start_api_server():
     try:
         import uvicorn
         from app.core.config import settings
+        from app.core.logging import get_logger
         from app.main import app
 
-        print("🚀 启动 WenCe AI Writing Assistant API 服务...")
-        print(f"📍 访问地址: http://{settings.HOST}:{settings.PORT}")
+        logger = get_logger("api")
+        logger.info("启动 WenCe AI Writing Assistant API 服务")
+        logger.info("访问地址: http://%s:%s", settings.HOST, settings.PORT)
 
         # 打包后直接使用 app 对象，而不是字符串导入
         # ws_ping_interval/timeout：默认是 (20s, 20s)，对长 LLM 思考过于激进。
@@ -83,15 +82,15 @@ def start_api_server():
             port=settings.PORT,
             reload=False,
             log_level="info",
+            log_config=None,
             access_log=True,
             ws_ping_interval=60,
             ws_ping_timeout=180,
         )
     except Exception as e:
-        print(f"❌ API 服务启动失败: {e}")
-        import traceback
+        from app.core.logging import get_logger
 
-        traceback.print_exc()
+        get_logger("api").exception("API 服务启动失败: %s", e)
 
 
 def start_gui():
@@ -103,10 +102,12 @@ def start_gui():
 
 
 if __name__ == "__main__":
-    _load_runtime_env()
+    loaded_env_paths = _load_runtime_env()
 
     def signal_handler(sig, frame):
-        print("\n正在安全关闭服务...")
+        from app.core.logging import get_logger
+
+        get_logger("main").info("正在安全关闭服务")
         sys.exit(0)
 
     signal.signal(signal.SIGINT, signal_handler)
@@ -118,7 +119,17 @@ if __name__ == "__main__":
 
     OutputBuffer.install()
 
-    print(r"""
+    from app.core.logging import configure_logging, get_logger
+
+    configure_logging(force=True)
+    logger = get_logger("main")
+    if loaded_env_paths:
+        for env_path in loaded_env_paths:
+            logger.info("已加载配置: %s", env_path)
+    else:
+        logger.info("未找到 .env，继续使用系统环境变量")
+
+    logger.info(r"""
 ██╗    ██╗███████╗███╗   ██╗ ██████╗███████╗     █████╗ ██╗
 ██║    ██║██╔════╝████╗  ██║██╔════╝██╔════╝    ██╔══██╗██║
 ██║ █╗ ██║█████╗  ██╔██╗ ██║██║     █████╗      ███████║██║
@@ -137,19 +148,16 @@ if __name__ == "__main__":
         time.sleep(1)
 
         # 在主线程启动 GUI（Qt 必须在主线程运行）
-        print("🖥️  启动 GUI 桌面程序...")
+        logger.info("启动 GUI 桌面程序")
         start_gui()
 
         # GUI 关闭后退出
-        print("🖥️  GUI 已关闭，正在退出...")
+        logger.info("GUI 已关闭，正在退出")
         os._exit(0)
 
     except KeyboardInterrupt:
-        print("\n👋 程序已退出")
+        logger.info("程序已退出")
         sys.exit(0)
     except Exception as e:
-        print(f"❌ 程序异常退出: {e}")
-        import traceback
-
-        traceback.print_exc()
+        logger.exception("程序异常退出: %s", e)
         sys.exit(1)

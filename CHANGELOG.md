@@ -1,6 +1,14 @@
 # Changelog
 
-## [v0.4.7]
+## Unreleased
+
+### Added
+- 添加系统logger，记录系统运行日志
+
+### Changed
+- 修改文档和官网内容
+
+## [v0.5.0]
 
 ### Added
 - 添加新版打包脚本，生成installer.exe和deb包

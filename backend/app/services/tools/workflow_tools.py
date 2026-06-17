@@ -15,6 +15,10 @@ from langchain_core.tools import tool
 from langgraph.config import get_stream_writer
 from pydantic import BaseModel, Field
 
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
+
 
 class WorkflowStep(BaseModel):
     """Workflow step definition."""
@@ -51,7 +55,7 @@ def build_create_workflow(description: str):
         wf_dict = workflow.model_dump()
         step_count = len(wf_dict.get("steps", []))
         summary = wf_dict.get("summary", "")
-        print(f"[create_workflow] Workflow: {summary}, {step_count} steps")
+        logger.info(f"[create_workflow] Workflow: {summary}, {step_count} steps")
         if writer:
             writer({"type": "status", "content": f"📋 工作流已规划（{step_count} 个步骤）: {summary}"})
         return json.dumps(wf_dict, ensure_ascii=False)
@@ -69,7 +73,7 @@ def build_review_document(description: str):
         review_dict = review.model_dump()
         score = review_dict.get("score", 0)
         feedback = review_dict.get("feedback", "")[:100]
-        print(f"[review_document] Score: {score}/10")
+        logger.info(f"[review_document] Score: {score}/10")
         if writer:
             writer(
                 {

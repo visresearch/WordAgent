@@ -26,6 +26,10 @@ warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"langchai
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
+
 if TYPE_CHECKING:
     from langchain_openai import ChatOpenAI
 
@@ -184,7 +188,7 @@ def _light_compact_tool_results(
     }
 
     if not ENABLE_LIGHT_COMPACT:
-        print(f"[Context] 轻量压缩: 已禁用")
+        logger.info(f"[Context] 轻量压缩: 已禁用")
         return messages, meta
 
     tool_msgs: list[tuple[int, ToolMessage]] = []
@@ -197,7 +201,7 @@ def _light_compact_tool_results(
             other_msgs.append((i, msg))
 
     if len(tool_msgs) <= protect_count:
-        print(f"[Context] 轻量压缩: 跳过（ToolMessage {len(tool_msgs)} <= 保护数量 {protect_count}）")
+        logger.info(f"[Context] 轻量压缩: 跳过（ToolMessage {len(tool_msgs)} <= 保护数量 {protect_count}）")
         return messages, meta
 
     protected_indices: set[int] = set()
@@ -225,7 +229,7 @@ def _light_compact_tool_results(
             clearable_tokens += _estimate_messages_tokens([msg])
 
     if not clearable_indices:
-        print("[Context] 轻量压缩: 跳过（没有可清除的旧工具结果）")
+        logger.info("[Context] 轻量压缩: 跳过（没有可清除的旧工具结果）")
         return messages, meta
 
     result: list[SystemMessage | HumanMessage | AIMessage | ToolMessage] = []
@@ -240,7 +244,7 @@ def _light_compact_tool_results(
     meta["light_compact_triggered"] = True
     meta["cleared_tool_results"] = cleared_count
     meta["cleared_tokens"] = clearable_tokens
-    print(f"[Context] 轻量压缩: 清除 {cleared_count} 个工具结果, 节省 ~{clearable_tokens} tokens")
+    logger.info(f"[Context] 轻量压缩: 清除 {cleared_count} 个工具结果, 节省 ~{clearable_tokens} tokens")
 
     return result, meta
 
@@ -290,10 +294,10 @@ def _extract_structured_summary(
         )
         summary = _extract_message_text(getattr(response, "content", ""))
         if summary:
-            print(f"[Context] 重量压缩生成摘要: {len(summary)} 字")
+            logger.info(f"[Context] 重量压缩生成摘要: {len(summary)} 字")
         return summary
     except Exception as e:
-        print(f"[Context] ⚠️ 生成结构化摘要失败: {e}")
+        logger.error(f"[Context] ⚠️ 生成结构化摘要失败: {e}")
         return ""
 
 
@@ -342,7 +346,7 @@ def _heavy_compact_with_summary(
 
     summary = _extract_structured_summary(history, llm, current_task)
     if not summary:
-        print("[Context] ⚠️ 重量压缩：未能生成摘要，回退")
+        logger.warning("[Context] ⚠️ 重量压缩：未能生成摘要，回退")
         return messages, meta
 
     meta["summary_length"] = len(summary)
@@ -363,7 +367,7 @@ def _heavy_compact_with_summary(
     meta["after_tokens"] = after_tokens
     meta["compression_ratio"] = compression_ratio
 
-    print(f"[Context] 重量压缩: {before_tokens} → {after_tokens} tokens (压缩 {compression_ratio:.1f}%)")
+    logger.info(f"[Context] 重量压缩: {before_tokens} → {after_tokens} tokens (压缩 {compression_ratio:.1f}%)")
 
     return result, meta
 
@@ -418,7 +422,7 @@ def compact_conversation(
 
     if compact_level in ("heavy", "both") or (compact_level == "auto" and need_heavy):
         if llm is None:
-            print("[Context] ⚠️ 重量压缩需要 LLM，但未提供，回退到 token 裁剪")
+            logger.warning("[Context] ⚠️ 重量压缩需要 LLM，但未提供，回退到 token 裁剪")
             current_messages, hard_meta = _fit_memory_messages_to_budget(
                 current_messages, llm=None, query=current_task, max_context_tokens=max_context_tokens
             )
@@ -461,7 +465,7 @@ def _compress_with_llm_chain_extractor(
         from langchain_core.documents import Document
         from langchain_classic.retrievers.document_compressors import LLMChainExtractor
     except Exception as e:
-        print(f"[Context] ⚠️ LLMChainExtractor 不可用，跳过抽取压缩: {e}")
+        logger.warning(f"[Context] ⚠️ LLMChainExtractor 不可用，跳过抽取压缩: {e}")
         return messages
 
     system_msgs = [m for m in messages if isinstance(m, SystemMessage)]
@@ -489,7 +493,7 @@ def _compress_with_llm_chain_extractor(
         extractor = LLMChainExtractor.from_llm(llm)
         compressed_docs = extractor.compress_documents(docs, query=question)
     except Exception as e:
-        print(f"[Context] ⚠️ LLMChainExtractor 压缩失败，回退常规裁剪: {e}")
+        logger.error(f"[Context] ⚠️ LLMChainExtractor 压缩失败，回退常规裁剪: {e}")
         return messages
 
     if not compressed_docs:
@@ -577,7 +581,7 @@ def _fit_memory_messages_to_budget(
     dropped = len(convo_msgs) - len(selected)
     meta["dropped_messages"] = max(0, dropped)
 
-    print(
+    logger.info(
         f"[Context] 压缩调试: convo_msgs={len(convo_msgs)}, selected={len(selected)}, dropped={dropped}, system_msgs={len(system_msgs)}"
     )
 

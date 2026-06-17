@@ -14,7 +14,10 @@ os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", "--disable-gpu")
 from PySide6.QtWidgets import QApplication
 from qfluentwidgets import setTheme, Theme
 
+from app.core.logging import get_logger
+
 IS_WINDOWS = platform.system() == "Windows"
+logger = get_logger(__name__)
 
 
 def _find_wpscloudsvr():
@@ -64,14 +67,14 @@ def is_port_listening(port=58890):
 def ensure_wps_cloud_service():
     """确保 wpscloudsvr 已启动并监听 58890 端口"""
     if is_port_listening(58890):
-        print("[GUI] wpscloudsvr 已在运行 (58890 端口已监听)")
+        logger.info("wpscloudsvr 已在运行 (58890 端口已监听)")
         return True
 
-    print("[GUI] 58890 端口未监听，正在启动 wpscloudsvr...")
+    logger.info("58890 端口未监听，正在启动 wpscloudsvr")
 
     svr_path = _find_wpscloudsvr()
     if svr_path:
-        print(f"[GUI] 找到 wpscloudsvr: {svr_path}")
+        logger.info("找到 wpscloudsvr: %s", svr_path)
         try:
             if IS_WINDOWS:
                 CREATE_NO_WINDOW = 0x08000000
@@ -88,9 +91,9 @@ def ensure_wps_cloud_service():
                     stderr=subprocess.DEVNULL,
                 )
         except Exception as e:
-            print(f"[GUI] 启动 wpscloudsvr 异常: {e}")
+            logger.warning("启动 wpscloudsvr 异常: %s", e)
     else:
-        print("[GUI] 未找到 wpscloudsvr，尝试系统协议唤起...")
+        logger.warning("未找到 wpscloudsvr，尝试系统协议唤起")
         try:
             if IS_WINDOWS:
                 os.startfile("ksoWPSCloudSvr://start=RelayHttpServer")
@@ -101,16 +104,16 @@ def ensure_wps_cloud_service():
                     stderr=subprocess.DEVNULL,
                 )
         except Exception as e:
-            print(f"[GUI] 系统协议唤起失败: {e}")
+            logger.warning("系统协议唤起失败: %s", e)
 
     import time
 
     for i in range(10):
         time.sleep(1)
         if is_port_listening(58890):
-            print(f"[GUI] wpscloudsvr 已启动 (等待了 {i + 1} 秒)")
+            logger.info("wpscloudsvr 已启动 (等待了 %s 秒)", i + 1)
             return True
-    print("[GUI] wpscloudsvr 启动超时")
+    logger.error("wpscloudsvr 启动超时")
     return False
 
 

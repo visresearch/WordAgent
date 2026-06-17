@@ -10,8 +10,8 @@ import sys
 import threading
 from collections import deque
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QFont, QTextCursor, QColor
+from PySide6.QtCore import Qt, QTimer, QUrl
+from PySide6.QtGui import QDesktopServices, QFont, QTextCursor, QColor
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -24,6 +24,8 @@ from qfluentwidgets import (
     PushButton,
     FluentIcon,
     CardWidget,
+    InfoBar,
+    InfoBarPosition,
 )
 
 
@@ -117,6 +119,11 @@ class ConsoleInterface(QWidget):
         header.addWidget(title)
         header.addStretch(1)
 
+        self._openLogDirBtn = PushButton(FluentIcon.FOLDER, "日志文件夹", self)
+        self._openLogDirBtn.setToolTip("打开日志文件夹")
+        self._openLogDirBtn.clicked.connect(self._openLogDir)
+        header.addWidget(self._openLogDirBtn)
+
         self._clearBtn = PushButton(FluentIcon.DELETE, "清空", self)
         self._clearBtn.setToolTip("清空日志")
         self._clearBtn.clicked.connect(self._clearLog)
@@ -194,6 +201,24 @@ class ConsoleInterface(QWidget):
 
     def _clearLog(self):
         self._textEdit.clear()
+
+    def _openLogDir(self):
+        try:
+            from app.core.logging import get_log_dir
+
+            log_dir = get_log_dir()
+            log_dir.mkdir(parents=True, exist_ok=True)
+            opened = QDesktopServices.openUrl(QUrl.fromLocalFile(str(log_dir)))
+            if not opened:
+                raise RuntimeError(f"无法打开目录：{log_dir}")
+        except Exception as e:
+            InfoBar.error(
+                title="打开日志文件夹失败",
+                content=str(e),
+                parent=self,
+                position=InfoBarPosition.TOP,
+                duration=4000,
+            )
 
     def _scrollToBottom(self):
         cursor = self._textEdit.textCursor()

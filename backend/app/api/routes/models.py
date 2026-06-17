@@ -14,8 +14,10 @@ from openai import AsyncOpenAI
 from pydantic import BaseModel
 
 from app.core.config import get_user_settings_file
+from app.core.logging import get_logger
 from app.models.chat import ModelInfo, ModelsResponse
 
+logger = get_logger(__name__)
 router = APIRouter()
 
 # 设置文件路径
@@ -88,7 +90,7 @@ def load_user_settings() -> dict:
                 return json.load(f)
         return {"providers": []}
     except Exception as e:
-        print(f"加载用户设置失败: {e}")
+        logger.error(f"加载用户设置失败: {e}")
         return {"providers": []}
 
 
@@ -137,7 +139,7 @@ async def get_models():
         models = get_enabled_models_from_settings()
         return ModelsResponse(success=True, models=models)
     except Exception as e:
-        print(f"❌ 获取模型列表失败: {e}")
+        logger.error(f"❌ 获取模型列表失败: {e}")
         return ModelsResponse(success=True, models=[])
 
 
@@ -190,7 +192,7 @@ async def get_provider_models(request: ProviderModelsRequest):
             else:
                 url = f"{base}/v1/models"
 
-            print(f"📡 获取 Anthropic 模型列表: {url}")
+            logger.info(f"📡 获取 Anthropic 模型列表: {url}")
             headers = {
                 "x-api-key": request.api_key,
                 "anthropic-version": "2023-06-01",
@@ -215,7 +217,7 @@ async def get_provider_models(request: ProviderModelsRequest):
         else:
             # 标准化 base_url（自动补全 /v1）
             base_url = normalize_base_url(request.base_url)
-            print(f"📡 获取 OpenAI 兼容模型列表: {base_url}")
+            logger.info(f"📡 获取 OpenAI 兼容模型列表: {base_url}")
 
             # 创建 OpenAI 客户端
             client = AsyncOpenAI(
@@ -242,5 +244,5 @@ async def get_provider_models(request: ProviderModelsRequest):
         return {"success": True, "models": models}
 
     except Exception as e:
-        print(f"❌ 获取 Provider 模型列表失败: {e}")
+        logger.error(f"❌ 获取 Provider 模型列表失败: {e}")
         return {"success": False, "error": str(e), "models": []}

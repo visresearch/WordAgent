@@ -1,8 +1,4 @@
-"""
-多平台 LLM 客户端管理
-根据模型 ID 自动选择对应的 API 配置
-从用户设置文件读取 provider 配置
-"""
+"""多平台 LLM 客户端管理。"""
 
 import json
 import re
@@ -16,6 +12,10 @@ from app.core.config import get_user_settings_file
 
 from langchain_openai import ChatOpenAI as _BaseChatOpenAI
 from langchain_core.outputs import ChatGenerationChunk
+
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 # =============================================================================
@@ -88,7 +88,7 @@ def _apply_reasoning_content_patches():
 
             lc_compat._convert_from_v1_to_chat_completions = _patched_convert
     except Exception as e:
-        print(f"[LLM] ⚠️ patch _convert_from_v1_to_chat_completions 失败: {e}")
+        logger.error(f"[LLM] ⚠️ patch _convert_from_v1_to_chat_completions 失败: {e}")
 
     # Patch _convert_message_to_dict：把 additional_kwargs.reasoning_content 注入 payload
     # 同时处理 reasoning block -> top-level reasoning_content 字段的转换
@@ -273,9 +273,9 @@ def _apply_reasoning_content_patches():
         import langchain_core.output_parsers.openai_tools as _oa_tools
 
         _oa_tools.parse_tool_call = _patched_parse_tool_call
-        print("[LLM] ✅ parse_tool_call JSON 智能修复 patch 已应用")
+        logger.info("[LLM] ✅ parse_tool_call JSON 智能修复 patch 已应用")
     except Exception as e:
-        print(f"[LLM] ⚠️ patch parse_tool_call 失败: {e}")
+        logger.error(f"[LLM] ⚠️ patch parse_tool_call 失败: {e}")
 
     # Patch parse_partial_json：LangChain 的 init_tool_calls() 直接调用 parse_partial_json，
     # 而不是 parse_tool_call。如果不 patch 这里，流式路径仍会产生 invalid_tool_calls。
@@ -336,11 +336,11 @@ def _apply_reasoning_content_patches():
 
         _ai_mod.parse_partial_json = _patched_parse_partial_json
 
-        print("[LLM] ✅ parse_partial_json trailing-comma patch 已应用（utils + ai）")
+        logger.info("[LLM] ✅ parse_partial_json trailing-comma patch 已应用（utils + ai）")
     except Exception as e:
-        print(f"[LLM] ⚠️ patch parse_partial_json 失败: {e}")
+        logger.error(f"[LLM] ⚠️ patch parse_partial_json 失败: {e}")
 
-    print("[LLM] ✅ DeepSeek reasoning_content patch 已应用")
+    logger.info("[LLM] ✅ DeepSeek reasoning_content patch 已应用")
 
 
 _apply_reasoning_content_patches()
@@ -448,7 +448,7 @@ def load_user_settings() -> dict:
                 return json.load(f)
         return {"providers": []}
     except Exception as e:
-        print(f"加载用户设置失败: {e}")
+        logger.error(f"加载用户设置失败: {e}")
         return {"providers": []}
 
 
@@ -569,7 +569,7 @@ def get_custom_prompt() -> str:
                 data = json.load(f)
             return data.get("customPrompt", "") or ""
     except Exception as e:
-        print(f"读取 customPrompt 失败: {e}")
+        logger.error(f"读取 customPrompt 失败: {e}")
     return ""
 
 
@@ -700,15 +700,15 @@ def _resolve_llm_params(model_name: str, enable_thinking: bool = False) -> dict:
             if "opus-4" in lowered:
                 kwargs["thinking"] = {"type": "enabled", "budget_tokens": 10000}
                 kwargs["temperature"] = 1
-                print(f"[LLM] 🧠 Anthropic thinking (opus-4): budget=10000")
+                logger.info(f"[LLM] 🧠 Anthropic thinking (opus-4): budget=10000")
             elif "sonnet-4" in lowered:
                 kwargs["thinking"] = {"type": "enabled", "budget_tokens": 8000}
                 kwargs["temperature"] = 1
-                print(f"[LLM] 🧠 Anthropic thinking (sonnet-4): budget=8000")
+                logger.info(f"[LLM] 🧠 Anthropic thinking (sonnet-4): budget=8000")
             elif "3-5-sonnet" in lowered:
                 kwargs["thinking"] = {"type": "enabled", "budget_tokens": 8000}
                 kwargs["temperature"] = 1
-                print(f"[LLM] 🧠 Anthropic thinking (3.5-sonnet): budget=8000")
+                logger.info(f"[LLM] 🧠 Anthropic thinking (3.5-sonnet): budget=8000")
     else:
         kwargs["model_provider"] = "openai"
         kwargs["base_url"] = provider_info.base_url
@@ -719,13 +719,13 @@ def _resolve_llm_params(model_name: str, enable_thinking: bool = False) -> dict:
             kwargs["http_async_client"] = httpx.AsyncClient(proxy=proxy_url)
         if enable_thinking:
             kwargs["extra_body"] = get_reasoning_extra_body(actual_model_name)
-            print(f"[LLM] 🧠 已注入 thinking extra_body（模型不支持则自动忽略）")
+            logger.info(f"[LLM] 🧠 已注入 thinking extra_body（模型不支持则自动忽略）")
         else:
             # 对于强制 thinking 的模型（如 DeepSeek r1），需要显式禁用
             disable_extra = get_disable_thinking_extra_body(actual_model_name)
             if disable_extra:
                 kwargs["extra_body"] = disable_extra
-                print(f"[LLM] ⏸️ 已禁用 thinking（模型强制思考时生效）")
+                logger.info(f"[LLM] ⏸️ 已禁用 thinking（模型强制思考时生效）")
 
     return kwargs
 
@@ -903,5 +903,5 @@ def create_sync_llm_client(
         # OpenAI 兼容接口
         return ChatOpenAI(**kwargs)
     except Exception as e:
-        print(f"[LLM] 创建同步客户端失败: {e}")
+        logger.error(f"[LLM] 创建同步客户端失败: {e}")
         return None

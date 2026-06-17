@@ -21,6 +21,10 @@ warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"langchai
 
 from langchain_core.messages import AIMessage, HumanMessage
 
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
+
 if TYPE_CHECKING:
     from langchain_openai import ChatOpenAI
 
@@ -91,7 +95,7 @@ def is_long_term_memory_enabled() -> bool:
         data = json.loads(raw) if raw.strip() else {}
         return bool(data.get("enableLongTermMemory", False))
     except Exception as e:
-        print(f"[Memory] 读取长期记忆开关失败，按关闭处理: {e}")
+        logger.error(f"[Memory] 读取长期记忆开关失败，按关闭处理: {e}")
         return False
 
 
@@ -122,7 +126,7 @@ def _save_items(items: list[str]) -> bool:
         file_path.write_text(content + "\n", encoding="utf-8")
         return True
     except Exception as e:
-        print(f"[Memory] 保存记忆失败: {e}")
+        logger.error(f"[Memory] 保存记忆失败: {e}")
         return False
 
 
@@ -203,7 +207,7 @@ def _compact_by_removing_old(items: list[str]) -> list[str]:
         return items
 
     removed = len(items) - MAX_MEMORY_ITEMS
-    print(f"[Memory] 压缩: 删除 {removed} 条旧记忆，保留 {MAX_MEMORY_ITEMS} 条")
+    logger.info(f"[Memory] 压缩: 删除 {removed} 条旧记忆，保留 {MAX_MEMORY_ITEMS} 条")
     return items[-MAX_MEMORY_ITEMS:]
 
 
@@ -218,7 +222,7 @@ def read_long_term_memory() -> str:
     try:
         return file_path.read_text(encoding="utf-8").strip()
     except Exception as e:
-        print(f"[Memory] 读取记忆失败: {e}")
+        logger.error(f"[Memory] 读取记忆失败: {e}")
         return ""
 
 
@@ -352,7 +356,7 @@ def build_short_term_messages(
             result.append(AIMessage(content=ai_msg))
 
     over_budget_note = " (over budget after stripping tool outputs)" if total_tokens > budget else ""
-    print(
+    logger.info(
         f"[Memory] 短期记忆: 保留 {len(selected)} 轮对话, "
         f"剥离工具输出 {stripped_outputs} 轮, ~{total_tokens} tokens{over_budget_note}"
     )
@@ -515,7 +519,7 @@ def _pair_history(history: list[dict]) -> list[tuple[dict, dict]]:
 
         valid.append({"role": role, "entry": entry})
 
-    print(f"[Memory] _pair_history: 原始 history={len(history)}, 过滤后 valid={len(valid)}")
+    logger.info(f"[Memory] _pair_history: 原始 history={len(history)}, 过滤后 valid={len(valid)}")
 
     while i < len(valid) - 1:
         if valid[i]["role"] == "user" and valid[i + 1]["role"] == "assistant":
@@ -689,7 +693,7 @@ def extract_and_save_memory(
         dict[str, bool]: {"added": True/False}
     """
     if not is_long_term_memory_enabled():
-        print("[Memory] 长期记忆开关关闭，跳过自动记忆提取")
+        logger.info("[Memory] 长期记忆开关关闭，跳过自动记忆提取")
         return {"added": False}
 
     if not conversation or not llm:
@@ -700,7 +704,7 @@ def extract_and_save_memory(
         return {"added": False}
 
     if latest_turn_conversation.strip() != conversation.strip():
-        print("[Memory] 记忆提取仅使用最近一轮 user/assistant 对话")
+        logger.info("[Memory] 记忆提取仅使用最近一轮 user/assistant 对话")
 
     prompt = _build_extract_prompt(latest_turn_conversation)
 
@@ -714,32 +718,32 @@ def extract_and_save_memory(
             content = response.text.strip()
 
         if not content:
-            print("[Memory] LLM 未返回任何内容")
+            logger.info("[Memory] LLM 未返回任何内容")
             return {"added": False}
 
         items = _parse_extracted_items(content)
         if not items:
-            print("[Memory] 未提取到有效记忆条目")
+            logger.info("[Memory] 未提取到有效记忆条目")
             return {"added": False}
 
-        print(f"[Memory] 提取到 {len(items)} 条候选记忆")
+        logger.info(f"[Memory] 提取到 {len(items)} 条候选记忆")
 
         added_count = 0
         for item in items:
             success, reason = _add_item(item)
             if success:
                 added_count += 1
-                print(f"[Memory] 添加: {item[:40]}... ({reason})")
+                logger.info(f"[Memory] 添加: {item[:40]}... ({reason})")
             else:
-                print(f"[Memory] 跳过: {item[:40]}... ({reason})")
+                logger.info(f"[Memory] 跳过: {item[:40]}... ({reason})")
 
         current_count = _get_item_count()
-        print(f"[Memory] 记忆提取完成: 新增 {added_count} 条, 当前共 {current_count} 条")
+        logger.info(f"[Memory] 记忆提取完成: 新增 {added_count} 条, 当前共 {current_count} 条")
 
         return {"added": added_count > 0}
 
     except Exception as e:
-        print(f"[Memory] 记忆提取失败: {e}")
+        logger.error(f"[Memory] 记忆提取失败: {e}")
         import traceback
 
         traceback.print_exc()

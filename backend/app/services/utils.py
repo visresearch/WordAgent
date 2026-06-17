@@ -3,6 +3,10 @@
 import json
 from typing import Any
 
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
+
 
 def _strip_code_fence(text: str) -> str:
     """去掉可能包裹参数的 Markdown 代码块围栏。"""
@@ -135,10 +139,10 @@ def normalize_tool_args(tool_name: str, raw_args: Any) -> dict:
             if isinstance(parsed_document, dict):
                 # 成功解析，用 dict 替换字符串
                 args = {**args, "document": _normalize_blank_paragraph_shape(parsed_document)}
-                print(f"[normalize_tool_args] ✅ 成功解析 document 字符串为 dict")
+                logger.info(f"[normalize_tool_args] ✅ 成功解析 document 字符串为 dict")
             else:
                 # 解析失败，打印警告但继续（不抛错），让 Pydantic schema 处理
-                print(f"[normalize_tool_args] ⚠️ document 字符串解析失败，将由 schema 处理: {doc_raw[:100]}...")
+                logger.error(f"[normalize_tool_args] ⚠️ document 字符串解析失败，将由 schema 处理: {doc_raw[:100]}...")
         elif isinstance(document, dict):
             args = {**args, "document": _normalize_blank_paragraph_shape(document)}
 

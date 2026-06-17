@@ -8,6 +8,10 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings
 
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
+
 
 def get_data_dir() -> Path:
     """获取数据目录"""
@@ -39,7 +43,7 @@ def get_database_url() -> str:
         temp_dir = Path(tempfile.gettempdir()) / "wence_ai"
         temp_dir.mkdir(parents=True, exist_ok=True)
         db_path = temp_dir / "wence_ai.db"
-        print(f"Warning: Using temp directory for database: {db_path}")
+        logger.warning("使用临时目录保存数据库: %s", db_path)
         return f"sqlite+aiosqlite:///{db_path.absolute()}"
 
 
