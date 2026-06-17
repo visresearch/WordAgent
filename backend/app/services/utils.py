@@ -111,6 +111,47 @@ def _normalize_blank_paragraph_shape(document: dict) -> dict:
     return {**document, "paragraphs": normalized_paragraphs}
 
 
+def _pad_style_array(style_id: str, style_value: Any) -> Any:
+    """Pad known style arrays when the model omits trailing default fields."""
+    if not isinstance(style_value, list):
+        return style_value
+
+    defaults_by_prefix = {
+        "pS_": ["left", 0, 0, 0, 0, 0, 0, "", 1],
+        "rS_": ["", 12, False, False, 0, "#000000", "#000000", 0, False, False, False],
+        "cS_": [1, 1, "left", "center"],
+        "tS_": [1],
+    }
+
+    for prefix, defaults in defaults_by_prefix.items():
+        if not style_id.startswith(prefix):
+            continue
+        if len(style_value) >= len(defaults):
+            return style_value
+        return [*style_value, *defaults[len(style_value) :]]
+
+    return style_value
+
+
+def _normalize_style_shapes(document: dict) -> dict:
+    """Normalize generate_document styles before Pydantic validates them."""
+    styles = document.get("styles")
+    if not isinstance(styles, dict):
+        return document
+
+    normalized_styles = {
+        style_id: _pad_style_array(style_id, style_value)
+        for style_id, style_value in styles.items()
+    }
+    return {**document, "styles": normalized_styles}
+
+
+def _normalize_generate_document_payload(document: dict) -> dict:
+    document = _normalize_blank_paragraph_shape(document)
+    document = _normalize_style_shapes(document)
+    return document
+
+
 def normalize_tool_args(tool_name: str, raw_args: Any) -> dict:
     """归一化工具参数，修复常见的模型参数形态偏差。"""
     args = parse_tool_args_with_repair(raw_args)
@@ -145,5 +186,23 @@ def normalize_tool_args(tool_name: str, raw_args: Any) -> dict:
                 logger.error(f"[normalize_tool_args] ⚠️ document 字符串解析失败，将由 schema 处理: {doc_raw[:100]}...")
         elif isinstance(document, dict):
             args = {**args, "document": _normalize_blank_paragraph_shape(document)}
+
+    if tool_name == "generate_document" and isinstance(args.get("document"), str):
+        doc_raw = _strip_code_fence(args["document"]).strip()
+        parsed_document = parse_tool_args_with_repair(doc_raw)
+        if not isinstance(parsed_document, dict):
+            try:
+                import ast
+
+                literal_val = ast.literal_eval(doc_raw)
+                if isinstance(literal_val, dict):
+                    parsed_document = literal_val
+            except Exception:
+                pass
+        if isinstance(parsed_document, dict):
+            args = {**args, "document": parsed_document}
+
+    if tool_name == "generate_document" and isinstance(args.get("document"), dict):
+        args = {**args, "document": _normalize_generate_document_payload(args["document"])}
 
     return args

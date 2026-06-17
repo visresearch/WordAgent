@@ -510,7 +510,7 @@ def _run_sub_agent(
                         break
                     messages.append(
                         SystemMessage(
-                            content="Tool call format incomplete. Use proper JSON format with correct style references (pS_*, rS_*, etc.). Define all referenced styles in styles dictionary. For long content, split into multiple generate_document calls."
+                            content="Tool call format incomplete. Use proper JSON format with correct style references (pS_*, rS_*, etc.). Define all referenced styles in styles dictionary. Style arrays must be complete: pS_* has 9 items, rS_* has 11 items, cS_* has 4 items, tS_* has 1 item. For long content, split into multiple generate_document calls."
                         )
                     )
                     continue

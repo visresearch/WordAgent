@@ -107,7 +107,7 @@ const DEFAULT_RSTYLE = ["", 12, false, false, 0, "#000000", "#000000", 0, false,
 const DEFAULT_CSTYLE = [1, 1, "left", "center"];
 const DEFAULT_IMAGE_PSTYLE = ["center", 0, 0, 0, 0, 0, 0, "", 0];
 const DEFAULT_FALLBACK_FONT_NAME = "Calibri";
-const PARA_ID_PATTERN = /^(0|[1-9]\d*)$/;
+const PARA_ID_PATTERN = /^[+-]?(0|[1-9]\d*)$/;
 
 function normalizeParaIdValue(value) {
   if (value === null || value === undefined) {
@@ -131,8 +131,7 @@ function normalizeParaID(value) {
 function createSignedNineDigitParaID(existingIDs = new Set()) {
   for (let attempt = 0; attempt < 5000; attempt++) {
     const absValue = Math.floor(100000000 + Math.random() * 900000000);
-    const sign = Math.random() < 0.5 ? -1 : 1;
-    const id = sign < 0 ? `-${absValue}` : `${absValue}`;
+    const id = `${absValue}`;
     if (!existingIDs.has(id)) {
       return id;
     }
@@ -149,6 +148,14 @@ function toHiddenBookmarkNameFromParaID(paraID) {
     return `_${id.slice(1)}_n`;
   }
   return `_${id}_p`;
+}
+
+function insertParagraphIDBookmark(paragraph, paraID) {
+  const bookmarkName = toHiddenBookmarkNameFromParaID(paraID);
+  if (!bookmarkName) {
+    throw new Error(`invalid paraID bookmark name: ${paraID}`);
+  }
+  paragraph.getRange("Start").insertBookmark(bookmarkName);
 }
 
 function parseParaIDFromBookmarkName(bookmarkName) {
@@ -181,13 +188,6 @@ async function ensureAllParagraphsHaveHiddenBookmarks(context) {
 }
 
 async function resolveParagraphParaIDs(context, paragraphs, seedKnownIDs = []) {
-  void context;
-  void seedKnownIDs;
-  if (!Array.isArray(paragraphs) || paragraphs.length === 0) {
-    return [];
-  }
-  return paragraphs.map((_, idx) => String(idx));
-
   if (!Array.isArray(paragraphs) || paragraphs.length === 0) {
     return [];
   }
@@ -201,7 +201,6 @@ async function resolveParagraphParaIDs(context, paragraphs, seedKnownIDs = []) {
       .filter((id) => id)
   );
   const legacyControlsToRemove = [];
-  const legacyParaIDIndexes = new Set();
 
   for (let i = 0; i < paragraphs.length; i++) {
     try {
@@ -220,11 +219,10 @@ async function resolveParagraphParaIDs(context, paragraphs, seedKnownIDs = []) {
       const paraID =
         parseParaIDFromContentControlMeta(item.contentControl.tag) ||
         parseParaIDFromContentControlMeta(item.contentControl.title);
-      if (paraID) {
+      if (paraID && !knownIDs.has(paraID)) {
         paraIDs[item.idx] = paraID;
         knownIDs.add(paraID);
         legacyControlsToRemove.push(item.contentControl);
-        legacyParaIDIndexes.add(item.idx);
       }
     }
   }
@@ -245,7 +243,7 @@ async function resolveParagraphParaIDs(context, paragraphs, seedKnownIDs = []) {
       const names = item.bookmarks?.value || [];
       for (const name of names) {
         const paraID = parseParaIDFromBookmarkName(name);
-        if (paraID) {
+        if (paraID && !knownIDs.has(paraID)) {
           paraIDs[item.idx] = paraID;
           knownIDs.add(paraID);
           break;
@@ -255,16 +253,13 @@ async function resolveParagraphParaIDs(context, paragraphs, seedKnownIDs = []) {
   }
 
   const created = [];
+  const reanchored = [];
   for (let i = 0; i < paragraphs.length; i++) {
     if (paraIDs[i]) {
-      if (legacyParaIDIndexes.has(i)) {
-        try {
-          const bookmarkName = toHiddenBookmarkNameFromParaID(paraIDs[i]);
-          if (bookmarkName) {
-            paragraphs[i].getRange("Whole").insertBookmark(bookmarkName);
-          }
-        } catch (e) {}
-      }
+      try {
+        insertParagraphIDBookmark(paragraphs[i], paraIDs[i]);
+        reanchored.push({ idx: i, paraID: paraIDs[i] });
+      } catch (e) {}
       continue;
     }
     const paraID = createSignedNineDigitParaID(knownIDs);
@@ -273,7 +268,7 @@ async function resolveParagraphParaIDs(context, paragraphs, seedKnownIDs = []) {
       if (!bookmarkName) {
         throw new Error(`无效 paraID 无法映射书签名: ${paraID}`);
       }
-      paragraphs[i].getRange("Whole").insertBookmark(bookmarkName);
+      insertParagraphIDBookmark(paragraphs[i], paraID);
       paraIDs[i] = paraID;
       knownIDs.add(paraID);
       created.push({ idx: i, paraID });
@@ -282,7 +277,7 @@ async function resolveParagraphParaIDs(context, paragraphs, seedKnownIDs = []) {
     }
   }
 
-  if (created.length > 0 || legacyControlsToRemove.length > 0) {
+  if (created.length > 0 || reanchored.length > 0 || legacyControlsToRemove.length > 0) {
     await context.sync();
   }
 
@@ -322,10 +317,6 @@ async function resolveParagraphParaIDs(context, paragraphs, seedKnownIDs = []) {
 }
 
 function assignParagraphBookmarkID(paragraph, existingIDs, requestedID = null) {
-  void paragraph;
-  void existingIDs;
-  return normalizeParaID(requestedID);
-
   const preferredID = normalizeParaID(requestedID);
   const paraID =
     preferredID && !existingIDs.has(preferredID)
@@ -335,7 +326,7 @@ function assignParagraphBookmarkID(paragraph, existingIDs, requestedID = null) {
   if (!bookmarkName) {
     throw new Error(`invalid paraID bookmark name: ${paraID}`);
   }
-  paragraph.getRange("Whole").insertBookmark(bookmarkName);
+  insertParagraphIDBookmark(paragraph, paraID);
   existingIDs.add(paraID);
   return paraID;
 }
@@ -2959,6 +2950,10 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection", inse
               inserted = targetRange.insertParagraph("", insertLoc);
               targetRange = inserted;
             }
+            const paraID = assignParagraphBookmarkID(inserted, existingParaIDs, para.paraID);
+            if (paraID) {
+              insertedParaIDs.push(paraID);
+            }
             insertedParagraphCount++;
             continue;
           }
@@ -2983,6 +2978,10 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection", inse
             try {
               newParagraph.style = styleName;
             } catch (e) {}
+          }
+          const paraID = assignParagraphBookmarkID(newParagraph, existingParaIDs, para.paraID);
+          if (paraID) {
+            insertedParaIDs.push(paraID);
           }
 
           newParagraph.alignment = getAlignmentValue(alignment);
@@ -3292,7 +3291,7 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection", inse
 
       await context.sync();
       await ensureAllParagraphsHaveHiddenBookmarks(context);
-      if (insertedParagraphCount > 0) {
+      if (insertedParagraphCount > 0 && insertedParaIDs.length === 0) {
         let startIndex = Number.isInteger(insertStartParaIndex) ? insertStartParaIndex : null;
         if (startIndex === null) {
           const allParagraphs = context.document.body.paragraphs;
@@ -3300,8 +3299,15 @@ async function generateDocxFromJSON(jsonData, insertLocation = "selection", inse
           await context.sync();
           startIndex = Math.max(0, allParagraphs.items.length - insertedParagraphCount);
         }
+        const allParagraphs = context.document.body.paragraphs;
+        allParagraphs.load("items");
+        await context.sync();
+        const allParaIDs = await resolveParagraphParaIDs(context, allParagraphs.items);
         for (let i = 0; i < insertedParagraphCount; i++) {
-          insertedParaIDs.push(String(startIndex + i));
+          const paraID = allParaIDs[startIndex + i];
+          if (paraID) {
+            insertedParaIDs.push(paraID);
+          }
         }
       }
 
@@ -3403,19 +3409,31 @@ function getOfficeErrorMessage(error) {
   return `${code}${message}${debugInfo}`;
 }
 
-function getProofreadHighlightColor(text) {
-  return /删除|鍒犻櫎/.test(String(text || "")) ? "Turquoise" : "Pink";
+const PROOFREAD_HIGHLIGHT_COLORS = {
+  add: { preferred: "Pink", fallback: "Pink" },
+  delete: { preferred: "Turquoise", fallback: "Turquoise" },
+};
+
+function getProofreadHighlightColors(text) {
+  return /删除|鍒犻櫎/.test(String(text || ""))
+    ? PROOFREAD_HIGHLIGHT_COLORS.delete
+    : PROOFREAD_HIGHLIGHT_COLORS.add;
 }
 
 async function applyHighlightToRange(context, rangeFactory, text) {
-  try {
-    const range = rangeFactory();
-    range.font.highlightColor = getProofreadHighlightColor(text);
-    await context.sync();
-    return { success: true, mode: "highlight" };
-  } catch (e) {
-    return { success: false, error: getOfficeErrorMessage(e) };
+  const colors = getProofreadHighlightColors(text);
+  let lastError = null;
+  for (const color of [colors.preferred, colors.fallback]) {
+    try {
+      const range = rangeFactory();
+      range.font.highlightColor = color;
+      await context.sync();
+      return { success: true, mode: "highlight", color };
+    } catch (e) {
+      lastError = e;
+    }
   }
+  return { success: false, error: getOfficeErrorMessage(lastError) };
 }
 
 async function insertCommentWithFallbackRanges(context, rangeFactories, text) {
@@ -3546,8 +3564,13 @@ async function addCommentToParas(startParaIndex, endParaIndex, text, mode = 'rev
       );
 
       if (result.success) {
+        const highlightResult = await applyHighlightToRange(
+          context,
+          () => startPara.getRange("Content").expandTo(endPara.getRange("Content")),
+          text
+        );
         console.log("[addCommentToParas] 批注添加成功:", text, "范围:", startParaIndex, "-", endParaIndex);
-        return result;
+        return { ...result, highlighted: highlightResult.success, highlightColor: highlightResult.color };
       }
 
       const highlightResult = await applyHighlightToRange(
@@ -3612,6 +3635,10 @@ async function addCommentToParaIDs(paraIDs, text) {
         );
         if (result.success) {
           commentedCount++;
+          const highlightResult = await applyHighlightToRange(context, () => para.getRange("Whole"), text);
+          if (highlightResult.success) {
+            highlightedCount++;
+          }
         } else {
           const highlightResult = await applyHighlightToRange(context, () => para.getRange("Whole"), text);
           if (highlightResult.success) {

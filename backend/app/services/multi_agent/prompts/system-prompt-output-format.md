@@ -11,7 +11,7 @@ Use `generate_document` tool with proper JSON structure:
   "paragraphs": [...],
   "tables": [...],
   "styles": {...},
-  "insertParaIndex": 0
+  "insertParaID": 123456
 }
 ```
 

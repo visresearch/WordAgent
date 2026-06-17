@@ -9,6 +9,7 @@ Generate formatted content and insert it into the Word document.
 - Top-level tool args: `{"document": {...}, "insertParaID": 123456}`.
 - `document` should include `paragraphs`, `tables` (can be `[]`), and `styles`.
 - Every referenced `pStyle/rStyle/cStyle/tStyle` must exist in `styles`.
+- Style arrays must be complete: `pS_*` has 9 items, `rS_*` has 11 items, `cS_*` has 4 items, `tS_*` has 1 item.
 - Never put `\n` inside `run.text`; one visual line is one paragraph.
 - Blank line: `{ "pStyle": "", "runs": [] }`.
 - `insertParaID` must be an existing paragraph ID from recent `read_document`/`search_documnet` results; do not guess IDs.

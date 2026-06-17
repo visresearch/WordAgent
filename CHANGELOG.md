@@ -2,10 +2,16 @@
 
 ## Unreleased
 
+### Fixed
+- 修复多智能体模式生成文档的json schema不同步的问题
+- 修复Microsoft word加载项paraID的问题，放弃使用paraIndex，使用隐藏书签实现paraID
+- 修复了旧的为同步的提示词会干扰agent调用generate_document工具生成文档的问题
+
 ### Added
 - 添加系统logger，记录系统运行日志
 
 ### Changed
+- 修改Microsoft word加载项批注高亮
 - 修改文档和官网内容
 
 ## [v0.5.0]

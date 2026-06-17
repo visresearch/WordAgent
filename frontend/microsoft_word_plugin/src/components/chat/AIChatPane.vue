@@ -1170,7 +1170,7 @@ export default {
       }
       const normalize = (raw) => {
         const trimmed = String(raw).trim();
-        return /^(0|[1-9]\d*)$/.test(trimmed) ? String(Number(trimmed)) : null;
+        return /^[+-]?(0|[1-9]\d*)$/.test(trimmed) ? String(Number(trimmed)) : null;
       };
       if (typeof value === 'string') {
         return normalize(value);
@@ -1509,22 +1509,13 @@ export default {
         console.warn("[AIChatPane] pending operation queue failed before confirm:", e);
       }
 
-      const deletesById = [...this.pendingDeletes];
-      for (const d of deletesById) {
-        const deleteIDs = this._shiftParaIndexIDsForInsertions(d.paraIDs || [], d.docId);
-        console.log("[AIChatPane] confirm delete shifted paraIndex IDs:", {
-          original: d.paraIDs || [],
-          shifted: deleteIDs,
-        });
-        await this._deleteByParaIDsOneByOne(deleteIDs);
-      }
-
       for (const ins of this.pendingInsertions) {
         const insertedParaIDs = this._normalizeParaIdList(ins.insertedParaIDs || []);
-        if (ins._markingMode === 'highlight') {
-          await this._clearHighlightOnRange(ins.insertStartParaIndex, ins.insertEndParaIndex);
-        } else if (insertedParaIDs.length > 0) {
+        if (insertedParaIDs.length > 0) {
           await clearWenceCommentsByParaIDs(insertedParaIDs, ['文策AI-添加']);
+          await this._clearHighlightOnParaIDs(insertedParaIDs, ins.docId);
+        } else if (ins._markingMode === 'highlight') {
+          await this._clearHighlightOnRange(ins.insertStartParaIndex, ins.insertEndParaIndex);
         } else if (
           ins.insertStartParaIndex !== null &&
           ins.insertStartParaIndex !== undefined &&
@@ -1533,6 +1524,11 @@ export default {
         ) {
           await this._clearHighlightOnRange(ins.insertStartParaIndex, ins.insertEndParaIndex);
         }
+      }
+
+      const deletesById = [...this.pendingDeletes];
+      for (const d of deletesById) {
+        await this._deleteByParaIDsOneByOne(d.paraIDs || []);
       }
 
       this.pendingDeletes = [];
@@ -1554,6 +1550,7 @@ export default {
 
       for (const pd of this.pendingDeletes) {
         await clearWenceCommentsByParaIDs(pd.paraIDs || [], ['文策AI-删除']);
+        await this._clearHighlightOnParaIDs(pd.paraIDs || [], pd.docId);
       }
 
       const insertsById = [...this.pendingInsertions].reverse();

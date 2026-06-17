@@ -597,8 +597,9 @@ def build_graph(llm_with_tools, all_tools: list):
                         "1) document 参数必须是 JSON 对象，不是字符串；"
                         "2) 不要使用 json.dumps() 或 escape quotes；"
                         "3) 段落样式使用 pStyle ID（如 pS_1），字符样式使用 rStyle ID（如 rS_2）；"
-                        "4) 文本内容中如需引号，请使用中文引号或正确转义；"
-                        "5) 如果文档只有 runs: [] 的空占位段落，省略 insertParaID。"
+                        "4) styles 中 pS_* 必须 9 项，rS_* 必须 11 项，cS_* 必须 4 项，tS_* 必须 1 项；"
+                        "5) 文本内容中如需引号，请使用中文引号或正确转义；"
+                        "6) 如果文档只有 runs: [] 的空占位段落，省略 insertParaID。"
                     )
                 ),
             ]
