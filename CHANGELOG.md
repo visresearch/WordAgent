@@ -5,9 +5,10 @@
 ### Fixed
 - 修复多智能体模式生成文档的json schema不同步的问题
 - 修复Microsoft word加载项paraID的问题，放弃使用paraIndex，使用隐藏书签实现paraID
-- 修复了旧的为同步的提示词会干扰agent调用generate_document工具生成文档的问题
+- 修复了旧的提示词会干扰agent调用generate_document工具生成文档的问题
 - 修复了Microsoft word加载项重复隐藏书签的bug
 - 修复了generate_document工具的提示词
+- 修复前端about界面版本号不匹配的问题
 
 ### Added
 - 添加系统logger，记录系统运行日志，添加终端level颜色警告

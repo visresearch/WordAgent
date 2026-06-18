@@ -104,12 +104,13 @@ import webIcon from '../../assets/icons/web.svg';
 import helpIcon from '../../assets/icons/help.svg';
 import issueIcon from '../../assets/icons/issue.svg';
 import sponsorIcon from '../../assets/icons/sponsor.svg';
+import api from '../js/api.js';
 
 export default {
   name: 'AboutPane',
   data() {
     return {
-      version: process.env.APP_VERSION || '未知版本',
+      version: '未知版本',
       githubIcon,
       webIcon,
       helpIcon,
@@ -117,7 +118,17 @@ export default {
       sponsorIcon
     };
   },
+  mounted() {
+    this.loadVersion();
+  },
   methods: {
+    async loadVersion() {
+      const result = await api.getAppVersion();
+      const version = result.success ? result.data?.version : '';
+      if (version) {
+        this.version = version;
+      }
+    },
     openExternalLink(url) {
       try {
         const opened = window.open(url, '_blank', 'noopener,noreferrer');

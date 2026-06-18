@@ -112,7 +112,14 @@ def _summarize_custom_event(chunk: Any) -> str:
         parts.append(f"truncated={bool(chunk.get('truncated'))}")
         if chunk.get("isError"):
             parts.append("error=true")
-    elif event_type in {"read_document", "read_complete", "search_document", "query_complete", "delete_document", "generate_complete"}:
+    elif event_type in {
+        "read_document",
+        "read_complete",
+        "search_document",
+        "query_complete",
+        "delete_document",
+        "generate_complete",
+    }:
         content = chunk.get("content")
         if content:
             parts.append(str(content))

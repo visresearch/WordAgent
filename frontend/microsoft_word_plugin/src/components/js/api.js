@@ -163,7 +163,10 @@ async function getCurrentDocumentMeta() {
 
       // 只保留文件名，去掉路径
       if (documentName) {
-        documentName = documentName.split(/[/\\]/).pop().replace(/\.docx?$/i, "");
+        documentName = documentName
+          .split(/[/\\]/)
+          .pop()
+          .replace(/\.docx?$/i, "");
       }
 
       // 判断文档是否为空
@@ -234,9 +237,7 @@ const wsManager = {
         console.warn(`[WebSocket] 已 ${seconds}s 未收到任何消息，判定为超时`);
         this._completeCalled = true;
         if (this.onError) {
-          this.onError(
-            new Error(`请求超时：${seconds}s 内未收到任何响应（含心跳），请稍后重试`)
-          );
+          this.onError(new Error(`请求超时：${seconds}s 内未收到任何响应（含心跳），请稍后重试`));
         }
         if (this.ws) {
           this.ws.close();
@@ -274,7 +275,7 @@ const wsManager = {
   setCachedDocument(docJson) {
     this._documentCache = {
       documentJson: docJson,
-      timestamp: Date.now()
+      timestamp: Date.now(),
     };
     console.log("[WebSocket] 文档已缓存，段落数:", docJson?.paragraphs?.length || 0);
   },
@@ -380,8 +381,7 @@ const wsManager = {
           this._requestTimeoutTimer = null;
         }
 
-        const isIdleTimeoutClose =
-          event.code === 1011 && event.reason === "idle-timeout";
+        const isIdleTimeoutClose = event.code === 1011 && event.reason === "idle-timeout";
         if (!this._completeCalled && isIdleTimeoutClose) {
           this._completeCalled = true;
           if (this.onError) {
@@ -450,9 +450,7 @@ const wsManager = {
             ? null
             : startParaIndexOrParams.startParaID;
         endParaID =
-          startParaIndexOrParams.endParaID === undefined
-            ? null
-            : startParaIndexOrParams.endParaID;
+          startParaIndexOrParams.endParaID === undefined ? null : startParaIndexOrParams.endParaID;
         docId =
           startParaIndexOrParams.docId === undefined || startParaIndexOrParams.docId === null
             ? 0
@@ -545,9 +543,7 @@ const wsManager = {
       ].sort((a, b) => a - b);
       const matchedParaIds = [
         ...new Set(
-          (result.matches || [])
-            .map((m) => normalizeParaIdValue(m?.paragraphId))
-            .filter((id) => id)
+          (result.matches || []).map((m) => normalizeParaIdValue(m?.paragraphId)).filter((id) => id)
         ),
       ];
 
@@ -805,6 +801,16 @@ async function addSessionMessage(sessionId, messageData) {
 async function clearAllSessions() {
   return await request("/api/sessions", {
     method: "DELETE",
+  });
+}
+
+/**
+ * 获取后端应用版本号
+ */
+async function getAppVersion() {
+  return await request("/api/version", {
+    method: "GET",
+    timeout: 5000,
   });
 }
 
@@ -1112,6 +1118,7 @@ export default {
   getSessionMessages,
   addSessionMessage,
   clearAllSessions,
+  getAppVersion,
   uploadFiles,
 
   getSettings,
@@ -1151,6 +1158,7 @@ export {
   getSessionMessages,
   addSessionMessage,
   clearAllSessions,
+  getAppVersion,
   uploadFiles,
   getSettings,
   saveSettings,

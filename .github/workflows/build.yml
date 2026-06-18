@@ -99,9 +99,9 @@ jobs:
       - name: Extract changelog for current tag
         if: startsWith(github.ref, 'refs/tags/')
         run: |
-          VERSION="${GITHUB_REF_NAME}"
+          RELEASE_TAG="${GITHUB_REF_NAME}"
 
-          awk -v version="$VERSION" '
+          awk -v version="$RELEASE_TAG" '
             function normalize_heading(line) {
               gsub(/\r/, "", line)
               sub(/^##[[:space:]]+/, "", line)
@@ -123,7 +123,7 @@ jobs:
           ' CHANGELOG.md > release_notes.md
 
           if [ ! -s release_notes.md ]; then
-            echo "No changelog found for ${VERSION}" > release_notes.md
+            echo "No changelog found for ${RELEASE_TAG}" > release_notes.md
           fi
 
       - name: Upload to Release
@@ -222,9 +222,9 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         run: |
-          VERSION="${GITHUB_REF_NAME}"
+          RELEASE_TAG="${GITHUB_REF_NAME}"
 
-          awk -v version="$VERSION" '
+          awk -v version="$RELEASE_TAG" '
             function normalize_heading(line) {
               gsub(/\r/, "", line)
               sub(/^##[[:space:]]+/, "", line)
@@ -246,7 +246,7 @@ jobs:
           ' CHANGELOG.md > release_notes.md
 
           if [ ! -s release_notes.md ]; then
-            echo "No changelog found for ${VERSION}" > release_notes.md
+            echo "No changelog found for ${RELEASE_TAG}" > release_notes.md
           fi
 
       - name: Upload to Release

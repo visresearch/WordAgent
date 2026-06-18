@@ -33,7 +33,12 @@ from qfluentwidgets import (
 
 def _read_local_version() -> str:
     """从环境变量读取本地版本号。"""
-    return os.environ.get("APP_VERSION") or ""
+    try:
+        from app.core.config import settings
+
+        return settings.APP_VERSION or ""
+    except Exception:
+        return os.environ.get("APP_VERSION") or ""
 
 
 def _version_key(version: str) -> tuple[int, ...]:

@@ -22,8 +22,11 @@ logger = get_logger(__name__)
 
 
 def get_app_version() -> str:
-    """用户可见版本优先使用发布环境变量，缺省时使用配置默认版本。"""
-    return os.environ.get("APP_VERSION") or settings.VERSION
+    """用户可见版本。
+
+    Packaged releases write the release tag into APP_VERSION before settings load.
+    """
+    return settings.APP_VERSION
 
 
 def get_static_dir() -> Path:
