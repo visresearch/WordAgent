@@ -13,7 +13,14 @@ class Run(BaseModel):
     """
 
     # Text run fields (if text is present, this is a text run)
-    text: str | None = Field(default=None, description="Text content (omit this field for image run)")
+    text: str | None = Field(
+        default=None,
+        description=(
+            "Text content (omit this field for image run). "
+            "For quoted phrases inside text, use Chinese quotation marks such as “...” or 「...」; "
+            "do not put raw ASCII double quote characters inside text."
+        ),
+    )
     rStyle: str | None = Field(
         default=None,
         description='Character style reference ID, e.g. "rS_1", mapped to document.styles["rS_1"]',
@@ -38,7 +45,10 @@ class Paragraph(BaseModel):
     """A paragraph. Each line should be a separate paragraph; do not use \\n in run text."""
 
     pStyle: str = Field(
-        description='Paragraph style reference ID, e.g. "pS_1", mapped to document.styles["pS_1"]. Optional for empty paragraphs.',
+        description=(
+            'Paragraph style reference ID, e.g. "pS_1", mapped to document.styles["pS_1"]. '
+            "Required for every non-empty paragraph. Use an empty string only for a blank paragraph whose runs array is empty."
+        ),
         default="",
     )
     runs: list[Run] = Field(
@@ -65,7 +75,13 @@ class Paragraph(BaseModel):
 class CellParagraph(BaseModel):
     """A paragraph inside a table cell."""
 
-    text: str = Field(description="Paragraph text (optional; typically the concatenation of run texts)", default="")
+    text: str = Field(
+        description=(
+            "Paragraph text (optional; typically the concatenation of run texts). "
+            "Use Chinese quotation marks such as “...” or 「...」 instead of raw ASCII double quotes."
+        ),
+        default="",
+    )
     pStyle: str = Field(description='Paragraph style reference ID, e.g. "pS_1"', default="")
     runs: list[Run] = Field(
         description="Array of runs. A cell paragraph can contain multiple runs with different formatting.",
@@ -83,7 +99,11 @@ class Cell(BaseModel):
     """
 
     text: str = Field(
-        description="Cell text (required in simple mode; may be empty in multi-paragraph mode)", default=""
+        description=(
+            "Cell text (required in simple mode; may be empty in multi-paragraph mode). "
+            "Use Chinese quotation marks such as “...” or 「...」 instead of raw ASCII double quotes."
+        ),
+        default="",
     )
     paragraphs: list[CellParagraph] | None = Field(
         default=None,
@@ -162,6 +182,10 @@ class DocumentOutput(BaseModel):
         for para in self.paragraphs:
             if not para.runs:
                 continue
+            if not para.pStyle:
+                raise ValueError(
+                    'Non-empty paragraphs must use a defined pStyle such as "pS_3"; pStyle="" is only allowed when runs=[]'
+                )
             if para.pStyle not in style_keys:
                 missing.add(para.pStyle)
             for run in para.runs:

@@ -66,6 +66,96 @@ def repair_unescaped_quotes_in_json(raw: str) -> str:
     return "".join(out)
 
 
+def normalize_json_punctuation_outside_strings(raw: str) -> str:
+    """Normalize common Chinese punctuation used as JSON separators.
+
+    Only punctuation outside quoted strings is changed, so normal Chinese text
+    inside values is preserved.
+    """
+
+    replacements = {
+        "，": ",",
+        "、": ",",
+        "：": ":",
+        "；": ";",
+        "｛": "{",
+        "｝": "}",
+        "［": "[",
+        "］": "]",
+    }
+
+    quote_pairs = {
+        '"': '"',
+        "'": "'",
+        "“": "”",
+        "‘": "’",
+    }
+    quote_output = {
+        '"': '"',
+        "'": "'",
+        "“": '"',
+        "”": '"',
+        "‘": "'",
+        "’": "'",
+    }
+
+    out: list[str] = []
+    quote: str | None = None
+    escape = False
+    for ch in raw:
+        if quote:
+            if escape:
+                out.append(ch)
+                escape = False
+            elif ch == "\\":
+                out.append(ch)
+                escape = True
+            elif ch == quote:
+                out.append(quote_output.get(ch, ch))
+                quote = None
+            else:
+                out.append(ch)
+            continue
+
+        if ch in quote_pairs:
+            quote = quote_pairs[ch]
+            out.append(quote_output.get(ch, ch))
+            continue
+
+        out.append(replacements.get(ch, ch))
+
+    return "".join(out)
+
+
+def _loads_json_object_allow_trailing_closers(raw: str) -> dict | None:
+    """Parse a JSON object and tolerate extra trailing closing delimiters.
+
+    Some LLM tool calls end with one more `}`/`]` than needed. `json.loads`
+    reports this as "Extra data" even though the first object is complete.
+    Only accept this repair when the remaining text contains closing
+    delimiters and whitespace only.
+    """
+
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else None
+    except json.JSONDecodeError:
+        pass
+
+    try:
+        parsed, end = json.JSONDecoder().raw_decode(raw)
+    except json.JSONDecodeError:
+        return None
+
+    if not isinstance(parsed, dict):
+        return None
+
+    remainder = raw[end:].strip()
+    if remainder and all(ch in "]} \t\r\n" for ch in remainder):
+        return parsed
+    return None
+
+
 def parse_tool_args_with_repair(raw_args: Any) -> dict | None:
     """尝试解析工具参数；若 JSON 非法，执行一次轻量修复后重试。"""
     if isinstance(raw_args, dict):
@@ -75,15 +165,34 @@ def parse_tool_args_with_repair(raw_args: Any) -> dict | None:
 
     raw_args = _strip_code_fence(raw_args)
 
-    try:
-        return json.loads(raw_args)
-    except json.JSONDecodeError:
-        repaired = repair_unescaped_quotes_in_json(raw_args)
-        if repaired != raw_args:
-            try:
-                return json.loads(repaired)
-            except json.JSONDecodeError:
-                pass
+    candidates = [raw_args]
+    punctuation_repaired = normalize_json_punctuation_outside_strings(raw_args)
+    if punctuation_repaired != raw_args:
+        candidates.append(punctuation_repaired)
+
+    for candidate in list(candidates):
+        quote_repaired = repair_unescaped_quotes_in_json(candidate)
+        if quote_repaired != candidate:
+            candidates.append(quote_repaired)
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+
+        parsed = _loads_json_object_allow_trailing_closers(candidate)
+        if parsed is not None:
+            return parsed
+
+        try:
+            import ast
+
+            parsed = ast.literal_eval(candidate)
+            return parsed if isinstance(parsed, dict) else None
+        except Exception:
+            pass
+
     return None
 
 
@@ -139,10 +248,7 @@ def _normalize_style_shapes(document: dict) -> dict:
     if not isinstance(styles, dict):
         return document
 
-    normalized_styles = {
-        style_id: _pad_style_array(style_id, style_value)
-        for style_id, style_value in styles.items()
-    }
+    normalized_styles = {style_id: _pad_style_array(style_id, style_value) for style_id, style_value in styles.items()}
     return {**document, "styles": normalized_styles}
 
 
@@ -180,10 +286,10 @@ def normalize_tool_args(tool_name: str, raw_args: Any) -> dict:
             if isinstance(parsed_document, dict):
                 # 成功解析，用 dict 替换字符串
                 args = {**args, "document": _normalize_blank_paragraph_shape(parsed_document)}
-                logger.info(f"[normalize_tool_args] ✅ 成功解析 document 字符串为 dict")
+                logger.debug("[normalize_tool_args] 成功解析 document 字符串为 dict")
             else:
                 # 解析失败，打印警告但继续（不抛错），让 Pydantic schema 处理
-                logger.error(f"[normalize_tool_args] ⚠️ document 字符串解析失败，将由 schema 处理: {doc_raw[:100]}...")
+                logger.warning(f"[normalize_tool_args] document 字符串解析失败，将由 schema 处理: {doc_raw[:100]}...")
         elif isinstance(document, dict):
             args = {**args, "document": _normalize_blank_paragraph_shape(document)}
 

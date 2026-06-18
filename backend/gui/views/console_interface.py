@@ -11,7 +11,7 @@ import threading
 from collections import deque
 
 from PySide6.QtCore import Qt, QTimer, QUrl
-from PySide6.QtGui import QDesktopServices, QFont, QTextCursor, QColor
+from PySide6.QtGui import QDesktopServices, QFont, QTextCursor, QColor, QTextCharFormat
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -53,7 +53,7 @@ class OutputBuffer:
                 if self.original:
                     self.original.write(text)
                 with self._buf._lock:
-                    self._buf._deque.append((text, self._name))
+                    self._buf._deque.append((self._strip_ansi(text), self._name))
 
         def flush(self):
             if self.original:
@@ -66,6 +66,15 @@ class OutputBuffer:
 
         def isatty(self):
             return False
+
+        @staticmethod
+        def _strip_ansi(text: str) -> str:
+            try:
+                from app.core.logging import strip_ansi
+
+                return strip_ansi(text)
+            except Exception:
+                return text
 
     def __init__(self):
         self._deque: deque = deque(maxlen=50000)
@@ -185,7 +194,7 @@ class ConsoleInterface(QWidget):
     def _appendText(self, text: str, stream_name: str):
         cursor = self._textEdit.textCursor()
         cursor.movePosition(QTextCursor.End)
-        cursor.insertText(text)
+        cursor.insertText(text, self._formatForLogText(text, stream_name))
 
         if self._textEdit.blockCount() > self._maxLines:
             cursor.movePosition(QTextCursor.Start)
@@ -198,6 +207,21 @@ class ConsoleInterface(QWidget):
 
         self._textEdit.setTextCursor(cursor)
         self._textEdit.ensureCursorVisible()
+
+    def _formatForLogText(self, text: str, stream_name: str) -> QTextCharFormat:
+        fmt = QTextCharFormat()
+        if "][CRITICAL][" in text or "][ERROR][" in text:
+            fmt.setForeground(QColor("#ff6b6b"))
+            fmt.setFontWeight(QFont.Bold)
+        elif "][WARNING][" in text:
+            fmt.setForeground(QColor("#facc15"))
+        elif "][DEBUG][" in text:
+            fmt.setForeground(QColor("#8a8a8a"))
+        elif stream_name == "stderr":
+            fmt.setForeground(QColor("#ff6b6b"))
+        else:
+            fmt.setForeground(QColor("#d4d4d4"))
+        return fmt
 
     def _clearLog(self):
         self._textEdit.clear()

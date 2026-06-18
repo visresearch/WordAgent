@@ -2,18 +2,24 @@ Generate formatted content and insert it into the Word document.
 
 ## Parameters
 - `document` (object): raw `DocumentOutput` object. Do not pass escaped JSON, a string, or `{"document": {...}}` inside this value.
-- `insertParaID` (int, optional): insert after this paragraph ID. Omit for current cursor position. For a blank/new document, omit it.
+- `insertParaID` (int, required): insertion anchor. Use an existing paragraph ID to insert after that paragraph. Use `0` only for the first write into an empty/new document, which inserts at the document start.
 - `docId` (int, optional): target document ID; use `0` for the active document.
 
 ## Required payload shape
 - Top-level tool args: `{"document": {...}, "insertParaID": 123456}`.
+- The tool args must be exactly one balanced top-level JSON object. Do not add extra closing braces/brackets after `docId` or after the top-level object.
 - `document` should include `paragraphs`, `tables` (can be `[]`), and `styles`.
 - Every referenced `pStyle/rStyle/cStyle/tStyle` must exist in `styles`.
 - Style arrays must be complete: `pS_*` has 9 items, `rS_*` has 11 items, `cS_*` has 4 items, `tS_*` has 1 item.
+- Non-empty paragraphs must use a non-empty paragraph style ID such as `pS_3`, and that ID must be defined in `styles`.
+- Use `pStyle: ""` only for a truly blank line with `runs: []`; never use empty `pStyle` for paragraphs that contain text or images.
+- Text runs must use an `rStyle` such as `rS_2`, and that ID must be defined in `styles`.
 - Never put `\n` inside `run.text`; one visual line is one paragraph.
+- In `run.text`, `cell.text`, and table paragraph text, never use raw ASCII double quote characters (`"`). For quoted phrases, use Chinese quotation marks such as `“三夏”` or `「三夏」`. Raw `"` in text often breaks tool-call JSON.
 - Blank line: `{ "pStyle": "", "runs": [] }`.
-- `insertParaID` must be an existing paragraph ID from recent `read_document`/`search_documnet` results; do not guess IDs.
-- If `read_document` returns only one empty placeholder paragraph such as `runs: []`, treat the document as blank and omit `insertParaID`.
+- `insertParaID` is mandatory. Never omit it and never pass `null`/`None`.
+- For non-empty documents, `insertParaID` must be an existing paragraph ID from selected context, `read_document`, or `search_documnet`; do not guess IDs.
+- If document metadata says `isEmpty=true` or `read_document` returns only one empty placeholder paragraph such as `runs: []`, treat the document as blank and use `"insertParaID": 0`.
 
 ## Use
 - New writing, append/insert content, or replacement content after `delete_document`.
@@ -22,12 +28,21 @@ Generate formatted content and insert it into the Word document.
 
 ## Runs and images
 - Text run: `{ "text": "...", "rStyle": "rS_2" }`.
+- A paragraph containing this run must also have a defined `pStyle`, for example `{ "pStyle": "pS_3", "runs": [{ "text": "...", "rStyle": "rS_2" }] }`.
+- If text includes a quoted phrase, write it as `“quoted text”` / `「quoted text」`, not `"quoted text"`.
 - Image run: `{ "url": "...", "width": 320, "height": 240, "altText": "..." }` (no `text` field).
 - Keep image URLs unchanged, including query parameters. `url` may be http/https, file URL, or local/project-relative path.
 - Keep image aspect ratio; omit `width`/`height` to use native size.
 
 ## ParaID stability with `delete_document`
 Prefer paraID-based workflows: search/read returns paragraph IDs and delete uses paraIDs directly. This avoids index drift after insertion.
+
+## Pre-call checklist
+Before calling `generate_document`, scan the payload:
+- Collect every `pStyle`, `rStyle`, `cStyle`, and `tStyle` value that appears in paragraphs, runs, cells, and tables.
+- Confirm each collected non-empty style ID exists as a key in `document.styles`.
+- Confirm no paragraph with `runs` uses `pStyle: ""`.
+- Confirm blank lines are exactly `{ "pStyle": "", "runs": [] }`.
 
 ## Minimal example
 ```json
@@ -47,7 +62,7 @@ Prefer paraID-based workflows: search/read returns paragraph IDs and delete uses
 ```
 
 ## Blank document first write
-If document metadata says the active document is empty, e.g. `{"documentId":1265989210,"isEmpty":true,"totalParas":1}`, the first write should omit `insertParaID` and target the active document:
+If document metadata says the active document is empty, e.g. `{"documentId":1265989210,"isEmpty":true,"totalParas":1}`, the first write must use `"insertParaID": 0` and target the active document:
 
 ```json
 {
@@ -61,6 +76,7 @@ If document metadata says the active document is empty, e.g. `{"documentId":1265
 			"rS_1": ["黑体", 16, true, false, 0, "#000000", "#000000", 0, false, false, false]
 		}
 	},
+	"insertParaID": 0,
 	"docId": 1265989210
 }
 ```

@@ -1,18 +1,26 @@
 # Changelog
 
-## Unreleased
+## [v0.5.1]
 
 ### Fixed
 - 修复多智能体模式生成文档的json schema不同步的问题
 - 修复Microsoft word加载项paraID的问题，放弃使用paraIndex，使用隐藏书签实现paraID
 - 修复了旧的为同步的提示词会干扰agent调用generate_document工具生成文档的问题
+- 修复了Microsoft word加载项重复隐藏书签的bug
+- 修复了generate_document工具的提示词
 
 ### Added
-- 添加系统logger，记录系统运行日志
+- 添加系统logger，记录系统运行日志，添加终端level颜色警告
+- 添加Microsoft word加载项上下文圆环
+
+### Deleted
+- 删除Microsoft word加载项paraIndex索引漂移补偿的逻辑，简化代码
 
 ### Changed
+- 更新py依赖
 - 修改Microsoft word加载项批注高亮
-- 修改文档和官网内容
+- 加大短期记忆上下文参数
+- 修改generate_document工具，insertParaID参数为必填参数，约定0代表空文章开头
 
 ## [v0.5.0]
 

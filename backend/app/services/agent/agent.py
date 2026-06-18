@@ -25,9 +25,14 @@ from langchain_core.messages import (
 from langgraph.graph import END, START, MessagesState, StateGraph
 
 from app.core.logging import get_logger
+from app.services.document import (
+    build_document_name_by_id,
+    format_document_range_line,
+    normalize_document_meta,
+)
 from app.services.llm_client import resolve_model, supports_thinking, init_chat_model_with_reasoning
 from app.services.agent.prompts import get_core_prompts
-from app.services.utils import normalize_tool_args
+from app.services.utils import normalize_tool_args, parse_tool_args_with_repair
 from app.services.agent.tools import (
     TOOL_MAP,
     _current_chat_id,
@@ -58,6 +63,67 @@ def _get_env_int(name: str, default: int) -> int:
 
 
 _AGENT_RECURSION_LIMIT = _get_env_int("WORDAGENT_AGENT_RECURSION_LIMIT", 100)
+
+
+def _bind_tools_for_agent(llm, tools: list):
+    """Bind tools with stricter argument generation when the model adapter supports it."""
+    try:
+        return llm.bind_tools(tools, strict=True, parallel_tool_calls=False)
+    except TypeError:
+        logger.warning("[Agent] 当前模型适配器不支持 strict/parallel_tool_calls，使用默认工具绑定")
+        return llm.bind_tools(tools)
+    except Exception as exc:
+        logger.warning(f"[Agent] strict 工具绑定失败，使用默认工具绑定: {exc}")
+        return llm.bind_tools(tools)
+
+
+def _summarize_custom_event(chunk: Any) -> str:
+    """Return a compact log line for stream_writer custom events."""
+    if not isinstance(chunk, dict):
+        text = str(chunk)
+        return text if len(text) <= 300 else text[:300] + "..."
+
+    event_type = chunk.get("type", "?")
+    parts = [f"type={event_type}"]
+
+    tool_name = chunk.get("toolName")
+    if tool_name:
+        parts.append(f"tool={tool_name}")
+
+    if event_type == "json":
+        content = chunk.get("content")
+        if isinstance(content, dict):
+            paragraphs = content.get("paragraphs")
+            tables = content.get("tables")
+            styles = content.get("styles")
+            parts.append(f"paragraphs={len(paragraphs) if isinstance(paragraphs, list) else 0}")
+            parts.append(f"tables={len(tables) if isinstance(tables, list) else 0}")
+            parts.append(f"styles={len(styles) if isinstance(styles, dict) else 0}")
+            if "insertParaID" in content:
+                parts.append(f"insertParaID={content.get('insertParaID')}")
+            if "docId" in content:
+                parts.append(f"docId={content.get('docId')}")
+    elif event_type in {"mcp_tool_call", "tool_call"}:
+        args = chunk.get("args")
+        if isinstance(args, dict):
+            parts.append(f"args={list(args.keys())}")
+    elif event_type in {"mcp_tool_result", "tool_result"}:
+        parts.append(f"length={chunk.get('outputLength', 0)}")
+        parts.append(f"truncated={bool(chunk.get('truncated'))}")
+        if chunk.get("isError"):
+            parts.append("error=true")
+    elif event_type in {"read_document", "read_complete", "search_document", "query_complete", "delete_document", "generate_complete"}:
+        content = chunk.get("content")
+        if content:
+            parts.append(str(content))
+        for key in ("docId", "insertParaID", "startParaIndex", "endParaIndex", "startParaID", "endParaID"):
+            if key in chunk and chunk.get(key) is not None:
+                parts.append(f"{key}={chunk.get(key)}")
+    else:
+        keys = sorted(str(k) for k in chunk.keys())
+        parts.append(f"keys={keys}")
+
+    return " ".join(parts)
 
 
 class ContextOverflowError(Exception):
@@ -348,7 +414,7 @@ def build_graph(llm_with_tools, all_tools: list):
         if is_stop_requested(chat_id):
             logger.info(f"[Agent] ⛔ 收到停止信号，终止 Agent 节点 (session={chat_id})")
             return {"messages": []}
-        logger.info("[Agent] 开始处理")
+        logger.debug("[Agent] 开始处理")
         invoke_messages = state["messages"]
         try:
             from app.services.context import _light_compact_tool_results
@@ -378,12 +444,12 @@ def build_graph(llm_with_tools, all_tools: list):
             tool_fn = tool_map.get(tool_name)
             if tool_fn:
                 try:
-                    logger.info(
+                    logger.debug(
                         f"[Tools] 调用 normalize_tool_args 前，args 类型={type(tool_call['args'])}, keys={list(tool_call['args'].keys()) if isinstance(tool_call['args'], dict) else 'N/A'}"
                     )
                     # 用 normalize_tool_args 预处理参数，修复 JSON 字符串转义等问题
                     normalized_args = normalize_tool_args(tool_name, tool_call["args"])
-                    logger.info(
+                    logger.debug(
                         f"[Tools] normalize_tool_args 返回，类型={type(normalized_args)}, keys={list(normalized_args.keys()) if isinstance(normalized_args, dict) else 'N/A'}"
                     )
                     result = tool_fn.invoke(normalized_args)
@@ -468,60 +534,15 @@ def build_graph(llm_with_tools, all_tools: list):
             raw_args = tc.get("args", "")
             error_msg = tc.get("error", "")
             logger.info(f"[Repair] 尝试修复工具: {tool_name}")
-            logger.error(f"[Repair] 原始错误: {error_msg}")
-            logger.info(f"[Repair] 原始 args: {str(raw_args)[:200]}...")
+            if error_msg:
+                logger.error(f"[Repair] 原始错误: {error_msg}")
+            else:
+                logger.debug("[Repair] 原始错误: None")
+            logger.debug(f"[Repair] 原始 args: {str(raw_args)[:500]}...")
 
-            parsed_args = None
-            for attempt in range(3):
-                if isinstance(raw_args, str):
-                    raw_args_stripped = raw_args.strip()
-                    try:
-                        parsed = json.loads(raw_args_stripped)
-                        raw_args = parsed
-                        logger.info(f"[Repair] ✅ JSON 解析成功")
-                    except json.JSONDecodeError:
-                        try:
-                            import ast
-
-                            parsed = ast.literal_eval(raw_args_stripped)
-                            raw_args = parsed
-                            logger.info(f"[Repair] ✅ ast.literal_eval 解析成功")
-                        except Exception as e:
-                            logger.error(f"[Repair] ⚠️ 解析失败: {e}")
-
-                if isinstance(raw_args, dict):
-                    # 如果 document 是字符串，尝试解析
-                    if "document" in raw_args and isinstance(raw_args.get("document"), str):
-                        doc_str = raw_args["document"]
-                        logger.info(f"[Repair] document 是字符串，尝试解析，长度={len(doc_str)}")
-                        try:
-                            # 尝试直接解析
-                            doc_parsed = json.loads(doc_str)
-                            raw_args = {**raw_args, "document": doc_parsed}
-                            logger.info(f"[Repair] ✅ document JSON 解析成功")
-                        except json.JSONDecodeError:
-                            try:
-                                import ast
-
-                                doc_parsed = ast.literal_eval(doc_str)
-                                if isinstance(doc_parsed, dict):
-                                    raw_args = {**raw_args, "document": doc_parsed}
-                                    logger.info(f"[Repair] ✅ document ast.literal_eval 解析成功")
-                            except Exception as e:
-                                logger.error(f"[Repair] ⚠️ document 解析失败: {e}")
-
-                    # 检查 document 是否已正确解析
-                    if isinstance(raw_args.get("document"), dict):
-                        parsed_args = raw_args
-                        break
-                    elif raw_args.get("document") is None:
-                        # document 字段不存在或为 None，跳过
-                        parsed_args = raw_args
-                        break
-                elif isinstance(raw_args, str):
-                    if attempt < 2:
-                        continue
-                break
+            parsed_args = parse_tool_args_with_repair(raw_args)
+            if parsed_args is not None:
+                logger.info("[Repair] ✅ 工具参数解析/修复成功")
 
             if parsed_args is None:
                 logger.error(f"[Repair] ❌ 无法解析工具参数: {tool_name}")
@@ -592,14 +613,19 @@ def build_graph(llm_with_tools, all_tools: list):
                 RemoveMessage(id=last_message.id),
                 SystemMessage(
                     content=(
-                        "[RETRY_GENERATE] 你刚才的 tool call 参数无效（可能是 JSON 被转义或格式错误）。"
-                        "请重试调用 generate_document，并确保："
-                        "1) document 参数必须是 JSON 对象，不是字符串；"
-                        "2) 不要使用 json.dumps() 或 escape quotes；"
-                        "3) 段落样式使用 pStyle ID（如 pS_1），字符样式使用 rStyle ID（如 rS_2）；"
-                        "4) styles 中 pS_* 必须 9 项，rS_* 必须 11 项，cS_* 必须 4 项，tS_* 必须 1 项；"
-                        "5) 文本内容中如需引号，请使用中文引号或正确转义；"
-                        "6) 如果文档只有 runs: [] 的空占位段落，省略 insertParaID。"
+                        "[RETRY_GENERATE] Your previous tool call arguments were invalid. "
+                        "Retry generate_document and follow these rules exactly: "
+                        "1) The document argument must be a JSON object, not a string. "
+                        "2) Do not use json.dumps(), escaped JSON strings, or markdown code fences. "
+                        "The tool call must be exactly one balanced top-level JSON object; do not add extra closing braces or brackets after it. "
+                        "3) Use paragraph style IDs such as pS_1 and run style IDs such as rS_2. "
+                        "4) Every referenced style must be defined: pS_* arrays have 9 items, "
+                        "rS_* arrays have 11 items, cS_* arrays have 4 items, and tS_* arrays have 1 item. "
+                        "5) Do not put raw ASCII double quote characters inside generated text fields "
+                        "(run.text, cell.text, or table paragraph text). Use Chinese quotation marks "
+                        "such as “...” or 「...」 for quoted phrases. "
+                        "6) insertParaID is required. For non-empty documents, use a real paraID. "
+                        "For the first write into an empty document, use insertParaID=0."
                     )
                 ),
             ]
@@ -717,7 +743,8 @@ async def process_writing_request_stream(
         mcp_failed_servers = []
     mcp_tool_names = {t.name for t in mcp_tools}
     tools = get_base_tools_for_mode(mode) + mcp_tools
-    logger.info(f"[Agent] 已绑定 {[t.name for t in tools]}")
+    logger.info(f"[Agent] 已绑定 {len(tools)} 个工具")
+    logger.debug(f"[Agent] 工具列表: {[t.name for t in tools]}")
 
     # 构建系统提示
     system_parts = list(get_core_prompts(mode=mode))
@@ -752,9 +779,12 @@ async def process_writing_request_stream(
     system_prompt = "\n\n".join(system_parts)
 
     # 使用 bind_tools + build_graph（替代 create_agent）
-    llm_with_tools = llm.bind_tools(tools)
+    llm_with_tools = _bind_tools_for_agent(llm, tools)
     app = build_graph(llm_with_tools, tools)
     tool_log: list[dict] = []
+    meta_list = normalize_document_meta(document_meta)
+    document_name_by_id = build_document_name_by_id(meta_list)
+    document_meta_for_context = meta_list[0] if len(meta_list) == 1 else meta_list
 
     try:
         # 构建初始消息列表
@@ -777,12 +807,7 @@ async def process_writing_request_stream(
             # 构建文档范围描述
             range_lines = []
             for r in document_range:
-                doc_name = r.get("docName", "")
-                doc_id = r.get("docId", 0)
-                start = r.get("startParaIndex", 0)
-                end = r.get("endParaIndex", -1)
-                range_str = f"《{doc_name}》docId={doc_id}, selected paragraphIndex {start} to {end}"
-                range_lines.append(range_str)
+                range_lines.append(format_document_range_line(r, document_name_by_id))
 
             if mode == "ask":
                 user_content = (
@@ -800,13 +825,7 @@ async def process_writing_request_stream(
             logger.info(f"[Agent] 文档范围: {document_range}")
 
         # 注入文档全局元信息（支持多文档）
-        if document_meta:
-            # 支持单个文档（dict）和多个文档（list）
-            if isinstance(document_meta, list):
-                meta_list = document_meta
-            else:
-                meta_list = [document_meta]
-
+        if meta_list:
             # 使用 JSON 格式输出元信息（紧凑模式，不换行）
             meta_json = json.dumps(meta_list, ensure_ascii=False, separators=(",", ":"))
             user_content += (
@@ -814,7 +833,7 @@ async def process_writing_request_stream(
                 "\nThe following fields come from frontend document state and are not body content."
                 f"\n{meta_json}"
                 "\nUse these metadata fields in task analysis. The first document in the array is the active document the user is currently viewing."
-                "\nIf the active document has isEmpty=true, treat it as a blank/new document: for the first generate_document call, use the active documentId as docId and omit insertParaID. Do not call read_document just to obtain the empty placeholder paragraph ID."
+                "\nIf the active document has isEmpty=true, treat it as a blank/new document: for the first generate_document call, use the active documentId as docId and set insertParaID=0. Do not call read_document just to obtain the empty placeholder paragraph ID."
             )
         # 处理附件
         image_content_parts = []
@@ -877,7 +896,7 @@ async def process_writing_request_stream(
             messages.append(HumanMessage(content=user_content))
         text_only_messages = list(messages[:-1]) + [HumanMessage(content=text_only_user_content)]
 
-        logger.info(f"[Agent] 消息数量: {len(messages)}")
+        logger.debug(f"[Agent] 消息数量: {len(messages)}")
 
         # 获取事件循环
         loop = asyncio.get_running_loop()
@@ -907,7 +926,7 @@ async def process_writing_request_stream(
                         "model": model_name,
                         "mode": mode or "agent",
                         "has_document_range": bool(document_range),
-                        "has_document_meta": bool(document_meta),
+                        "has_document_meta": bool(meta_list),
                         "chat_id": chat_id or "",
                     },
                 }
@@ -924,7 +943,7 @@ async def process_writing_request_stream(
                 # 设置请求上下文，供工具函数获取 document_meta
                 _current_request_context.set(
                     {
-                        "document_meta": document_meta,
+                        "document_meta": document_meta_for_context,
                         "document_range": document_range,
                     }
                 )
@@ -955,7 +974,7 @@ async def process_writing_request_stream(
                         for stream_item in response:
                             has_any_stream_item = True
                             if chat_id and is_stop_requested(chat_id):
-                                logger.info(f"[Agent] ⛔ 检测到停止信号，结束流式处理 (session={chat_id})")
+                                logger.warning(f"[Agent] ⛔ 检测到停止信号，结束流式处理 (session={chat_id})")
                                 break
                             asyncio.run_coroutine_threadsafe(queue.put(stream_item), loop)
 
@@ -1145,7 +1164,8 @@ async def process_writing_request_stream(
 
             elif input_type == "custom":
                 # stream_writer 输出（工具状态消息）
-                logger.info(f"[Agent] 自定义输出: {chunk}")
+                logger.info(f"[Agent] 事件: {_summarize_custom_event(chunk)}")
+                logger.debug(f"[Agent] 自定义输出: {chunk}")
                 if chunk:
                     if isinstance(chunk, dict):
                         yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
@@ -1172,11 +1192,7 @@ async def process_writing_request_stream(
         if document_range:
             range_lines = []
             for r in document_range:
-                doc_name = r.get("docName", "")
-                doc_id = r.get("docId", 0)
-                start = r.get("startParaIndex", 0)
-                end = r.get("endParaIndex", -1)
-                range_lines.append(f"《{doc_name}》docId={doc_id}, selected paragraphIndex {start} to {end}")
+                range_lines.append(format_document_range_line(r, document_name_by_id))
             user_content = f"{message}\n\nPlease process based on the user-selected document content:\n" + "\n".join(
                 f"  - {line}" for line in range_lines
             )

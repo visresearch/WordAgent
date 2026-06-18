@@ -28,6 +28,7 @@
         :uploaded-files="uploadedFiles"
         :pending-document="pendingDocument"
         :pending-deletes="pendingDeletes"
+        :token-stats="tokenStats"
         :enable-thinking="enableThinking"
         @update:mode="mode = $event"
         @update:selected-model="selectedModel = $event"
@@ -107,6 +108,7 @@ export default {
       _streamingSessionId: null,
       _streamingCache: {},
       isWide: false,
+      tokenStats: { current: 0, max: 200000, percentage: 0 },
       enableThinking: true,  // 是否启用深度思考
       _insertQueue: Promise.resolve(),
       _initializing: false   // 是否正在初始化，防止 ensureSession 创建重复会话
@@ -633,6 +635,8 @@ export default {
           // 计算选区对应的段落索引
           let startParaIndex = 0;
           let endParaIndex = 0;
+          let startParaID = null;
+          let endParaID = null;
 
           if (selParagraphs.items.length > 0) {
             const firstSelParaRange = selParagraphs.items[0].getRange('Whole');
@@ -656,6 +660,14 @@ export default {
               if (endComparisons[i].value === 'Equal') {
                 endParaIndex = i;
               }
+            }
+
+            try {
+              const allParaIDs = await resolveParagraphParaIDs(context, allParagraphs.items);
+              startParaID = allParaIDs[startParaIndex] || null;
+              endParaID = allParaIDs[endParaIndex] || startParaID;
+            } catch (e) {
+              console.warn('[Selection] 获取选区 paraID 失败:', e);
             }
           }
 
@@ -690,6 +702,8 @@ export default {
             hasMore,
             startParaIndex,
             endParaIndex,
+            startParaID,
+            endParaID,
             fullText: cleanedText,
             docId
           });
@@ -769,6 +783,8 @@ export default {
           endText: s.endText,
           startParaIndex: s.startParaIndex,
           endParaIndex: s.endParaIndex,
+          startParaID: s.startParaID,
+          endParaID: s.endParaID,
           charCount: s.charCount,
           docId: Number.isInteger(s.docId) ? s.docId : 0,
           docName: s.docName || ''
@@ -776,6 +792,8 @@ export default {
         documentRange = this.selections.map(s => ({
           startParaIndex: s.startParaIndex,
           endParaIndex: s.endParaIndex,
+          startParaID: s.startParaID,
+          endParaID: s.endParaID,
           docId: Number.isInteger(s.docId) ? s.docId : 0,
           docName: s.docName || ''
         }));
@@ -894,6 +912,15 @@ export default {
       // 收到非 thinking 事件时，标记思考已结束
       if (data.type !== 'thinking' && msg.thinkingStartTime && !msg.thinkingDone) {
         msg.thinkingDone = true;
+      }
+
+      if (data.type === 'token_stats') {
+        this.tokenStats = {
+          current: data.current_tokens || 0,
+          max: data.max_tokens || 200000,
+          percentage: data.percentage || 0
+        };
+        return;
       }
 
       // 后端请求读取文档
@@ -1335,6 +1362,10 @@ export default {
     async _applyImmediateInsertion(insItem) {
       const normalizedDocId = this._toIntOrDefault(insItem.docId, 0);
       const requestedInsertParaID = this._toParaIdOrNull(insItem.insertParaID);
+      if (requestedInsertParaID === null) {
+        console.error('[AIChatPane] generate_document 缺少必填 insertParaID:', insItem);
+        return false;
+      }
       const docPayload = { ...(insItem.documentJson || {}) };
       const result = await generateDocxFromJSON(docPayload, "selection", requestedInsertParaID);
       if (!result || !result.success) {
@@ -1365,15 +1396,9 @@ export default {
       let insertStartParaIndex = null;
       let insertEndParaIndex = null;
       if (shiftCount > 0) {
-        if (requestedInsertParaID === null) {
-          const totalParas = await Word.run(async (context) => {
-            const paras = context.document.body.paragraphs;
-            paras.load('items');
-            await context.sync();
-            return paras.items.length;
-          });
-          insertEndParaIndex = totalParas - 1;
-          insertStartParaIndex = Math.max(0, totalParas - shiftCount);
+        if (requestedInsertParaID === '0') {
+          insertStartParaIndex = 0;
+          insertEndParaIndex = shiftCount - 1;
         } else {
           const indices = await this._resolveParaIDsToIndices([requestedInsertParaID]);
           if (indices.length > 0) {
@@ -1677,6 +1702,11 @@ export default {
 
         if (jsonData && (jsonData.paragraphs || jsonData.tables)) {
           const insertParaID = this._toParaIdOrNull(jsonData.insertParaID);
+          if (insertParaID === null) {
+            console.error('生成文档失败: 缺少必填 insertParaID');
+            await this._insertPlainText(content);
+            return;
+          }
           const result = await generateDocxFromJSON(jsonData, 'selection', insertParaID);
           msg.insertedParaIDs = this._normalizeParaIdList(result?.insertedParaIDs || []);
           if (result?.error) {
@@ -1694,9 +1724,9 @@ export default {
 
                   const totalParas = paras.items.length;
                   let startIdx, endIdx;
-                  if (insertParaID === null) {
-                    endIdx = totalParas - 1;
-                    startIdx = totalParas - newParaCount;
+                  if (insertParaID === '0') {
+                    startIdx = 0;
+                    endIdx = newParaCount - 1;
                   } else {
                     const indices = await this._resolveParaIDsToIndices([insertParaID]);
                     if (indices.length > 0) {

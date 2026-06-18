@@ -334,7 +334,7 @@ def _load_mcp_server_configs() -> dict[str, dict[str, Any]]:
             entry["command"] = command
             if isinstance(config.get("args"), list):
                 entry["args"] = config["args"]
-            logger.info(f"[MCP] 🔧 {name}: command={command} args={entry.get('args')}")
+            logger.debug(f"[MCP] {name}: command={command} args={entry.get('args')}")
 
             entry["transport"] = transport or "stdio"
 
@@ -471,7 +471,8 @@ async def load_mcp_tools() -> tuple[list, list, list[dict[str, str]]]:
             wrapped = [_wrap_mcp_tool_for_sync(t, loop) for t in raw_tools]
             all_tools.extend(wrapped)
             live_clients.append(client)
-            logger.info(f"[MCP] ✅ {name}: 已加载 {len(wrapped)} 个工具 {[t.name for t in wrapped]}")
+            logger.info(f"[MCP] ✅ {name}: 已加载 {len(wrapped)} 个工具")
+            logger.debug(f"[MCP] {name} 工具列表: {[t.name for t in wrapped]}")
         except Exception as e1:
             # SSE 连接失败时，尝试以 streamable_http 重试
             if server_cfg.get("transport") == "sse":

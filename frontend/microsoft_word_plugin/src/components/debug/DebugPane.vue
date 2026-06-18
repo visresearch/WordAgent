@@ -236,9 +236,16 @@ export default {
       }
 
       try {
-        const insertParaID = Number.isInteger(jsonData.insertParaID)
-          ? jsonData.insertParaID
-          : null;
+        const rawInsertParaID = jsonData.insertParaID;
+        const insertParaID = Number.isInteger(rawInsertParaID)
+          ? rawInsertParaID
+          : rawInsertParaID !== null && rawInsertParaID !== undefined && Number.isInteger(Number(rawInsertParaID))
+            ? Number(jsonData.insertParaID)
+            : null;
+        if (insertParaID === null) {
+          this.showStatus('转换失败: 缺少必填 insertParaID（空文档首次写入使用 0）', 'error');
+          return;
+        }
         const result = await generateDocxFromJSON(jsonData, 'selection', insertParaID);
         if (result && result.error) {
           this.showStatus('转换失败: ' + result.error, 'error');

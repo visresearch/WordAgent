@@ -34,6 +34,7 @@ _MAX_DOC_JSON_CHARS = 100_000
 
 DocIdInput = int | str | None
 ParaIdInput = int | str | None
+RequiredParaIdInput = int | str
 
 
 def _parse_int_like(value: object) -> int | None:
@@ -404,7 +405,7 @@ def _read_document_impl(
     if chat_id:
         q = _pending_tool_requests.get(chat_id)
         if q:
-            logger.info(
+            logger.debug(
                 f"[read_document] WebSocket 模式，等待前端回传文档 (session={chat_id}, 队列现有 {q.qsize()} 条)"
             )
             loop = _pending_loops.get(chat_id)
@@ -416,7 +417,7 @@ def _read_document_impl(
                 try:
                     result = future.result(timeout=65)
                     result_type = result.get("type", "?")
-                    logger.info(f"[read_document] 收到回传: type={result_type}, keys={list(result.keys())}")
+                    logger.debug(f"[read_document] 收到回传: type={result_type}, keys={list(result.keys())}")
                     if result_type == "stop" or result.get("error") == "stopped_by_user":
                         logger.info("[read_document] ⛔ 用户已停止，终止读取")
                         return ""
@@ -477,10 +478,14 @@ def _read_document_impl(
     return ""
 
 
-def _generate_document_impl(document: DocumentOutput, docId: DocIdInput, insertParaID: ParaIdInput) -> dict:
+def _generate_document_impl(document: DocumentOutput, docId: DocIdInput, insertParaID: RequiredParaIdInput) -> dict:
     """generate_document 的核心逻辑。"""
     resolved_doc_id = _normalize_doc_id(docId)
     normalized_insert_para_id = _normalize_para_id(insertParaID)
+    if normalized_insert_para_id is None:
+        raise ValueError(
+            "generate_document requires insertParaID. Use 0 only for the first write into an empty document, otherwise use a real paraID from read_document/search_documnet."
+        )
 
     doc_dict = document.model_dump()
     _ensure_image_payload_shape(doc_dict)
@@ -508,6 +513,7 @@ def _generate_document_impl(document: DocumentOutput, docId: DocIdInput, insertP
                 "type": "generate_complete",
                 "content": f"📝 文档已生成，共 {para_count} 个段落{f'，{image_count} 张图片' if image_count else ''}",
                 "docId": resolved_doc_id,
+                "insertParaID": normalized_insert_para_id,
             }
         )
     return doc_dict
@@ -541,7 +547,7 @@ def _search_document_impl(query: DocumentQuery, docId: DocIdInput) -> str:
     if chat_id:
         q = _pending_tool_requests.get(chat_id)
         if q:
-            logger.info(f"[search_documnet] WebSocket 模式，等待前端回传查询结果 (session={chat_id})")
+            logger.debug(f"[search_documnet] WebSocket 模式，等待前端回传查询结果 (session={chat_id})")
             loop = _pending_loops.get(chat_id)
             if loop:
                 future = asyncio.run_coroutine_threadsafe(
@@ -713,16 +719,16 @@ def build_generate_document(description: str):
     @tool(description=description)
     def generate_document(
         document: DocumentOutput,
+        insertParaID: RequiredParaIdInput,
         docId: DocIdInput = 0,
-        insertParaID: ParaIdInput = None,
     ) -> dict:
         """Generate a formatted document JSON for insertion into the Word document.
 
         Args:
             document: The document content to generate.
+            insertParaID: Required insertion anchor. Use 0 for the first write into an empty document;
+                otherwise insert after the paragraph whose paraID equals this value.
             docId: Document ID (int-like). Positive/negative are both allowed. 0 means current active document.
-            insertParaID: Insert after the paragraph whose paraID equals this value (int-like).
-                Omit/None to use current selection position.
         """
         return _generate_document_impl(document, docId, insertParaID)
 

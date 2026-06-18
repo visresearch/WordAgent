@@ -56,9 +56,9 @@ def _get_env_float(name: str, default: float) -> float:
 
 
 # ============ 短期记忆 Token 预算（类 Claude Code 风格） ============
-SHORT_TERM_TOKEN_BUDGET = _get_env_int("WORDAGENT_SHORT_TERM_TOKEN_BUDGET", 50000)
+SHORT_TERM_TOKEN_BUDGET = _get_env_int("WORDAGENT_SHORT_TERM_TOKEN_BUDGET", 100000)
 SHORT_TERM_MIN_TURNS = _get_env_int("WORDAGENT_SHORT_TERM_MIN_TURNS", 3)
-SHORT_TERM_LARGE_TOOL_OUTPUT_TOKENS = _get_env_int("WORDAGENT_SHORT_TERM_LARGE_TOOL_OUTPUT_TOKENS", 2000)
+SHORT_TERM_LARGE_TOOL_OUTPUT_TOKENS = _get_env_int("WORDAGENT_SHORT_TERM_LARGE_TOOL_OUTPUT_TOKENS", 5000)
 
 
 # ============== 长期记忆配置 ==============

@@ -23,6 +23,10 @@ from qfluentwidgets import (
     InfoBarPosition,
 )
 
+from app.core.logging import get_logger
+
+logger = get_logger("gui.office_install")
+
 
 def _get_runtime_base() -> Path:
     """获取 backend 运行时基础目录（兼容 PyInstaller）。"""
@@ -380,6 +384,13 @@ class OfficeInstallInterface(QWidget):
                     self.send_header("Expires", "0")
                     self.send_header("Access-Control-Allow-Origin", "*")
                     super().end_headers()
+
+                def log_message(self, format, *args):
+                    message = format % args
+                    if " 200 " in f" {message} " or " 304 " in f" {message} ":
+                        logger.debug("Office 静态服务: %s - %s", self.address_string(), message)
+                    else:
+                        logger.warning("Office 静态服务: %s - %s", self.address_string(), message)
 
             handler = partial(LocalStaticHandler, directory=str(dist_dir))
 

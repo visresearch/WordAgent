@@ -23,7 +23,10 @@ Use this map for new content and include every style referenced in the payload:
 
 ### Style rules
 - `styles` is mandatory; style values are arrays.
+- Every style ID used in `paragraphs`, `runs`, `tables`, or cells must appear in `styles`.
+- Never use `pStyle: ""` for a paragraph containing text or images. Use `pS_3` for ordinary body text. Empty `pStyle` is only for `{ "pStyle": "", "runs": [] }`.
 - `pS_1`: title. `pS_2`: section heading. `pS_4`: subsection. `pS_3`: body. `pS_5`: table cell. `pS_6`: figure/chart caption.
 - `rS_1`: Chinese heading. `rS_2`: Chinese body. `rS_3`: English/number heading. `rS_4`: English/number body. `rS_5`: caption.
 - Split mixed Chinese/English/number text into runs; do not add extra spaces only to separate scripts.
 - Figure/chart captions go directly below the figure as `图X 描述` using `pS_6` + `rS_5`.
+- For quoted phrases in generated Chinese document text, use Chinese quotation marks such as `“三夏”` or `「三夏」`; do not use raw ASCII double quote characters inside `run.text`.

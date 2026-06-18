@@ -82,7 +82,7 @@ async def submit_tool_response(chat_id: str, data: dict):
     q = _pending_tool_requests.get(chat_id)
     if q:
         data_type = data.get("type", "?") if isinstance(data, dict) else type(data).__name__
-        logger.info(f"[ToolCallback] ✅ 放入队列 session={chat_id}, type={data_type}, 队列大小={q.qsize() + 1}")
+        logger.debug(f"[ToolCallback] 放入队列 session={chat_id}, type={data_type}, 队列大小={q.qsize() + 1}")
         await q.put(data)
     else:
         logger.warning(f"[ToolCallback] ⚠️ 找不到 session {chat_id} 的等待队列")

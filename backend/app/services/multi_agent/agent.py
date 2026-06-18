@@ -14,6 +14,11 @@ import traceback
 from collections.abc import AsyncGenerator
 
 from app.core.logging import get_logger
+from app.services.document import (
+    build_document_name_by_id,
+    format_document_range_line,
+    normalize_document_meta,
+)
 
 logger = get_logger(__name__)
 
@@ -240,6 +245,18 @@ def _create_llm(model_name: str):
 # region Sub-Agent ReAct Runner
 
 
+def _bind_tools_for_agent(llm, tools: list):
+    """Bind tools with stricter argument generation when the model adapter supports it."""
+    try:
+        return llm.bind_tools(tools, strict=True, parallel_tool_calls=False)
+    except TypeError:
+        logger.warning("[MultiAgent] 当前模型适配器不支持 strict/parallel_tool_calls，使用默认工具绑定")
+        return llm.bind_tools(tools)
+    except Exception as exc:
+        logger.warning(f"[MultiAgent] strict 工具绑定失败，使用默认工具绑定: {exc}")
+        return llm.bind_tools(tools)
+
+
 def _run_sub_agent(
     llm,
     agent_name: str,
@@ -250,7 +267,7 @@ def _run_sub_agent(
 ) -> tuple[str, dict | None, list[dict]]:
     """Run a sub-agent ReAct loop (synchronous, in thread)."""
     tool_map = {t.name: t for t in tools}
-    llm_with_tools = llm.bind_tools(tools)
+    llm_with_tools = _bind_tools_for_agent(llm, tools)
     system_prompt = get_agent_prompt(agent_name)
 
     messages = [SystemMessage(content=system_prompt)]
@@ -730,29 +747,27 @@ def _build_multi_agent_graph(llm, model_name: str, mcp_tools: list = None):
         task = state.user_message
         if state.document_range:
             # 构建文档范围描述
+            meta_list = normalize_document_meta(state.document_meta)
+            document_name_by_id = build_document_name_by_id(meta_list)
             range_lines = []
             for r in state.document_range:
-                doc_name = r.get("docName", "")
-                doc_id = r.get("docId", 0)
-                start = r.get("startParaIndex", 0)
-                end = r.get("endParaIndex", -1)
-                range_str = f"「{doc_name}」docId={doc_id}, selected paragraphIndex {start} to {end}"
-                range_lines.append(range_str)
+                range_lines.append(format_document_range_line(r, document_name_by_id, brackets=("「", "」")))
             task += f"\n\nUser has selected the following document content:\n" + "\n".join(
                 f"  - {line}" for line in range_lines
             )
 
-        if state.document_meta:
+        meta_list = normalize_document_meta(state.document_meta)
+        if meta_list:
             # 使用 JSON 格式输出元信息（紧凑模式，不换行）
             meta_json = json.dumps(
-                state.document_meta if isinstance(state.document_meta, list) else [state.document_meta],
+                meta_list,
                 ensure_ascii=False,
                 separators=(",", ":"),
             )
             task += (
                 f"\n\n[Document Global Metadata]\nThe following fields come from frontend document state and are not body content.\n{meta_json}"
                 "\nUse these metadata fields in task analysis. The first document in the array is the active document the user is currently viewing."
-                "\nIf the active document has isEmpty=true, treat it as a blank/new document: for the first generate_document call, use the active documentId as docId and omit insertParaID. Do not call read_document just to obtain the empty placeholder paragraph ID."
+                "\nIf the active document has isEmpty=true, treat it as a blank/new document: for the first generate_document call, use the active documentId as docId and set insertParaID=0. Do not call read_document just to obtain the empty placeholder paragraph ID."
             )
 
         if state.attached_files:
@@ -994,6 +1009,8 @@ async def process_writing_request_stream(
 
     # Build graph AFTER mcp_tools is loaded
     app = _build_multi_agent_graph(llm, model_name, mcp_tools)
+    meta_list = normalize_document_meta(document_meta)
+    document_name_by_id = build_document_name_by_id(meta_list)
 
     try:
         loop = asyncio.get_running_loop()
@@ -1030,7 +1047,7 @@ async def process_writing_request_stream(
         initial_state = MultiAgentState(
             user_message=message,
             document_range=document_range or [],
-            document_meta=document_meta or {},
+            document_meta=meta_list,
             memory_context=memory_context,
             attached_files=attached_files or [],
         )
@@ -1056,7 +1073,7 @@ async def process_writing_request_stream(
                         "model": model_name,
                         "mode": mode or "plan",
                         "has_document_range": bool(document_range),
-                        "has_document_meta": bool(document_meta),
+                        "has_document_meta": bool(meta_list),
                         "chat_id": chat_id or "",
                     },
                 }
@@ -1267,11 +1284,7 @@ async def process_writing_request_stream(
         if document_range:
             range_lines = []
             for r in document_range:
-                doc_name = r.get("docName", "")
-                doc_id = r.get("docId", 0)
-                start = r.get("startParaIndex", 0)
-                end = r.get("endParaIndex", -1)
-                range_lines.append(f"《{doc_name}》docId={doc_id}, selected paragraphIndex {start} to {end}")
+                range_lines.append(format_document_range_line(r, document_name_by_id))
             user_content = f"{message}\n\nPlease process based on the user-selected document content:\n" + "\n".join(
                 f"  - {line}" for line in range_lines
             )

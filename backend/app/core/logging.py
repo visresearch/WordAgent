@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import sys
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
@@ -16,6 +17,13 @@ from pathlib import Path
 
 DEFAULT_LOG_FORMAT = "[%(asctime)s][%(levelname)s][%(name)s] %(message)s"
 DEFAULT_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+ANSI_RESET = "\033[0m"
+ANSI_COLORS = {
+    logging.DEBUG: "\033[2m",
+    logging.WARNING: "\033[33m",
+    logging.ERROR: "\033[31m",
+    logging.CRITICAL: "\033[1;31m",
+}
 
 
 def _get_wence_data_dir() -> Path:
@@ -35,6 +43,34 @@ def _normalize_log_level(level: str | int | None) -> int:
 
     raw = (level or os.environ.get("WORDAGENT_LOG_LEVEL") or os.environ.get("LOG_LEVEL") or "INFO").strip().upper()
     return getattr(logging, raw, logging.INFO)
+
+
+class ColorFormatter(logging.Formatter):
+    """ANSI color formatter for console logs only."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        message = super().format(record)
+        color = ANSI_COLORS.get(record.levelno)
+        if not color:
+            return message
+        return f"{color}{message}{ANSI_RESET}"
+
+
+def strip_ansi(text: str) -> str:
+    """Remove ANSI escape sequences from text."""
+
+    return re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", text)
+
+
+def _enable_windows_ansi() -> None:
+    if os.name != "nt":
+        return
+    try:
+        import colorama
+
+        colorama.just_fix_windows_console()
+    except Exception:
+        pass
 
 
 def _get_log_file() -> Path:
@@ -80,7 +116,8 @@ def configure_logging(
 
     stream_handler = logging.StreamHandler(sys.stdout)
     stream_handler.setLevel(log_level)
-    stream_handler.setFormatter(formatter)
+    _enable_windows_ansi()
+    stream_handler.setFormatter(ColorFormatter(DEFAULT_LOG_FORMAT, datefmt=DEFAULT_DATE_FORMAT))
     root.addHandler(stream_handler)
 
     if enable_file:
@@ -108,9 +145,16 @@ def configure_logging(
         logger = logging.getLogger(logger_name)
         logger.handlers.clear()
         logger.propagate = True
-        logger.setLevel(log_level)
+        logger.setLevel(logging.WARNING if logger_name == "uvicorn.access" else log_level)
 
-    for logger_name in ("sqlalchemy", "sqlalchemy.engine", "sqlalchemy.pool"):
+    for logger_name in (
+        "sqlalchemy",
+        "sqlalchemy.engine",
+        "sqlalchemy.pool",
+        "httpx",
+        "httpcore",
+        "mcp.client.streamable_http",
+    ):
         logger = logging.getLogger(logger_name)
         logger.handlers.clear()
         logger.propagate = True

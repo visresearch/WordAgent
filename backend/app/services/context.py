@@ -188,7 +188,7 @@ def _light_compact_tool_results(
     }
 
     if not ENABLE_LIGHT_COMPACT:
-        logger.info(f"[Context] 轻量压缩: 已禁用")
+        logger.debug(f"[Context] 轻量压缩: 已禁用")
         return messages, meta
 
     tool_msgs: list[tuple[int, ToolMessage]] = []
@@ -201,7 +201,7 @@ def _light_compact_tool_results(
             other_msgs.append((i, msg))
 
     if len(tool_msgs) <= protect_count:
-        logger.info(f"[Context] 轻量压缩: 跳过（ToolMessage {len(tool_msgs)} <= 保护数量 {protect_count}）")
+        logger.debug(f"[Context] 轻量压缩: 跳过（ToolMessage {len(tool_msgs)} <= 保护数量 {protect_count}）")
         return messages, meta
 
     protected_indices: set[int] = set()
@@ -229,7 +229,7 @@ def _light_compact_tool_results(
             clearable_tokens += _estimate_messages_tokens([msg])
 
     if not clearable_indices:
-        logger.info("[Context] 轻量压缩: 跳过（没有可清除的旧工具结果）")
+        logger.debug("[Context] 轻量压缩: 跳过（没有可清除的旧工具结果）")
         return messages, meta
 
     result: list[SystemMessage | HumanMessage | AIMessage | ToolMessage] = []
