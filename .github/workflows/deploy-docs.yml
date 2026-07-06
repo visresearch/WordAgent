@@ -35,7 +35,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: web
-        run: pnpm install --ignore-workspace --allow-build=esbuild
+        run: pnpm install --ignore-workspace
 
       - name: Copy docs images
         run: |
