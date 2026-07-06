@@ -141,7 +141,7 @@ jobs:
 
   build-macos:
     name: Build macOS packages
-    runs-on: macos-15-intel
+    runs-on: macos-15
 
     permissions:
       contents: write
@@ -254,7 +254,7 @@ jobs:
       - name: Create macOS zip
         working-directory: backend
         run: |
-          ditto -c -k --sequesterRsrc --keepParent "package/WenCe AI.app" package/wence_ai-macos-x86_64-full.zip
+          ditto -c -k --sequesterRsrc --keepParent "package/WenCe AI.app" package/wence_ai-macos-arm64-full.zip
 
       - name: Create macOS dmg
         working-directory: backend
@@ -263,15 +263,15 @@ jobs:
           mkdir -p "$DMG_ROOT"
           cp -R "package/WenCe AI.app" "$DMG_ROOT/"
           ln -s /Applications "$DMG_ROOT/Applications"
-          hdiutil create -volname "WenCe AI" -srcfolder "$DMG_ROOT" -ov -format UDZO package/wence_ai-macos-x86_64.dmg
+          hdiutil create -volname "WenCe AI" -srcfolder "$DMG_ROOT" -ov -format UDZO package/wence_ai-macos-arm64.dmg
 
       - name: Upload macOS workflow artifacts
         uses: actions/upload-artifact@v4
         with:
           name: wordagent-macos-packages
           path: |
-            backend/package/wence_ai-macos-x86_64.dmg
-            backend/package/wence_ai-macos-x86_64-full.zip
+            backend/package/wence_ai-macos-arm64.dmg
+            backend/package/wence_ai-macos-arm64-full.zip
 
       - name: Extract changelog for current tag
         if: startsWith(github.ref, 'refs/tags/')
@@ -308,8 +308,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            backend/package/wence_ai-macos-x86_64.dmg
-            backend/package/wence_ai-macos-x86_64-full.zip
+            backend/package/wence_ai-macos-arm64.dmg
+            backend/package/wence_ai-macos-arm64-full.zip
           body_path: release_notes.md
           draft: false
           prerelease: false
