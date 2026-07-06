@@ -91,7 +91,7 @@
       <div class="copyright">
         <p>© 2026 WenCe Team. All rights reserved.</p>
         <p class="license">
-          Licensed under MIT License
+          Licensed under Apache 2.0 License
         </p>
       </div>
     </div>

@@ -6,7 +6,7 @@ import platform
 import ctypes
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QCloseEvent, QIcon
 from PySide6.QtWidgets import (
     QMainWindow,
     QWidget,
@@ -40,6 +40,8 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self._title_bar_applied = False
+        self._tray_available = False
+        self._allow_close = False
         self._initWindow()
         self._initUI()
 
@@ -74,6 +76,7 @@ class MainWindow(QMainWindow):
         self.resize(900, 600)
         self.setMinimumSize(700, 500)
         self.setWindowTitle("WenCe AI")
+        self.setWindowIcon(QIcon(_icon_path("robot.png")))
 
         screen = QApplication.primaryScreen().availableGeometry()
         self.move(
@@ -154,6 +157,26 @@ class MainWindow(QMainWindow):
     def _switchPage(self, widget):
         self._stack.setCurrentWidget(widget)
 
+    def set_tray_available(self, available: bool):
+        """设置是否启用托盘关闭行为。"""
+        self._tray_available = available
+
+    def show_from_tray(self):
+        """从系统托盘恢复主窗口。"""
+        if self.isMinimized():
+            self.setWindowState(self.windowState() & ~Qt.WindowMinimized)
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def quit_from_tray(self):
+        """通过托盘菜单退出应用。"""
+        self._allow_close = True
+        self.close()
+        app = QApplication.instance()
+        if app is not None:
+            app.quit()
+
     def resizeEvent(self, event):
         self._nav.setFixedHeight(self.height())
         super().resizeEvent(event)
@@ -163,3 +186,10 @@ class MainWindow(QMainWindow):
         if not self._title_bar_applied:
             self._set_windows_light_title_bar()
             self._title_bar_applied = True
+
+    def closeEvent(self, event: QCloseEvent):
+        if self._tray_available and not self._allow_close:
+            event.ignore()
+            self.hide()
+            return
+        super().closeEvent(event)

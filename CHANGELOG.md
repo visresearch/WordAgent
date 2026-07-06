@@ -1,5 +1,15 @@
 # Changelog
 
+## [v0.5.2]
+
+### Added
+- 添加系统托盘功能
+- 添加macOS打包
+
+### Changed
+- 修改OCR识别图片为灰度图片
+- 更新所有py依赖
+
 ## [v0.5.1]
 
 ### Fixed

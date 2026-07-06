@@ -1,0 +1,72 @@
+name: 使用提问
+description: 咨询 Word Agent 的使用方式、配置方法或实现细节
+title: "[Question]: "
+labels: ["Question | 待回复"]
+
+body:
+  - type: dropdown
+    id: scope
+    attributes:
+      label: 问题范围
+      description: 这个问题主要涉及哪个模块？
+      multiple: true
+      options:
+        - WPS 加载项
+        - Microsoft Word 加载项
+        - 后端服务
+        - 单智能体模式
+        - 多智能体模式
+        - MCP Server 或 Skill
+        - 文档编辑与格式渲染
+        - 打包、安装或部署
+        - 文档或官网
+        - 其他
+    validations:
+      required: true
+
+  - type: textarea
+    id: question
+    attributes:
+      label: 具体问题
+      description: 请清楚描述你想了解的问题、当前目标和卡住的位置。
+      placeholder: "例如：如何在 Microsoft Word 加载项中连接本地后端服务？"
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: 背景信息
+      description: 请补充相关使用场景、配置方式、操作步骤或你参考过的文档。
+      placeholder: |
+        1. 我正在使用 ...
+        2. 我已经配置了 ...
+        3. 我期望实现 ...
+
+  - type: textarea
+    id: tried
+    attributes:
+      label: 已尝试的方法
+      description: 如果你已经尝试过排查或解决，请说明尝试过哪些方法以及结果。
+      placeholder: "例如：已重启后端服务并重新加载插件，但仍无法连接。"
+
+  - type: input
+    id: version
+    attributes:
+      label: 代码版本
+      description: 如与具体版本有关，请填写 Release 版本号、commit hash，或你正在使用的分支名称。
+      placeholder: "例如：v0.1.0 / main@abcdef1"
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 相关日志或截图
+      description: 如果问题涉及报错、界面状态或配置，请粘贴关键日志或上传截图。注意隐藏 API Key、Token、账号、隐私文档内容等敏感信息。
+      placeholder: "请拖拽上传图片，或粘贴相关日志。"
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: 补充信息
+      description: 其他有助于回答问题的信息，例如相关链接、配置片段或最小示例。
+      placeholder: "你的补充信息"

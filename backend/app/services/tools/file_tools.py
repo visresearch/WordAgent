@@ -141,6 +141,16 @@ def _get_python_ocr_engine():
         return None
 
 
+def _load_grayscale_image_for_ocr(file_path: Path):
+    """Load an image as a grayscale numpy array before OCR."""
+    from PIL import Image, ImageOps
+    import numpy as np
+
+    with Image.open(file_path) as img:
+        gray_img = ImageOps.exif_transpose(img).convert("L")
+        return np.ascontiguousarray(gray_img)
+
+
 def _ocr_image_text(file_path: Path) -> str:
     engine = _get_python_ocr_engine()
     if engine is None:
@@ -150,7 +160,8 @@ def _ocr_image_text(file_path: Path) -> str:
         )
 
     try:
-        result, _elapsed = engine(str(file_path))
+        grayscale_image = _load_grayscale_image_for_ocr(file_path)
+        result, _elapsed = engine(grayscale_image)
     except Exception as exc:
         return f"OCR failed: {exc}"
 

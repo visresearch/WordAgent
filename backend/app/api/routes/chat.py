@@ -204,7 +204,7 @@ async def chat_websocket(websocket: WebSocket):
                             },
                         )
                 if attached_files:
-                    logger.error(f"附件: {[f.get('filename', '?') for f in attached_files]}")
+                    logger.info(f"附件: {[f.get('filename', '?') for f in attached_files]}")
                 logger.info("=" * 50)
 
                 # 启动流式处理

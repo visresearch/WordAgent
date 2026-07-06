@@ -7,17 +7,24 @@ import os
 import subprocess
 import socket
 import platform
+from pathlib import Path
 
 # QtWebEngine (Chromium) 不兼容 QT_OPENGL=software
 os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", "--disable-gpu")
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtGui import QAction, QIcon
+from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 from qfluentwidgets import setTheme, Theme
 
 from app.core.logging import get_logger
 
 IS_WINDOWS = platform.system() == "Windows"
 logger = get_logger(__name__)
+
+
+def _icon_path(name: str) -> str:
+    """获取 GUI 图标文件路径"""
+    return str(Path(__file__).parent / "resources" / "icon" / name)
 
 
 def _find_wpscloudsvr():
@@ -122,11 +129,42 @@ def start_gui(base_path=None):
     ensure_wps_cloud_service()
 
     qt_app = QApplication(sys.argv)
+    app_icon = QIcon(_icon_path("robot.png"))
+    qt_app.setWindowIcon(app_icon)
     setTheme(Theme.LIGHT, save=True, lazy=False)
 
     from gui.views import MainWindow
 
     window = MainWindow()
+    tray_icon = None
+    if QSystemTrayIcon.isSystemTrayAvailable():
+        qt_app.setQuitOnLastWindowClosed(False)
+        window.set_tray_available(True)
+
+        tray_menu = QMenu(window)
+        show_action = QAction("显示", tray_menu)
+        quit_action = QAction("退出文策AI", tray_menu)
+        show_action.triggered.connect(window.show_from_tray)
+        quit_action.triggered.connect(window.quit_from_tray)
+        tray_menu.addAction(show_action)
+        tray_menu.addAction(quit_action)
+
+        tray_icon = QSystemTrayIcon(app_icon, qt_app)
+        tray_icon.setToolTip("文策AI")
+        tray_icon.setContextMenu(tray_menu)
+        tray_icon.activated.connect(
+            lambda reason: window.show_from_tray()
+            if reason
+            in (
+                QSystemTrayIcon.ActivationReason.Trigger,
+                QSystemTrayIcon.ActivationReason.DoubleClick,
+            )
+            else None
+        )
+        tray_icon.show()
+    else:
+        logger.warning("系统托盘不可用，关闭主窗口将直接退出程序")
+
     window.show()
 
     qt_app.exec()
