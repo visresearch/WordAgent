@@ -50,8 +50,8 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{autoprograms}\WenCe AI"; Filename: "{app}\wence_ai.exe"; WorkingDir: "{app}"
-Name: "{autodesktop}\WenCe AI"; Filename: "{app}\wence_ai.exe"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{autoprograms}\WenCe AI"; Filename: "{app}\wence_ai.exe"; WorkingDir: "{app}"; IconFilename: "{app}\wence_ai.exe"
+Name: "{autodesktop}\WenCe AI"; Filename: "{app}\wence_ai.exe"; WorkingDir: "{app}"; IconFilename: "{app}\wence_ai.exe"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\wence_ai.exe"; Description: "{cm:LaunchProgram,WenCe AI}"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent

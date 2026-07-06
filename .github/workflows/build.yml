@@ -198,72 +198,8 @@ jobs:
           echo '{}' > config/user_settings.json
           uv run pyinstaller ../packaging/pyinstaller/package.spec --clean --noconfirm
 
-      - name: Create macOS app bundle
-        working-directory: backend
-        run: |
-          VERSION="${APP_VERSION:-0.0.0}"
-          VERSION="${VERSION#v}"
-
-          APP_BUNDLE="package/WenCe AI.app"
-          APP_CONTENTS="$APP_BUNDLE/Contents"
-          APP_MACOS="$APP_CONTENTS/MacOS"
-          APP_RESOURCES="$APP_CONTENTS/Resources"
-
-          mkdir -p "$APP_MACOS" "$APP_RESOURCES"
-          cp -R dist/wence_ai "$APP_RESOURCES/wence_ai"
-          chmod +x "$APP_RESOURCES/wence_ai/wence_ai"
-          cp ../packaging/robot.png "$APP_RESOURCES/robot.png"
-
-          cat > "$APP_MACOS/wence_ai" <<'EOF'
-          #!/bin/sh
-          APP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-          cd "$APP_DIR/Resources/wence_ai"
-          exec ./wence_ai "$@"
-          EOF
-          chmod +x "$APP_MACOS/wence_ai"
-
-          cat > "$APP_CONTENTS/Info.plist" <<EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>CFBundleDevelopmentRegion</key>
-            <string>zh_CN</string>
-            <key>CFBundleDisplayName</key>
-            <string>WenCe AI</string>
-            <key>CFBundleExecutable</key>
-            <string>wence_ai</string>
-            <key>CFBundleIdentifier</key>
-            <string>ai.wence.WordAgent</string>
-            <key>CFBundleName</key>
-            <string>WenCe AI</string>
-            <key>CFBundlePackageType</key>
-            <string>APPL</string>
-            <key>CFBundleShortVersionString</key>
-            <string>$VERSION</string>
-            <key>CFBundleVersion</key>
-            <string>$VERSION</string>
-            <key>LSMinimumSystemVersion</key>
-            <string>10.15</string>
-            <key>NSHighResolutionCapable</key>
-            <true/>
-          </dict>
-          </plist>
-          EOF
-
-      - name: Create macOS zip
-        working-directory: backend
-        run: |
-          ditto -c -k --sequesterRsrc --keepParent "package/WenCe AI.app" package/wence_ai-macos-arm64-full.zip
-
-      - name: Create macOS dmg
-        working-directory: backend
-        run: |
-          DMG_ROOT="package/dmg-root"
-          mkdir -p "$DMG_ROOT"
-          cp -R "package/WenCe AI.app" "$DMG_ROOT/"
-          ln -s /Applications "$DMG_ROOT/Applications"
-          hdiutil create -volname "WenCe AI" -srcfolder "$DMG_ROOT" -ov -format UDZO package/wence_ai-macos-arm64.dmg
+      - name: Create macOS packages
+        run: bash packaging/darwin/build-packages.sh
 
       - name: Upload macOS workflow artifacts
         uses: actions/upload-artifact@v4
@@ -271,7 +207,7 @@ jobs:
           name: wordagent-macos-packages
           path: |
             backend/package/wence_ai-macos-arm64.dmg
-            backend/package/wence_ai-macos-arm64-full.zip
+            backend/package/wence_ai-macos-arm64-app.zip
 
       - name: Extract changelog for current tag
         if: startsWith(github.ref, 'refs/tags/')
@@ -309,7 +245,7 @@ jobs:
         with:
           files: |
             backend/package/wence_ai-macos-arm64.dmg
-            backend/package/wence_ai-macos-arm64-full.zip
+            backend/package/wence_ai-macos-arm64-app.zip
           body_path: release_notes.md
           draft: false
           prerelease: false

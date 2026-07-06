@@ -9,6 +9,7 @@ PyInstaller from backend/ while still using this single shared spec.
 
 import os
 import subprocess
+import sys
 
 from PyInstaller.utils.hooks import collect_submodules
 
@@ -178,7 +179,8 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
-icon_path = os.path.join(packaging_dir, "robot.ico")
+icon_file = "robot.icns" if sys.platform == "darwin" else "robot.ico"
+icon_path = os.path.join(packaging_dir, icon_file)
 
 exe = EXE(
     pyz,
