@@ -26,7 +26,7 @@ This project is an AI-assisted writing system based on (multi-)agent workflows: 
 
 Compared with existing AI writing assistants on the market, WenCe AI provides:
 
-1. **Multi-version and cross-platform support**: built on widely used office software with a Copilot-style Word add-in, allowing general users to access high-quality AI writing assistance with a low barrier. It supports both Windows and Linux.
+1. **Multi-version and cross-platform support**: built on widely used office software with a Copilot-style Word add-in, allowing general users to access high-quality AI writing assistance with a low barrier. It supports Windows, Linux, and macOS.
 2. **Native rich text with document styles and paragraph editing**: compared with common AI writing tools in Word, this project allows agents to understand Word document structure, autonomously collect online information, generate content that fits Word document structure, and modify article structure and content according to user needs.
 3. **Efficient editing with multi-agent collaboration**: multiple agents act as different **expert roles** and collaborate to generate in-depth long-form articles.
 4. **Open and flexible, with custom API or local service support**: the LLM API key used by this project is provided by the user. It currently supports most mainstream LLM providers, allowing users to choose different providers and models according to their needs.
@@ -116,7 +116,7 @@ The frontend part is the same as the Single Agent architecture. In the backend m
 - node v22.12.0
 - wpsjs 2.2.3
 - python 3.11.14
-- Windows 10/11, Ubuntu 22.04
+- Windows 10/11, Ubuntu 22.04, macOS
 
 ### Build Frontend Add-in
 
@@ -161,10 +161,18 @@ Windows releases are built with Inno Setup:
 .\packaging\windows\build-installer.ps1
 ```
 
+macOS releases are built as an `.app` archive and a `.dmg` package:
+
+```bash
+bash packaging/darwin/build-packages.sh
+```
+
 GitHub Actions builds the platform packages and keeps the full archives:
 
 - `wence_ai-linux-x86_64.deb`
 - `wence_ai-linux-x86_64-full.zip`
+- `wence_ai-macos-arm64-app.zip`
+- `wence_ai-macos-arm64.dmg`
 - `wence_ai-windows-x86_64-installer.exe`
 - `wence_ai-windows-x86_64-full.zip`
 

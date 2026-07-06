@@ -26,7 +26,7 @@
 
 对比市面上已有的AI辅助写作工具，文策AI的优势在于：
 
-1. **支持多版本、跨平台适配**：以国民级办公软件为载体，类Copilot风格Word加载项，让普通用户无门槛获得优质的AI写作辅助体验，并且同时支持Windows和Linux系统。
+1. **支持多版本、跨平台适配**：以国民级办公软件为载体，类Copilot风格Word加载项，让普通用户无门槛获得优质的AI写作辅助体验，并且同时支持Windows、Linux和macOS系统。
 2. **原生富文本，支持文档样式、段落编辑**：对比常见的在Word中的AI写作工具，本项目智能体能够理解Word文章结构，能够自主联网搜集资料信息，生成符合Word文档结构的内容，能够根据用户需求进行文章结构修改和内容修改。
 3. **高效编辑，支持多智能体协作架构**：多智能体扮演不同**专家角色**，以生成有深度的长文章为目标，协同完成写作任务。
 4. **自由开放，支持自定义API或本地服务**：本项目使用的大模型服务APIKey来自于用户自己，目前支持世界上大多数主流的LLM服务商，用户可以根据自己的需求选择不同的LLM服务商和不同的模型。
@@ -116,7 +116,7 @@
 - node v22.12.0
 - wpsjs 2.2.3
 - python 3.11.14
-- Windows10/11、Ubuntu22.04
+- Windows10/11、Ubuntu22.04、macOS
 
 ### 构建前端加载项
 
@@ -160,10 +160,18 @@ Windows 使用 Inno Setup 打包：
 .\packaging\windows\build-installer.ps1
 ```
 
+macOS 会打包为 `.app` 压缩包和 `.dmg` 安装包：
+
+```bash
+bash packaging/darwin/build-packages.sh
+```
+
 GitHub Actions 会生成平台安装包，并保留完整压缩包：
 
 - `wence_ai-linux-x86_64.deb`
 - `wence_ai-linux-x86_64-full.zip`
+- `wence_ai-macos-arm64-app.zip`
+- `wence_ai-macos-arm64.dmg`
 - `wence_ai-windows-x86_64-installer.exe`
 - `wence_ai-windows-x86_64-full.zip`
 
