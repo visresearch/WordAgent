@@ -26,13 +26,24 @@ ANSI_COLORS = {
 }
 
 
+def _get_default_data_dir() -> Path:
+    if sys.platform.startswith("linux"):
+        return Path.home() / ".wence_ai" / "wence_data"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "WenCe AI" / "wence_data"
+    return Path(sys.executable).resolve().parent / "wence_data"
+
+
 def _get_wence_data_dir() -> Path:
     data_dir = os.environ.get("WENCE_DATA_DIR")
     if data_dir:
         return Path(data_dir)
 
     if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent / "wence_data"
+        return _get_default_data_dir()
+
+    if sys.platform.startswith("linux") or sys.platform == "darwin":
+        return _get_default_data_dir()
 
     return Path(__file__).resolve().parents[2] / "wence_data"
 

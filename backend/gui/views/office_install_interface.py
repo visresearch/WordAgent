@@ -23,6 +23,7 @@ from qfluentwidgets import (
     InfoBarPosition,
 )
 
+from app.core.config import get_wence_data_dir
 from app.core.logging import get_logger
 
 logger = get_logger("gui.office_install")
@@ -82,10 +83,7 @@ def _get_frontend_dist_dir() -> Path | None:
 
 def _get_persistent_cert_dir() -> Path:
     """获取可持久化证书目录。"""
-    if getattr(sys, "frozen", False):
-        # 打包后使用 exe 同级目录，避免写入 _MEIPASS 临时目录。
-        return Path(sys.executable).resolve().parent / "wence_data" / "certs"
-    return _get_runtime_base() / "wence_data" / "certs"
+    return get_wence_data_dir() / "certs"
 
 
 def _generate_localhost_cert(target_dir: Path) -> tuple[Path, Path]:

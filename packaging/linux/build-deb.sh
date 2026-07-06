@@ -37,7 +37,17 @@ mkdir -p \
 
 cp -a "${DIST_DIR}/." "${STAGING_DIR}/opt/${APP_NAME}/"
 chmod +x "${STAGING_DIR}/opt/${APP_NAME}/${APP_EXECUTABLE}"
-ln -s "/opt/${APP_NAME}/${APP_EXECUTABLE}" "${STAGING_DIR}/usr/bin/${APP_NAME}"
+cat > "${STAGING_DIR}/usr/bin/${APP_NAME}" <<LAUNCHER
+#!/usr/bin/env bash
+set -euo pipefail
+
+export WENCE_DATA_DIR="\${WENCE_DATA_DIR:-\${HOME}/.wence_ai/wence_data}"
+mkdir -p "\${WENCE_DATA_DIR}"
+
+cd "/opt/${APP_NAME}"
+exec "/opt/${APP_NAME}/${APP_EXECUTABLE}" "\$@"
+LAUNCHER
+chmod +x "${STAGING_DIR}/usr/bin/${APP_NAME}"
 cp "${REPO_ROOT}/packaging/robot.png" "${STAGING_DIR}/usr/share/icons/hicolor/256x256/apps/${APP_NAME}.png"
 
 cat > "${STAGING_DIR}/usr/share/applications/${APP_NAME}.desktop" <<DESKTOP
@@ -45,7 +55,7 @@ cat > "${STAGING_DIR}/usr/share/applications/${APP_NAME}.desktop" <<DESKTOP
 Type=Application
 Name=${APP_DISPLAY_NAME}
 Comment=AI writing assistant for Word documents
-Exec=/opt/${APP_NAME}/${APP_EXECUTABLE}
+Exec=/usr/bin/${APP_NAME}
 Icon=${APP_NAME}
 Terminal=false
 Categories=Office;Utility;

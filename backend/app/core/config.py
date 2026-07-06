@@ -13,6 +13,14 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 
+def _get_default_data_dir() -> Path:
+    if sys.platform.startswith("linux"):
+        return Path.home() / ".wence_ai" / "wence_data"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "WenCe AI" / "wence_data"
+    return Path(sys.executable).parent / "wence_data"
+
+
 def get_data_dir() -> Path:
     """获取数据目录"""
     # 环境变量优先
@@ -22,7 +30,10 @@ def get_data_dir() -> Path:
 
     # 打包后的路径
     if getattr(sys, "frozen", False):
-        return Path(sys.executable).parent / "wence_data"
+        return _get_default_data_dir()
+
+    if sys.platform.startswith("linux") or sys.platform == "darwin":
+        return _get_default_data_dir()
 
     # 开发环境
     return Path(__file__).parent.parent.parent / "wence_data"
@@ -56,7 +67,10 @@ def get_wence_data_dir() -> Path:
 
     # 打包后的路径
     if getattr(sys, "frozen", False):
-        return Path(sys.executable).parent / "wence_data"
+        return _get_default_data_dir()
+
+    if sys.platform.startswith("linux") or sys.platform == "darwin":
+        return _get_default_data_dir()
 
     # 开发环境
     return Path(__file__).parent.parent.parent / "wence_data"

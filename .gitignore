@@ -36,8 +36,6 @@ __pycache__
 *.pyd
 pip-log.txt
 pip-delete-this-directory.txt
-wence_data/
-example/
 
 # PyInstaller
 build/
@@ -66,4 +64,3 @@ package/
 .env
 .env.local
 .env.*.local
-version.txt
