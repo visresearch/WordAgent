@@ -1,13 +1,13 @@
 <template>
   <div class="mcp-setting-container">
     <div class="section-header">
-      <img class="section-icon" :src="iconSkill" alt="Skill 图标" />
+      <img class="section-icon" :src="iconSkill" alt="" />
       <div class="section-title-group">
         <h2 class="section-title">
-          Skill 管理
+          {{ $t('settings.skillTitle') }}
         </h2>
         <p class="section-subtitle">
-          上传包含 SKILL.md 的 zip 压缩包，系统会自动解压到本地 skills 目录
+          {{ $t('skill.subtitle') }}
         </p>
       </div>
     </div>
@@ -22,7 +22,7 @@
         >
           <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4z" />
         </svg>
-        {{ uploading ? '上传中...' : '上传 Skill 压缩包' }}
+        {{ uploading ? $t('skill.uploading') : $t('skill.upload') }}
       </button>
       <input
         ref="fileInputRef"
@@ -31,7 +31,7 @@
         class="hidden-file-input"
         @change="onFileChange"
       />
-      <span class="toolbar-tip">仅支持 zip，且压缩包中需包含 SKILL.md</span>
+      <span class="toolbar-tip">{{ $t('skill.zipHint') }}</span>
     </div>
 
     <p v-if="message" :class="['status-message', messageType === 'success' ? 'success' : 'error']">
@@ -39,11 +39,11 @@
     </p>
 
     <div v-if="loading" class="empty-state">
-      <p>正在加载 Skill 列表...</p>
+      <p>{{ $t('skill.loading') }}</p>
     </div>
 
     <div v-else-if="skills.length === 0" class="empty-state">
-      <p>还没有 Skill，点击上方“上传 Skill 压缩包”开始配置。</p>
+      <p>{{ $t('skill.empty') }}</p>
     </div>
 
     <div v-else class="server-list">
@@ -55,12 +55,12 @@
         <div class="server-header">
           <div class="server-info">
             <div class="skill-text-group">
-              <span class="server-name">{{ skill.name || '未命名 Skill' }}</span>
+              <span class="server-name">{{ skill.name || $t('skill.unnamed') }}</span>
               <span class="skill-meta">{{ skill.folder }}{{ skill.description ? ` - ${skill.description}` : '' }}</span>
             </div>
           </div>
           <div class="server-actions">
-            <label class="switch switch-sm" title="启用/禁用 Skill">
+            <label class="switch switch-sm" :title="$t('skill.toggle')">
               <input
                 :checked="skill.enabled !== false"
                 type="checkbox"
@@ -70,9 +70,17 @@
               <span class="slider"></span>
             </label>
             <button
+              class="action-btn"
+              :disabled="busyFolder === skill.folder"
+              :title="$t('skill.openFolder')"
+              @click="openSkillFolder(skill)"
+            >
+              <img :src="iconFolder" class="action-icon" alt="" />
+            </button>
+            <button
               class="action-btn delete"
               :disabled="busyFolder === skill.folder"
-              title="删除"
+              :title="$t('common.delete')"
               @click="removeSkillItem(skill)"
             >
               <svg
@@ -95,7 +103,9 @@
 <script>
 import { onMounted, ref } from 'vue';
 import api from '../js/api.js';
+import iconFolder from '../../assets/icons/folder.svg';
 import iconSkill from '../../assets/icons/skill.svg';
+import { t } from '../../i18n/index.js';
 
 export default {
   name: 'SkillSetting',
@@ -126,7 +136,7 @@ export default {
         skills.value = await api.getSkills();
       } catch (error) {
         console.error('加载 skills 失败:', error);
-        setMessage(error.message || '加载 skill 失败', 'error');
+        setMessage(error.message || t('skill.loadFailed'), 'error');
       } finally {
         loading.value = false;
       }
@@ -146,7 +156,7 @@ export default {
       }
 
       if (!file.name.toLowerCase().endsWith('.zip')) {
-        setMessage('仅支持上传 zip 压缩包', 'error');
+        setMessage(t('skill.uploadZipOnly'), 'error');
         event.target.value = '';
         return;
       }
@@ -154,11 +164,11 @@ export default {
       uploading.value = true;
       try {
         const result = await api.uploadSkillPackage(file);
-        setMessage(result?.message || 'Skill 上传成功', 'success');
+        setMessage(t('skill.uploadSuccess'), 'success');
         await loadSkills();
       } catch (error) {
         console.error('上传 skill 失败:', error);
-        setMessage(error.message || '上传 skill 失败', 'error');
+        setMessage(error.message || t('skill.uploadFailed'), 'error');
       } finally {
         uploading.value = false;
         event.target.value = '';
@@ -173,7 +183,7 @@ export default {
         skill.enabled = nextEnabled;
       } catch (error) {
         console.error('更新 skill 启用状态失败:', error);
-        setMessage(error.message || '更新 skill 状态失败', 'error');
+        setMessage(error.message || t('skill.updateFailed'), 'error');
         event.target.checked = !nextEnabled;
       } finally {
         busyFolder.value = '';
@@ -181,7 +191,7 @@ export default {
     };
 
     const removeSkillItem = async (skill) => {
-      const confirmed = window.confirm(`确认删除 Skill: ${skill.name || skill.folder} ?`);
+      const confirmed = window.confirm(t('skill.deleteConfirm', { name: skill.name || skill.folder }));
       if (!confirmed) {
         return;
       }
@@ -189,11 +199,23 @@ export default {
       busyFolder.value = skill.folder;
       try {
         await api.deleteSkill(skill.folder);
-        setMessage('Skill 删除成功', 'success');
+        setMessage(t('skill.deleteSuccess'), 'success');
         skills.value = skills.value.filter((item) => item.folder !== skill.folder);
       } catch (error) {
         console.error('删除 skill 失败:', error);
-        setMessage(error.message || '删除 skill 失败', 'error');
+        setMessage(error.message || t('skill.deleteFailed'), 'error');
+      } finally {
+        busyFolder.value = '';
+      }
+    };
+
+    const openSkillFolder = async (skill) => {
+      busyFolder.value = skill.folder;
+      try {
+        await api.openSkillFolder(skill.folder);
+      } catch (error) {
+        console.error('打开 skill 文件夹失败:', error);
+        setMessage(error.message || t('skill.openFailed'), 'error');
       } finally {
         busyFolder.value = '';
       }
@@ -205,6 +227,7 @@ export default {
 
     return {
       iconSkill,
+      iconFolder,
       loading,
       uploading,
       busyFolder,
@@ -215,6 +238,7 @@ export default {
       openUploadDialog,
       onFileChange,
       toggleSkill,
+      openSkillFolder,
       removeSkillItem
     };
   }
@@ -241,6 +265,12 @@ export default {
   color: #667eea;
   flex-shrink: 0;
   margin-top: 2px;
+}
+
+.action-icon {
+  width: 14px;
+  height: 14px;
+  display: block;
 }
 
 .section-title-group {

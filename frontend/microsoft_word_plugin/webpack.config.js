@@ -27,7 +27,7 @@ module.exports = async (env, options) => {
       clean: true,
     },
     resolve: {
-      extensions: [".js", ".vue", ".json", ".html"],
+      extensions: [".js", ".mjs", ".vue", ".json", ".html"],
       alias: {
         "@": require("path").resolve(__dirname, "src"),
       },
@@ -39,7 +39,7 @@ module.exports = async (env, options) => {
           loader: "vue-loader",
         },
         {
-          test: /\.js$/,
+          test: /\.(?:js|mjs)$/,
           exclude: /node_modules/,
           use: {
             loader: "babel-loader",

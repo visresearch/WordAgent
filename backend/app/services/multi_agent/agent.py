@@ -19,6 +19,7 @@ from app.services.document import (
     format_document_range_line,
     normalize_document_meta,
 )
+from app.services.agent.agent import ContextOverflowError
 
 logger = get_logger(__name__)
 
@@ -33,14 +34,6 @@ def _get_env_int(name: str, default: int) -> int:
         return value if value > 0 else default
     except Exception:
         return default
-
-
-class ContextOverflowError(Exception):
-    """Context overflow exception with compressed history for retry."""
-
-    def __init__(self, message: str, compressed_history: list):
-        super().__init__(message)
-        self.compressed_history = compressed_history
 
 
 def _is_transient_stream_error(exc: Exception) -> bool:
@@ -169,7 +162,7 @@ from app.services.multi_agent.tools import (
     read_document,
     generate_document,
     delete_document,
-    search_documnet,
+    search_document,
     load_skill_context,
     load_mcp_tools,
     build_mcp_tools_prompt,
@@ -410,7 +403,7 @@ def _run_sub_agent(
 
                 # 收集所有工具调用结果，用于后续步骤共享
                 is_mcp_tool = tool_name.startswith("mcp_") or tool_name not in (
-                    "search_documnet",
+                    "search_document",
                     "read_document",
                     "generate_document",
                     "delete_document",
@@ -582,7 +575,7 @@ def _run_sub_agent(
 
                     # 收集所有工具调用结果，用于后续步骤共享
                     is_mcp_tool = tool_name.startswith("mcp_") or tool_name not in (
-                        "search_documnet",
+                        "search_document",
                         "read_document",
                         "generate_document",
                         "delete_document",
@@ -615,7 +608,7 @@ def _run_sub_agent(
                 except Exception as e:
                     # 为不同工具生成友好的错误消息
                     is_mcp_tool = tool_name.startswith("mcp_") or tool_name not in (
-                        "search_documnet",
+                        "search_document",
                         "read_document",
                         "generate_document",
                         "delete_document",
@@ -668,12 +661,12 @@ def _format_shared_tool_data(tool_data: list[dict]) -> str:
         result = item.get("result", "")
         is_mcp = item.get("is_mcp", False)
 
-        # 截断过长的结果
+        # Skill instructions must remain complete; other shared tool results stay bounded.
         max_result_len = 4000
-        if len(result) > max_result_len:
+        if tool_name != "load_skill_context" and len(result) > max_result_len:
             result = result[:max_result_len] + "\n\n...(结果已截断)"
 
-        if tool_name == "search_documnet":
+        if tool_name == "search_document":
             filters = args.get("filters", {})
             filter_desc = ", ".join(f"{k}={v}" for k, v in filters.items())
             parts.append(f"### 文档搜索: {filter_desc}\n{result}")
@@ -693,7 +686,8 @@ def _format_shared_tool_data(tool_data: list[dict]) -> str:
             parts.append(f"### 工具调用: {tool_name}\n参数: {args}\n\n结果:\n{result}")
 
     result_text = "\n\n".join(parts)
-    if len(result_text) > 8000:
+    has_skill_context = any(item.get("tool") == "load_skill_context" for item in tool_data)
+    if not has_skill_context and len(result_text) > 8000:
         result_text = result_text[:8000] + "\n\n...(已截断)"
     return result_text
 
@@ -1119,7 +1113,6 @@ async def process_writing_request_stream(
                     except Exception as e:
                         if _is_context_overflow_error(e):
                             logger.info(f"[MultiAgent] Context overflow, triggering heavy compaction")
-                            asyncio.run_coroutine_threadsafe(queue.put(("context_overflow", str(e))), loop)
                             raise
                         if attempt < max_attempts and (not has_any_stream_item) and _is_transient_stream_error(e):
                             logger.error(f"[MultiAgent] Streaming error ({attempt}): {e}, retrying")
@@ -1127,7 +1120,8 @@ async def process_writing_request_stream(
                             continue
                         raise
             except Exception as e:
-                asyncio.run_coroutine_threadsafe(queue.put(("error", str(e))), loop)
+                event_type = "context_overflow" if _is_context_overflow_error(e) else "error"
+                asyncio.run_coroutine_threadsafe(queue.put((event_type, str(e))), loop)
 
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         executor.submit(run_stream)
@@ -1304,6 +1298,8 @@ async def process_writing_request_stream(
         yield f"__memory_conversation__: {json.dumps(conversation_for_memory, ensure_ascii=False)}\n\n"
         yield f"__tool_json__: {json.dumps(build_tool_json(tool_log), ensure_ascii=False)}\n\n"
 
+    except ContextOverflowError:
+        raise
     except Exception as e:
         logger.error(f"[MultiAgent Error] {e}")
         traceback.print_exc()

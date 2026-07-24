@@ -5,7 +5,7 @@
 
 压缩层级：
 1. 轻量压缩 (Light Compact / Microcompact) - 无 LLM 调用，仅清除旧工具结果
-2. 重量压缩 (Heavy Compact) - LLM 生成 9 段结构化摘要
+2. 重量压缩 (Heavy Compact) - LLM 生成仅包含持久任务状态的结构化摘要
 
 核心函数：
 - _light_compact_tool_results: 轻量压缩，清除旧工具结果
@@ -49,7 +49,7 @@ def _get_env_int(name: str, default: int) -> int:
 
 
 # 上下文预算控制（可通过环境变量覆盖，默认200k）
-MAX_CONTEXT_TOKENS = _get_env_int("WORDAGENT_MAX_CONTEXT_TOKENS", 200000)
+MAX_CONTEXT_TOKENS = _get_env_int("WORDAGENT_MAX_CONTEXT_TOKENS", 258000)
 
 # ============ LLMChainExtractor 语义压缩配置（默认禁用） ============
 ENABLE_LLM_CHAIN_EXTRACTOR = os.environ.get("WORDAGENT_ENABLE_LLM_CHAIN_EXTRACTOR", "false").strip().lower() in {
@@ -81,7 +81,7 @@ ENABLE_HEAVY_COMPACT = os.environ.get("WORDAGENT_ENABLE_HEAVY_COMPACT", "true").
 }
 HEAVY_COMPACT_TRIGGER_PCT = _get_env_int("WORDAGENT_HEAVY_COMPACT_TRIGGER_PCT", 83)
 HEAVY_COMPACT_RESERVE_OUTPUT = _get_env_int("WORDAGENT_HEAVY_COMPACT_RESERVE_OUTPUT", 20000)
-HEAVY_COMPACT_MAX_OUTPUT = _get_env_int("WORDAGENT_HEAVY_COMPACT_MAX_OUTPUT", 20000)
+HEAVY_COMPACT_MAX_OUTPUT = min(4000, _get_env_int("WORDAGENT_HEAVY_COMPACT_MAX_OUTPUT", 4000))
 HEAVY_COMPACT_KEEP_RECENT_MSGS = _get_env_int("WORDAGENT_HEAVY_COMPACT_KEEP_RECENT", 4)
 
 
@@ -259,18 +259,7 @@ def _extract_structured_summary(
     max_output_tokens: int = HEAVY_COMPACT_MAX_OUTPUT,
 ) -> str:
     """
-    使用 LLM 生成 Claude Code 风格的 9 段结构化摘要。
-
-    9 段结构：
-    1. Primary Request and Intent - 用户的主要请求和意图
-    2. Key Technical Concepts - 关键的技术概念
-    3. Files and Code Sections - 文件和代码段
-    4. Errors and Fixes - 错误和修复
-    5. Problem Solving - 问题解决
-    6. All User Messages - 所有用户消息
-    7. Pending Tasks - 待办任务
-    8. Current Work - 当前工作
-    9. Next Steps - 下一步
+    使用 LLM 生成仅包含后续完成任务所需持久状态的结构化摘要。
     """
     if not history:
         return ""
@@ -302,23 +291,40 @@ def _extract_structured_summary(
 
 
 def _format_history_for_summary(history: list[dict]) -> str:
-    """将历史记录格式化为可读的文本。"""
-    lines = []
-    total_chars = 0
-    max_total_chars = 4000
+    """格式化摘要输入，同时保留对话开头的目标和最近的执行状态。"""
+    entries: list[tuple[int, str]] = []
     for i, msg in enumerate(history):
         role = msg.get("role", "unknown")
         content = _extract_message_text(msg.get("content", ""))
         if not content:
             continue
-        if len(content) > 800:
-            content = content[:800] + f"\n[...截断，原 {len(content)} 字符]"
+        if len(content) > 2000:
+            content = content[:2000] + f"\n[...截断，原 {len(content)} 字符]"
         entry = f"[{i + 1}] {role.upper()}: {content}"
-        if total_chars + len(entry) > max_total_chars:
+        entries.append((i, entry))
+
+    max_total_chars = 40000
+    if sum(len(entry) for _, entry in entries) <= max_total_chars:
+        return "\n\n".join(entry for _, entry in entries)
+
+    selected: dict[int, str] = {}
+    head_chars = 0
+    for index, entry in entries:
+        if head_chars + len(entry) > 8000:
             break
-        lines.append(entry)
-        total_chars += len(entry)
-    return "\n\n".join(lines)
+        selected[index] = entry
+        head_chars += len(entry)
+
+    tail_chars = 0
+    for index, entry in reversed(entries):
+        if index in selected:
+            continue
+        if tail_chars + len(entry) > max_total_chars - head_chars:
+            break
+        selected[index] = entry
+        tail_chars += len(entry)
+
+    return "\n\n".join(selected[index] for index in sorted(selected))
 
 
 def _heavy_compact_with_summary(
@@ -330,7 +336,7 @@ def _heavy_compact_with_summary(
     max_context_tokens: int = MAX_CONTEXT_TOKENS,
 ) -> tuple[list[SystemMessage | HumanMessage | AIMessage], dict[str, Any]]:
     """
-    重量压缩：使用 LLM 生成 9 段结构化摘要替换历史。
+    重量压缩：使用 LLM 生成持久任务状态摘要替换历史。
     """
     meta: dict[str, Any] = {
         "heavy_compact_triggered": False,
@@ -618,7 +624,7 @@ def compress_conversation_history_if_needed(
 
     支持两种压缩模式（类 Claude Code 风格）：
     1. 轻量压缩 (light) - 无 LLM 调用，仅清除旧工具结果
-    2. 重量压缩 (heavy) - LLM 生成 9 段结构化摘要
+    2. 重量压缩 (heavy) - LLM 生成持久任务状态摘要
 
     Args:
         messages: 消息列表

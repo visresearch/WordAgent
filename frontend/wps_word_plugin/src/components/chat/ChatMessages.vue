@@ -13,16 +13,16 @@
         <circle cx="12" cy="12" r="10" />
         <polyline points="12 6 12 12 16 14" />
       </svg>
-      <span>显示历史聊天记录</span>
+      <span>{{ $t('chat.showHistory') }}</span>
     </div>
     <!-- 空状态显示 -->
     <div v-if="messages.length === 0 && !isLoading" class="empty-state">
       <img class="empty-icon" src="/images/robot.svg" alt="WenCe AI" />
       <div class="empty-text-container">
-        <span class="empty-text">我能做什么</span>
+        <span class="empty-text">{{ $t('chat.whatCanIDo') }}</span>
         <a
           class="help-icon"
-          aria-label="使用文档"
+          :aria-label="$t('chat.documentation')"
           @click.prevent="openExternalLink('https://visresearch.github.io/WordAgent/guide/how-to-ask.html')"
         >
           <span class="help-question-icon" :style="questionIconMaskStyle"></span>
@@ -50,11 +50,11 @@
               />
               <path d="M3 4h10v1H3V4zm0 3h10v1H3V7zm0 3h6v1H3v-1z" />
             </svg>
-            <span>引用选区 ({{ msg.selectionContext.length }})</span>
+            <span>{{ $t('chat.selectionRef', { count: msg.selectionContext.length }) }}</span>
           </div>
           <div v-for="(ctx, ctxIdx) in msg.selectionContext" :key="ctxIdx" class="context-item">
             <span class="context-text">{{ formatSelectionContextText(ctx) }}</span>
-            <span class="context-pos">(段落 {{ ctx.startParaIndex }} - {{ ctx.endParaIndex }})</span>
+            <span class="context-pos">({{ $t('chat.paragraphRange', { start: ctx.startParaIndex, end: ctx.endParaIndex }) }})</span>
           </div>
         </div>
         <!-- 显示附件文件 -->
@@ -71,10 +71,10 @@
               />
               <path d="M3 4h10v1H3V4zm0 3h10v1H3V7zm0 3h6v1H3v-1z" />
             </svg>
-            <span>引用文件 ({{ msg.attachedFiles.length }})</span>
+            <span>{{ $t('chat.fileRef', { count: msg.attachedFiles.length }) }}</span>
           </div>
           <div v-for="(file, fileIdx) in msg.attachedFiles" :key="fileIdx" class="context-item">
-            <span class="context-text">{{ file.filename || file.name || '未知文件' }}</span>
+            <span class="context-text">{{ file.filename || file.name || $t('chat.unknownFile') }}</span>
             <span v-if="file.size" class="context-pos">({{ formatFileSize(file.size) }})</span>
           </div>
         </div>
@@ -82,7 +82,7 @@
           <span
             v-if="msg.role === 'assistant' && !msg.content && !msg.thinking && !msg.statusText && !(msg.contentParts && msg.contentParts.length > 0) && isLoading"
             class="typing"
-          >💭 AI正在准备中</span>
+          >{{ $t('chat.preparing') }}</span>
           <!-- 状态提示文本 -->
           <span
             v-if="msg.statusText"
@@ -103,7 +103,7 @@
                 <circle cx="12" cy="12" r="10" />
                 <path d="M12 6v6l4 2" />
               </svg>
-              <span class="thinking-label">{{ msg.thinkingDone ? '深度思考（已结束）' : '深度思考' }}</span>
+              <span class="thinking-label">{{ msg.thinkingDone ? $t('chat.thinkingDone') : $t('chat.thinking') }}</span>
               <svg
                 class="thinking-arrow"
                 :class="{ rotated: msg.thinkingExpanded }"
@@ -138,7 +138,7 @@
                   <div class="status-line mcp-inline-head">
                     <button
                       class="mcp-inline-toggle"
-                      :aria-label="isMcpExpanded(index, partIndex) ? '收起 MCP 详情' : '展开 MCP 详情'"
+                      :aria-label="isMcpExpanded(index, partIndex) ? $t('chat.collapseMcp') : $t('chat.expandMcp')"
                       @click="toggleMcpExpand(index, partIndex)"
                     >
                       <svg
@@ -157,20 +157,20 @@
                       :class="{ 'mcp-error-text': part.isError }"
                       @click="toggleMcpExpand(index, partIndex)"
                     >
-                      {{ part.preview || ('🔧 调用 MCP 工具: ' + (part.toolName || 'unknown_tool')) }}
+                      {{ part.preview || $t('chat.callMcp', { name: part.toolName || 'unknown_tool' }) }}
                     </span>
                   </div>
                   <div v-if="isMcpExpanded(index, partIndex)" class="mcp-inline-detail">
                     <div class="typing mcp-inline-label">
-                      - 🧾 参数:
+                      {{ $t('chat.arguments') }}
                     </div>
-                    <pre class="mcp-inline-pre">{{ part.argsText || '无参数' }}</pre>
+                    <pre class="mcp-inline-pre">{{ part.argsText || $t('chat.noArguments') }}</pre>
                     <div class="typing mcp-inline-label">
-                      - 🛠️ 工具输出:
+                      {{ $t('chat.toolOutput') }}
                     </div>
                     <div
                       class="mcp-inline-output markdown-body"
-                      v-html="renderMarkdown(part.outputText || '（无输出）')"
+                      v-html="renderMarkdown(part.outputText || $t('chat.noOutput'))"
                     ></div>
                   </div>
                 </div>
@@ -211,7 +211,7 @@
               />
             </svg>
           </button>
-          <span class="icon-tooltip">输出</span>
+          <span class="icon-tooltip">{{ $t('chat.outputDocument') }}</span>
         </div>
         <div class="icon-btn-wrapper">
           <button class="icon-btn" @click="$emit('copy', msg.content)">
@@ -226,7 +226,7 @@
               />
             </svg>
           </button>
-          <span class="icon-tooltip">复制</span>
+          <span class="icon-tooltip">{{ $t('common.copy') }}</span>
         </div>
         <div class="icon-btn-wrapper">
           <button class="icon-btn" @click="$emit('retry', index)">
@@ -245,7 +245,7 @@
               />
             </svg>
           </button>
-          <span class="icon-tooltip">重试</span>
+          <span class="icon-tooltip">{{ $t('common.retry') }}</span>
         </div>
         <!-- <div v-if="index > 0" class="icon-btn-wrapper">
           <button class="icon-btn" @click="$emit('revert', index)">
@@ -271,10 +271,10 @@
     <!-- 图片右键菜单 -->
     <div v-if="imgMenuVisible" class="img-context-menu" :style="{ top: imgMenuY + 'px', left: imgMenuX + 'px' }">
       <div class="img-menu-item" @click="copyImage">
-        复制图片
+        {{ $t('chat.copyImage') }}
       </div>
       <div class="img-menu-item" @click="saveImage">
-        保存图片
+        {{ $t('chat.saveImage') }}
       </div>
     </div>
   </div>
@@ -283,6 +283,7 @@
 <script>
 import MarkdownIt from 'markdown-it';
 import questionIcon from '../../assets/icons/question.svg';
+import { t } from '../../i18n/index.js';
 
 const md = new MarkdownIt({
   html: false,
@@ -371,13 +372,13 @@ export default {
     },
     formatSelectionContextText(ctx) {
       if (!ctx) {
-        return '选区';
+        return t('chat.selection');
       }
       if (ctx.startText || ctx.endText) {
-        const start = ctx.startText || ctx.preview || ctx.docName || '选区';
+        const start = ctx.startText || ctx.preview || ctx.docName || t('chat.selection');
         return ctx.endText ? `${start} → ${ctx.endText}` : start;
       }
-      return ctx.preview || ctx.docName || '选区';
+      return ctx.preview || ctx.docName || t('chat.selection');
     },
     formatFileSize(bytes) {
       if (!bytes || bytes === 0) {
@@ -432,7 +433,7 @@ export default {
         sel.removeAllRanges();
       } catch (e) {
         console.error('复制图片失败:', e);
-        alert('复制失败，请尝试右键 → 保存图片');
+        alert(t('chat.copyImageFailed'));
       }
     },
     saveImage() {

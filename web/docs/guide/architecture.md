@@ -2,10 +2,10 @@
 
 ## 整体设计
 
-本项目采用 FastAPI 构建后端 API，前端 WPS/Word 加载项与后端利用流式 SSE 接口通信，使前端流式显示 LLM 输出的内容，实现无缝的写作辅助体验。
+本项目采用 FastAPI 构建后端 API，前端 WPS/Word 加载项通过 WebSocket 与后端通信，使前端能够流式显示 LLM 输出、工具调用状态和错误信息。
 
 - **前端**：Vue3 + JavaScript 开发，包含 DocxJson 双向转化器模块，能够将带格式的 Word 文档内容与 JSON 格式进行相互转换
-- **后端**：Python 语言，利用 LangChain 和 LangGraph 框架实现智能体的设计和协作，用 ChatOpenAI 接口实现 SSE 流式输出和工具调用，利用 PySide6 设计了一个简单的后端服务界面，方便安装加载项和查看终端日志
+- **后端**：使用 Python、LangChain 和 LangGraph 实现智能体编排，通过 OpenAI/Anthropic 兼容接口完成流式输出与工具调用，并由 PySide6 提供桌面服务界面
 
 ## 文档数据结构
 
@@ -20,20 +20,22 @@
   - **paraID**: 段落唯一标识，智能体可以根据这个标识定位到文档中的具体段落进行修改
 - **styles**: 样式定义字典，包含所有段落样式和字符样式的定义，智能体生成文档时需要引用这些样式ID来保证文档格式正确
 
-## Single Agent Loop 架构
+## Agent / Ask 架构
 
-标准的 ReAct 智能体循环架构，智能体在每个循环中根据用户输入和当前文档状态进行思考，选择调用工具或结束任务。
+Agent 与 Ask 使用 ReAct 循环。Agent 可以读取并修改文档；Ask 只保留读取、搜索与分析能力，不会生成或删除 Word 内容。
 
 ![单智能体架构](/single_agent_loop.png)
 
 工具列表：
 
-- **read_document**：读取 (startPosition, endPosition) 范围内的文章内容并转化成 JSON 格式回传给智能体
-- **generate_document**：生成 JSON 格式的文章内容传给前端加载项
-- **search_document**：查询某种格式或文字信息的段落位置并返回给智能体
-- **web_fetch**：根据用户输入的网站链接进行抓取获取信息
+- **read_document / search_document**：读取文档并定位内容
+- **generate_document / delete_document**：生成或删除 Word 内容（Ask 不可用）
+- **load_skill_context**：按任务加载已启用 Skill
+- **list_file / read_file / edit_file**：处理任务文件
+- **python_repl / run_sub_agent**：执行数据处理或委派子任务（Agent 模式）
+- **MCP 工具**：调用用户配置的搜索、图表和其他外部服务
 
-## Multi Agent 架构
+## Plan（Multi-Agent）架构
 
 多智能体协作框架中设计了一个 **Planner Agent** 负责编排和调度其他专家智能体的工作流。
 
@@ -49,7 +51,7 @@
 
 ### 多智能体模式工作流程
 
-以 WPS 的 **多智能体（Multi Agent）模式** 为例，当用户请求写一篇长篇小说并绘制插图时，各专家智能体会依次工作：
+以 **Plan 模式**为例，当用户请求写一篇长篇小说并绘制插图时，各专家智能体会依次工作：
 
 1. **Planner Agent**：编排智能体流程
 2. **Research Agent**：搜索网文小说，调用文生图

@@ -558,7 +558,10 @@ def get_first_available_model() -> tuple[LLMProvider | None, str]:
 def get_temperature() -> float:
     """从用户设置中获取 temperature 值"""
     settings = load_user_settings()
-    return settings.get("temperature", 0.7)
+    try:
+        return min(1, max(0, float(settings.get("temperature", 0.5))))
+    except (TypeError, ValueError):
+        return 0.5
 
 
 def get_custom_prompt() -> str:

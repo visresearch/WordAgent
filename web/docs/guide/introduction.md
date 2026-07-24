@@ -10,7 +10,7 @@
 
 本项目采用 FastAPI 构建后端 API，前端加载项与后端使用流式接口通信，使前端能够实时展示 LLM 输出内容。前端采用 Vue3 和 JavaScript 开发，核心是 DocxJson 双向转换模块，能将带格式的 Word 文档内容与 JSON 格式互相转换。
 
-后端基于 langchain 和 langgraph 实现智能体设计与协作，使用 chatOpenAI 接口完成 SSE 流式输出与工具调用，并使用 pySide6 提供简易后端服务界面，方便安装加载项与查看日志。
+后端基于 LangChain 和 LangGraph 实现智能体设计与协作，使用 OpenAI/Anthropic 兼容接口完成流式输出与工具调用。前端加载项通过 WebSocket 与后端通信，PySide6 桌面程序用于启动服务、安装加载项和查看日志。
 
 为了让智能体能够生成**结构化 Word 文档**，项目中定义了一套接近 HTML/CSS 的 JSON Schema：
 
@@ -25,7 +25,7 @@
 
 ## 核心优势
 
-1. **跨平台适配**：类 Copilot 风格的 Word 加载项，支持 Windows 与 Linux。
+1. **跨平台适配**：后端应用支持 Windows、Linux 与 macOS，提供 WPS 和 Microsoft Word 加载项。
 2. **原生富文本**：理解 Word 结构并生成符合文档样式的内容。
 3. **多智能体协作**：多专家角色协同生成高质量长文。
 4. **自由开放**：支持自定义 API 或本地服务，兼容主流 LLM 服务商。
@@ -69,7 +69,7 @@
 - node v22.12.0
 - wpsjs 2.2.3
 - python 3.11.14
-- Win10/11、Ubuntu 22.04
+- Windows 10/11、Ubuntu 22.04、macOS 10.15+
 
 ### 构建前端加载项
 
@@ -91,8 +91,8 @@ uv run python main.py
 
 | 办公软件 | 支持版本 |
 |---------|---------|
-| WPS Office（Windows、Linux） | 12.1.2.24722 及以上 |
-| Microsoft Word（Windows、Web） | 2019/2021 及以上 |
+| WPS Office（Windows、Linux） | 12.1.25225 及以上 |
+| Microsoft Word（Windows、macOS、Web） | Office 2019/2021 或 Microsoft 365 |
 
 ## 开发计划
 
@@ -112,12 +112,12 @@ uv run python main.py
 | GPT 5.4 | ✅ 运行稳定 |
 | MiniMax M2.5 | ✅ 运行稳定 |
 | Step 3.5 Flash | ✅ 运行稳定 |
-| DeepSeek v4 pro | ✅ 运行稳定 |
+| DeepSeek V4 Pro | ✅ 运行稳定 |
 | Claude Sonnet/Opus | ✅ 运行稳定 |
 | MiMo-V2.5 | ✅ 运行稳定 |
 | Gemini 3.1 Pro | 🔲 待测试 |
 
-> 推荐使用 **GPT 系列** 模型，其次是 **Qwen 系列** 模型。
+> 推荐优先使用 **DeepSeek V4 Pro**。具体配置步骤见 [配置大模型服务](/guide/api-config)。
 
 本项目开发使用了部分[阿里云百炼](https://bailian.console.aliyun.com/)、[Openrouter](https://openrouter.ai/models?q=free)免费额度。
 

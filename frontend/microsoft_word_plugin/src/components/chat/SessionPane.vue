@@ -2,7 +2,7 @@
   <div class="session-container">
     <!-- 标题栏 -->
     <div class="session-title-bar">
-      <span>历史会话</span>
+      <span>{{ $t('session.title') }}</span>
     </div>
     <!-- 新聊天按钮 -->
     <div class="new-chat-section">
@@ -10,7 +10,7 @@
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M12 5v14M5 12h14" />
         </svg>
-        <span>新聊天</span>
+        <span>{{ $t('session.newChat') }}</span>
       </button>
     </div>
 
@@ -22,7 +22,7 @@
           <path d="M881.777778 1024H142.222222a56.888889 56.888889 0 0 1-56.888889-56.888889V56.888889a56.888889 56.888889 0 0 1 56.888889-56.888889h739.555556a56.888889 56.888889 0 0 1 56.888889 56.888889v910.222222a56.888889 56.888889 0 0 1-56.888889 56.888889z m0-938.666667a28.444444 28.444444 0 0 0-28.444445-28.444444H170.666667a28.444444 28.444444 0 0 0-28.444445 28.444444v853.333334a28.444444 28.444444 0 0 0 28.444445 28.444444h682.666666a28.444444 28.444444 0 0 0 28.444445-28.444444V85.333333z" fill="currentColor" />
           <path d="M227.555556 512h284.444444v56.888889H227.555556zM227.555556 711.111111h483.555555v56.888889H227.555556z" fill="currentColor" />
         </svg>
-        <span>暂无历史会话</span>
+        <span>{{ $t('session.empty') }}</span>
       </div>
 
       <!-- 会话项列表（使用模拟数据） -->
@@ -34,16 +34,16 @@
           @click="selectSession(session)"
         >
           <div class="session-content">
-            <div class="session-title">{{ session.title || '新对话' }}</div>
-            <div class="session-preview">{{ session.preview || '暂无消息' }}</div>
+            <div class="session-title">{{ session.title || $t('session.newConversation') }}</div>
+            <div class="session-preview">{{ session.preview || $t('session.noMessages') }}</div>
           </div>
           <div class="session-actions">
-            <button class="action-btn" title="重命名" @click.stop="renameSession(session)">
+            <button class="action-btn" :title="$t('session.rename')" @click.stop="renameSession(session)">
               <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
                 <path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168l10-10zM11.207 2.5L13.5 4.793 14.793 3.5 12.5 1.207 11.207 2.5zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293l6.5-6.5zm-9.761 5.175l-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325z" />
               </svg>
             </button>
-            <button class="action-btn delete-btn" title="删除" @click.stop="deleteSession(session)">
+            <button class="action-btn delete-btn" :title="$t('common.delete')" @click.stop="deleteSession(session)">
               <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
                 <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z" />
                 <path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4L4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z" />
@@ -57,18 +57,18 @@
     <!-- 重命名对话框 -->
     <div v-if="showRenameDialog" class="dialog-overlay" @click.self="closeRenameDialog">
       <div class="rename-dialog">
-        <div class="dialog-header">重命名会话</div>
+        <div class="dialog-header">{{ $t('session.renameTitle') }}</div>
         <input
           ref="renameInput"
           v-model="renameValue"
           type="text"
           class="rename-input"
-          placeholder="输入新名称"
+          :placeholder="$t('session.renamePlaceholder')"
           @keyup.enter="confirmRename"
         />
         <div class="dialog-actions">
-          <button class="dialog-btn cancel-btn" @click="closeRenameDialog">取消</button>
-          <button class="dialog-btn confirm-btn" @click="confirmRename">确定</button>
+          <button class="dialog-btn cancel-btn" @click="closeRenameDialog">{{ $t('common.cancel') }}</button>
+          <button class="dialog-btn confirm-btn" @click="confirmRename">{{ $t('common.confirm') }}</button>
         </div>
       </div>
     </div>
@@ -76,11 +76,11 @@
     <!-- 删除确认对话框 -->
     <div v-if="showDeleteDialog" class="dialog-overlay" @click.self="closeDeleteDialog">
       <div class="delete-dialog">
-        <div class="dialog-header">确认删除</div>
-        <div class="dialog-content">确定要删除这个会话吗？此操作无法撤销。</div>
+        <div class="dialog-header">{{ $t('session.deleteTitle') }}</div>
+        <div class="dialog-content">{{ $t('session.deleteBody') }}</div>
         <div class="dialog-actions">
-          <button class="dialog-btn cancel-btn" @click="closeDeleteDialog">取消</button>
-          <button class="dialog-btn delete-confirm-btn" @click="confirmDelete">删除</button>
+          <button class="dialog-btn cancel-btn" @click="closeDeleteDialog">{{ $t('common.cancel') }}</button>
+          <button class="dialog-btn delete-confirm-btn" @click="confirmDelete">{{ $t('common.delete') }}</button>
         </div>
       </div>
     </div>
@@ -90,6 +90,7 @@
 <script>
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import api from '../js/api.js';
+import { t } from '../../i18n/index.js';
 
 export default {
   name: 'SessionPane',
@@ -131,7 +132,7 @@ export default {
 
     const createNewSession = async () => {
       try {
-        const result = await api.createSession({ title: '新对话' });
+        const result = await api.createSession({ title: t('session.newConversation') });
         if (result.success && result.data?.session) {
           const newSession = result.data.session;
           sessions.value.unshift(newSession);

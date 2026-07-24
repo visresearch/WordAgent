@@ -74,6 +74,7 @@ import SessionPane from './SessionPane.vue';
 import { sessionState } from '../../sessionState.js';
 import { settingsState } from '../../settingsState.js';
 import { chatState } from '../../chatState.js';
+import { t } from '../../i18n/index.js';
 
 export default {
   name: 'AIChatPane',
@@ -242,9 +243,9 @@ export default {
       msg.contentParts.push({
         type: "mcp",
         toolName: safeToolName,
-        preview: `🔧 调用 MCP 工具: ${safeToolName}`,
-        argsText: argsText || "无参数",
-        outputText: "等待工具输出...",
+        preview: t('chat.callMcp', { name: safeToolName }),
+        argsText: argsText || t('chat.noArguments'),
+        outputText: t('chat.mcpWaiting'),
         completed: false,
         isError: false,
       });
@@ -261,7 +262,7 @@ export default {
       for (let i = msg.contentParts.length - 1; i >= 0; i--) {
         const part = msg.contentParts[i];
         if (part.type === "mcp" && part.toolName === safeToolName && !part.completed) {
-          part.outputText = outputText || "（无输出）";
+          part.outputText = outputText || t('chat.noOutput');
           part.completed = true;
           part.isError = !!isError;
           return;
@@ -271,9 +272,9 @@ export default {
       msg.contentParts.push({
         type: "mcp",
         toolName: safeToolName,
-        preview: `🔧 调用 MCP 工具: ${safeToolName}`,
-        argsText: "参数未知",
-        outputText: outputText || "（无输出）",
+        preview: t('chat.callMcp', { name: safeToolName }),
+        argsText: t('chat.unknownArguments'),
+        outputText: outputText || t('chat.noOutput'),
         completed: true,
         isError: !!isError,
       });
@@ -525,7 +526,7 @@ export default {
       }
 
       try {
-        const result = await api.createSession({ title: '新对话' });
+        const result = await api.createSession({ title: t('session.newConversation') });
         if (result.success && result.data?.session) {
           this.currentSessionId = result.data.session.id;
           try {
@@ -675,11 +676,11 @@ export default {
           let displayText = cleanedText;
           if (!displayText) {
             if (hasInlineImage && hasTable) {
-              displayText = "[图片+表格选区]";
+              displayText = t('chat.imageTableSelection');
             } else if (hasInlineImage) {
-              displayText = "[图片选区]";
+              displayText = t('chat.imageSelection');
             } else if (hasTable) {
-              displayText = "[表格选区]";
+              displayText = t('chat.tableSelection');
             }
           }
 
@@ -822,7 +823,7 @@ export default {
       }
 
       this.messages.push(userMsgObj);
-      if (!this.currentSessionTitle || this.currentSessionTitle === '新对话') {
+      if (!this.currentSessionTitle || ['新对话', 'New conversation'].includes(this.currentSessionTitle)) {
         this.currentSessionTitle = userMessage.length > 30 ? userMessage.substring(0, 30) + '...' : userMessage;
       }
       this.historyLoaded = true;
@@ -871,9 +872,9 @@ export default {
           console.error('请求失败:', error);
           const errMsg = String(error?.message || '');
           if (errMsg.includes('⛔ 网络超时连接，自动断开')) {
-            aiMsg.content = '⛔ 网络超时连接，自动断开';
+            aiMsg.content = t('chat.networkTimeout');
           } else {
-            aiMsg.content = `网络错误：${errMsg}。请确保后端服务运行在 localhost:3880`;
+            aiMsg.content = t('chat.networkError', { error: errMsg });
           }
           this.isLoading = false;
         },
@@ -931,8 +932,8 @@ export default {
           type: 'status',
           content: data.content || (
             hasParaIDMode
-              ? `📑 正在读取文档(段落ID ${data.startParaID ?? ''} - ${data.endParaID ?? data.startParaID ?? ''})`
-              : `📑 正在读取文档(段落 ${data.startParaIndex} - ${data.endParaIndex})`
+              ? t('chat.readingDocumentById', { start: data.startParaID ?? '', end: data.endParaID ?? data.startParaID ?? '' })
+              : t('chat.readingDocument', { start: data.startParaIndex, end: data.endParaIndex })
           ),
           loading: true
         });
@@ -951,7 +952,7 @@ export default {
       if (data.type === 'search_document') {
         msg.contentParts.push({
           type: 'status',
-          content: data.content || '🔍 正在搜索文档...',
+          content: data.content || t('chat.searchingDocument'),
           loading: true
         });
         this.scrollToBottom();
@@ -967,7 +968,7 @@ export default {
           if (parts[i].type === 'status' && parts[i].loading) {
             parts.splice(i, 1, {
               type: 'status',
-              content: data.content || '✅ 搜索完成',
+              content: data.content || t('chat.searchComplete'),
               loading: false
             });
             found = true;
@@ -975,7 +976,7 @@ export default {
           }
         }
         if (!found) {
-          parts.push({ type: 'status', content: data.content || '✅ 搜索完成', loading: false });
+          parts.push({ type: 'status', content: data.content || t('chat.searchComplete'), loading: false });
         }
         this.scrollToBottom();
         return;
@@ -990,7 +991,7 @@ export default {
           if (parts[i].type === 'status' && parts[i].loading) {
             parts.splice(i, 1, {
               type: 'status',
-              content: data.content || '📑 文档读取完成',
+              content: data.content || t('chat.documentReadComplete'),
               loading: false
             });
             found = true;
@@ -998,7 +999,7 @@ export default {
           }
         }
         if (!found) {
-          parts.push({ type: 'status', content: data.content || '📑 文档读取完成', loading: false });
+          parts.push({ type: 'status', content: data.content || t('chat.documentReadComplete'), loading: false });
         }
         this.scrollToBottom();
         return;
@@ -1010,7 +1011,7 @@ export default {
         console.log('[AIChatPane] 后端请求删除文档段落, paraIDs:', paraIDs, 'docId:', data.docId);
         msg.contentParts.push({
           type: 'status',
-          content: data.content || `🗑️ 准备删除段落ID(${paraIDs.join(', ')})`,
+          content: data.content || t('chat.prepareDelete', { ids: paraIDs.join(', ') }),
           loading: false
         });
         this.scrollToBottom();
@@ -1033,7 +1034,7 @@ export default {
           if (parts[i].type === 'status' && parts[i].loading) {
             parts.splice(i, 1, {
               type: 'status',
-              content: data.content || '✅ 删除完成',
+              content: data.content || t('chat.deleteComplete'),
               loading: false
             });
             found = true;
@@ -1041,7 +1042,7 @@ export default {
           }
         }
         if (!found) {
-          parts.push({ type: 'status', content: data.content || '✅ 删除完成', loading: false });
+          parts.push({ type: 'status', content: data.content || t('chat.deleteComplete'), loading: false });
         }
         this.scrollToBottom();
         return;
@@ -1051,7 +1052,7 @@ export default {
       if (data.type === 'generate_document') {
         msg.contentParts.push({
           type: 'status',
-          content: data.content || '📝 正在生成文档',
+          content: data.content || t('chat.generatingDocument'),
           loading: true
         });
         this.scrollToBottom();
@@ -1066,7 +1067,7 @@ export default {
           if (parts[i].type === 'status' && parts[i].loading) {
             parts.splice(i, 1, {
               type: 'status',
-              content: data.content || '📝 文档已生成',
+              content: data.content || t('chat.documentGenerated'),
               loading: false
             });
             found = true;
@@ -1074,7 +1075,7 @@ export default {
           }
         }
         if (!found) {
-          parts.push({ type: 'status', content: data.content || '📝 文档已生成', loading: false });
+          parts.push({ type: 'status', content: data.content || t('chat.documentGenerated'), loading: false });
         }
         msg._docId = this._toIntOrDefault(data.docId, 0);
         msg._insertParaID = this._toParaIdOrNull(data.insertParaID);
@@ -1166,7 +1167,7 @@ export default {
             if (!inserted) {
               msg.contentParts.push({
                 type: 'status',
-                content: '⚠️ 文档插入失败，请检查目标文档是否可写',
+                content: t('chat.documentInsertFailed'),
                 loading: false
               });
               this.scrollToBottom();
@@ -1177,7 +1178,7 @@ export default {
           });
         this.scrollToBottom();
       } else if (data.error) {
-        msg.content += `\n\n错误: ${data.error}`;
+        msg.content += `\n\n${t('chat.errorLabel', { error: data.error })}`;
       }
     },
 
@@ -1333,11 +1334,11 @@ export default {
         0
       );
 
-      let summary = `${totalParaCount} 个段落`;
+      let summary = t('chat.paragraphCount', { count: totalParaCount });
       if (totalTableCount > 0) {
-        summary += `，${totalTableCount} 个表格`;
+        summary += `, ${t('chat.tableCount', { count: totalTableCount })}`;
       }
-      this.pendingDocument = { preview: `AI 已生成（${summary}，待确认）` };
+      this.pendingDocument = { preview: t('chat.generatedPending', { summary }) };
       this.pendingDocumentMsg = this.pendingInsertions[this.pendingInsertions.length - 1]?.msg || null;
     },
 
@@ -1351,7 +1352,7 @@ export default {
       this.pendingDeletes.push({
         paraIDs,
         docId,
-        preview: `AI 准备删除段落（paraID: ${paraIDs.join(', ')}）`,
+        preview: t('chat.deletePreview', { ids: paraIDs.join(', ') }),
         _commentAdded: false,
         _markingMode: 'comment'
       });

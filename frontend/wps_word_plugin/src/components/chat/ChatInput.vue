@@ -4,12 +4,12 @@
     <div v-for="(file, index) in uploadedFiles" :key="`${file.name}-${file.size}-${file.lastModified}-${index}`" class="current-selection-bar">
       <div class="selection-bar-content">
         <div class="selection-bar-icon">
-          <img :src="fileIcon" alt="附件" class="selection-bar-icon-img" />
+          <img :src="fileIcon" :alt="$t('chat.attachment')" class="selection-bar-icon-img" />
         </div>
         <div class="selection-bar-info">
           <span class="selection-bar-preview">{{ file.name }} ({{ formatFileSize(file.size) }})</span>
         </div>
-        <button class="selection-bar-clear" title="移除文件" @click="$emit('remove-file', index)">
+        <button class="selection-bar-clear" :title="$t('chat.removeFile')" @click="$emit('remove-file', index)">
           <svg
             width="12"
             height="12"
@@ -40,9 +40,9 @@
         </div>
         <div class="selection-bar-info">
           <span v-if="sel.docName" class="selection-bar-docname">{{ sel.docName }}</span>
-          <span class="selection-bar-preview">{{ sel.startText }} → {{ sel.endText }} (段落 {{ sel.startParaIndex }} - {{ sel.endParaIndex }})</span>
+          <span class="selection-bar-preview">{{ sel.startText }} → {{ sel.endText }} ({{ $t('chat.paragraphRange', { start: sel.startParaIndex, end: sel.endParaIndex }) }})</span>
         </div>
-        <button class="selection-bar-clear" title="清除选区" @click="$emit('remove-selection', index)">
+        <button class="selection-bar-clear" :title="$t('chat.clearSelection')" @click="$emit('remove-selection', index)">
           <svg
             width="12"
             height="12"
@@ -76,10 +76,10 @@
         </div>
         <div v-if="!isLoading" class="pending-actions">
           <button class="pending-btn confirm-btn" :class="{ 'delete-confirm-btn': pendingDeletes.length > 0 && !pendingDocument }" @click="$emit('confirm-pending')">
-            确定
+            {{ $t('common.confirm') }}
           </button>
           <button class="pending-btn cancel-btn" @click="$emit('cancel-pending')">
-            取消
+            {{ $t('common.cancel') }}
           </button>
         </div>
       </div>
@@ -155,7 +155,7 @@
               :class="{ open: modelDropdownOpen, disabled: modelsLoading }"
             >
               <div class="select-trigger" @click="toggleModelDropdown">
-                <span v-if="modelsLoading">加载中...</span>
+                <span v-if="modelsLoading">{{ $t('common.loading') }}</span>
                 <span v-else>{{ selectedModelName }}</span>
                 <svg
                   class="select-arrow"
@@ -180,7 +180,7 @@
                   :class="{ active: !selectedModel }"
                   @click="selectModel('')"
                 >
-                  None
+                  {{ $t('common.none') }}
                 </div>
                 <div
                   v-for="model in availableModels"
@@ -189,7 +189,7 @@
                   :class="{ active: selectedModel === model.id && selectedModelProvider === model.provider }"
                   @click="selectModel(model.id, model.provider)"
                 >
-                  {{ model.provider || 'Unknown' }} / {{ model.name }}
+                  {{ model.provider || $t('common.unknown') }} / {{ model.name }}
                 </div>
               </div>
             </div>
@@ -199,11 +199,11 @@
               <input
                 :checked="enableThinking"
                 type="checkbox"
-                aria-label="启用或禁用深度思考"
+                :aria-label="$t('chat.thinkingToggle')"
                 @change="$emit('update:enableThinking', $event.target.checked)"
               />
               <span class="thinking-slider"></span>
-              <span class="thinking-label">{{ enableThinking ? '允许思考' : '禁止思考' }}</span>
+              <span class="thinking-label">{{ enableThinking ? $t('chat.allowThinking') : $t('chat.disableThinking') }}</span>
             </label>
           </div>
           <div class="toolbar-right">
@@ -240,12 +240,12 @@
               <button
                 class="add-selection-btn"
                 type="button"
-                aria-label="添加文件"
+                :aria-label="$t('chat.addFile')"
                 @click="triggerFilePicker"
               >
                 <img :src="fileIcon" alt="" class="toolbar-icon" />
               </button>
-              <span class="tooltip">添加文件</span>
+              <span class="tooltip">{{ $t('chat.addFile') }}</span>
             </div>
             <input
               ref="fileInput"
@@ -259,12 +259,12 @@
               <button
                 class="add-selection-btn"
                 type="button"
-                aria-label="添加选区"
+                :aria-label="$t('chat.addSelection')"
                 @click="$emit('add-selection')"
               >
                 <img :src="addIcon" alt="" class="toolbar-icon" />
               </button>
-              <span class="tooltip">添加选区</span>
+              <span class="tooltip">{{ $t('chat.addSelection') }}</span>
             </div>
             <div class="btn-wrapper">
               <button
@@ -273,7 +273,7 @@
                 :disabled="!inputText.trim()"
                 @click="sendMessage"
               >
-                <img :src="sendIcon" alt="发送" class="toolbar-icon" />
+                <img :src="sendIcon" :alt="$t('chat.send')" class="toolbar-icon" />
               </button>
               <button v-else class="stop-btn" @click="$emit('stop')">
                 <svg
@@ -300,7 +300,7 @@
                   />
                 </svg>
               </button>
-              <span class="tooltip">{{ isLoading ? '终止' : '发送' }}</span>
+              <span class="tooltip">{{ isLoading ? $t('chat.stop') : $t('chat.send') }}</span>
             </div>
           </div>
         </div>
@@ -316,6 +316,7 @@ import askIcon from '@/assets/icons/ask.svg?url';
 import fileIcon from '@/assets/icons/file.svg';
 import planIcon from '@/assets/icons/plan.svg?url';
 import sendIcon from '@/assets/icons/send.svg';
+import { t } from '../../i18n/index.js';
 
 export default {
   name: 'ChatInput',
@@ -386,12 +387,12 @@ export default {
   computed: {
     inputPlaceholder() {
       if (this.mode === 'plan') {
-        return '概述需要研究的目标或问题';
+        return t('chat.planPlaceholder');
       }
       if (this.mode === 'ask') {
-        return '输入要咨询的问题';
+        return t('chat.askPlaceholder');
       }
-      return '描述下一步要构建的内容';
+      return t('chat.agentPlaceholder');
     },
     currentModeLabel() {
       if (this.mode === 'plan') {
@@ -413,11 +414,11 @@ export default {
     },
     selectedModelName() {
       if (!this.selectedModel) {
-        return '请选择模型';
+        return t('chat.chooseModel');
       }
       const model = this.availableModels.find((m) => m.id === this.selectedModel && m.provider === this.selectedModelProvider);
       if (model) {
-        return `${model.provider || 'Unknown'} / ${model.name}`;
+        return `${model.provider || t('common.unknown')} / ${model.name}`;
       }
       // 模型不在列表中，显示 ID
       if (this.selectedModelProvider) {
@@ -446,12 +447,12 @@ export default {
           const end = d.origEndParaIndex ?? d.endParaIndex ?? start;
           totalDeleteParas += (end - start + 1);
         }
-        parts.push(`删除 ${totalDeleteParas} 个段落`);
+        parts.push(t('chat.deleteParagraphs', { count: totalDeleteParas }));
       }
       if (this.pendingDocument) {
         parts.push(this.pendingDocument.preview);
       }
-      return 'AI 操作：' + parts.join('，');
+      return t('chat.aiOperation', { actions: parts.join(', ') });
     },
     tokenRingOffset() {
       const max = this.tokenStats.max || 200000;
@@ -476,7 +477,7 @@ export default {
       const currentK = (current / 1000).toFixed(1);
       const maxK = (max / 1000).toFixed(0);
       const percentage = max > 0 ? Math.min(100, Math.round(current / max * 100)) : 0;
-      return `上下文：${currentK}k / ${maxK}k tokens（${percentage}%）`;
+      return t('chat.context', { current: currentK, max: maxK, percentage });
     }
   },
   mounted() {
@@ -524,7 +525,7 @@ export default {
         if (allowedExtensions.has(ext)) {
           validFiles.push(file);
         } else {
-          invalidFiles.push(fileName || '未命名文件');
+          invalidFiles.push(fileName || t('chat.unnamedFile'));
         }
       }
 
@@ -533,7 +534,7 @@ export default {
       }
 
       if (invalidFiles.length > 0) {
-        alert(`以下文件格式不支持：${invalidFiles.join('，')}。仅支持 png、jpg、pdf、docx、txt、md。`);
+        alert(t('chat.unsupportedFiles', { files: invalidFiles.join(', ') }));
       }
 
       event.target.value = '';

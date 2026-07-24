@@ -52,7 +52,7 @@ from app.services.tools import (
 
 read_document = build_read_document(get_tool_description("read_document"))
 generate_document = build_generate_document(get_tool_description("generate_document"))
-search_documnet = build_search_document(get_tool_description("search_document"))
+search_document = build_search_document(get_tool_description("search_document"))
 delete_document = build_delete_document(get_tool_description("delete_document"))
 load_skill_context = build_load_skill_context(get_tool_description("load_skill_context"))
 create_workflow = build_create_workflow(get_tool_description("create_workflow"))
@@ -67,8 +67,8 @@ edit_file = build_edit_file(get_tool_description("edit_file"))
 # ---------------------------------------------------------------------------
 
 PLANNER_TOOLS = [create_workflow]
-OUTLINE_TOOLS = [read_document, search_documnet]
-WRITER_TOOLS = [read_document, search_documnet, generate_document, delete_document]
+OUTLINE_TOOLS = [read_document, search_document]
+WRITER_TOOLS = [read_document, search_document, generate_document, delete_document]
 REVIEWER_TOOLS = [review_document]
 # load_skill_context 总是可用；MCP 工具运行时再动态加载
 RESEARCH_TOOLS = [load_skill_context, list_file, read_file, edit_file]
@@ -84,7 +84,7 @@ AGENT_TOOLS = {
 # 静态工具列表（不含 MCP 动态工具）
 ALL_TOOLS = [
     read_document,
-    search_documnet,
+    search_document,
     generate_document,
     delete_document,
     create_workflow,
@@ -108,7 +108,7 @@ __all__ = [
     "edit_file",
     "read_document",
     "review_document",
-    "search_documnet",
+    "search_document",
     # tool sets
     "AGENT_TOOLS",
     "ALL_TOOLS",

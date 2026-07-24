@@ -54,8 +54,8 @@ def initialize_tool_registry() -> None:
         delete_document,
         generate_document,
         read_document,
-        search_documnet,
+        search_document,
     )
 
-    for tool in [read_document, search_documnet, generate_document, delete_document]:
+    for tool in [read_document, search_document, generate_document, delete_document]:
         register_tool(tool)

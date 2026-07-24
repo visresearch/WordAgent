@@ -11,7 +11,7 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-from app.core.config import get_skills_dir, get_user_settings_file
+from app.core.config import get_builtin_skills_dir, get_skills_dir, get_user_settings_file
 
 
 class SkillAlreadyExistsError(ValueError):
@@ -21,6 +21,60 @@ class SkillAlreadyExistsError(ValueError):
 def _skills_root() -> Path:
     """Return skills root directory under wence_data/project."""
     return get_skills_dir()
+
+
+def sync_builtin_skills() -> dict[str, list[str]]:
+    """Copy missing bundled skills into the shared user skills directory."""
+    source_root = get_builtin_skills_dir()
+    if not source_root.exists() or not source_root.is_dir():
+        raise FileNotFoundError(f"Builtin skills directory not found: {source_root}")
+
+    skills_root = _skills_root()
+    existing_folders = {
+        child.name.casefold()
+        for child in skills_root.iterdir()
+        if child.is_dir()
+    }
+    existing_names = {
+        str(skill.get("name", "")).strip().casefold()
+        for skill in discover_skills(include_disabled=True)
+        if str(skill.get("name", "")).strip()
+    }
+
+    copied: list[str] = []
+    skipped: list[str] = []
+    invalid: list[str] = []
+
+    for source_dir in sorted(source_root.iterdir(), key=lambda path: path.name.casefold()):
+        if not source_dir.is_dir():
+            continue
+
+        skill_file = _find_skill_file(source_dir)
+        if skill_file is None:
+            invalid.append(source_dir.name)
+            continue
+
+        try:
+            skill_text = skill_file.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            skill_text = ""
+        frontmatter, _ = _extract_frontmatter(skill_text)
+        skill_name = (frontmatter.get("name") or source_dir.name).strip()
+
+        folder_key = source_dir.name.casefold()
+        name_key = skill_name.casefold()
+        if folder_key in existing_folders or name_key in existing_names:
+            skipped.append(source_dir.name)
+            continue
+
+        destination = skills_root / source_dir.name
+        shutil.copytree(source_dir, destination)
+        set_skill_enabled(source_dir.name, True)
+        existing_folders.add(folder_key)
+        existing_names.add(name_key)
+        copied.append(source_dir.name)
+
+    return {"copied": copied, "skipped": skipped, "invalid": invalid}
 
 
 def _load_skill_enable_map() -> dict[str, bool]:
@@ -190,8 +244,6 @@ def _match_skill(skill_name: str, include_disabled: bool = True) -> dict[str, st
 
 def load_skill_context(
     skill_name: str,
-    max_total_chars: int = 12000,
-    max_file_chars: int = 3000,
     allow_disabled: bool = False,
 ) -> str:
     """Load SKILL.md and companion markdown files for a discovered skill."""
@@ -207,20 +259,12 @@ def load_skill_context(
     skill_file = Path(str(matched["entry"]))
 
     chunks: list[str] = []
-    total_chars = 0
 
-    def _append_chunk(title: str, content: str):
-        nonlocal total_chars
+    def _append_chunk(title: str, content: str) -> None:
         if not content:
             return
-        if total_chars >= max_total_chars:
-            return
-        content = content[:max_file_chars]
         payload = f"\n## {title}\n{content.strip()}\n"
-        remain = max_total_chars - total_chars
-        payload = payload[:remain]
         chunks.append(payload)
-        total_chars += len(payload)
 
     try:
         skill_text = skill_file.read_text(encoding="utf-8", errors="ignore")
@@ -240,8 +284,6 @@ def load_skill_context(
         md_files = []
 
     for md in sorted(md_files, key=lambda p: str(p.relative_to(skill_dir)).lower()):
-        if total_chars >= max_total_chars:
-            break
         try:
             text = md.read_text(encoding="utf-8", errors="ignore")
         except Exception:

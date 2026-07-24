@@ -10,6 +10,10 @@ import time
 import os
 from pathlib import Path
 
+# 必须在 console_interface 等 PySide6 模块导入前关闭 QWidget RHI，
+# 否则 OpenGL 上下文创建失败时主窗口可能只显示黑色。
+os.environ.setdefault("QT_WIDGETS_RHI", "0")
+
 
 def _load_runtime_env() -> list[Path]:
     """加载运行时 .env（优先可执行文件同目录），兼容 PyInstaller 与开发环境。"""

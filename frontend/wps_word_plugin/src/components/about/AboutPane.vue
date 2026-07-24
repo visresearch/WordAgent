@@ -7,7 +7,7 @@
           <img class="icon-logo" src="/images/robot.svg" alt="WenCe AI" />
         </div>
         <h1 class="project-name">
-          文策AI助手
+          {{ $t('about.product') }}
         </h1>
         <p class="project-subtitle">
           WenCe AI Assistant
@@ -17,22 +17,22 @@
       <!-- 版本信息 -->
       <div class="info-section">
         <div class="info-item">
-          <span class="info-label">版本号</span>
-          <span class="info-value">{{ version }}</span>
+          <span class="info-label">{{ $t('about.version') }}</span>
+          <span class="info-value">{{ version || $t('about.unknownVersion') }}</span>
         </div>
         <div class="info-item">
-          <span class="info-label">插件类型</span>
-          <span class="info-value">WPS 文字加载项</span>
+          <span class="info-label">{{ $t('about.pluginType') }}</span>
+          <span class="info-value">{{ $t('about.wpsPlugin') }}</span>
         </div>
         <div class="info-item">
-          <span class="info-label">开发者</span>
-          <span class="info-value">日月星辰</span>
+          <span class="info-label">{{ $t('about.developer') }}</span>
+          <span class="info-value">{{ $t('about.developerName') }}</span>
         </div>
       </div>
 
       <!-- 项目链接 -->
       <div class="links-section">
-        <h3>🔗 相关链接</h3>
+        <h3>{{ $t('about.links') }}</h3>
         <div class="link-list">
           <a
             href="https://github.com/visresearch/WordAgent"
@@ -42,7 +42,7 @@
             @click.prevent="openExternalLink('https://github.com/visresearch/WordAgent')"
           >
             <img class="link-icon" :src="githubIcon" alt="GitHub" />
-            <span>GitHub 仓库</span>
+            <span>{{ $t('about.github') }}</span>
           </a>
           <a
             href="https://visresearch.github.io/WordAgent/"
@@ -51,8 +51,8 @@
             class="link-item"
             @click.prevent="openExternalLink('https://visresearch.github.io/WordAgent/')"
           >
-            <img class="link-icon" :src="webIcon" alt="项目官网" />
-            <span>项目官网</span>
+            <img class="link-icon" :src="webIcon" alt="" />
+            <span>{{ $t('about.website') }}</span>
           </a>
           <a
             href="https://visresearch.github.io/WordAgent/guide/wps-plugin.html"
@@ -61,8 +61,8 @@
             class="link-item"
             @click.prevent="openExternalLink('https://visresearch.github.io/WordAgent/guide/wps-plugin.html')"
           >
-            <img class="link-icon" :src="helpIcon" alt="使用文档" />
-            <span>使用文档</span>
+            <img class="link-icon" :src="helpIcon" alt="" />
+            <span>{{ $t('about.docs') }}</span>
           </a>
           <a
             href="https://github.com/visresearch/WordAgent/issues"
@@ -71,8 +71,8 @@
             class="link-item"
             @click.prevent="openExternalLink('https://github.com/visresearch/WordAgent/issues')"
           >
-            <img class="link-icon" :src="issueIcon" alt="问题反馈" />
-            <span>问题反馈</span>
+            <img class="link-icon" :src="issueIcon" alt="" />
+            <span>{{ $t('about.issues') }}</span>
           </a>
           <a
             href="https://visresearch.github.io/WordAgent/guide/sponsor.html"
@@ -81,8 +81,8 @@
             class="link-item"
             @click.prevent="openExternalLink('https://visresearch.github.io/WordAgent/guide/sponsor.html')"
           >
-            <img class="link-icon" :src="sponsorIcon" alt="赞助作者" />
-            <span>赞助作者</span>
+            <img class="link-icon" :src="sponsorIcon" alt="" />
+            <span>{{ $t('about.sponsor') }}</span>
           </a>
         </div>
       </div>
@@ -110,7 +110,7 @@ export default {
   name: 'AboutPane',
   data() {
     return {
-      version: '未知版本',
+      version: '',
       githubIcon,
       webIcon,
       helpIcon,

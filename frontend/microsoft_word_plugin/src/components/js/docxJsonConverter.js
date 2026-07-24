@@ -66,6 +66,8 @@
 
 /* global Word */
 
+import { parseParaIDFromContentControlMetadata } from "./contentControlMetadata.mjs";
+
 // ============== 样式数组索引常量 ==============
 
 const PSTYLE = {
@@ -372,9 +374,7 @@ async function resolveParagraphParaIDs(context, paragraphs, seedKnownIDs = []) {
       if (item.contentControl.isNullObject) {
         continue;
       }
-      const paraID =
-        parseParaIDFromContentControlMeta(item.contentControl.tag) ||
-        parseParaIDFromContentControlMeta(item.contentControl.title);
+      const paraID = parseParaIDFromContentControlMetadata(item.contentControl);
       if (paraID && !usedIDs.has(paraID)) {
         paraIDs[item.idx] = paraID;
         paraIDSources[item.idx] = "contentControl";

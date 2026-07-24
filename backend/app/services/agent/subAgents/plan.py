@@ -22,7 +22,7 @@ class PlanSubAgent:
 
     ALLOWED_TOOLS: list[str] = [
         "read_document",
-        "search_documnet",
+        "search_document",
     ]
 
     def get_system_prompt(self, context: dict[str, Any] | None = None) -> str:
@@ -30,7 +30,7 @@ class PlanSubAgent:
         prompt_file = Path(__file__).parent.parent / "prompts" / "agent-prompt-plan.md"
         if prompt_file.exists():
             return prompt_file.read_text(encoding="utf-8").strip()
-        return "You are a planning specialist. Use read_document and search_documnet to plan tasks."
+        return "You are a planning specialist. Use read_document and search_document to plan tasks."
 
     def get_allowed_tools(self) -> list[str]:
         return self.ALLOWED_TOOLS

@@ -16,28 +16,28 @@
           </svg>
           <div class="section-title-group">
             <h2 class="section-title">
-              自定义指令
+              {{ $t('personalization.instructions') }}
             </h2>
             <p class="section-subtitle">
-              设置AI的全局提示词，影响所有对话
+              {{ $t('personalization.instructionsDesc') }}
             </p>
           </div>
         </div>
 
         <div class="setting-item">
           <label class="setting-label">
-            全局提示词
-            <span class="label-hint">在每次对话中都会被应用，帮助AI更好地理解你的需求</span>
+            {{ $t('personalization.globalPrompt') }}
+            <span class="label-hint">{{ $t('personalization.promptHint') }}</span>
           </label>
           <textarea
             v-model="settings.customPrompt"
             class="custom-prompt-input"
-            placeholder="例如：你是一位专业的写作助手，擅长学术写作和文档编辑。请用简洁、专业的语言回答问题..."
+            :placeholder="$t('personalization.promptPlaceholder')"
             rows="6"
             @input="onSettingChange"
           ></textarea>
           <div class="input-footer">
-            <span class="char-count">{{ settings.customPrompt.length }} 字符</span>
+            <span class="char-count">{{ $t('personalization.chars', { count: settings.customPrompt.length }) }}</span>
             <button v-if="settings.customPrompt.length > 0" class="btn-clear" @click="clearCustomPrompt">
               <svg
                 width="14"
@@ -47,14 +47,14 @@
               >
                 <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z" />
               </svg>
-              清空
+              {{ $t('common.clear') }}
             </button>
           </div>
         </div>
 
         <!-- 预设模板 -->
         <div class="setting-item">
-          <label class="setting-label">快速模板</label>
+          <label class="setting-label">{{ $t('personalization.quickTemplates') }}</label>
           <div class="template-grid">
             <button
               v-for="template in promptTemplates"
@@ -96,10 +96,10 @@
           </svg>
           <div class="section-title-group">
             <h2 class="section-title">
-              LLM温度
+              {{ $t('personalization.temperature') }}
             </h2>
             <p class="section-subtitle">
-              调整AI的创造性和随机性
+              {{ $t('personalization.temperatureDesc') }}
             </p>
           </div>
         </div>
@@ -116,22 +116,22 @@
                 v-model.number="settings.temperature"
                 type="range"
                 min="0"
-                max="2"
+                max="1"
                 step="0.01"
                 class="temperature-slider"
                 @input="onSettingChange"
               />
               <div class="slider-marks">
                 <span class="mark">0</span>
+                <span class="mark">0.25</span>
                 <span class="mark">0.5</span>
+                <span class="mark">0.75</span>
                 <span class="mark">1</span>
-                <span class="mark">1.5</span>
-                <span class="mark">2</span>
               </div>
             </div>
 
             <div class="temperature-description">
-              <div class="temp-zone" :class="{ active: settings.temperature < 0.5 }">
+              <div class="temp-zone" :class="{ active: settings.temperature < 0.33 }">
                 <div class="zone-header">
                   <svg
                     class="zone-icon"
@@ -150,14 +150,14 @@
                     />
                     <path d="M7 11V7a5 5 0 0 1 10 0v4" />
                   </svg>
-                  <span class="zone-name">精确模式 (0-0.5)</span>
+                  <span class="zone-name">{{ $t('personalization.precise') }}</span>
                 </div>
                 <p class="zone-desc">
-                  输出更确定、一致，适合事实性任务
+                  {{ $t('personalization.preciseDesc') }}
                 </p>
               </div>
 
-              <div class="temp-zone" :class="{ active: settings.temperature >= 0.5 && settings.temperature < 1.5 }">
+              <div class="temp-zone" :class="{ active: settings.temperature >= 0.33 && settings.temperature < 0.67 }">
                 <div class="zone-header">
                   <svg
                     class="zone-icon"
@@ -169,14 +169,14 @@
                     <circle cx="12" cy="12" r="10" />
                     <polyline points="12 6 12 12 16 14" />
                   </svg>
-                  <span class="zone-name">平衡模式 (0.5-1.5)</span>
+                  <span class="zone-name">{{ $t('personalization.balanced') }}</span>
                 </div>
                 <p class="zone-desc">
-                  平衡准确性和创造性，适合大多数场景
+                  {{ $t('personalization.balancedDesc') }}
                 </p>
               </div>
 
-              <div class="temp-zone" :class="{ active: settings.temperature >= 1.5 }">
+              <div class="temp-zone" :class="{ active: settings.temperature >= 0.67 }">
                 <div class="zone-header">
                   <svg
                     class="zone-icon"
@@ -189,10 +189,10 @@
                     <path d="M2 17l10 5 10-5" />
                     <path d="M2 12l10 5 10-5" />
                   </svg>
-                  <span class="zone-name">创意模式 (1.5-2)</span>
+                  <span class="zone-name">{{ $t('personalization.creative') }}</span>
                 </div>
                 <p class="zone-desc">
-                  输出更随机、富有创造力，适合头脑风暴
+                  {{ $t('personalization.creativeDesc') }}
                 </p>
               </div>
             </div>
@@ -204,7 +204,8 @@
 </template>
 
 <script>
-import { ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
+import { t } from '../../i18n/index.js';
 
 export default {
   name: 'PersonalizationPane',
@@ -218,42 +219,42 @@ export default {
   setup(props, { emit }) {
     const settings = ref({
       customPrompt: props.settings.customPrompt ?? '',
-      temperature: props.settings.temperature ?? 0.7
+      temperature: props.settings.temperature ?? 0.5
     });
 
     watch(() => props.settings, (newVal) => {
       settings.value.customPrompt = newVal.customPrompt ?? '';
-      settings.value.temperature = newVal.temperature ?? 0.7;
+      settings.value.temperature = newVal.temperature ?? 0.5;
     }, { deep: true });
 
-    const promptTemplates = ref([
+    const promptTemplates = computed(() => [
       {
         id: 'academic',
-        name: '学术写作',
-        description: '专业、严谨的学术风格',
+        name: t('personalization.templates.academicName'),
+        description: t('personalization.templates.academicDesc'),
         icon: 'M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z',
-        prompt: '你是一位专业的学术写作助手，擅长撰写和编辑学术论文。请使用正式、严谨的学术语言，注重逻辑性和准确性。在回答问题时，优先考虑学术规范和专业术语的正确使用。'
+        prompt: t('personalization.templates.academicPrompt')
       },
       {
         id: 'creative',
-        name: '创意写作',
-        description: '富有想象力的创作风格',
+        name: t('personalization.templates.creativeName'),
+        description: t('personalization.templates.creativeDesc'),
         icon: 'M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z',
-        prompt: '你是一位富有创造力的写作助手，擅长创意写作和文学创作。请用生动、形象的语言表达，注重文采和艺术性。在协助写作时，鼓励创新思维和独特视角。'
+        prompt: t('personalization.templates.creativePrompt')
       },
       {
         id: 'business',
-        name: '商务文档',
-        description: '简洁、专业的商务风格',
+        name: t('personalization.templates.businessName'),
+        description: t('personalization.templates.businessDesc'),
         icon: 'M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z',
-        prompt: '你是一位专业的商务写作助手，擅长撰写商务文档、报告和邮件。请使用简洁、清晰的商务语言，注重效率和专业性。在协助写作时，确保内容条理清晰、重点突出。'
+        prompt: t('personalization.templates.businessPrompt')
       },
       {
         id: 'casual',
-        name: '日常交流',
-        description: '轻松、友好的对话风格',
+        name: t('personalization.templates.casualName'),
+        description: t('personalization.templates.casualDesc'),
         icon: 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z',
-        prompt: '你是一位友好、平易近人的写作助手。请使用轻松、自然的语言风格，就像朋友之间的对话一样。在协助写作时，注重可读性和亲和力。'
+        prompt: t('personalization.templates.casualPrompt')
       }
     ]);
 
@@ -269,14 +270,14 @@ export default {
     };
 
     const clearCustomPrompt = () => {
-      if (confirm('确定要清空自定义指令吗？')) {
+      if (confirm(t('personalization.clearConfirm'))) {
         settings.value.customPrompt = '';
         emitChange();
       }
     };
 
     const applyTemplate = (template) => {
-      if (settings.value.customPrompt && !confirm('应用模板将覆盖当前的自定义指令，是否继续？')) {
+      if (settings.value.customPrompt && !confirm(t('personalization.overwriteConfirm'))) {
         return;
       }
       settings.value.customPrompt = template.prompt;

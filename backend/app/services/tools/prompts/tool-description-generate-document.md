@@ -18,7 +18,7 @@ Generate formatted content and insert it into the Word document.
 - In `run.text`, `cell.text`, and table paragraph text, never use raw ASCII double quote characters (`"`). For quoted phrases, use Chinese quotation marks such as `“三夏”` or `「三夏」`. Raw `"` in text often breaks tool-call JSON.
 - Blank line: `{ "pStyle": "", "runs": [] }`.
 - `insertParaID` is mandatory. Never omit it and never pass `null`/`None`.
-- For non-empty documents, `insertParaID` must be an existing paragraph ID from selected context, `read_document`, or `search_documnet`; do not guess IDs.
+- For non-empty documents, `insertParaID` must be an existing paragraph ID from selected context, `read_document`, or `search_document`; do not guess IDs.
 - If document metadata says `isEmpty=true` or `read_document` returns only one empty placeholder paragraph such as `runs: []`, treat the document as blank and use `"insertParaID": 0`.
 
 ## Use

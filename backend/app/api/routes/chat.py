@@ -321,9 +321,6 @@ async def chat_websocket(websocket: WebSocket):
         logger.info(f"[WebSocket] 清理完成 session={chat_id}")
 
 
-from app.services.agent.agent import ContextOverflowError
-
-
 class _IdleAbort(Exception):
     """看门狗主动中止流（达到 IDLE_ABORT_SECONDS）。"""
 

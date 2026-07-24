@@ -1,0 +1,19 @@
+import { ssrRenderAttrs, ssrRenderStyle } from "vue/server-renderer";
+import { useSSRContext } from "vue";
+import { _ as _export_sfc } from "./plugin-vue_export-helper.1tPrXgE0.js";
+const __pageData = JSON.parse('{"title":"快速开始","description":"","frontmatter":{},"headers":[],"relativePath":"guide/quick-start.md","filePath":"guide/quick-start.md"}');
+const _sfc_main = { name: "guide/quick-start.md" };
+function _sfc_ssrRender(_ctx, _push, _parent, _attrs, $props, $setup, $data, $options) {
+  _push(`<div${ssrRenderAttrs(_attrs)}><h1 id="快速开始" tabindex="-1">快速开始 <a class="header-anchor" href="#快速开始" aria-label="Permalink to “快速开始”">​</a></h1><h2 id="_1-下载并启动文策-ai" tabindex="-1">1. 下载并启动文策 AI <a class="header-anchor" href="#_1-下载并启动文策-ai" aria-label="Permalink to “1. 下载并启动文策 AI”">​</a></h2><p>普通用户前往 <a href="https://github.com/visresearch/WordAgent/releases" target="_blank" rel="noreferrer">GitHub Releases</a> 下载发行版：</p><table tabindex="0"><thead><tr><th>平台</th><th>推荐下载</th></tr></thead><tbody><tr><td>Windows 10/11</td><td><code>wence_ai-windows-x86_64-installer.exe</code></td></tr><tr><td>Ubuntu / Debian</td><td><code>wence_ai-linux-x86_64.deb</code></td></tr><tr><td>macOS Apple Silicon</td><td><code>wence_ai-macos-arm64.dmg</code></td></tr></tbody></table><p>安装并启动 <strong>WenCe AI / 文策 AI</strong>。免安装包、Intel Mac 和源码运行方式请查看 <a href="/WordAgent/guide/installation.html">安装方式</a>。</p><h2 id="_2-加载-word-插件" tabindex="-1">2. 加载 Word 插件 <a class="header-anchor" href="#_2-加载-word-插件" aria-label="Permalink to “2. 加载 Word 插件”">​</a></h2><p>根据使用的办公软件选择对应说明：</p><ul><li><a href="/WordAgent/guide/wps-plugin.html">安装 WPS Word 加载项</a>：适用于 Windows、Linux 的 WPS Office。</li><li><a href="/WordAgent/guide/msword-plugin.html">启动 Microsoft Word 加载项</a>：适用于 Windows、macOS 和 Word 网页版。</li></ul><p>安装成功后，文策 AI 会显示在 Word 侧边栏中。</p><h2 id="_3-配置-deepseek-v4-pro" tabindex="-1">3. 配置 DeepSeek V4 Pro <a class="header-anchor" href="#_3-配置-deepseek-v4-pro" aria-label="Permalink to “3. 配置 DeepSeek V4 Pro”">​</a></h2><ol><li>打开侧边栏的 <strong>设置 → 大模型</strong>。</li><li>添加 <code>DeepSeek</code> 提供商，填写官方 API Key，Base URL 设为 <code>https://api.deepseek.com</code>，API 类型选择 <strong>OpenAI 兼容</strong>。</li><li>获取模型列表，添加并启用 <strong>DeepSeek V4 Pro</strong>。</li><li>保存设置并返回聊天页选择该模型。</li></ol><p>完整字段说明见 <a href="/WordAgent/guide/api-config.html">配置大模型服务</a>。</p><h2 id="_4-开始第一个任务" tabindex="-1">4. 开始第一个任务 <a class="header-anchor" href="#_4-开始第一个任务" aria-label="Permalink to “4. 开始第一个任务”">​</a></h2><p>在输入框中选择 <strong>Agent</strong> 模式，然后尝试：</p><div class="language-text"><button title="Copy Code" class="copy"></button><span class="lang">text</span><pre class="shiki shiki-themes github-light github-dark" style="${ssrRenderStyle({ "--shiki-light": "#24292e", "--shiki-dark": "#e1e4e8", "--shiki-light-bg": "#fff", "--shiki-dark-bg": "#24292e" })}" tabindex="0" dir="ltr"><code><span class="line"><span>读取当前文档，为文章补充一个结构清晰的总结，并保持现有文档风格。</span></span></code></pre></div><p>涉及文档修改时，前端会展示待确认操作。确认后才会将内容写入 Word。</p><h2 id="_5-继续配置" tabindex="-1">5. 继续配置 <a class="header-anchor" href="#_5-继续配置" aria-label="Permalink to “5. 继续配置”">​</a></h2><ul><li><a href="/WordAgent/guide/how-to-ask.html">如何提问</a></li><li><a href="/WordAgent/guide/features.html">功能与 Agent 模式</a></li><li><a href="/WordAgent/guide/personalization.html">个性化配置</a></li><li><a href="/WordAgent/guide/mcp.html">MCP 服务器</a></li><li><a href="/WordAgent/guide/skills.html">Skill 配置</a></li></ul></div>`);
+}
+const _sfc_setup = _sfc_main.setup;
+_sfc_main.setup = (props, ctx) => {
+  const ssrContext = useSSRContext();
+  (ssrContext.modules || (ssrContext.modules = /* @__PURE__ */ new Set())).add("guide/quick-start.md");
+  return _sfc_setup ? _sfc_setup(props, ctx) : void 0;
+};
+const quickStart = /* @__PURE__ */ _export_sfc(_sfc_main, [["ssrRender", _sfc_ssrRender]]);
+export {
+  __pageData,
+  quickStart as default
+};

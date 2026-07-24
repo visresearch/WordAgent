@@ -1,5 +1,6 @@
 import Util from './js/util.js';
 import api from './js/api.js';
+import { t } from '../i18n/index.js';
 
 //这个函数在整个wps加载项中是第一个执行的
 function OnAddinLoad(ribbonUI) {
@@ -31,7 +32,7 @@ async function checkAutoShowPanel() {
       if (!tsId) {
         let tskpane = window.Application.CreateTaskPane(
           Util.GetUrlPath() + Util.GetRouterHash() + '/aichat',
-          '文策AI助手'
+          t('windows.assistant')
         );
         let id = tskpane.ID;
         window.Application.PluginStorage.setItem('ai_taskpane_id', id);
@@ -57,7 +58,7 @@ function OnAction(control) {
         if (!tsId) {
           let tskpane = window.Application.CreateTaskPane(
             Util.GetUrlPath() + Util.GetRouterHash() + '/aichat',
-            '文策AI助手'
+            t('windows.assistant')
           );
           let id = tskpane.ID;
           window.Application.PluginStorage.setItem('ai_taskpane_id', id);
@@ -79,7 +80,7 @@ function OnAction(control) {
         if (!tsId) {
           tskpane = window.Application.CreateTaskPane(
             Util.GetUrlPath() + Util.GetRouterHash() + '/aichat',
-            '文策AI助手'
+            t('windows.assistant')
           );
           let id = tskpane.ID;
           window.Application.PluginStorage.setItem('ai_taskpane_id', id);
@@ -105,7 +106,7 @@ function OnAction(control) {
         // 使用 WPS 原生对话框显示设置界面
         window.Application.ShowDialog(
           Util.GetUrlPath() + Util.GetRouterHash() + '/setting',
-          '设置',
+          t('windows.settings'),
           900 * window.devicePixelRatio,
           600 * window.devicePixelRatio,
           false
@@ -117,7 +118,7 @@ function OnAction(control) {
         // 使用 WPS 原生对话框显示关于界面
         window.Application.ShowDialog(
           Util.GetUrlPath() + Util.GetRouterHash() + '/about',
-          '关于',
+          t('windows.about'),
           900 * window.devicePixelRatio,
           600 * window.devicePixelRatio,
           false
@@ -130,7 +131,7 @@ function OnAction(control) {
         if (!tsId) {
           let tskpane = window.Application.CreateTaskPane(
             Util.GetUrlPath() + Util.GetRouterHash() + '/debug',
-            '调试面板'
+            t('windows.debug')
           );
           let id = tskpane.ID;
           window.Application.PluginStorage.setItem('debug_taskpane_id', id);

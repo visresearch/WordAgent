@@ -1,13 +1,13 @@
 <template>
   <div class="mcp-setting-container">
     <div class="section-header">
-      <img class="section-icon" :src="iconMcp" alt="MCP 图标" />
+      <img class="section-icon" :src="iconMcp" alt="" />
       <div class="section-title-group">
         <h2 class="section-title">
-          MCP 服务器配置
+          {{ $t('mcp.title') }}
         </h2>
         <p class="section-subtitle">
-          点击服务器卡片可展开编辑，不会打开新窗口
+          {{ $t('mcp.subtitle') }}
         </p>
       </div>
     </div>
@@ -22,12 +22,12 @@
         >
           <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4z" />
         </svg>
-        添加服务器
+        {{ $t('mcp.addServer') }}
       </button>
     </div>
 
     <div v-if="localServers.length === 0" class="empty-state">
-      <p>还没有 MCP 服务器，点击上方“添加服务器”开始配置。</p>
+      <p>{{ $t('mcp.empty') }}</p>
     </div>
 
     <div class="server-list">
@@ -48,14 +48,14 @@
             >
               <path fill-rule="evenodd" d="M4.646 1.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1 0 .708l-6 6a.5.5 0 0 1-.708-.708L10.293 8 4.646 2.354a.5.5 0 0 1 0-.708z" />
             </svg>
-            <span class="server-name">{{ server.name || '未命名服务器' }}</span>
+            <span class="server-name">{{ server.name || $t('mcp.unnamed') }}</span>
           </div>
           <div class="server-actions" @click.stop>
-            <label class="switch switch-sm" title="启用/禁用 MCP 服务器">
+            <label class="switch switch-sm" :title="$t('mcp.toggle')">
               <input v-model="server.enabled" type="checkbox" @change="emitChange" />
               <span class="slider"></span>
             </label>
-            <button class="action-btn delete" title="删除" @click.stop="removeServer(index)">
+            <button class="action-btn delete" :title="$t('common.delete')" @click.stop="removeServer(index)">
               <svg
                 width="14"
                 height="14"
@@ -71,18 +71,18 @@
 
         <div v-if="server.expanded" class="server-body">
           <div class="form-row">
-            <label class="field-label">服务器名称</label>
+            <label class="field-label">{{ $t('mcp.serverName') }}</label>
             <input
               v-model="server.name"
               type="text"
               class="field-input"
-              placeholder="例如：local-filesystem"
+              :placeholder="$t('mcp.namePlaceholder')"
               @input="emitChange"
             />
           </div>
 
           <div class="form-row">
-            <label class="field-label">服务器配置 (JSON)</label>
+            <label class="field-label">{{ $t('mcp.config') }}</label>
             <div class="json-editor-wrapper">
               <div :ref="(el) => setLineNumberRef(index, el)" class="json-line-numbers">
                 <span v-for="line in getLineCount(server.configSource)" :key="line">{{ line }}</span>
@@ -93,7 +93,7 @@
                 class="json-editor"
                 rows="10"
                 spellcheck="false"
-                placeholder="请输入 MCP 服务器 JSON 配置"
+                :placeholder="$t('mcp.configPlaceholder')"
                 @scroll="syncLineNumberScroll(index)"
                 @input="onConfigChange(server, index)"
                 @blur="onConfigBlur(server)"
@@ -110,7 +110,7 @@
               :disabled="server.testing"
               @click="testConnection(index)"
             >
-              {{ server.testing ? '测试中...' : '测试连接' }}
+              {{ server.testing ? $t('common.testing') : $t('mcp.testConnection') }}
             </button>
             <span
               v-if="server.testMessage"
@@ -129,6 +129,7 @@
 import { nextTick, ref, watch } from 'vue';
 import api from '../js/api.js';
 import iconMcp from '../../assets/icons/mcp.svg';
+import { t } from '../../i18n/index.js';
 
 function normalizeServer(server = {}) {
   const name = server.name || '';
@@ -225,7 +226,7 @@ export default {
 
         const parsed = JSON.parse(server.configSource || '{}');
         if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-          server.jsonError = '配置必须是 JSON 对象（不能是数组或基础类型）';
+          server.jsonError = t('mcp.objectRequired');
           return false;
         }
 
@@ -233,7 +234,7 @@ export default {
         if (parsed.mcpServers && typeof parsed.mcpServers === 'object' && !Array.isArray(parsed.mcpServers)) {
           const entries = Object.entries(parsed.mcpServers);
           if (!entries.length) {
-            server.jsonError = 'mcpServers 不能为空对象';
+            server.jsonError = t('mcp.serversEmpty');
             return false;
           }
 
@@ -243,7 +244,7 @@ export default {
           const targetConfig = parsed.mcpServers[targetName];
 
           if (!targetConfig || typeof targetConfig !== 'object' || Array.isArray(targetConfig)) {
-            server.jsonError = 'mcpServers 中的服务器配置必须是对象';
+            server.jsonError = t('mcp.serverObjectRequired');
             return false;
           }
 
@@ -257,7 +258,7 @@ export default {
         server.jsonError = '';
         return true;
       } catch (error) {
-        server.jsonError = `JSON 格式错误: ${error.message}`;
+        server.jsonError = t('mcp.jsonError', { error: error.message });
         return false;
       }
     };
@@ -305,19 +306,19 @@ export default {
       const server = localServers.value[index];
       if (!server.name.trim()) {
         server.testSuccess = false;
-        server.testMessage = '请先填写服务器名称';
+        server.testMessage = t('mcp.nameRequired');
         return;
       }
 
       if (!(server.configSource || '').trim()) {
         server.testSuccess = false;
-        server.testMessage = '请先填写服务器配置';
+        server.testMessage = t('mcp.configRequired');
         return;
       }
 
       if (!parseConfig(server)) {
         server.testSuccess = false;
-        server.testMessage = '请先修复 JSON 配置';
+        server.testMessage = t('mcp.fixJson');
         return;
       }
 
@@ -330,10 +331,10 @@ export default {
           config: server.config
         });
         server.testSuccess = !!result.success;
-        server.testMessage = result.message || (result.success ? '连接成功' : '连接失败');
+        server.testMessage = result.success ? t('mcp.success') : (result.message || t('mcp.failed'));
       } catch (error) {
         server.testSuccess = false;
-        server.testMessage = error.message || '连接失败';
+        server.testMessage = error.message || t('mcp.failed');
       } finally {
         server.testing = false;
       }

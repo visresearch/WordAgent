@@ -1,6 +1,6 @@
 # Midnight Galaxy
 
-A dramatic and cosmic theme with deep purples and mystical tones for impactful presentations.
+A dramatic and cosmic theme with deep purples and mystical tones for impactful Word documents.
 
 ## Color Palette
 
@@ -16,4 +16,4 @@ A dramatic and cosmic theme with deep purples and mystical tones for impactful p
 
 ## Best Used For
 
-Entertainment industry, gaming presentations, nightlife venues, luxury brands, creative agencies.
+Entertainment, gaming, nightlife, luxury brand, and creative agency documents.

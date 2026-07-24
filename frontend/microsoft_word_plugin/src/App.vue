@@ -5,7 +5,7 @@
         href="#"
         class="nav-btn"
         :class="{ active: $route.path === '/aichat' }"
-        title="AI对话"
+        :title="$t('nav.chat')"
         @click.prevent="onNavAichat"
       >
         <img :src="robotIcon" width="18" height="18" alt="" />
@@ -15,7 +15,7 @@
         class="nav-btn"
         :class="{ active: sessionState.visible, 'nav-btn-disabled': chatState.aiBusy }"
         :aria-disabled="chatState.aiBusy ? 'true' : 'false'"
-        title="历史会话"
+        :title="$t('nav.history')"
         @click="toggleSession"
       >
         <img :src="sessionIcon" width="16" height="16" alt="" />
@@ -25,7 +25,7 @@
         class="nav-btn"
         :class="{ active: $route.path === '/setting', 'nav-btn-disabled': chatState.aiBusy }"
         :aria-disabled="chatState.aiBusy ? 'true' : 'false'"
-        title="设置"
+        :title="$t('nav.settings')"
         @click.prevent="go('/setting')"
       >
         <img :src="settingIcon" width="16" height="16" alt="" />
@@ -35,7 +35,7 @@
         class="nav-btn"
         :class="{ active: $route.path === '/about', 'nav-btn-disabled': chatState.aiBusy }"
         :aria-disabled="chatState.aiBusy ? 'true' : 'false'"
-        title="关于"
+        :title="$t('nav.about')"
         @click.prevent="go('/about')"
       >
         <img :src="aboutIcon" width="16" height="16" alt="" />
@@ -45,7 +45,7 @@
         class="nav-btn"
         :class="{ active: $route.path === '/debug', 'nav-btn-disabled': chatState.aiBusy }"
         :aria-disabled="chatState.aiBusy ? 'true' : 'false'"
-        title="调试"
+        :title="$t('nav.debug')"
         @click.prevent="go('/debug')"
       >
         <img :src="debugIcon" width="16" height="16" alt="" />

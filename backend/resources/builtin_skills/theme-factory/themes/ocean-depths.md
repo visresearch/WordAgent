@@ -16,4 +16,4 @@ A professional and calming maritime theme that evokes the serenity of deep ocean
 
 ## Best Used For
 
-Corporate presentations, financial reports, professional consulting decks, trust-building content.
+Corporate and financial reports, consulting proposals, executive briefs, and other trust-focused Word documents.

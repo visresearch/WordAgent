@@ -11,5 +11,5 @@ Delete a paragraph range from the Word document.
 ## Critical notes
 - Non-blocking: frontend marks/highlights the range; do not wait for confirmation.
 - Continue the planned workflow after calling this tool, including `generate_document` when needed.
-- Use paraIDs returned by `search_documnet`/`read_document`. Avoid relying on stale paragraph indices.
+- Use paraIDs returned by `search_document`/`read_document`. Avoid relying on stale paragraph indices.
 - Deletion is pending until user confirms in Word UI. If content still appears immediately after tool call, do NOT retry the same delete again.

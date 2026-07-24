@@ -6,6 +6,10 @@
 - 已安装 WPS Office 桌面版（Windows 或 Linux）
 - WPS版本要求：12.1.25225 及以上（建议使用最新版本以获得最佳兼容性）
 
+::: info macOS 用户
+当前 WPS 加载项自动安装流程面向 Windows 和 Linux。macOS 用户请使用 [Microsoft Word 加载项](/guide/msword-plugin)。
+:::
+
 ## 安装步骤
 
 ### 1. 启动后端服务
@@ -31,4 +35,4 @@
 
 ## 下一步
 
-请参考 [配置 API Key](/guide/api-config) 完成模型配置后即可开始使用。
+请参考 [配置大模型服务](/guide/api-config)，添加并启用 DeepSeek V4 Pro 后开始使用。

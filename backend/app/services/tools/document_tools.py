@@ -484,7 +484,7 @@ def _generate_document_impl(document: DocumentOutput, docId: DocIdInput, insertP
     normalized_insert_para_id = _normalize_para_id(insertParaID)
     if normalized_insert_para_id is None:
         raise ValueError(
-            "generate_document requires insertParaID. Use 0 only for the first write into an empty document, otherwise use a real paraID from read_document/search_documnet."
+            "generate_document requires insertParaID. Use 0 only for the first write into an empty document, otherwise use a real paraID from read_document/search_document."
         )
 
     doc_dict = document.model_dump()
@@ -520,7 +520,7 @@ def _generate_document_impl(document: DocumentOutput, docId: DocIdInput, insertP
 
 
 def _search_document_impl(query: DocumentQuery, docId: DocIdInput) -> str:
-    """search_documnet 的核心逻辑。"""
+    """search_document 的核心逻辑。"""
     resolved_doc_id = _normalize_doc_id(docId)
 
     query_dict = query.model_dump(exclude_none=True)
@@ -537,17 +537,17 @@ def _search_document_impl(query: DocumentQuery, docId: DocIdInput) -> str:
                 "docId": resolved_doc_id,
             }
         )
-    logger.info(f"[search_documnet] 请求前端搜索文档 (type={query_type}, filters={filters}, docId={resolved_doc_id})")
+    logger.info(f"[search_document] 请求前端搜索文档 (type={query_type}, filters={filters}, docId={resolved_doc_id})")
 
     chat_id = _current_chat_id.get(None)
     if is_stop_requested(chat_id):
-        logger.info("[search_documnet] ⛔ 检测到停止请求，终止搜索")
+        logger.info("[search_document] ⛔ 检测到停止请求，终止搜索")
         return '{"matches": [], "matchCount": 0, "error": "stopped_by_user"}'
 
     if chat_id:
         q = _pending_tool_requests.get(chat_id)
         if q:
-            logger.debug(f"[search_documnet] WebSocket 模式，等待前端回传查询结果 (session={chat_id})")
+            logger.debug(f"[search_document] WebSocket 模式，等待前端回传查询结果 (session={chat_id})")
             loop = _pending_loops.get(chat_id)
             if loop:
                 future = asyncio.run_coroutine_threadsafe(
@@ -557,7 +557,7 @@ def _search_document_impl(query: DocumentQuery, docId: DocIdInput) -> str:
                 try:
                     result = future.result(timeout=35)
                     if result.get("type") == "stop" or result.get("error") == "stopped_by_user":
-                        logger.info("[search_documnet] ⛔ 用户已停止，终止搜索")
+                        logger.info("[search_document] ⛔ 用户已停止，终止搜索")
                         return '{"matches": [], "matchCount": 0, "error": "stopped_by_user"}'
                     matches = result.get("matches", [])
                     match_count = result.get("matchCount", 0)
@@ -600,7 +600,7 @@ def _search_document_impl(query: DocumentQuery, docId: DocIdInput) -> str:
 
                     if match_count > 0:
                         logger.info(
-                            f"[search_documnet] ✅ 查询完成，匹配 {match_count} 项，"
+                            f"[search_document] ✅ 查询完成，匹配 {match_count} 项，"
                             f"涉及段落索引 {matched_para_indices}，段落ID {matched_para_ids}"
                         )
                         if writer:
@@ -623,7 +623,7 @@ def _search_document_impl(query: DocumentQuery, docId: DocIdInput) -> str:
                             ensure_ascii=False,
                         )
 
-                    logger.warning("[search_documnet] ⚠️ 未找到匹配项")
+                    logger.warning("[search_document] ⚠️ 未找到匹配项")
                     if writer:
                         writer(
                             {
@@ -645,15 +645,15 @@ def _search_document_impl(query: DocumentQuery, docId: DocIdInput) -> str:
                         ensure_ascii=False,
                     )
                 except (TimeoutError, concurrent.futures.TimeoutError):
-                    logger.warning("[search_documnet] ⏰ 等待查询结果超时")
+                    logger.warning("[search_document] ⏰ 等待查询结果超时")
                     if writer:
                         writer({"type": "status", "content": "⏰ 搜索超时", "docId": resolved_doc_id})
                     return '{"matches": [], "matchCount": 0, "error": "timeout"}'
                 except Exception as e:
-                    logger.error(f"[search_documnet] ❌ 等待查询结果出错: {e}")
+                    logger.error(f"[search_document] ❌ 等待查询结果出错: {e}")
                     return '{"matches": [], "matchCount": 0, "error": "' + str(e) + '"}'
 
-    logger.warning("[search_documnet] ⚠️ 非 WebSocket 模式，无法执行查询")
+    logger.warning("[search_document] ⚠️ 非 WebSocket 模式，无法执行查询")
     return '{"matches": [], "matchCount": 0, "error": "non-websocket"}'
 
 
@@ -736,13 +736,13 @@ def build_generate_document(description: str):
 
 
 def build_search_document(description: str):
-    """根据传入的 description 构造 search_documnet 工具实例。
+    """根据传入的 description 构造 search_document 工具实例。
 
-    注意：工具名拼写为 search_documnet（历史遗留，与 LLM 提示一致，不修正）。
+    注意：工具名拼写为 search_document（历史遗留，与 LLM 提示一致，不修正）。
     """
 
     @tool(description=description)
-    def search_documnet(query: DocumentQuery, docId: DocIdInput = 0) -> str:
+    def search_document(query: DocumentQuery, docId: DocIdInput = 0) -> str:
         """Search document content. Requests the frontend to search for matching content by text or style criteria.
 
         Args:
@@ -751,7 +751,7 @@ def build_search_document(description: str):
         """
         return _search_document_impl(query, docId)
 
-    return search_documnet
+    return search_document
 
 
 def build_delete_document(description: str):

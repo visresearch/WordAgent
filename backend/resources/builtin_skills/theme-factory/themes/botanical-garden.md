@@ -1,6 +1,6 @@
 # Botanical Garden
 
-A fresh and organic theme featuring vibrant garden-inspired colors for lively presentations.
+A fresh and organic theme featuring vibrant garden-inspired colors for lively Word documents.
 
 ## Color Palette
 
@@ -16,4 +16,4 @@ A fresh and organic theme featuring vibrant garden-inspired colors for lively pr
 
 ## Best Used For
 
-Garden centers, food presentations, farm-to-table content, botanical brands, natural products.
+Garden, food, farm-to-table, botanical brand, and natural-product documents.

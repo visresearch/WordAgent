@@ -35,10 +35,10 @@ SUB_AGENT_PROMPT_FILES: dict[str, list[str]] = {
 
 # 子智能体类型到工具的映射
 SUB_AGENT_TOOLS: dict[str, list[str]] = {
-    "reviewer": ["read_document", "search_documnet"],
-    "explore": ["read_document", "search_documnet"],
-    "plan": ["read_document", "search_documnet"],
-    "general-purpose": ["read_document", "search_documnet", "generate_document", "delete_document"],
+    "reviewer": ["read_document", "search_document"],
+    "explore": ["read_document", "search_document"],
+    "plan": ["read_document", "search_document"],
+    "general-purpose": ["read_document", "search_document", "generate_document", "delete_document"],
 }
 
 
@@ -53,12 +53,12 @@ def _get_all_tools() -> dict[str, Any]:
         delete_document,
         generate_document,
         read_document,
-        search_documnet,
+        search_document,
     )
 
     return {
         "read_document": read_document,
-        "search_documnet": search_documnet,
+        "search_document": search_document,
         "generate_document": generate_document,
         "delete_document": delete_document,
     }

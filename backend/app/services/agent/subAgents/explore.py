@@ -22,7 +22,7 @@ class ExploreSubAgent:
 
     ALLOWED_TOOLS: list[str] = [
         "read_document",
-        "search_documnet",
+        "search_document",
     ]
 
     def get_system_prompt(self, context: dict[str, Any] | None = None) -> str:
@@ -30,7 +30,7 @@ class ExploreSubAgent:
         prompt_file = Path(__file__).parent.parent / "prompts" / "agent-prompt-explore.md"
         if prompt_file.exists():
             return prompt_file.read_text(encoding="utf-8").strip()
-        return "You are a document search specialist. Use search_documnet and read_document to explore content."
+        return "You are a document search specialist. Use search_document and read_document to explore content."
 
     def get_allowed_tools(self) -> list[str]:
         return self.ALLOWED_TOOLS

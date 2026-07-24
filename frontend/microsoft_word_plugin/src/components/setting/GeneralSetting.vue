@@ -14,17 +14,60 @@
       </svg>
       <div class="section-title-group">
         <h2 class="section-title">
-          基础设置
+          {{ $t('general.title') }}
         </h2>
         <p class="section-subtitle">
-          配置应用的启动行为和显示模式
+          {{ $t('general.subtitle') }}
         </p>
+      </div>
+    </div>
+
+    <div class="setting-row">
+      <span class="setting-label">{{ $t('general.language') }}</span>
+      <div
+        ref="languagePicker"
+        class="language-picker"
+        @keydown.esc="closeLanguageMenu"
+      >
+        <button
+          type="button"
+          class="language-trigger"
+          :class="{ open: languageMenuOpen }"
+          aria-haspopup="listbox"
+          :aria-expanded="languageMenuOpen"
+          @click="toggleLanguageMenu"
+        >
+          <span>{{ selectedLanguageLabel }}</span>
+          <span class="language-chevron" aria-hidden="true"></span>
+        </button>
+        <div v-if="languageMenuOpen" class="language-menu" role="listbox">
+          <button
+            type="button"
+            class="language-option"
+            :class="{ selected: localSettings.language === 'zh-CN' }"
+            role="option"
+            :aria-selected="localSettings.language === 'zh-CN'"
+            @click="selectLanguage('zh-CN')"
+          >
+            {{ $t('general.simplifiedChinese') }}
+          </button>
+          <button
+            type="button"
+            class="language-option"
+            :class="{ selected: localSettings.language === 'en-US' }"
+            role="option"
+            :aria-selected="localSettings.language === 'en-US'"
+            @click="selectLanguage('en-US')"
+          >
+            {{ $t('general.english') }}
+          </button>
+        </div>
       </div>
     </div>
 
     <!-- 启动时显示AI面板 -->
     <div class="setting-row">
-      <span class="setting-label">启动时显示AI面板</span>
+      <span class="setting-label">{{ $t('general.showPanel') }}</span>
       <label class="switch">
         <input v-model="localSettings.showPanelOnStart" type="checkbox" @change="emitChange" />
         <span class="slider"></span>
@@ -34,33 +77,33 @@
     <!-- 校对显示模式 -->
     <div class="setting-group">
       <div class="group-title">
-        校对显示模式
+        {{ $t('general.proofreadMode') }}
       </div>
       <div class="radio-group">
         <label class="radio-item" :class="{ active: localSettings.proofreadMode === 'redblue' }">
-          <input 
-            v-model="localSettings.proofreadMode" 
-            type="radio" 
+          <input
+            v-model="localSettings.proofreadMode"
+            type="radio"
             value="redblue"
             @change="emitChange"
           />
           <span class="radio-circle"></span>
           <div class="radio-content">
-            <span class="radio-title">红蓝模式</span>
-            <span class="radio-desc">使用浅蓝色标记删除内容，浅红色标记新增内容</span>
+            <span class="radio-title">{{ $t('general.redblue') }}</span>
+            <span class="radio-desc">{{ $t('general.redblueDesc') }}</span>
           </div>
         </label>
         <label class="radio-item" :class="{ active: localSettings.proofreadMode === 'revision' }">
-          <input 
-            v-model="localSettings.proofreadMode" 
-            type="radio" 
+          <input
+            v-model="localSettings.proofreadMode"
+            type="radio"
             value="revision"
             @change="emitChange"
           />
           <span class="radio-circle"></span>
           <div class="radio-content">
-            <span class="radio-title">修订模式</span>
-            <span class="radio-desc">使用Word修订功能标记修改内容</span>
+            <span class="radio-title">{{ $t('general.revision') }}</span>
+            <span class="radio-desc">{{ $t('general.revisionDesc') }}</span>
           </div>
         </label>
       </div>
@@ -83,17 +126,17 @@
       </svg>
       <div class="section-title-group">
         <h2 class="section-title">
-          网络代理
+          {{ $t('general.proxyTitle') }}
         </h2>
         <p class="section-subtitle">
-          配置 HTTP/HTTPS 请求的代理服务器
+          {{ $t('general.proxySubtitle') }}
         </p>
       </div>
     </div>
 
     <div class="proxy-section">
       <div class="setting-row" style="border-bottom: none; padding-bottom: 8px;">
-        <span class="setting-label">启用代理</span>
+        <span class="setting-label">{{ $t('general.enableProxy') }}</span>
         <label class="switch">
           <input v-model="localSettings.proxy.enabled" type="checkbox" @change="emitChange" />
           <span class="slider"></span>
@@ -102,7 +145,7 @@
       <div class="proxy-inputs" :class="{ disabled: !localSettings.proxy.enabled }">
         <div class="proxy-row">
           <div class="input-group flex-grow">
-            <label class="input-label">代理地址 (IP)</label>
+            <label class="input-label">{{ $t('general.proxyHost') }}</label>
             <input
               v-model="localSettings.proxy.host"
               type="text"
@@ -113,7 +156,7 @@
             />
           </div>
           <div class="input-group port-input">
-            <label class="input-label">端口</label>
+            <label class="input-label">{{ $t('general.port') }}</label>
             <input
               v-model.number="localSettings.proxy.port"
               type="number"
@@ -127,7 +170,7 @@
           </div>
         </div>
         <p class="proxy-hint">
-          提示：HTTP 和 HTTPS 请求将统一使用此代理。仅支持 HTTP 代理协议，不支持 SOCKS。
+          {{ $t('general.proxyHint') }}
         </p>
       </div>
     </div>
@@ -135,7 +178,8 @@
 </template>
 
 <script>
-import { ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { setLocale, t } from '../../i18n/index.js';
 
 export default {
   name: 'GeneralSetting',
@@ -147,7 +191,10 @@ export default {
   },
   emits: ['update:settings'],
   setup(props, { emit }) {
+    const languagePicker = ref(null);
+    const languageMenuOpen = ref(false);
     const localSettings = ref({
+      language: props.settings.language ?? 'zh-CN',
       showPanelOnStart: props.settings.showPanelOnStart ?? true,
       proofreadMode: props.settings.proofreadMode ?? 'revision',
       proxy: {
@@ -158,6 +205,7 @@ export default {
     });
 
     watch(() => props.settings, (newVal) => {
+      localSettings.value.language = newVal.language ?? 'zh-CN';
       localSettings.value.showPanelOnStart = newVal.showPanelOnStart ?? true;
       localSettings.value.proofreadMode = newVal.proofreadMode ?? 'revision';
       localSettings.value.proxy.enabled = newVal.proxy?.enabled ?? false;
@@ -167,15 +215,52 @@ export default {
 
     const emitChange = () => {
       emit('update:settings', {
+        language: localSettings.value.language,
         showPanelOnStart: localSettings.value.showPanelOnStart,
         proofreadMode: localSettings.value.proofreadMode,
         proxy: { ...localSettings.value.proxy }
       });
     };
 
+    const selectedLanguageLabel = computed(() => (
+      localSettings.value.language === 'en-US'
+        ? t('general.english')
+        : t('general.simplifiedChinese')
+    ));
+
+    const closeLanguageMenu = () => {
+      languageMenuOpen.value = false;
+    };
+
+    const toggleLanguageMenu = () => {
+      languageMenuOpen.value = !languageMenuOpen.value;
+    };
+
+    const selectLanguage = (language) => {
+      localSettings.value.language = language;
+      setLocale(language);
+      emitChange();
+      closeLanguageMenu();
+    };
+
+    const handleOutsideClick = (event) => {
+      if (languagePicker.value && !languagePicker.value.contains(event.target)) {
+        closeLanguageMenu();
+      }
+    };
+
+    onMounted(() => document.addEventListener('mousedown', handleOutsideClick));
+    onBeforeUnmount(() => document.removeEventListener('mousedown', handleOutsideClick));
+
     return {
+      languagePicker,
+      languageMenuOpen,
       localSettings,
-      emitChange
+      selectedLanguageLabel,
+      emitChange,
+      closeLanguageMenu,
+      toggleLanguageMenu,
+      selectLanguage
     };
   }
 };
@@ -232,6 +317,92 @@ export default {
 .setting-label {
   font-size: 14px;
   color: #333;
+}
+
+.language-picker {
+  position: relative;
+  width: 148px;
+  flex-shrink: 0;
+}
+
+.language-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  height: 34px;
+  padding: 0 11px;
+  border: 1px solid #d8dce3;
+  border-radius: 6px;
+  background: #fff;
+  color: #333;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.language-trigger:hover,
+.language-trigger:focus,
+.language-trigger.open {
+  border-color: #667eea;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.12);
+}
+
+.language-chevron {
+  width: 7px;
+  height: 7px;
+  margin: -3px 2px 0 10px;
+  border-right: 1.5px solid #667085;
+  border-bottom: 1.5px solid #667085;
+  transform: rotate(45deg);
+  transition: transform 0.16s ease;
+}
+
+.language-trigger.open .language-chevron {
+  margin-top: 3px;
+  transform: rotate(225deg);
+}
+
+.language-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  width: 100%;
+  padding: 4px;
+  border: 1px solid #d8dce3;
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: 0 8px 20px rgba(31, 41, 55, 0.14);
+  box-sizing: border-box;
+}
+
+.language-option {
+  display: block;
+  width: 100%;
+  min-height: 32px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #333;
+  font-size: 13px;
+  line-height: 18px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.language-option:hover,
+.language-option:focus {
+  background: #f3f5f9;
+  outline: none;
+}
+
+.language-option.selected {
+  background: #eef1ff;
+  color: #4f5fca;
+  font-weight: 500;
 }
 
 /* 开关样式 */

@@ -4,13 +4,20 @@
 
 ### Added
 - 添加CONTRIBUTING.md
+- 前端添加中英文切换
 
 ### Changed
+- 更改temputure默认值和取值范围
 - 更新所有py依赖
 - 更新所有node依赖
-- 更新官网文档
+- 更新官网web文档
 
 ### Fixed
+- 修复上下文溢出重试的bug
+- 修复历史遗留工具名拼错的bug
+- 修复未定义的Microsoft word旧内容控件
+- 优化上下文压缩的系统提示词
+- 取消加载SKILL上下文最大限制截断
 
 ## [v0.5.2]
 

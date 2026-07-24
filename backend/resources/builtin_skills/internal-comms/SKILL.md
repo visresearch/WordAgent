@@ -1,32 +1,37 @@
 ---
 name: internal-comms
-description: A set of resources to help me write all kinds of internal communications, using the formats that my company likes to use. Claude should use this skill whenever asked to write some sort of internal communications (status reports, leadership updates, 3P updates, company newsletters, FAQs, incident reports, project updates, etc.).
-license: Complete terms in LICENSE.txt
+description: Draft and revise internal communications in WordAgent, including 3P updates, company newsletters, FAQs, leadership notes, project updates, incident communications, and general announcements. Use whenever the user asks for employee-facing or leadership-facing communication.
 ---
 
-## When to use this skill
-To write internal communications, use this skill for:
-- 3P updates (Progress, Plans, Problems)
-- Company newsletters
-- FAQ responses
-- Status reports
-- Leadership updates
-- Project updates
-- Incident reports
+# Internal Communications
 
-## How to use this skill
+Produce concise, factual communication for the intended internal audience. Use the active Word document as the primary deliverable.
 
-To write any internal communication:
+## Select the format
 
-1. **Identify the communication type** from the request
-2. **Load the appropriate guideline file** from the `examples/` directory:
-    - `examples/3p-updates.md` - For Progress/Plans/Problems team updates
-    - `examples/company-newsletter.md` - For company-wide newsletters
-    - `examples/faq-answers.md` - For answering frequently asked questions
-    - `examples/general-comms.md` - For anything else that doesn't explicitly match one of the above
-3. **Follow the specific instructions** in that file for formatting, tone, and content gathering
+Follow the matching guide included with this skill:
 
-If the communication type doesn't match any existing guideline, ask for clarification or more context about the desired format.
+- `examples/3p-updates.md` for Progress, Plans, and Problems updates
+- `examples/company-newsletter.md` for company-wide digests
+- `examples/faq-answers.md` for employee FAQs
+- `examples/general-comms.md` for leadership notes, project updates, incidents, policy notices, and other announcements
 
-## Keywords
-3P updates, company newsletter, company comms, weekly update, faqs, common questions, updates, internal comms
+## Gather facts
+
+Use information already supplied in the conversation first. For an existing draft or source material in Word, call `read_document`; use `search_document` for targeted retrieval. Read uploaded files with `read_file`.
+
+External systems such as email, chat, calendars, drives, or knowledge bases may be used only when a corresponding MCP tool is available. Do not claim access to a source that is unavailable. Do not fabricate metrics, dates, owners, links, decisions, or quotes. Mark genuinely uncertain information clearly or ask a focused question when it blocks an accurate draft.
+
+Confirm only material gaps such as audience, purpose, time period, desired action, owner, deadline, or approval status. For incident communication, distinguish confirmed facts from investigation status and avoid assigning blame.
+
+## Write in Word
+
+Match the user's language and established company voice. Put the key message and required action first, then supporting context. Use scannable headings and short paragraphs or bullets.
+
+- Empty document: first write with `generate_document(..., insertParaID=0)`.
+- Existing document: read it and use real paragraph IDs.
+- Replacement: call `delete_document` once for the old paragraph IDs, then `generate_document` for the replacement. Do not repeat a pending deletion.
+- Preserve existing formatting unless restyling is requested.
+- Change only the requested content.
+
+Before finishing, verify names, dates, figures, links, audience, action, owner, and deadline. Remove repetition and unsupported claims.

@@ -16,7 +16,7 @@ Guidelines:
    - How should I structure my response?
 
 3. **Use tools effectively**:
-   - Use search_documnet to find relevant content
+   - Use search_document to find relevant content
    - Use read_document to get detailed information
    - Use generate_document to create new content
    - Use delete_document when content needs to be removed

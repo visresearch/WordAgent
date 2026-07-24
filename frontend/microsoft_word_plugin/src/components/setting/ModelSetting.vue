@@ -20,10 +20,10 @@
       </svg>
       <div class="section-title-group">
         <h2 class="section-title">
-          大模型服务商配置
+          {{ $t('model.title') }}
         </h2>
         <p class="section-subtitle">
-          管理AI服务提供商和模型设置
+          {{ $t('model.subtitle') }}
         </p>
       </div>
     </div>
@@ -31,8 +31,8 @@
     <!-- 工具栏 -->
     <div class="models-toolbar">
       <div class="toolbar-left">
-        <span class="toolbar-title">已配置的提供商</span>
-        <span v-if="enabledModelsCount > 0" class="models-count">{{ enabledModelsCount }} 个可用模型</span>
+        <span class="toolbar-title">{{ $t('model.configured') }}</span>
+        <span v-if="enabledModelsCount > 0" class="models-count">{{ $t('model.availableCount', { count: enabledModelsCount }) }}</span>
       </div>
       <div class="toolbar-right">
         <button class="btn-add-provider" @click="addNewProvider">
@@ -44,7 +44,7 @@
           >
             <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4z" />
           </svg>
-          添加提供商
+          {{ $t('model.addProvider') }}
         </button>
       </div>
     </div>
@@ -52,16 +52,16 @@
     <!-- 提供商列表 -->
     <div class="providers-list">
       <!-- 提供商卡片 -->
-      <div 
-        v-for="(provider, pIndex) in localProviders" 
-        :key="pIndex" 
+      <div
+        v-for="(provider, pIndex) in localProviders"
+        :key="pIndex"
         class="provider-card"
       >
         <!-- 提供商头部 -->
         <div class="provider-header">
           <div class="provider-info" @click="toggleProviderExpand(pIndex)">
-            <svg 
-              class="expand-icon" 
+            <svg
+              class="expand-icon"
               :class="{ expanded: provider.expanded }"
               width="12"
               height="12"
@@ -70,13 +70,13 @@
             >
               <path fill-rule="evenodd" d="M4.646 1.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1 0 .708l-6 6a.5.5 0 0 1-.708-.708L10.293 8 4.646 2.354a.5.5 0 0 1 0-.708z" />
             </svg>
-            <span class="provider-name">{{ provider.name || '新提供商' }}</span>
+            <span class="provider-name">{{ provider.name || $t('model.newProvider') }}</span>
             <span v-if="provider.models && provider.models.length" class="provider-meta">
-              {{ provider.models.length }} 个模型
+              {{ $t('model.modelCount', { count: provider.models.length }) }}
             </span>
           </div>
           <div class="provider-actions">
-            <button class="action-btn delete" title="删除" @click.stop="removeProvider(pIndex)">
+            <button class="action-btn delete" :title="$t('common.delete')" @click.stop="removeProvider(pIndex)">
               <svg
                 width="14"
                 height="14"
@@ -95,20 +95,20 @@
           <!-- 配置字段 -->
           <div class="provider-form">
             <div class="form-row">
-              <label class="field-label">名称</label>
+              <label class="field-label">{{ $t('model.name') }}</label>
               <input
                 v-model="provider.name"
                 type="text"
                 class="field-input"
-                placeholder="例如: openai"
+                :placeholder="$t('model.namePlaceholder')"
                 @input="emitChange"
               />
             </div>
             <div class="form-row">
               <label class="field-label">API Key</label>
               <div class="api-key-wrapper">
-                <input 
-                  v-model="provider.apiKey" 
+                <input
+                  v-model="provider.apiKey"
                   :type="provider.showKey ? 'text' : 'password'"
                   class="field-input"
                   placeholder="sk-..."
@@ -150,7 +150,7 @@
               />
             </div>
             <div class="form-row">
-              <label class="field-label">API 类型</label>
+              <label class="field-label">{{ $t('model.apiType') }}</label>
               <div class="api-type-segment">
                 <button
                   type="button"
@@ -158,7 +158,7 @@
                   :class="{ active: provider.apiType === 'openai' }"
                   @click="setProviderApiType(pIndex, 'openai')"
                 >
-                  OpenAI 兼容
+                  {{ $t('model.openaiCompatible') }}
                 </button>
                 <button
                   type="button"
@@ -184,27 +184,27 @@
                 <path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2v1z" />
                 <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466z" />
               </svg>
-              {{ provider.fetchingModels ? '获取中...' : '获取模型列表' }}
+              {{ provider.fetchingModels ? $t('model.fetching') : $t('model.fetch') }}
             </button>
-            <button 
-              v-if="provider.availableModels && provider.availableModels.length > 0" 
-              class="btn-hide-available" 
+            <button
+              v-if="provider.availableModels && provider.availableModels.length > 0"
+              class="btn-hide-available"
               @click="hideAvailableModels(pIndex)"
             >
-              收起可用列表
+              {{ $t('model.collapse') }}
             </button>
           </div>
 
           <!-- 可用模型列表（从API获取的，临时显示） -->
           <div v-if="provider.availableModels && provider.availableModels.length > 0" class="models-list available-models">
             <div class="models-list-header">
-              <span>可用模型 ({{ provider.availableModels.length }})</span>
-              <span class="header-hint">点击 + 添加模型</span>
+              <span>{{ $t('model.availableModels', { count: provider.availableModels.length }) }}</span>
+              <span class="header-hint">{{ $t('model.addHint') }}</span>
             </div>
             <div class="models-list-body">
-              <div 
-                v-for="model in provider.availableModels" 
-                :key="model.id" 
+              <div
+                v-for="model in provider.availableModels"
+                :key="model.id"
                 class="model-item"
                 :class="{ 'is-added': isModelAdded(provider, model.id) }"
               >
@@ -212,10 +212,10 @@
                   <span class="model-name">{{ model.name || model.id }}</span>
                   <span class="model-id">{{ model.id }}</span>
                 </div>
-                <button 
+                <button
                   v-if="!isModelAdded(provider, model.id)"
                   class="btn-add-model"
-                  title="添加模型"
+                  :title="$t('model.addModel')"
                   @click="addModelFromAvailable(pIndex, model)"
                 >
                   <svg
@@ -227,7 +227,7 @@
                     <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4z" />
                   </svg>
                 </button>
-                <span v-else class="added-badge">已添加</span>
+                <span v-else class="added-badge">{{ $t('model.added') }}</span>
               </div>
             </div>
           </div>
@@ -235,12 +235,12 @@
           <!-- 已添加的模型列表 -->
           <div v-if="provider.models && provider.models.length > 0" class="models-list added-models">
             <div class="models-list-header">
-              <span>已添加的模型 ({{ provider.models.length }})</span>
+              <span>{{ $t('model.addedModels', { count: provider.models.length }) }}</span>
             </div>
             <div class="models-list-body">
-              <div 
-                v-for="model in provider.models" 
-                :key="model.id" 
+              <div
+                v-for="model in provider.models"
+                :key="model.id"
                 class="model-item"
               >
                 <div class="model-info">
@@ -252,7 +252,7 @@
                     <input v-model="model.enabled" type="checkbox" @change="emitChange" />
                     <span class="slider"></span>
                   </label>
-                  <button class="btn-remove-model" title="移除" @click="removeModelFromProvider(pIndex, model.id)">
+                  <button class="btn-remove-model" :title="$t('common.remove')" @click="removeModelFromProvider(pIndex, model.id)">
                     <svg
                       width="12"
                       height="12"
@@ -278,7 +278,7 @@
             >
               <path d="M7 11H5V9H7M14 7H11.38L13.29 9H14V9.75L15.87 11.71C15.95 11.5 16 11.25 16 11V9C16 7.9 15.11 7 14 7M4.45 2.62L3 4L5.86 7H5C3.9 7 3 7.9 3 9V17H5V13H7V17H9V10.3L10 11.34V17H12V13.45L19.55 21.38L21 20M20.9 17H21V15H20V9H21V7H17V9H18V13.95Z" />
             </svg>
-            <p>暂无模型，请点击"获取模型列表"</p>
+            <p>{{ $t('model.noModels') }}</p>
           </div>
         </div>
       </div>
@@ -295,7 +295,7 @@
           <path d="M7 11H5V9H7M14 7H11.38L13.29 9H14V9.75L15.87 11.71C15.95 11.5 16 11.25 16 11V9C16 7.9 15.11 7 14 7M4.45 2.62L3 4L5.86 7H5C3.9 7 3 7.9 3 9V17H5V13H7V17H9V10.3L10 11.34V17H12V13.45L19.55 21.38L21 20M20.9 17H21V15H20V9H21V7H17V9H18V13.95Z" />
         </svg>
         <p class="empty-text">
-          暂无配置的提供商，点击上方"添加提供商"开始配置
+          {{ $t('model.empty') }}
         </p>
       </div>
     </div>
@@ -305,6 +305,7 @@
 <script>
 import { ref, watch, computed } from 'vue';
 import api from '../js/api.js';
+import { t } from '../../i18n/index.js';
 
 export default {
   name: 'ModelSetting',
@@ -377,7 +378,7 @@ export default {
     };
 
     const removeProvider = (index) => {
-      if (confirm('确定要删除此提供商吗？')) {
+      if (confirm(t('model.deleteConfirm'))) {
         localProviders.value.splice(index, 1);
         emitChange();
       }
@@ -391,7 +392,7 @@ export default {
       const provider = localProviders.value[index];
 
       if (!provider.apiKey || !provider.baseUrl) {
-        alert('请先填写 API Key 和 Base URL');
+        alert(t('model.credentialsRequired'));
         return;
       }
 
@@ -412,7 +413,7 @@ export default {
         provider.availableModels = availableModels;
       } catch (error) {
         console.error('获取模型失败:', error);
-        alert('获取模型失败: ' + (error.message || '请检查配置'));
+        alert(t('model.fetchFailed', { error: error.message || t('model.checkConfig') }));
       } finally {
         provider.fetchingModels = false;
       }
@@ -427,7 +428,7 @@ export default {
       if (!provider.models) {
         provider.models = [];
       }
-      
+
       if (!isModelAdded(provider, model.id)) {
         provider.models.push({
           id: model.id,

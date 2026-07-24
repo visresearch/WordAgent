@@ -17,6 +17,7 @@ from app.api import api_router
 from app.core.config import settings
 from app.core.db import close_db, init_db
 from app.core.logging import get_logger
+from app.services.agent.skills import sync_builtin_skills
 
 logger = get_logger(__name__)
 
@@ -61,11 +62,19 @@ def get_frontend_dist_dir() -> Path:
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     try:
+        builtin_result = sync_builtin_skills()
+        logger.info(
+            "内置 Skill 同步完成: copied=%s skipped=%s invalid=%s",
+            builtin_result["copied"],
+            builtin_result["skipped"],
+            builtin_result["invalid"],
+        )
+
         # 启动时初始化数据库
         await init_db()
         logger.info("数据库初始化完成")
     except Exception as e:
-        logger.exception("数据库初始化失败: %s", e)
+        logger.exception("应用启动初始化失败: %s", e)
         raise
 
     yield

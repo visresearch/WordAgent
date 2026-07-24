@@ -63,6 +63,7 @@ if version_value:
 datas = [
     _data(os.path.join(backend_dir, "README.md"), "."),
     _data(os.path.join(backend_dir, "app"), "app"),
+    _data(os.path.join(backend_dir, "resources", "builtin_skills"), "resources/builtin_skills"),
     _data(os.path.join(frontend_dir, "wps_word_plugin", "dist"), "frontend"),
     _data(os.path.join(frontend_dir, "microsoft_word_plugin", "dist"), "msoffice"),
 ]

@@ -9,6 +9,7 @@ import { createApp } from "vue";
 import App from "../App.vue";
 import router from "../router";
 import api from "../components/js/api.js";
+import { i18n } from "../i18n/index.js";
 
 /**
  * 检查是否需要在启动时自动显示 AI Chat 面板
@@ -29,6 +30,7 @@ async function checkAutoShowPanel() {
 Office.onReady(() => {
   const app = createApp(App);
   app.use(router);
+  app.use(i18n);
   app.mount("#app");
 
   // 检查是否需要自动显示面板

@@ -476,7 +476,7 @@ def build_graph(llm_with_tools, all_tools: list):
                 except Exception as e:
                     # 为不同工具生成友好的错误消息
                     is_mcp_tool = tool_name.startswith("mcp_") or tool_name not in (
-                        "search_documnet",
+                        "search_document",
                         "read_document",
                         "generate_document",
                         "delete_document",
@@ -996,7 +996,6 @@ async def process_writing_request_stream(
 
                         if _is_context_overflow_error(e):
                             logger.error(f"[Agent] ⚠️ 上下文超限错误（{e}），触发被动重量重压缩")
-                            asyncio.run_coroutine_threadsafe(queue.put(("context_overflow", str(e))), loop)
                             raise
                         if attempt < max_attempts and (not has_any_stream_item) and _is_transient_stream_error(e):
                             logger.error(f"[Agent] ⚠️ 流式连接异常（第 {attempt} 次）: {e}，准备重试")
@@ -1004,7 +1003,8 @@ async def process_writing_request_stream(
                             continue
                         raise
             except Exception as e:
-                asyncio.run_coroutine_threadsafe(queue.put(("error", str(e))), loop)
+                event_type = "context_overflow" if _is_context_overflow_error(e) else "error"
+                asyncio.run_coroutine_threadsafe(queue.put((event_type, str(e))), loop)
 
         # 在线程池中启动
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
@@ -1219,6 +1219,8 @@ async def process_writing_request_stream(
         yield f"__memory_conversation__: {json.dumps(conversation_for_memory, ensure_ascii=False)}\n\n"
         yield f"__tool_json__: {json.dumps(build_tool_json(tool_log), ensure_ascii=False)}\n\n"
 
+    except ContextOverflowError:
+        raise
     except Exception as e:
         logger.error(f"[Agent Error] {e}")
         traceback.print_exc()

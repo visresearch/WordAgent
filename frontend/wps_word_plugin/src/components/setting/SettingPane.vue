@@ -20,10 +20,10 @@
       <div v-if="currentTab === 'general'" class="tab-content">
         <div class="tab-header">
           <h2 class="tab-title">
-            通用设置
+            {{ $t('settings.generalTitle') }}
           </h2>
           <p class="tab-desc">
-            配置应用的基础行为
+            {{ $t('settings.generalDesc') }}
           </p>
         </div>
         <div class="setting-section">
@@ -38,10 +38,10 @@
       <div v-if="currentTab === 'model'" class="tab-content">
         <div class="tab-header">
           <h2 class="tab-title">
-            大模型设置
+            {{ $t('settings.modelTitle') }}
           </h2>
           <p class="tab-desc">
-            配置AI模型提供商和模型
+            {{ $t('settings.modelDesc') }}
           </p>
         </div>
         <div class="setting-section">
@@ -56,10 +56,10 @@
       <div v-if="currentTab === 'personalization'" class="tab-content">
         <div class="tab-header">
           <h2 class="tab-title">
-            个性化设置
+            {{ $t('settings.personalizationTitle') }}
           </h2>
           <p class="tab-desc">
-            自定义您的AI助手行为和响应参数
+            {{ $t('settings.personalizationDesc') }}
           </p>
         </div>
         <div class="setting-section">
@@ -74,10 +74,10 @@
       <div v-if="currentTab === 'mcp'" class="tab-content">
         <div class="tab-header">
           <h2 class="tab-title">
-            MCP 服务器管理
+            {{ $t('settings.mcpTitle') }}
           </h2>
           <p class="tab-desc">
-            管理 MCP 服务器名称和 JSON 配置，支持连接测试
+            {{ $t('settings.mcpDesc') }}
           </p>
         </div>
         <div class="setting-section">
@@ -100,10 +100,10 @@
       <div v-if="currentTab === 'skill'" class="tab-content">
         <div class="tab-header">
           <h2 class="tab-title">
-            Skill 管理
+            {{ $t('settings.skillTitle') }}
           </h2>
           <p class="tab-desc">
-            查看和管理本地已下载 Skill，支持上传压缩包、启用开关和删除
+            {{ $t('settings.skillDesc') }}
           </p>
         </div>
         <div class="setting-section">
@@ -120,7 +120,7 @@
           @click="saveSettings"
         >
           <span v-if="saving" class="loading-spinner"></span>
-          {{ saving ? '保存中...' : '保存设置' }}
+          {{ saving ? $t('common.saving') : $t('settings.save') }}
         </button>
         <transition name="fade">
           <span v-if="saveMessage" :class="['save-msg', saveSuccess ? 'success' : 'error']">
@@ -148,6 +148,7 @@ import iconUser from '../../assets/icons/user.svg';
 import iconMcp from '../../assets/icons/mcp.svg';
 import iconData from '../../assets/icons/data.svg';
 import iconSkill from '../../assets/icons/skill.svg';
+import { locale, setLocale, t } from '../../i18n/index.js';
 
 export default {
   name: 'SettingPane',
@@ -165,20 +166,20 @@ export default {
     const saveMessage = ref('');
     const saveSuccess = ref(false);
 
-    const tabs = ref([
+    const tabs = computed(() => [
       {
         id: 'general',
-        name: '通用',
+        name: t('settings.tabs.general'),
         icon: iconSetting
       },
       {
         id: 'model',
-        name: '大模型',
+        name: t('settings.tabs.model'),
         icon: iconModel
       },
       {
         id: 'personalization',
-        name: '个性化',
+        name: t('settings.tabs.personalization'),
         icon: iconUser
       },
       {
@@ -193,12 +194,13 @@ export default {
       },
       {
         id: 'data',
-        name: '数据管理',
+        name: t('settings.tabs.data'),
         icon: iconData
       }
     ]);
 
     const settings = reactive({
+      language: locale.value,
       showPanelOnStart: true,
       proofreadMode: 'revision',
       enableLongTermMemory: false,
@@ -210,7 +212,7 @@ export default {
       providers: [],
       mcpServers: [],
       customPrompt: '',
-      temperature: 0.7
+      temperature: 0.5
     });
 
     // 缓存信息（只加载一次）
@@ -221,6 +223,7 @@ export default {
     });
 
     const generalSettings = computed(() => ({
+      language: settings.language,
       showPanelOnStart: settings.showPanelOnStart,
       proofreadMode: settings.proofreadMode,
       proxy: { ...settings.proxy }
@@ -260,6 +263,8 @@ export default {
       try {
         const data = await api.getSettings();
         if (data) {
+          settings.language = data.language === 'en-US' ? 'en-US' : 'zh-CN';
+          setLocale(settings.language);
           if (data.showPanelOnStart !== undefined) {
             settings.showPanelOnStart = data.showPanelOnStart;
           }
@@ -319,6 +324,7 @@ export default {
 
       try {
         const settingsToSave = {
+          language: settings.language,
           showPanelOnStart: settings.showPanelOnStart,
           proofreadMode: settings.proofreadMode,
           enableLongTermMemory: settings.enableLongTermMemory,
@@ -346,7 +352,7 @@ export default {
 
         await api.saveSettings(settingsToSave);
 
-        saveMessage.value = '设置已保存！';
+        saveMessage.value = t('settings.saved');
         saveSuccess.value = true;
 
         setTimeout(() => {
@@ -354,7 +360,7 @@ export default {
         }, 2000);
       } catch (error) {
         console.error('保存设置失败:', error);
-        saveMessage.value = '保存失败，请重试';
+        saveMessage.value = t('settings.saveFailed');
         saveSuccess.value = false;
       } finally {
         saving.value = false;
@@ -362,6 +368,8 @@ export default {
     };
 
     const onGeneralSettingsChange = (newSettings) => {
+      settings.language = newSettings.language;
+      setLocale(newSettings.language);
       settings.showPanelOnStart = newSettings.showPanelOnStart;
       settings.proofreadMode = newSettings.proofreadMode;
       settingsState.proofreadMode = newSettings.proofreadMode;

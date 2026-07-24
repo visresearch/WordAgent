@@ -12,7 +12,7 @@
 - For ordinary body paragraphs, use `pS_3` with `rS_2` unless the requested format requires another defined style.
 - JSON safety: inside generated document text fields (`run.text`, table `cell.text`, table paragraph text), do not use raw ASCII double quote characters (`"`). Use Chinese quotation marks such as `“...”` or `「...」` for quoted phrases.
 - `insertParaID` is required. Never omit it and never pass `null`/`None`.
-- For non-empty documents, `insertParaID` must come from selected context or a real paragraph ID returned by `read_document`/`search_documnet`; do not invent IDs.
+- For non-empty documents, `insertParaID` must come from selected context or a real paragraph ID returned by `read_document`/`search_document`; do not invent IDs.
 - Use `insertParaID: 0` only for the first write into an empty/new document; it means insert at the document start.
 - Images must be inline runs with a single `url`; keep URLs unchanged and preserve aspect ratio.
 - If paragraph location is uncertain, re-read/search and use paragraph IDs for follow-up delete operations.

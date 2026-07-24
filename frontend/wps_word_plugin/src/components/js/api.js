@@ -380,8 +380,11 @@ const wsManager = {
               clearTimeout(this._requestTimeoutTimer);
               this._requestTimeoutTimer = null;
             }
-            if (this.onError) {
-              this.onError(new Error(data.content || '未知错误'));
+            if (!this._completeCalled) {
+              this._completeCalled = true;
+              if (this.onError) {
+                this.onError(new Error(data.content || '未知错误'));
+              }
             }
             return;
           }
@@ -418,17 +421,25 @@ const wsManager = {
           this._requestTimeoutTimer = null;
         }
 
-        // 后端 watchdog 超时主动断开时，确保前端拿到明确提示
+        const willReconnect =
+          event.code !== 1000 && this._reconnectAttempts < this._maxReconnectAttempts;
+
+        // 断线后的自动重连只恢复连接，不会重放已经中断的请求。
         const isIdleTimeoutClose = event.code === 1011 && event.reason === 'idle-timeout';
-        if (!this._completeCalled && isIdleTimeoutClose) {
+        if (!this._completeCalled) {
           this._completeCalled = true;
           if (this.onError) {
-            this.onError(new Error('⛔ 网络超时连接，自动断开'));
+            const error = new Error(
+              isIdleTimeoutClose
+                ? '⛔ 网络超时连接，自动断开'
+                : 'WebSocket 连接意外中断，本次请求已失败'
+            );
+            error.reconnecting = willReconnect;
+            this.onError(error);
           }
         }
 
-        // 如果不是主动关闭，尝试重连
-        if (event.code !== 1000 && this._reconnectAttempts < this._maxReconnectAttempts) {
+        if (willReconnect) {
           this._scheduleReconnect();
         }
       };
@@ -720,8 +731,14 @@ function chatStream(message, options = {}) {
         clearTimeout(wsManager._requestTimeoutTimer);
         wsManager._requestTimeoutTimer = null;
       }
-      if (onError) {
-        onError(error);
+      if (!wsManager._completeCalled) {
+        wsManager._completeCalled = true;
+        if (onError) {
+          const terminalError = error instanceof Error ? error : new Error(String(error));
+          terminalError.reconnecting =
+            wsManager._reconnectAttempts < wsManager._maxReconnectAttempts;
+          onError(terminalError);
+        }
       }
     }
   };
@@ -975,7 +992,7 @@ async function parseDocumentRange(startParaIndex = 0, endParaIndex = -1, docId =
           result = parseDocxToJSON(null, startParaIndex, endParaIndex, doc, startParaID, endParaID);
         }
 
-        // read_document / search_documnet 回包仅返回文档内容，不携带全局 meta。
+        // read_document / search_document 回包仅返回文档内容，不携带全局 meta。
         // 全局 meta 在 chatStream 中通过 documentMeta 单独发送。
 
         resolve(result);

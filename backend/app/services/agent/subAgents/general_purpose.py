@@ -22,7 +22,7 @@ class GeneralPurposeSubAgent:
 
     ALLOWED_TOOLS: list[str] = [
         "read_document",
-        "search_documnet",
+        "search_document",
         "generate_document",
         "delete_document",
     ]

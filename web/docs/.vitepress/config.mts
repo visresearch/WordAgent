@@ -14,7 +14,7 @@ export default defineConfig({
 
     nav: [
       { text: '首页', link: '/' },
-      { text: '快速开始', link: '/guide/introduction' },
+      { text: '快速开始', link: '/guide/quick-start' },
       { text: '下载', link: 'https://github.com/visresearch/WordAgent/releases' }
     ],
 
@@ -27,6 +27,7 @@ export default defineConfig({
         {
           text: '快速开始',
           items: [
+            { text: '快速开始', link: '/guide/quick-start' },
             { text: '项目简介', link: '/guide/introduction' },
             { text: '项目架构', link: '/guide/architecture' },
             { text: '安装方式', link: '/guide/installation' },
@@ -38,6 +39,7 @@ export default defineConfig({
             { text: '安装 WPS Word 加载项', link: '/guide/wps-plugin' },
             { text: '启动 Microsoft Word 加载项', link: '/guide/msword-plugin' },
             { text: '配置 API Key', link: '/guide/api-config' },
+            { text: '使用说明', link: '/guide/usage' },
             { text: '个性化配置', link: '/guide/personalization' },
             { text: 'MCP 服务器配置', link: '/guide/mcp' },
             { text: 'Skill 配置', link: '/guide/skills' },

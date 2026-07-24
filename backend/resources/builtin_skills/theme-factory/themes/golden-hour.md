@@ -16,4 +16,4 @@ A rich and warm autumnal palette that creates an inviting and sophisticated atmo
 
 ## Best Used For
 
-Restaurant presentations, hospitality brands, fall campaigns, cozy lifestyle content, artisan products.
+Restaurant and hospitality briefs, seasonal campaigns, lifestyle content, and artisan product documents.

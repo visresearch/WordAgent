@@ -23,7 +23,7 @@ hero:
 features:
   - icon: 🖥️
     title: 跨平台适配
-    details: 以国民级办公软件为载体，同时支持 WPS 和 Microsoft Word，覆盖 Windows 和 Linux 系统，让普通用户无门槛获得优质的AI写作辅助体验。
+    details: 同时支持 WPS 和 Microsoft Word，后端应用覆盖 Windows、Linux 和 macOS，让用户在熟悉的办公软件中直接使用 AI 写作能力。
   - icon: 📝
     title: 原生富文本生成
     details: 智能体能够理解 Word 文章结构，生成符合 Word 文档结构的内容，支持文档样式、段落编辑，包括标题、正文、加粗、字体、缩进、行距等。
@@ -34,4 +34,3 @@ features:
     title: 自由开放
     details: 支持自定义 API 或本地服务，兼容世界上大多数主流 LLM 服务商，用户可以根据需求选择不同的模型。
 ---
-

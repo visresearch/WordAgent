@@ -65,6 +65,7 @@ import ChatInput from './ChatInput.vue';
 import SessionPane from './SessionPane.vue';
 import { sessionState } from '../../sessionState.js';
 import { settingsState } from '../../settingsState.js';
+import { t } from '../../i18n/index.js';
 
 export default {
   name: 'AIChatPane',
@@ -275,9 +276,9 @@ export default {
       msg.contentParts.push({
         type: 'mcp',
         toolName: safeToolName,
-        preview: `🔧 调用 MCP 工具: ${safeToolName}`,
-        argsText: argsText || '无参数',
-        outputText: '等待工具输出...',
+        preview: t('chat.callMcp', { name: safeToolName }),
+        argsText: argsText || t('chat.noArguments'),
+        outputText: t('chat.mcpWaiting'),
         completed: false,
         isError: false
       });
@@ -294,7 +295,7 @@ export default {
       for (let i = msg.contentParts.length - 1; i >= 0; i--) {
         const part = msg.contentParts[i];
         if (part.type === 'mcp' && part.toolName === safeToolName && !part.completed) {
-          part.outputText = outputText || '（无输出）';
+          part.outputText = outputText || t('chat.noOutput');
           part.completed = true;
           part.isError = !!isError;
           return;
@@ -304,9 +305,9 @@ export default {
       msg.contentParts.push({
         type: 'mcp',
         toolName: safeToolName,
-        preview: `🔧 调用 MCP 工具: ${safeToolName}`,
-        argsText: '参数未知',
-        outputText: outputText || '（无输出）',
+        preview: t('chat.callMcp', { name: safeToolName }),
+        argsText: t('chat.unknownArguments'),
+        outputText: outputText || t('chat.noOutput'),
         completed: true,
         isError: !!isError
       });
@@ -365,19 +366,19 @@ export default {
 
       try {
         if (!window.Application) {
-          alert('WPS API 不可用');
+          alert(t('chat.wpsUnavailable'));
           return;
         }
 
         const doc = window.Application.ActiveDocument;
         if (!doc) {
-          alert('请先打开一个Word文档');
+          alert(t('chat.openDocumentFirst'));
           return;
         }
 
         const msg = this.messages[messageIndex];
         if (!msg) {
-          alert('消息不存在');
+          alert(t('chat.messageMissing'));
           return;
         }
 
@@ -413,11 +414,11 @@ export default {
           delete msg.commentIndex;
         } catch (e) {
           console.error('删除失败:', e.message);
-          alert('撤销失败: ' + e.message);
+          alert(t('chat.undoFailed', { error: e.message }));
         }
       } catch (error) {
         console.error('撤销失败:', error);
-        alert('撤销失败: ' + error.message);
+        alert(t('chat.undoFailed', { error: error.message }));
       }
     },
 
@@ -698,7 +699,7 @@ export default {
 
       console.log('[自动创建会话] 开始创建');
       try {
-        const result = await api.createSession({ title: '新对话' });
+        const result = await api.createSession({ title: t('session.newConversation') });
 
         if (result.success && result.data?.session) {
           this.currentSessionId = result.data.session.id;
@@ -796,14 +797,14 @@ export default {
         const selection = window.Application?.Selection;
         if (!selection) {
           console.warn('[Selection] 无法获取选区');
-          alert('无法获取选区，请确保在 WPS Word 中选中了文本');
+          alert(t('chat.selectionUnavailable'));
           return;
         }
 
         const range = selection.Range;
         if (!range) {
           console.warn('[Selection] 无法获取范围');
-          alert('无法获取选区范围');
+          alert(t('chat.selectionRangeUnavailable'));
           return;
         }
 
@@ -827,7 +828,7 @@ export default {
 
         if (!cleanedText && !hasNonTextContent) {
           console.warn('[Selection] 没有选中有效内容');
-          alert('请先在文档中选中内容（可为文本、图片或表格）');
+          alert(t('chat.selectContentFirst'));
           return;
         }
 
@@ -845,7 +846,7 @@ export default {
           void e;
           docId = 0;
         }
-        const docName = doc?.BuiltInDocumentProperties?.Item('Title')?.Value || doc?.Name || '未命名文档';
+        const docName = doc?.BuiltInDocumentProperties?.Item('Title')?.Value || doc?.Name || t('chat.unnamedDocument');
         const totalParas = doc.Paragraphs.Count;
         let startParaIndex = 0;
         let endParaIndex = 0;
@@ -865,11 +866,11 @@ export default {
         let displayText = cleanedText;
         if (!displayText) {
           if ((hasInlineImage || hasFloatingImage) && hasTable) {
-            displayText = '[图片+表格选区]';
+            displayText = t('chat.imageTableSelection');
           } else if (hasInlineImage || hasFloatingImage) {
-            displayText = '[图片选区]';
+            displayText = t('chat.imageSelection');
           } else if (hasTable) {
-            displayText = '[表格选区]';
+            displayText = t('chat.tableSelection');
           }
         }
 
@@ -904,7 +905,7 @@ export default {
         this.handleSelectionAdd(selectionInfo);
       } catch (error) {
         console.error('[Selection] 处理选区失败:', error);
-        alert('处理选中内容时出错: ' + error.message);
+        alert(t('chat.selectionFailed', { error: error.message }));
       }
     },
 
@@ -1087,7 +1088,7 @@ export default {
       }
 
       this.messages.push(userMsgObj);
-      if (!this.currentSessionTitle || this.currentSessionTitle === '新对话') {
+      if (!this.currentSessionTitle || ['新对话', 'New conversation'].includes(this.currentSessionTitle)) {
         this.currentSessionTitle = userMessage.length > 30 ? userMessage.substring(0, 30) + '...' : userMessage;
       }
       this.historyLoaded = true;
@@ -1144,10 +1145,20 @@ export default {
           console.error('请求失败:', error);
           const errMsg = String(error?.message || '');
           if (errMsg.includes('⛔ 网络超时连接，自动断开')) {
-            aiMsg.content = '⛔ 网络超时连接，自动断开';
+            aiMsg.content = t('chat.networkTimeout');
+          } else if (error?.reconnecting) {
+            aiMsg.content = t('chat.networkInterruptedReconnecting');
           } else {
-            aiMsg.content = `网络错误：${errMsg}。请确保后端服务运行在 localhost:3880`;
+            aiMsg.content = t('chat.networkError', { error: errMsg });
           }
+          this.isLoading = false;
+          this._streamingSessionId = null;
+          this.currentStreamCtrl = null;
+          if (aiMsg.thinking) {
+            aiMsg.thinkingDone = true;
+          }
+          delete this._streamingCache[streamSessionId];
+          this.scrollToBottom();
         },
 
         onComplete: () => {
@@ -1210,8 +1221,8 @@ export default {
           type: 'status',
           content: data.content || (
             hasParaIDMode
-              ? `📑 正在读取文档(段落ID ${data.startParaID ?? ''} - ${data.endParaID ?? data.startParaID ?? ''})`
-              : `📑 正在读取文档(段落 ${data.startParaIndex} - ${data.endParaIndex})`
+              ? t('chat.readingDocumentById', { start: data.startParaID ?? '', end: data.endParaID ?? data.startParaID ?? '' })
+              : t('chat.readingDocument', { start: data.startParaIndex, end: data.endParaIndex })
           ),
           loading: true
         });
@@ -1232,7 +1243,7 @@ export default {
         console.log('[AIChatPane] 后端请求查询文档, query:', data.query, 'docId:', data.docId);
         msg.contentParts.push({
           type: 'status',
-          content: data.content || '🔍 正在搜索文档...',
+          content: data.content || t('chat.searchingDocument'),
           loading: true
         });
         this.scrollToBottom();
@@ -1249,7 +1260,7 @@ export default {
           if (parts[i].type === 'status' && parts[i].loading) {
             parts.splice(i, 1, {
               type: 'status',
-              content: data.content || '✅ 搜索完成',
+              content: data.content || t('chat.searchComplete'),
               loading: false
             });
             found = true;
@@ -1259,7 +1270,7 @@ export default {
         if (!found) {
           parts.push({
             type: 'status',
-            content: data.content || '✅ 搜索完成',
+            content: data.content || t('chat.searchComplete'),
             loading: false
           });
         }
@@ -1278,7 +1289,7 @@ export default {
             console.log('[AIChatPane] 找到 loading 状态，索引:', i, '内容:', parts[i].content);
             parts.splice(i, 1, {
               type: 'status',
-              content: data.content || '📑 文档读取完成',
+              content: data.content || t('chat.documentReadComplete'),
               loading: false
             });
             found = true;
@@ -1289,7 +1300,7 @@ export default {
           console.warn('[AIChatPane] 未找到 loading 状态的 read_document，直接追加');
           parts.push({
             type: 'status',
-            content: data.content || '📑 文档读取完成',
+            content: data.content || t('chat.documentReadComplete'),
             loading: false
           });
         }
@@ -1305,7 +1316,7 @@ export default {
         console.log('[AIChatPane] 后端请求删除文档段落, paraIDs:', paraIDs, 'docId:', data.docId);
         msg.contentParts.push({
           type: 'status',
-          content: data.content || `🗑️ 准备删除段落ID(${paraIDs.join(', ')})`,
+          content: data.content || t('chat.prepareDelete', { ids: paraIDs.join(', ') }),
           loading: false
         });
         this.scrollToBottom();
@@ -1325,7 +1336,7 @@ export default {
           if (parts[i].type === 'status' && parts[i].loading) {
             parts.splice(i, 1, {
               type: 'status',
-              content: data.content || '✅ 删除完成',
+              content: data.content || t('chat.deleteComplete'),
               loading: false
             });
             found = true;
@@ -1335,7 +1346,7 @@ export default {
         if (!found) {
           parts.push({
             type: 'status',
-            content: data.content || '✅ 删除完成',
+            content: data.content || t('chat.deleteComplete'),
             loading: false
           });
         }
@@ -1347,7 +1358,7 @@ export default {
         console.log('[AIChatPane] 生成文档中...');
         msg.contentParts.push({
           type: 'status',
-          content: data.content || '📝 正在生成文档',
+          content: data.content || t('chat.generatingDocument'),
           loading: true
         });
         this.scrollToBottom();
@@ -1363,7 +1374,7 @@ export default {
             console.log('[AIChatPane] 找到 loading 状态，索引:', i, '内容:', parts[i].content);
             parts.splice(i, 1, {
               type: 'status',
-              content: data.content || '📝 文档已生成',
+              content: data.content || t('chat.documentGenerated'),
               loading: false
             });
             found = true;
@@ -1374,7 +1385,7 @@ export default {
           console.warn('[AIChatPane] 未找到 loading 状态的 generate_document，直接追加');
           parts.push({
             type: 'status',
-            content: data.content || '📝 文档已生成',
+            content: data.content || t('chat.documentGenerated'),
             loading: false
           });
         }
@@ -1485,14 +1496,14 @@ export default {
         if (!inserted) {
           msg.contentParts.push({
             type: 'status',
-            content: '⚠️ 文档插入失败（可能是 insertParaID 无效或目标文档不可写）',
+            content: t('chat.documentInsertFailed'),
             loading: false
           });
         }
 
         this.scrollToBottom();
       } else if (data.error) {
-        msg.content += `\n\n错误: ${data.error}`;
+        msg.content += `\n\n${t('chat.errorLabel', { error: data.error })}`;
       }
     },
 
@@ -1518,7 +1529,7 @@ export default {
       this.pendingDeletes.push({
         paraIDs,
         docId: docId,
-        preview: `AI 准备删除段落（paraID: ${paraIDs.join(', ')}）`,
+        preview: t('chat.deletePreview', { ids: paraIDs.join(', ') }),
         _commentAdded: false,
         _markingMode: null
       });
@@ -1585,11 +1596,11 @@ export default {
           (sum, item) => sum + ((item.documentJson?.tables || []).length),
           0
         );
-        let summary = `${totalParaCount} 个段落`;
+        let summary = t('chat.paragraphCount', { count: totalParaCount });
         if (totalTableCount > 0) {
-          summary += `，${totalTableCount} 个表格`;
+          summary += `, ${t('chat.tableCount', { count: totalTableCount })}`;
         }
-        this.pendingDocument = { preview: `AI 已生成（${summary}，待确认）` };
+        this.pendingDocument = { preview: t('chat.generatedPending', { summary }) };
         // 立即给新增内容标注（红色高亮/添加批注）
         this._addInsertComment(doc, insItem, insItem.docId);
 
@@ -1632,7 +1643,7 @@ export default {
               '文策AI-添加',
               ins.insertStartPos,
               ins.insertEndPos,
-              { fallbackText: '待添加内容' }
+              { fallbackText: t('chat.pendingAddition') }
             );
           }
         } catch (e) {
@@ -1646,7 +1657,7 @@ export default {
         if (!doc) {
           continue;
         }
-        this._removeCommentsByAuthorInRange(doc, '文策AI-添加', null, null, { fallbackText: '待添加内容' });
+        this._removeCommentsByAuthorInRange(doc, '文策AI-添加', null, null, { fallbackText: t('chat.pendingAddition') });
       }
 
       // 2) 确认删除：按 paraID 删除（不依赖索引偏移）
@@ -1827,7 +1838,7 @@ export default {
           console.log('[AIChatPane] 已为插入内容添加浅红色高亮, docId:', docId);
         } else {
           try {
-            const comment = doc.Comments.Add(insertedRange, '待添加内容');
+            const comment = doc.Comments.Add(insertedRange, t('chat.pendingAddition'));
             comment.Author = '文策AI-添加';
             ins._markingMode = 'comment';
             console.log('[AIChatPane] 已为插入内容添加批注, docId:', docId);
@@ -1877,7 +1888,7 @@ export default {
             } else {
               // 修订模式：使用批注
               try {
-                const comment = doc.Comments.Add(insertedRange, '待添加内容');
+                const comment = doc.Comments.Add(insertedRange, t('chat.pendingAddition'));
                 comment.Author = '文策AI-添加';
                 insertMsg._markingMode = 'comment';
                 console.log('[AIChatPane] 已为生成内容添加批注');
@@ -1975,7 +1986,7 @@ export default {
             try {
               for (const para of matchedParas) {
                 const deleteRange = this._rangeForDeleteMarking(para);
-                const comment = pdDoc.Comments.Add(deleteRange, '待删除内容');
+                const comment = pdDoc.Comments.Add(deleteRange, t('chat.pendingDeletion'));
                 comment.Author = '文策AI-删除';
               }
               pd._commentAdded = true;
@@ -2099,7 +2110,7 @@ export default {
 
         const doc = Number.isInteger(docId) ? getDocumentById(docId) : window.Application.ActiveDocument;
         if (!doc) {
-          alert('请先打开一个Word文档');
+          alert(t('chat.openDocumentFirst'));
           return;
         }
 
@@ -2159,7 +2170,7 @@ export default {
         }
       } catch (error) {
         console.error('插入文本失败:', error);
-        alert('插入失败，请确保已打开Word文档');
+        alert(t('chat.insertFailed'));
       }
     },
 

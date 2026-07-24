@@ -9,7 +9,9 @@ import socket
 import platform
 from pathlib import Path
 
-# QtWebEngine (Chromium) 不兼容 QT_OPENGL=software
+# QWidget 的 RHI/OpenGL 上下文在部分 Linux 驱动或远程桌面中无法创建，会导致整个窗口黑屏。
+# 只关闭 QWidget RHI；QtWebEngine (Chromium) 不兼容 QT_OPENGL=software。
+os.environ.setdefault("QT_WIDGETS_RHI", "0")
 os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", "--disable-gpu")
 
 from PySide6.QtGui import QAction, QIcon

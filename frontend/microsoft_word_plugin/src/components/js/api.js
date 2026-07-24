@@ -704,7 +704,7 @@ async function parseDocumentRange(
       resolvedEndIndex = rangeResult.endParaIndex;
     }
 
-    // read_document / search_documnet 回包仅返回文档内容，不携带全局 meta。
+    // read_document / search_document 回包仅返回文档内容，不携带全局 meta。
     // 全局 meta 在 chatStream 中通过 documentMeta 单独发送。
     const result = await parseDocxToJSON("body", resolvedStartIndex, resolvedEndIndex);
     return result;
@@ -1061,6 +1061,19 @@ async function setSkillEnabled(folder, enabled) {
 }
 
 /**
+ * 在系统文件管理器中打开 skill 文件夹
+ */
+async function openSkillFolder(folder) {
+  const response = await request(`/api/skills/${encodeURIComponent(folder)}/open`, {
+    method: "POST",
+  });
+  if (!response.success) {
+    throw new Error(response.data?.detail || response.error || "打开 skill 文件夹失败");
+  }
+  return response.data;
+}
+
+/**
  * 删除 skill
  * @param {string} folder
  * @returns {Promise<Object>}
@@ -1135,6 +1148,7 @@ export default {
   getSkills,
   uploadSkillPackage,
   setSkillEnabled,
+  openSkillFolder,
   deleteSkill,
 
   updateConfig,
@@ -1171,6 +1185,7 @@ export {
   getSkills,
   uploadSkillPackage,
   setSkillEnabled,
+  openSkillFolder,
   deleteSkill,
   updateConfig,
   getConfig,

@@ -104,6 +104,18 @@ def get_skills_dir() -> Path:
     return skills_dir
 
 
+def get_builtin_skills_dir() -> Path:
+    """获取随应用发布的内置 Skill 资源目录。"""
+    override_dir = os.environ.get("WENCE_BUILTIN_SKILLS_DIR")
+    if override_dir:
+        return Path(override_dir)
+
+    if getattr(sys, "frozen", False):
+        return Path(sys._MEIPASS) / "resources" / "builtin_skills"
+
+    return Path(__file__).resolve().parent.parent.parent / "resources" / "builtin_skills"
+
+
 def get_user_settings_file() -> Path:
     """获取用户设置文件路径（固定在 wence_data 目录）"""
     new_dir = get_wence_data_dir()

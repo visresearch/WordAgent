@@ -11,7 +11,7 @@ from typing import Any
 
 import httpx
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.core.config import get_user_settings_file, get_temp_dir, get_upload_dir
 from app.core.logging import get_logger
@@ -22,6 +22,13 @@ router = APIRouter()
 
 # 设置文件路径
 SETTINGS_FILE = get_user_settings_file()
+
+
+def _clamp_temperature(value: Any) -> float:
+    try:
+        return min(1, max(0, float(value)))
+    except (TypeError, ValueError):
+        return 0.5
 
 
 class ProviderConfig(BaseModel):
@@ -50,11 +57,12 @@ class UserSettings(BaseModel):
     # 基础设置
     showPanelOnStart: bool = True
     proofreadMode: str = "revision"
+    language: str = "zh-CN"
     # 代理设置
     proxy: ProxyConfig = ProxyConfig()
     # 个性化设置
     customPrompt: str = ""
-    temperature: float = 0.5
+    temperature: float = Field(default=0.5, ge=0, le=1)
     enableLongTermMemory: bool = False
     # MCP 服务器设置
     mcpServers: list[dict[str, Any]] = []
@@ -74,6 +82,7 @@ async def get_settings():
         if SETTINGS_FILE.exists():
             with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
+                data["temperature"] = _clamp_temperature(data.get("temperature", 0.5))
                 return UserSettings(**data)
         # 返回默认设置
         return UserSettings()
@@ -97,6 +106,7 @@ async def save_settings(settings: UserSettings):
 
         # 合并：只用实际传入的字段覆盖，未传入的保留原值
         merged = {**existing_data, **settings.model_dump(exclude_unset=True)}
+        merged["temperature"] = _clamp_temperature(merged.get("temperature", 0.5))
 
         # 保存设置
         with open(SETTINGS_FILE, "w", encoding="utf-8") as f:

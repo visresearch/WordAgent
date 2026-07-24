@@ -51,7 +51,7 @@ from app.services.tools import (
 
 read_document = build_read_document(get_tool_description("read_document"))
 generate_document = build_generate_document(get_tool_description("generate_document"))
-search_documnet = build_search_document(get_tool_description("search_document"))
+search_document = build_search_document(get_tool_description("search_document"))
 delete_document = build_delete_document(get_tool_description("delete_document"))
 load_skill_context = build_load_skill_context(get_tool_description("load_skill_context"))
 run_sub_agent = build_run_sub_agent(get_tool_description("run_sub_agent"))
@@ -69,7 +69,7 @@ edit_file = build_edit_file(get_tool_description("edit_file"))
 AGENT_BASE_TOOLS = [
     load_skill_context,
     read_document,
-    search_documnet,
+    search_document,
     generate_document,
     delete_document,
     python_repl,
@@ -81,7 +81,7 @@ AGENT_BASE_TOOLS = [
 ASK_BASE_TOOLS = [
     load_skill_context,
     read_document,
-    search_documnet,
+    search_document,
     list_file,
     read_file,
     edit_file,
@@ -115,7 +115,7 @@ __all__ = [
     "read_file",
     "read_document",
     "run_sub_agent",
-    "search_documnet",
+    "search_document",
     # tool sets
     "AGENT_BASE_TOOLS",
     "ASK_BASE_TOOLS",

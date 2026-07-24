@@ -2,10 +2,10 @@
   <div class="data-management-container">
     <div class="page-header">
       <h1 class="page-title">
-        数据管理
+        {{ $t('data.title') }}
       </h1>
       <p class="page-desc">
-        管理应用数据和存储
+        {{ $t('data.subtitle') }}
       </p>
     </div>
 
@@ -36,21 +36,21 @@
           </svg>
           <div class="section-title-group">
             <h2 class="section-title">
-              清除缓存
+              {{ $t('data.clearCache') }}
             </h2>
             <p class="section-subtitle">
-              清除 project/temp 与 project/uploads 下的缓存文件，释放磁盘空间
+              {{ $t('data.clearCacheDesc') }}
             </p>
           </div>
         </div>
 
         <div class="cache-info-box">
           <div class="cache-info-item">
-            <span class="cache-label">缓存位置</span>
+            <span class="cache-label">{{ $t('data.cacheLocation') }}</span>
             <span class="cache-value">{{ cacheDir || 'wence_data/project/temp；wence_data/project/uploads' }}</span>
           </div>
           <div class="cache-info-item">
-            <span class="cache-label">缓存大小</span>
+            <span class="cache-label">{{ $t('data.cacheSize') }}</span>
             <span class="cache-value">{{ cacheSizeText }}</span>
           </div>
         </div>
@@ -77,7 +77,7 @@
                 y2="16.65"
               />
             </svg>
-            {{ scanningCache ? '扫描中...' : '扫描缓存' }}
+            {{ scanningCache ? $t('data.scanning') : $t('data.scan') }}
           </button>
           <button
             class="btn btn-warning"
@@ -95,7 +95,7 @@
               <polyline points="3 6 5 6 21 6" />
               <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
             </svg>
-            {{ clearingCache ? '清除中...' : '清除缓存' }}
+            {{ clearingCache ? $t('data.clearing') : $t('data.clearCache') }}
           </button>
         </div>
       </div>
@@ -115,16 +115,16 @@
           </svg>
           <div class="section-title-group">
             <h2 class="section-title">
-              长期记忆
+              {{ $t('data.memory') }}
             </h2>
             <p class="section-subtitle">
-              管理 AI 的持久化记忆，影响 AI 对您的长期理解（越靠上越旧，越靠下越新）
+              {{ $t('data.memoryDesc') }}
             </p>
           </div>
         </div>
 
         <div class="setting-row">
-          <span class="setting-label">启用长期记忆</span>
+          <span class="setting-label">{{ $t('data.enableMemory') }}</span>
           <label class="switch">
             <input v-model="enableLongTermMemory" type="checkbox" @change="saveMemoryToggle" />
             <span class="slider"></span>
@@ -141,7 +141,7 @@
               v-model="memoryContent"
               class="json-editor memory-json-editor"
               spellcheck="false"
-              placeholder="这里显示 AI 的长期记忆内容，您可以手动编辑后保存..."
+              :placeholder="$t('data.memoryPlaceholder')"
               :disabled="memoryLoading"
               @input="onMemoryInput"
               @scroll="syncMemoryLineNumberScroll"
@@ -151,7 +151,7 @@
 
         <div class="memory-hint">
           <span class="hint-icon">💡</span>
-          <span>提示：记忆按时间顺序排列，最新的记忆在底部。您可以删除不需要的记忆条目。</span>
+          <span>{{ $t('data.memoryHint') }}</span>
         </div>
 
         <div class="action-area">
@@ -160,7 +160,7 @@
             :disabled="memoryLoading"
             @click="loadMemory"
           >
-            {{ memoryLoading ? '加载中...' : '重新加载' }}
+            {{ memoryLoading ? $t('common.loading') : $t('common.refresh') }}
           </button>
           <button
             class="btn btn-primary"
@@ -185,7 +185,7 @@
                 stroke-dashoffset="10"
               />
             </svg>
-            {{ memorySaving ? '保存中...' : '保存记忆' }}
+            {{ memorySaving ? $t('common.saving') : $t('data.saveMemory') }}
           </button>
         </div>
       </div>
@@ -217,10 +217,10 @@
           </svg>
           <div class="section-title-group">
             <h2 class="section-title">
-              删除所有数据
+              {{ $t('data.deleteAll') }}
             </h2>
             <p class="section-subtitle">
-              清除应用中的所有聊天记录和缓存数据
+              {{ $t('data.deleteAllDesc') }}
             </p>
           </div>
         </div>
@@ -249,15 +249,15 @@
           </svg>
           <div class="warning-content">
             <p class="warning-title">
-              警告：此操作不可撤销
+              {{ $t('data.warning') }}
             </p>
             <p class="warning-text">
-              删除所有数据将会清除：
+              {{ $t('data.deleteIncludes') }}
             </p>
             <ul class="warning-list">
-              <li>所有聊天历史记录</li>
-              <li>缓存的文档数据</li>
-              <li>会话状态信息</li>
+              <li>{{ $t('data.chats') }}</li>
+              <li>{{ $t('data.cachedDocs') }}</li>
+              <li>{{ $t('data.sessionState') }}</li>
             </ul>
           </div>
         </div>
@@ -277,7 +277,7 @@
               <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z" />
               <path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z" />
             </svg>
-            删除所有数据
+            {{ $t('data.deleteAll') }}
           </button>
         </div>
 
@@ -307,19 +307,19 @@
                 />
               </svg>
               <h3 class="modal-title">
-                确认删除所有数据？
+                {{ $t('data.confirmTitle') }}
               </h3>
             </div>
             
             <div class="modal-body">
-              <p>此操作将永久删除所有数据，包括聊天记录、缓存和设置。此操作无法撤销。</p>
+              <p>{{ $t('data.confirmBody') }}</p>
               <div class="confirm-input-group">
-                <label>请输入 <strong>DELETE</strong> 以确认：</label>
+                <label>{{ $t('data.typeDelete') }}</label>
                 <input 
                   v-model="confirmText" 
                   type="text" 
                   class="confirm-input"
-                  placeholder="输入 DELETE"
+                  :placeholder="$t('data.deletePlaceholder')"
                   @keyup.enter="confirmDelete"
                 />
               </div>
@@ -327,7 +327,7 @@
             
             <div class="modal-footer">
               <button class="btn btn-cancel" @click="cancelDelete">
-                取消
+                {{ $t('common.cancel') }}
               </button>
               <button 
                 class="btn btn-confirm-danger" 
@@ -335,7 +335,7 @@
                 @click="confirmDelete"
               >
                 <span v-if="deleting" class="loading-spinner"></span>
-                {{ deleting ? '删除中...' : '确认删除' }}
+                {{ deleting ? $t('data.deleting') : $t('data.confirmDelete') }}
               </button>
             </div>
           </div>
@@ -373,6 +373,7 @@
 <script>
 import { nextTick, ref, computed, watch } from 'vue';
 import api from '../js/api.js';
+import { t } from '../../i18n/index.js';
 
 export default {
   name: 'DataManagementPane',
@@ -447,12 +448,12 @@ export default {
 
     const cacheSizeText = computed(() => {
       if (cacheSizeBytes.value < 0) {
-        return '计算中...';
+        return t('data.calculating');
       }
       if (cacheSizeBytes.value === 0) {
-        return '无缓存';
+        return t('data.noCache');
       }
-      return `${formatSize(cacheSizeBytes.value)}（${cacheFileCount.value} 个文件）`;
+      return t('data.cacheSummary', { size: formatSize(cacheSizeBytes.value), count: cacheFileCount.value });
     });
 
     /**
@@ -483,7 +484,7 @@ export default {
       if (cacheFileCount.value === 0) {
         return;
       }
-      if (!confirm('确定要清除 wence_data/project/temp 和 wence_data/project/uploads 下的所有缓存文件吗？')) {
+      if (!confirm(t('data.clearConfirm'))) {
         return;
       }
 
@@ -493,14 +494,14 @@ export default {
         cacheFileCount.value = 0;
         cacheSizeBytes.value = 0;
         emit('update:cache-info', { fileCount: 0, totalSize: 0 });
-        resultMessage.value = `已成功清除 ${data.deleted} 个缓存文件`;
+        resultMessage.value = t('data.cleared', { count: data.deleted });
         resultSuccess.value = true;
         setTimeout(() => {
           resultMessage.value = ''; 
         }, 3000);
       } catch (error) {
         console.error('清除缓存失败:', error);
-        resultMessage.value = '清除缓存失败：' + (error.message || '未知错误');
+        resultMessage.value = t('data.clearFailed', { error: error.message || t('common.unknownError') });
         resultSuccess.value = false;
         setTimeout(() => {
           resultMessage.value = ''; 
@@ -527,7 +528,7 @@ export default {
         // 调用清除所有聊天记录的 API
         await api.clearAllSessions();
         
-        resultMessage.value = '所有数据已成功删除！';
+        resultMessage.value = t('data.deleted');
         resultSuccess.value = true;
         showDeleteConfirm.value = false;
         confirmText.value = '';
@@ -537,7 +538,7 @@ export default {
         }, 5000);
       } catch (error) {
         console.error('删除数据失败:', error);
-        resultMessage.value = '删除失败：' + (error.message || '请稍后重试');
+        resultMessage.value = t('data.deleteFailed', { error: error.message || t('common.pleaseRetry') });
         resultSuccess.value = false;
 
         setTimeout(() => {
@@ -557,7 +558,7 @@ export default {
         nextTick(syncMemoryLineNumberScroll);
       } catch (error) {
         console.error('加载长期记忆失败:', error);
-        resultMessage.value = '加载长期记忆失败：' + (error.message || '未知错误');
+        resultMessage.value = t('data.memoryLoadFailed', { error: error.message || t('common.unknownError') });
         resultSuccess.value = false;
         setTimeout(() => {
           resultMessage.value = '';
@@ -572,14 +573,14 @@ export default {
       try {
         await api.saveMemory(memoryContent.value);
         memoryHasChanged.value = false;
-        resultMessage.value = '长期记忆保存成功！';
+        resultMessage.value = t('data.memorySaved');
         resultSuccess.value = true;
         setTimeout(() => {
           resultMessage.value = '';
         }, 3000);
       } catch (error) {
         console.error('保存长期记忆失败:', error);
-        resultMessage.value = '保存长期记忆失败：' + (error.message || '未知错误');
+        resultMessage.value = t('data.memorySaveFailed', { error: error.message || t('common.unknownError') });
         resultSuccess.value = false;
         setTimeout(() => {
           resultMessage.value = '';
@@ -602,14 +603,16 @@ export default {
     const saveMemoryToggle = async () => {
       try {
         await api.saveSettings({ enableLongTermMemory: !!enableLongTermMemory.value });
-        resultMessage.value = `长期记忆已${enableLongTermMemory.value ? '开启' : '关闭'}`;
+        resultMessage.value = t('data.memoryToggled', {
+          state: t(enableLongTermMemory.value ? 'data.memoryEnabled' : 'data.memoryDisabled')
+        });
         resultSuccess.value = true;
         setTimeout(() => {
           resultMessage.value = '';
         }, 2500);
       } catch (error) {
         console.error('保存长期记忆开关失败:', error);
-        resultMessage.value = '保存长期记忆开关失败：' + (error.message || '未知错误');
+        resultMessage.value = t('data.toggleFailed', { error: error.message || t('common.unknownError') });
         resultSuccess.value = false;
         setTimeout(() => {
           resultMessage.value = '';

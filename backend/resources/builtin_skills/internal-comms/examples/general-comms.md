@@ -1,16 +1,9 @@
-  ## Instructions
-  You are being asked to write internal company communication that doesn't fit into the standard formats (3P
-  updates, newsletters, or FAQs).
+# General Internal Communication
 
-  Before proceeding:
-  1. Ask the user about their target audience
-  2. Understand the communication's purpose
-  3. Clarify the desired tone (formal, casual, urgent, informational)
-  4. Confirm any specific formatting requirements
+Use this guide for leadership notes, project updates, incident messages, policy notices, launch announcements, and other formats.
 
-  Use these general principles:
-  - Be clear and concise
-  - Use active voice
-  - Put the most important information first
-  - Include relevant links and references
-  - Match the company's communication style
+Determine the audience, purpose, urgency, desired action, owner, and deadline from existing context. Ask only for missing details that block an accurate message.
+
+Lead with the key message. Follow with why it matters, essential context, required action, timing, and a real contact or source when available. Use active voice, short paragraphs, and descriptive headings. Match the established company tone.
+
+For incidents, separate confirmed facts, current impact, mitigation, next update time, and contact path. Avoid speculation and blame. For leadership or policy communication, distinguish final decisions from proposals or items pending approval.

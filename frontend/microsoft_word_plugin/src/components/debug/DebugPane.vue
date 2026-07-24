@@ -1,23 +1,23 @@
 <template>
   <div class="global">
     <div class="divItem">
-      <h2>🛠️ 调试面板</h2>
+      <h2>🛠️ {{ $t('debug.title') }}</h2>
       <p style="color: #666; font-size: 13px">
-        按 <span style="font-weight: bolder">"F12"</span> 可以打开调试器
+        {{ $t('debug.hint') }}
       </p>
     </div>
     <hr />
 
     <div class="divItem">
-      <h3>📄 文档内容解析</h3>
+      <h3>📄 {{ $t('debug.parse') }}</h3>
       <div class="button-group">
-        <button class="btn btn-primary" @click="parseSelection">解析选中内容</button>
-        <button class="btn btn-docs" @click="listOpenDocuments">显示所有文件名</button>
+        <button class="btn btn-primary" @click="parseSelection">{{ $t('debug.parseSelection') }}</button>
+        <button class="btn btn-docs" @click="listOpenDocuments">{{ $t('debug.showDocuments') }}</button>
       </div>
     </div>
 
     <div v-if="openDocuments.length" class="divItem">
-      <h4>已打开文档（{{ openDocuments.length }}）</h4>
+      <h4>{{ $t('debug.openDocuments', { count: openDocuments.length }) }}</h4>
       <div class="docs-container">
         <ul class="docs-list">
           <li v-for="(name, index) in openDocuments" :key="`${name}-${index}`">
@@ -28,48 +28,48 @@
     </div>
 
     <div class="divItem">
-      <h3>🗑️ 按 paraID 删除段落</h3>
+      <h3>🗑️ {{ $t('debug.deleteParagraphs') }}</h3>
       <textarea
         v-model="deletePositionsInput"
         class="json-input"
-        placeholder="输入 paraID 列表（逗号分隔），如: 3, 7, 12"
+        :placeholder="$t('debug.deletePlaceholder')"
         rows="3"
       ></textarea>
       <div class="button-group" style="margin-top: 8px">
-        <button class="btn btn-danger" @click="deleteDocxPara">删除段落</button>
-        <button class="btn btn-warning" @click="deletePositionsInput = ''">清空</button>
+        <button class="btn btn-danger" @click="deleteDocxPara">{{ $t('debug.deleteAction') }}</button>
+        <button class="btn btn-warning" @click="deletePositionsInput = ''">{{ $t('debug.clear') }}</button>
       </div>
     </div>
 
     <div class="divItem">
-      <h3>📥 JSON 转文档</h3>
+      <h3>📥 {{ $t('debug.jsonToDoc') }}</h3>
       <textarea
         v-model="jsonInput"
         class="json-input"
-        placeholder="粘贴 JSON 到此处..."
+        :placeholder="$t('debug.jsonPlaceholder')"
         rows="8"
       ></textarea>
       <div class="button-group" style="margin-top: 8px">
-        <button class="btn btn-apply" @click="applyJSONToDocument">应用到文档</button>
-        <button class="btn btn-warning" @click="jsonInput = ''">清空</button>
+        <button class="btn btn-apply" @click="applyJSONToDocument">{{ $t('debug.apply') }}</button>
+        <button class="btn btn-warning" @click="jsonInput = ''">{{ $t('debug.clear') }}</button>
       </div>
     </div>
 
     <div v-if="parsedData" class="divItem">
-      <h3>📋 导出操作</h3>
+      <h3>📋 {{ $t('debug.export') }}</h3>
       <div class="button-group">
-        <button class="btn btn-warning" @click="copyToClipboard">复制到剪贴板</button>
-        <button class="btn btn-info" @click="downloadJSON">下载JSON文件</button>
+        <button class="btn btn-warning" @click="copyToClipboard">{{ $t('debug.copy') }}</button>
+        <button class="btn btn-info" @click="downloadJSON">{{ $t('debug.download') }}</button>
       </div>
     </div>
 
     <div v-if="parsedData" class="divItem">
-      <h4>解析结果：</h4>
+      <h4>{{ $t('debug.result') }}</h4>
       <div class="stats">
-        <span>段落: {{ parsedData.paragraphs?.length || 0 }}</span>
-        <span>表格: {{ parsedData.tables?.length || 0 }}</span>
-        <span>图片: {{ inlineImageRunCount }}</span>
-        <span>字数: {{ totalCharCount }}</span>
+        <span>{{ $t('debug.paragraphs', { count: parsedData.paragraphs?.length || 0 }) }}</span>
+        <span>{{ $t('debug.tables', { count: parsedData.tables?.length || 0 }) }}</span>
+        <span>{{ $t('debug.images', { count: inlineImageRunCount }) }}</span>
+        <span>{{ $t('debug.chars', { count: totalCharCount }) }}</span>
       </div>
       <div class="json-container">
         <pre>{{ formattedJSON }}</pre>
