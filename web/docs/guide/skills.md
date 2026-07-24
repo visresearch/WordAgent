@@ -37,7 +37,7 @@ Skill 本质上是一组本地 Markdown 规则文件，核心入口是 `SKILL.md
 
 - 如果 `SKILL.md` 在某个子文件夹内：该文件夹名会作为 Skill 文件夹名
 - 如果 `SKILL.md` 在压缩包根目录：使用 zip 文件名作为 Skill 文件夹名
-- 如果本地已存在同名 Skill：新上传内容会覆盖旧内容
+- 如果本地已存在同名 Skill：上传会被阻止，请先删除已有 Skill 后再上传
 
 ## 启用 / 停用 Skill
 

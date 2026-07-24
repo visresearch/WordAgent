@@ -3,12 +3,19 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import subprocess
+import sys
 import tempfile
 import zipfile
 from pathlib import Path
 
-from app.core.config import get_user_settings_file, get_skills_dir
+from app.core.config import get_skills_dir, get_user_settings_file
+
+
+class SkillAlreadyExistsError(ValueError):
+    """Raised when an upload conflicts with an installed skill folder."""
 
 
 def _skills_root() -> Path:
@@ -317,8 +324,37 @@ def install_skill_zip(zip_path: Path, original_filename: str | None = None) -> d
         skills_root = _skills_root()
         dest_dir = skills_root / safe_folder_name
 
-        if dest_dir.exists():
-            shutil.rmtree(dest_dir)
+        existing_dir = next(
+            (
+                child
+                for child in skills_root.iterdir()
+                if child.is_dir() and child.name.casefold() == safe_folder_name.casefold()
+            ),
+            None,
+        )
+        if existing_dir is not None:
+            raise SkillAlreadyExistsError(
+                f"Skill 已存在：{existing_dir.name}。请先删除该同名 Skill，再重新上传。"
+            )
+
+        try:
+            uploaded_skill_text = skill_md_candidates[0].read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            uploaded_skill_text = ""
+        uploaded_frontmatter, _ = _extract_frontmatter(uploaded_skill_text)
+        uploaded_name = (uploaded_frontmatter.get("name") or safe_folder_name).strip()
+        existing_skill = next(
+            (
+                skill
+                for skill in discover_skills(include_disabled=True)
+                if str(skill.get("name", "")).strip().casefold() == uploaded_name.casefold()
+            ),
+            None,
+        )
+        if existing_skill is not None:
+            raise SkillAlreadyExistsError(
+                f"Skill 已存在：{existing_skill['name']}。请先删除该同名 Skill，再重新上传。"
+            )
 
         shutil.copytree(skill_root, dest_dir)
 
@@ -343,3 +379,25 @@ def delete_skill(folder: str) -> None:
 
     shutil.rmtree(target_dir)
     remove_skill_state(folder_key)
+
+
+def open_skill_directory(folder: str) -> Path:
+    """Open an installed skill directory in the platform file manager."""
+    folder_key = _validate_folder_key(folder)
+    skills_root = _skills_root().resolve()
+    target_dir = (skills_root / folder_key).resolve()
+    if target_dir.parent != skills_root or not target_dir.is_dir():
+        raise FileNotFoundError(f"Skill folder not found: {folder_key}")
+
+    if sys.platform == "win32":
+        os.startfile(str(target_dir))
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", str(target_dir)])
+    else:
+        subprocess.Popen(
+            ["xdg-open", str(target_dir)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    return target_dir

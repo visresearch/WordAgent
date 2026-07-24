@@ -70,6 +70,14 @@
               <span class="slider"></span>
             </label>
             <button
+              class="action-btn"
+              :disabled="busyFolder === skill.folder"
+              title="打开 Skill 文件夹"
+              @click="openSkillFolder(skill)"
+            >
+              <img :src="iconFolder" class="action-icon" alt="" />
+            </button>
+            <button
               class="action-btn delete"
               :disabled="busyFolder === skill.folder"
               title="删除"
@@ -95,6 +103,7 @@
 <script>
 import { onMounted, ref } from 'vue';
 import api from '../js/api.js';
+import iconFolder from '../../assets/icons/folder.svg';
 import iconSkill from '../../assets/icons/skill.svg';
 
 export default {
@@ -199,12 +208,25 @@ export default {
       }
     };
 
+    const openSkillFolder = async (skill) => {
+      busyFolder.value = skill.folder;
+      try {
+        await api.openSkillFolder(skill.folder);
+      } catch (error) {
+        console.error('打开 skill 文件夹失败:', error);
+        setMessage(error.message || '打开 skill 文件夹失败', 'error');
+      } finally {
+        busyFolder.value = '';
+      }
+    };
+
     onMounted(() => {
       loadSkills();
     });
 
     return {
       iconSkill,
+      iconFolder,
       loading,
       uploading,
       busyFolder,
@@ -215,6 +237,7 @@ export default {
       openUploadDialog,
       onFileChange,
       toggleSkill,
+      openSkillFolder,
       removeSkillItem
     };
   }
@@ -407,6 +430,11 @@ export default {
 .action-btn:disabled {
   opacity: 0.65;
   cursor: not-allowed;
+}
+
+.action-icon {
+  width: 16px;
+  height: 16px;
 }
 
 .switch {

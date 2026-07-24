@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- 添加CONTRIBUTING.md
+
+### Changed
+- 更新所有py依赖
+- 更新所有node依赖
+- 更新官网文档
+
+### Fixed
+
 ## [v0.5.2]
 
 ### Added

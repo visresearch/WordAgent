@@ -8,7 +8,14 @@ from pathlib import Path
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
-from app.services.agent.skills import delete_skill, discover_skills, install_skill_zip, set_skill_enabled
+from app.services.agent.skills import (
+    SkillAlreadyExistsError,
+    delete_skill,
+    discover_skills,
+    install_skill_zip,
+    open_skill_directory,
+    set_skill_enabled,
+)
 
 router = APIRouter()
 
@@ -45,6 +52,8 @@ async def upload_skill_package(file: UploadFile = File(...)):
             "message": "Skill 上传并安装成功",
             "skill": installed,
         }
+    except SkillAlreadyExistsError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -70,6 +79,20 @@ async def update_skill_enabled(folder: str, payload: SkillEnableRequest):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"更新 skill 状态失败: {e}")
+
+
+@router.post("/skills/{folder}/open")
+async def open_skill_folder(folder: str):
+    """Open a skill folder in the operating system file manager."""
+    try:
+        opened_path = open_skill_directory(folder)
+        return {"success": True, "folder": folder, "path": str(opened_path)}
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Skill 不存在: {folder}") from None
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"打开 Skill 文件夹失败: {e}") from e
 
 
 @router.delete("/skills/{folder}")

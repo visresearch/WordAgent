@@ -1414,6 +1414,21 @@ async function setSkillEnabled(folder, enabled) {
 }
 
 /**
+ * 在系统文件管理器中打开 skill 文件夹
+ * @param {string} folder
+ * @returns {Promise<Object>}
+ */
+async function openSkillFolder(folder) {
+  const response = await request(`/api/skills/${encodeURIComponent(folder)}/open`, {
+    method: 'POST'
+  });
+  if (!response.success) {
+    throw new Error(response.data?.detail || response.error || '打开 skill 文件夹失败');
+  }
+  return response.data;
+}
+
+/**
  * 删除 skill
  * @param {string} folder
  * @returns {Promise<Object>}
@@ -1474,6 +1489,7 @@ export default {
   // Skill 管理 API
   getSkills,
   uploadSkillPackage,
+  openSkillFolder,
   setSkillEnabled,
   deleteSkill,
 
@@ -1518,6 +1534,7 @@ export {
   saveMemory,
   getSkills,
   uploadSkillPackage,
+  openSkillFolder,
   setSkillEnabled,
   deleteSkill,
   updateConfig,
