@@ -20,6 +20,8 @@ from app.services.tools import (
     _pending_tool_requests,
     _stop_requested_sessions,
     build_delete_document,
+    build_create_document,
+    build_insert_break,
     build_edit_file,
     build_generate_document,
     build_list_file,
@@ -53,6 +55,8 @@ read_document = build_read_document(get_tool_description("read_document"))
 generate_document = build_generate_document(get_tool_description("generate_document"))
 search_document = build_search_document(get_tool_description("search_document"))
 delete_document = build_delete_document(get_tool_description("delete_document"))
+create_document = build_create_document(get_tool_description("create_document"))
+insert_break = build_insert_break(get_tool_description("insert_break"))
 load_skill_context = build_load_skill_context(get_tool_description("load_skill_context"))
 run_sub_agent = build_run_sub_agent(get_tool_description("run_sub_agent"))
 python_repl = build_python_repl(get_tool_description("python_repl"))
@@ -72,6 +76,8 @@ AGENT_BASE_TOOLS = [
     search_document,
     generate_document,
     delete_document,
+    create_document,
+    insert_break,
     python_repl,
     list_file,
     read_file,
@@ -107,6 +113,8 @@ TOOL_MAP = {t.name: t for t in BASE_TOOLS}
 __all__ = [
     # tools
     "delete_document",
+    "create_document",
+    "insert_break",
     "edit_file",
     "generate_document",
     "list_file",

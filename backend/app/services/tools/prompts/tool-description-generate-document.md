@@ -14,6 +14,7 @@ Generate formatted content and insert it into the Word document.
 - Non-empty paragraphs must use a non-empty paragraph style ID such as `pS_3`, and that ID must be defined in `styles`.
 - Use `pStyle: ""` only for a truly blank line with `runs: []`; never use empty `pStyle` for paragraphs that contain text or images.
 - Text runs must use an `rStyle` such as `rS_2`, and that ID must be defined in `styles`.
+- English text in body paragraphs must use a run style whose font is `Times New Roman`; split mixed Chinese-English text into separate runs and preserve the specified Chinese font for Chinese runs.
 - Never put `\n` inside `run.text`; one visual line is one paragraph.
 - In `run.text`, `cell.text`, and table paragraph text, never use raw ASCII double quote characters (`"`). For quoted phrases, use Chinese quotation marks such as `“三夏”` or `「三夏」`. Raw `"` in text often breaks tool-call JSON.
 - Blank line: `{ "pStyle": "", "runs": [] }`.

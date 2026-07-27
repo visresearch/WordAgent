@@ -13,7 +13,9 @@ function normalizeLocale(value) {
 function initialLocale() {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) return normalizeLocale(stored);
+    if (stored) {
+      return normalizeLocale(stored);
+    }
   } catch (error) {
     console.warn('[i18n] Unable to read the stored language:', error);
   }

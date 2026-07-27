@@ -22,6 +22,8 @@ from app.services.tools import (
     _stop_requested_sessions,
     build_create_workflow,
     build_delete_document,
+    build_create_document,
+    build_insert_break,
     build_edit_file,
     build_generate_document,
     build_list_file,
@@ -54,6 +56,8 @@ read_document = build_read_document(get_tool_description("read_document"))
 generate_document = build_generate_document(get_tool_description("generate_document"))
 search_document = build_search_document(get_tool_description("search_document"))
 delete_document = build_delete_document(get_tool_description("delete_document"))
+create_document = build_create_document(get_tool_description("create_document"))
+insert_break = build_insert_break(get_tool_description("insert_break"))
 load_skill_context = build_load_skill_context(get_tool_description("load_skill_context"))
 create_workflow = build_create_workflow(get_tool_description("create_workflow"))
 review_document = build_review_document(get_tool_description("review_document"))
@@ -68,9 +72,9 @@ edit_file = build_edit_file(get_tool_description("edit_file"))
 
 PLANNER_TOOLS = [create_workflow]
 OUTLINE_TOOLS = [read_document, search_document]
-WRITER_TOOLS = [read_document, search_document, generate_document, delete_document]
+WRITER_TOOLS = [load_skill_context, read_document, search_document, create_document, generate_document, delete_document, insert_break]
 REVIEWER_TOOLS = [review_document]
-# load_skill_context 总是可用；MCP 工具运行时再动态加载
+# Research and Writer can load skills; MCP tools are added to Research at runtime.
 RESEARCH_TOOLS = [load_skill_context, list_file, read_file, edit_file]
 
 AGENT_TOOLS = {
@@ -86,7 +90,9 @@ ALL_TOOLS = [
     read_document,
     search_document,
     generate_document,
+    create_document,
     delete_document,
+    insert_break,
     create_workflow,
     review_document,
     load_skill_context,
@@ -101,6 +107,8 @@ __all__ = [
     # tools
     "create_workflow",
     "delete_document",
+    "create_document",
+    "insert_break",
     "generate_document",
     "list_file",
     "load_skill_context",

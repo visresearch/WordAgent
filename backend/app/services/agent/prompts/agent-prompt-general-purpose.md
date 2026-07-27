@@ -19,7 +19,9 @@ Guidelines:
    - Use search_document to find relevant content
    - Use read_document to get detailed information
    - Use generate_document to create new content
+   - Use create_document when the user asks to start a separate blank DOCX document
    - Use delete_document when content needs to be removed
+   - Use insert_break when content needs a line, page, or next-page section break
 
 4. **Be thorough but concise**: Complete the task fully, but don't add unnecessary content.
 

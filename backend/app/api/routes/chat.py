@@ -257,6 +257,12 @@ async def chat_websocket(websocket: WebSocket):
                         elif incoming_type == "delete_response":
                             # delete_document 为非阻塞工具，不再等待前端回传，仅记录日志
                             logger.info(f"[WebSocket] 收到前端删除结果（仅记录）: {incoming}")
+                        elif incoming_type == "create_document_response":
+                            logger.info(f"[WebSocket] 收到前端创建文档结果: {incoming}")
+                            if active_mode == "plan":
+                                await ma_submit_tool_response(chat_id, incoming)
+                            else:
+                                await submit_tool_response(chat_id, incoming)
                         elif incoming_type == "stop":
                             logger.info(f"[WebSocket] 收到停止请求")
                             request_stop(chat_id)
@@ -287,6 +293,13 @@ async def chat_websocket(websocket: WebSocket):
 
             elif msg_type == "query_response":
                 # 非流式过程中的查询结果回传（fallback）
+                if active_mode == "plan":
+                    await ma_submit_tool_response(chat_id, data)
+                else:
+                    await submit_tool_response(chat_id, data)
+
+            elif msg_type == "create_document_response":
+                # create_document 在前端异步完成后回传结果，供工具继续执行后续调用。
                 if active_mode == "plan":
                     await ma_submit_tool_response(chat_id, data)
                 else:

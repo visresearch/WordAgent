@@ -39,7 +39,8 @@ export default {
     unnamed: '未命名 Skill', toggle: '启用/禁用 Skill', openFolder: '打开 Skill 文件夹', delete: '删除',
     loadFailed: '加载 Skill 失败', zipOnly: '仅支持上传 zip 压缩包', uploadZipOnly: '仅支持上传 ZIP 压缩包', uploadSuccess: 'Skill 上传成功',
     uploadFailed: '上传 Skill 失败', updateFailed: '更新 Skill 状态失败', deleteConfirm: '确认删除 Skill：{name}？',
-    deleteSuccess: 'Skill 删除成功', deleteFailed: '删除 Skill 失败', openFailed: '打开 Skill 文件夹失败'
+    deleteSuccess: 'Skill 删除成功', deleteFailed: '删除 Skill 失败', openFailed: '打开 Skill 文件夹失败',
+    builtinDeleteDisabled: '内置 Skill 不能删除'
   },
   model: {
     title: '大模型服务商配置', subtitle: '管理 AI 服务提供商和模型设置', configured: '已配置的提供商',
@@ -130,7 +131,7 @@ export default {
     selectionRangeUnavailable: '无法获取选区范围', selectContentFirst: '请先在文档中选中内容（可为文本、图片或表格）',
     selectionFailed: '处理选中内容时出错：{error}', insertFailed: '插入失败，请确保已打开 Word 文档', unnamedDocument: '未命名文档',
     searchComplete: '搜索完成', documentReadComplete: '文档读取完成', prepareDelete: '准备删除段落 ID（{ids}）',
-    deleteComplete: '删除完成', documentGenerated: '文档已生成', errorLabel: '错误：{error}',
+    deleteComplete: '删除完成', insertBreakSuccess: '文档分隔符已插入', insertBreakFailed: '插入文档分隔符失败：{error}', createDocumentPending: '📄 正在创建新的空白 DOCX 文档', createDocumentSuccess: '📄 新的空白 DOCX 文档已创建并打开', createDocumentFailed: '创建新 DOCX 文档失败：{error}', documentGenerated: '文档已生成', errorLabel: '错误：{error}',
     paragraphCount: '{count} 个段落', tableCount: '{count} 个表格', pendingAddition: '待添加内容', pendingDeletion: '待删除内容',
     input: {
       attachment: '附件', removeFile: '移除文件', paragraphRange: '段落 {start} - {end}', clearSelection: '清除选区',

@@ -25,6 +25,8 @@ class GeneralPurposeSubAgent:
         "search_document",
         "generate_document",
         "delete_document",
+        "create_document",
+        "insert_break",
     ]
 
     def get_system_prompt(self, context: dict[str, Any] | None = None) -> str:

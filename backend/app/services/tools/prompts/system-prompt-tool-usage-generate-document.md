@@ -10,6 +10,7 @@
 - Style reference closure is mandatory: every non-empty `pStyle`, `rStyle`, `cStyle`, and `tStyle` used anywhere in the payload must exist as a key in `document.styles`.
 - Never use `pStyle: ""` for paragraphs containing text or images. Empty `pStyle` is only valid for a blank paragraph with `runs: []`.
 - For ordinary body paragraphs, use `pS_3` with `rS_2` unless the requested format requires another defined style.
+- English text in body paragraphs must use a character style whose font is `Times New Roman`; split mixed Chinese-English paragraphs into separate runs when necessary, while preserving the template's Chinese font for Chinese text.
 - JSON safety: inside generated document text fields (`run.text`, table `cell.text`, table paragraph text), do not use raw ASCII double quote characters (`"`). Use Chinese quotation marks such as `“...”` or `「...」` for quoted phrases.
 - `insertParaID` is required. Never omit it and never pass `null`/`None`.
 - For non-empty documents, `insertParaID` must come from selected context or a real paragraph ID returned by `read_document`/`search_document`; do not invent IDs.

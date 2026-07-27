@@ -10,6 +10,8 @@
  *   paragraphs: [{             // 段落数组
  *     paraID: number,          // 段落唯一标识（int范围内）
  *     paraIndex: number,       // 段落索引（0-based）
+ *     pageStart: number,       // 段落起始位置所在页（full 模式）
+ *     pageEnd: number,         // 段落末尾位置所在页（full 模式）
  *     pStyle: [                // 段落样式数组（按顺序）
  *       alignment,             // [0] 对齐: left/center/right/justify
  *       lineSpacing,           // [1] 行间距
@@ -119,28 +121,124 @@ function isEmptyParagraph(para) {
   return !!(para && Array.isArray(para.runs) && para.runs.length === 0);
 }
 
-function getParagraphParaID(para, fallback = null) {
+/**
+ * Normalize an inline image run so WPS and Microsoft Word expose the same
+ * shape. Inline pictures do not have floating-position properties; keep them
+ * explicitly as null instead of omitting them.
+ */
+function makeInlineImageRun(image) {
+  return {
+    type: 'inline',
+    width: image?.width ?? null,
+    height: image?.height ?? null,
+    left: null,
+    top: null,
+    wrapType: null,
+    altText: image?.altText ?? '',
+    url: image?.url ?? null
+  };
+}
+
+/**
+ * WPS 将嵌入式图片暴露为 Characters 集合中的一个占位字符。
+ * 在部分版本中这个占位字符的 Text 是 ASCII `/`（而不是 Word 常见的
+ * 对象占位符），如果直接按普通字符解析，就会在图片旁边生成一个斜杠。
+ * 图片本身会单独作为 image run 添加，因此这里需要把落在图片 Range 内的
+ * 字符过滤掉。
+ */
+function isCharacterInsideInlineImage(char, inlineImages) {
+  if (!char || !Array.isArray(inlineImages) || inlineImages.length === 0) {
+    return false;
+  }
+
+  const charStart = Number(char.Start);
+  if (!Number.isFinite(charStart)) {
+    return false;
+  }
+  const rawCharEnd = Number(char.End);
+  const charEnd = Number.isFinite(rawCharEnd) && rawCharEnd > charStart ? rawCharEnd : charStart + 1;
+
+  return inlineImages.some((image) => {
+    const imageStart = Number(image?.rangeStart);
+    const imageEnd = Number(image?.rangeEnd);
+    if (!Number.isFinite(imageStart)) {
+      return false;
+    }
+    // 正常情况下 Range.End > Range.Start，可以按区间判断。少数 WPS
+    // 版本只返回了图片锚点的 Start，此时仅过滤与锚点同位置的 `/` 占位符。
+    if (!Number.isFinite(imageEnd) || imageEnd <= imageStart) {
+      return char.Text === '/' && charStart === imageStart;
+    }
+    return charStart < imageEnd && charEnd > imageStart;
+  });
+}
+
+function normalizeParagraphParaID(value) {
+  if (typeof value === 'number') {
+    return Number.isSafeInteger(value) && value !== 0 ? value : null;
+  }
+  if (typeof value === 'string' && /^[+-]?\d+$/.test(value.trim())) {
+    const parsed = Number(value.trim());
+    return Number.isSafeInteger(parsed) && parsed !== 0 ? parsed : null;
+  }
+  return null;
+}
+
+function getParagraphParaID(para) {
   if (!para) {
-    return fallback;
+    return null;
   }
 
   try {
-    if (para.ParaID !== undefined && para.ParaID !== null && para.ParaID !== '') {
-      return para.ParaID;
+    const paraID = normalizeParagraphParaID(para.ParaID);
+    if (paraID !== null) {
+      return paraID;
     }
   } catch (e) {
     void e;
   }
 
   try {
-    if (para.ID !== undefined && para.ID !== null && para.ID !== '') {
-      return para.ID;
+    const paraID = normalizeParagraphParaID(para.ID);
+    if (paraID !== null) {
+      return paraID;
     }
   } catch (e) {
     void e;
   }
 
-  return fallback;
+  return null;
+}
+
+const WPS_ACTIVE_END_PAGE_NUMBER = 3;
+
+/**
+ * Read a paragraph's physical start/end pages through the native WPS Range API.
+ * Return an empty object when WPS cannot provide both values.
+ */
+function getParagraphPageRange(doc, paraRange) {
+  try {
+    const start = Number(paraRange?.Start);
+    const rawEnd = Number(paraRange?.End);
+    if (!doc || !Number.isFinite(start) || !Number.isFinite(rawEnd)) {
+      return {};
+    }
+
+    // Exclude the paragraph mark from the end probe while keeping empty paragraphs valid.
+    const end = Math.max(start, rawEnd - 1);
+    const startRange = doc.Range(start, start);
+    const endRange = doc.Range(end, end);
+    const pageStart = Number(startRange.Information(WPS_ACTIVE_END_PAGE_NUMBER));
+    const pageEnd = Number(endRange.Information(WPS_ACTIVE_END_PAGE_NUMBER));
+
+    if (!Number.isInteger(pageStart) || pageStart < 1 || !Number.isInteger(pageEnd) || pageEnd < 1) {
+      return {};
+    }
+
+    return { pageStart, pageEnd };
+  } catch (e) {
+    return {};
+  }
 }
 
 // ============== 样式去重与解析 ==============
@@ -261,6 +359,9 @@ function deduplicateStyles(result) {
   const registry = createStyleRegistry();
 
   if (result.paragraphs) {
+    // A paragraph without a real WPS ParaID/ID is treated as blank and must
+    // never be exposed to the agent. In particular, do not substitute paraIndex.
+    result.paragraphs = result.paragraphs.filter((para) => normalizeParagraphParaID(para?.paraID) !== null);
     for (const para of result.paragraphs) {
       if (para.pStyle && Array.isArray(para.pStyle)) {
         para.pStyle = registerStyle(registry, 'p', para.pStyle);
@@ -290,6 +391,13 @@ function deduplicateStyles(result) {
               cell.rStyle = registerStyle(registry, 'r', cell.rStyle);
             }
             if (cell.paragraphs) {
+              cell.paragraphs = cell.paragraphs.filter(
+                (para) => normalizeParagraphParaID(para?.paraID) !== null
+              );
+              if (cell.paragraphs.length === 0) {
+                delete cell.paragraphs;
+                continue;
+              }
               for (const para of cell.paragraphs) {
                 if (para.pStyle && Array.isArray(para.pStyle)) {
                   para.pStyle = registerStyle(registry, 'p', para.pStyle);
@@ -1108,9 +1216,14 @@ function parseCellParagraphs(cellRange, doc) {
           continue;
         }
 
+        const paraID = getParagraphParaID(para);
+        if (paraID === null) {
+          continue;
+        }
+
         const paraData = {
           text: paraText,
-          paraID: getParagraphParaID(para),
+          paraID,
           pStyle: [
             getAlignmentName(para.Format.Alignment),
             para.Format.LineSpacing || 0,
@@ -1294,8 +1407,10 @@ function parseTable(table) {
       try {
         const cell = table.Cell(row, col);
         const cellRange = cell.Range;
-        const cellText = cleanText(cellRange.Text);
         const paragraphs = parseCellParagraphs(cellRange, null);
+        // Only expose text belonging to paragraphs with a real ParaID/ID.
+        // If none can be identified, treat the cell content as blank as well.
+        const cellText = paragraphs.map((paragraph) => paragraph.text || '').filter(Boolean).join('\n');
         const cellFont = cellRange.Font;
 
         rowData.push({
@@ -1432,7 +1547,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride, start
         const paras = doc.Paragraphs;
         for (let i = 1; i <= paras.Count; i++) {
           const para = paras.Item(i);
-          const pid = getParagraphParaID(para, null);
+          const pid = getParagraphParaID(para);
           if (pid === startParaID && startIndexByID === -1) {
             startIndexByID = i - 1;
           }
@@ -1634,7 +1749,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride, start
         const paraRange = para.Range;
         const paraStart = paraRange.Start;
         const paraEnd = paraRange.End;
-        const paraID = getParagraphParaID(para, idx);
+        const paraID = getParagraphParaID(para);
 
         // 跳过表格内段落
         let inTable = false;
@@ -1668,13 +1783,25 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride, start
 
         // 空段落但有图片
         if ((!paraText || paraText.match(/^[\r\n\f\u0007]*$/)) && (paraInlineImages.length > 0 || paraFloatingImages.length > 0)) {
-          result.paragraphs.push({ pStyle: DEFAULT_IMAGE_PSTYLE, runs: [], paraIndex: idx, paraID });
+          result.paragraphs.push({
+            pStyle: DEFAULT_IMAGE_PSTYLE,
+            runs: [],
+            paraIndex: idx,
+            paraID,
+            ...getParagraphPageRange(doc, paraRange)
+          });
         }
 
         // 如果是空段落且没有图片
         if (!paraText || paraText.match(/^[\r\n\f\u0007]*$/)) {
           if (paraInlineImages.length === 0 && paraFloatingImages.length === 0) {
-            result.paragraphs.push({ pStyle: '', runs: [], paraIndex: idx, paraID });
+            result.paragraphs.push({
+              pStyle: '',
+              runs: [],
+              paraIndex: idx,
+              paraID,
+              ...getParagraphPageRange(doc, paraRange)
+            });
           }
           continue;
         }
@@ -1699,7 +1826,8 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride, start
           ],
           runs: [],
           paraIndex: idx,
-          paraID
+          paraID,
+          ...getParagraphPageRange(doc, paraRange)
         };
 
         // 解析 runs
@@ -1721,6 +1849,17 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride, start
             }
 
             const charStart = typeof char.Start === 'number' ? char.Start : null;
+            // WPS 可能把嵌入式图片的对象占位符返回为 `/`。图片会在本段
+            // 末尾作为 image run 添加，不能再把这个占位符当成文本输出。
+            if (isCharacterInsideInlineImage(char, paraInlineImages)) {
+              if (currentRun && currentRun.text) {
+                paragraphData.runs.push(normalizeParsedRun(currentRun));
+              }
+              currentRun = null;
+              lastFormat = null;
+              continue;
+            }
+
             if (charStart !== null && formulaRuns.length > 0) {
               while (formulaRunIndex < formulaRuns.length && charStart >= formulaRuns[formulaRunIndex].end) {
                 formulaRunIndex++;
@@ -1792,12 +1931,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride, start
 
         // 在段落末尾添加 inline 图片 runs
         for (const img of paraInlineImages) {
-          paragraphData.runs.push({
-            width: img.width,
-            height: img.height,
-            altText: img.altText,
-            url: img.url
-          });
+          paragraphData.runs.push(makeInlineImageRun(img));
         }
         for (const img of paraFloatingImages) {
           paragraphData.runs.push({
@@ -1821,12 +1955,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride, start
       for (const img of inlineImages) {
         result.paragraphs.push({
           pStyle: DEFAULT_IMAGE_PSTYLE,
-          runs: [{
-            width: img.width,
-            height: img.height,
-            altText: img.altText,
-            url: img.url
-          }],
+          runs: [makeInlineImageRun(img)],
           paraIndex: -1,
           paraID: null
         });
@@ -1990,7 +2119,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride, start
         const paraRange = para.Range;
         const paraStart = paraRange.Start;
         const paraEnd = paraRange.End;
-        const paraID = getParagraphParaID(para, paraStartToIndex.get(paraStart) ?? null);
+        const paraID = getParagraphParaID(para);
 
         // // ====== DEBUG: 输出段落的各种属性 ======
         // try {
@@ -2089,7 +2218,8 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride, start
             pStyle: DEFAULT_IMAGE_PSTYLE,
             runs: [],
             paraIndex: paraStartToIndex.get(paraStart) ?? -1,
-            paraID
+            paraID,
+            ...getParagraphPageRange(doc, paraRange)
           });
         }
 
@@ -2100,7 +2230,8 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride, start
               pStyle: '',
               runs: [],
               paraIndex: paraStartToIndex.get(paraStart) ?? -1,
-              paraID
+              paraID,
+              ...getParagraphPageRange(doc, paraRange)
             });
           }
           continue;
@@ -2127,7 +2258,8 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride, start
           ],
           runs: [],
           paraIndex: paraStartToIndex.get(paraStart) ?? -1,
-          paraID
+          paraID,
+          ...getParagraphPageRange(doc, paraRange)
         };
 
         // 解析 runs - 使用Characters确保捕获Tab等特殊字符
@@ -2150,6 +2282,17 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride, start
             }
 
             const charStart = typeof char.Start === 'number' ? char.Start : null;
+            // WPS 可能把嵌入式图片的对象占位符返回为 `/`。图片会在本段
+            // 末尾作为 image run 添加，不能再把这个占位符当成文本输出。
+            if (isCharacterInsideInlineImage(char, paraInlineImages)) {
+              if (currentRun && currentRun.text) {
+                paragraphData.runs.push(normalizeParsedRun(currentRun));
+              }
+              currentRun = null;
+              lastFormat = null;
+              continue;
+            }
+
             if (charStart !== null && formulaRuns.length > 0) {
               while (formulaRunIndex < formulaRuns.length && charStart >= formulaRuns[formulaRunIndex].end) {
                 formulaRunIndex++;
@@ -2232,12 +2375,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride, start
 
         // 在段落末尾添加 inline 图片 runs
         for (const img of paraInlineImages) {
-          paragraphData.runs.push({
-            width: img.width,
-            height: img.height,
-            altText: img.altText,
-            url: img.url
-          });
+          paragraphData.runs.push(makeInlineImageRun(img));
         }
         for (const img of paraFloatingImages) {
           paragraphData.runs.push({
@@ -2262,12 +2400,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride, start
     for (const img of inlineImages) {
       result.paragraphs.push({
         pStyle: DEFAULT_IMAGE_PSTYLE,
-        runs: [{
-          width: img.width,
-          height: img.height,
-          altText: img.altText,
-          url: img.url
-        }],
+        runs: [makeInlineImageRun(img)],
         paraIndex: -1,
         paraID: null
       });
@@ -2727,7 +2860,7 @@ function generateDocxFromJSON(jsonData, doc, insertParaID) {
       let targetIndex = -1;
       for (let pi = 1; pi <= totalParas; pi++) {
         const para = doc.Paragraphs.Item(pi);
-        const pid = getParagraphParaID(para, null);
+        const pid = getParagraphParaID(para);
         if (pid === insertParaID) {
           targetIndex = pi;
           break;
@@ -3074,7 +3207,7 @@ function deleteDocxPara(paraIDs, docOverride) {
   const targets = [];
   for (let i = 1; i <= totalParas; i++) {
     const para = doc.Paragraphs.Item(i);
-    const pid = getParagraphParaID(para, null);
+    const pid = getParagraphParaID(para);
     if (normalizedIDs.includes(pid)) {
       targets.push({
         paraIndex: i - 1,
@@ -3113,6 +3246,65 @@ function deleteDocxPara(paraIDs, docOverride) {
   };
 }
 
+// WPS/Word WdBreakType values. Keep the public API descriptive and map to
+// native constants only at the document boundary.
+const INSERT_BREAK_TYPES = Object.freeze({
+  wdLineBreak: 6,
+  wdPageBreak: 7,
+  wdSectionBreakNextPage: 2
+});
+
+/**
+ * Insert a native break immediately after the paragraph identified by paraID.
+ * The insertion point is before the paragraph mark so the break belongs to
+ * the target paragraph's trailing position.
+ *
+ * @param {number|string} paraID
+ * @param {'wdLineBreak'|'wdPageBreak'|'wdSectionBreakNextPage'} breakType
+ * @param {Object} [docOverride]
+ * @returns {{success: boolean, paraID?: number, breakType?: string, position?: number, error?: string}}
+ */
+function insertBreakAfterParagraph(paraID, breakType, docOverride) {
+  const normalizedParaID = Number(paraID);
+  if (!Number.isInteger(normalizedParaID)) {
+    return { success: false, error: 'paraID 必须是整数' };
+  }
+  if (!Object.prototype.hasOwnProperty.call(INSERT_BREAK_TYPES, breakType)) {
+    return { success: false, error: 'breakType 必须是 wdLineBreak、wdPageBreak 或 wdSectionBreakNextPage' };
+  }
+
+  const doc = docOverride || (typeof window !== 'undefined' ? window.Application?.ActiveDocument : null);
+  if (!doc) {
+    return { success: false, error: '没有打开的文档' };
+  }
+
+  const totalParas = Number(doc.Paragraphs?.Count || 0);
+  for (let i = 1; i <= totalParas; i++) {
+    let para;
+    try {
+      para = doc.Paragraphs.Item(i);
+      const rawParaID = getParagraphParaID(para);
+      if (rawParaID === null || rawParaID === undefined || rawParaID === '' || Number(rawParaID) !== normalizedParaID) {
+        continue;
+      }
+
+      const start = Number(para.Range.Start);
+      const end = Number(para.Range.End);
+      if (!Number.isFinite(start) || !Number.isFinite(end)) {
+        return { success: false, error: `段落 ${normalizedParaID} 没有有效的 Range` };
+      }
+      const position = Math.max(start, end - 1);
+      const range = doc.Range(position, position);
+      range.InsertBreak(INSERT_BREAK_TYPES[breakType]);
+      return { success: true, paraID: normalizedParaID, breakType, position };
+    } catch (error) {
+      return { success: false, error: error?.message || String(error) };
+    }
+  }
+
+  return { success: false, error: `未找到 paraID=${normalizedParaID} 的段落` };
+}
+
 // ============== 导出 ==============
 
 export default {
@@ -3120,14 +3312,18 @@ export default {
   parseDocxToJSON,
   generateDocxFromJSON,
   deleteDocxPara,
+  insertBreakAfterParagraph,
 
   // 辅助函数（供外部使用）
   cleanText,
   cleanCellText,
+  makeInlineImageRun,
   exportImageToTemp,
   deduplicateStyles,
   resolveStyle,
   getParagraphParaID,
+  getParagraphPageRange,
+  isCharacterInsideInlineImage,
 
   // 样式数组常量
   PSTYLE,
@@ -3161,12 +3357,16 @@ export {
   parseDocxToJSON,
   generateDocxFromJSON,
   deleteDocxPara,
+  insertBreakAfterParagraph,
   cleanText,
   cleanCellText,
+  makeInlineImageRun,
   exportImageToTemp,
   deduplicateStyles,
   resolveStyle,
   getParagraphParaID,
+  getParagraphPageRange,
+  isCharacterInsideInlineImage,
   PSTYLE,
   RSTYLE,
   CSTYLE,

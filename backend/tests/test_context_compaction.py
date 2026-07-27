@@ -55,10 +55,7 @@ class ContextCompactionTests(unittest.TestCase):
 
     def test_long_history_preserves_initial_goal_and_recent_state(self):
         history = [{"role": "user", "content": "INITIAL_GOAL"}]
-        history.extend(
-            {"role": "assistant", "content": f"middle-{index}: " + ("x" * 2500)}
-            for index in range(30)
-        )
+        history.extend({"role": "assistant", "content": f"middle-{index}: " + ("x" * 2500)} for index in range(30))
         history.append({"role": "user", "content": "LATEST_UNRESOLVED_STATE"})
 
         formatted = _format_history_for_summary(history)

@@ -1033,8 +1033,11 @@ async function appendParagraphInlinePictureRuns(runs, para, context) {
       runs.push({
         type: "inline",
         url: info.url,
-        width: info.width,
-        height: info.height,
+        width: info.width ?? null,
+        height: info.height ?? null,
+        left: null,
+        top: null,
+        wrapType: null,
         altText: info.altText || "",
       });
     }

@@ -17,9 +17,7 @@ class LoadSkillContextTests(unittest.TestCase):
             skill_tail = "SKILL_BODY_END"
             reference_tail = "REFERENCE_BODY_END"
             (skill_dir / "SKILL.md").write_text(
-                "---\nname: Long Skill\ndescription: Complete content test\n---\n"
-                + "A" * 13000
-                + skill_tail,
+                "---\nname: Long Skill\ndescription: Complete content test\n---\n" + "A" * 13000 + skill_tail,
                 encoding="utf-8",
             )
             (skill_dir / "reference.md").write_text(
@@ -36,6 +34,26 @@ class LoadSkillContextTests(unittest.TestCase):
             self.assertIn(skill_tail, context)
             self.assertIn(reference_tail, context)
             self.assertGreater(len(context), 17000)
+
+    def test_skills_prompt_keeps_complete_trigger_description(self) -> None:
+        description = (
+            "Replicate formatting from a reference document. "
+            "Use when the user asks to strictly follow a graduation thesis template."
+        )
+        discovered = [
+            {
+                "name": "document-format-replication",
+                "folder": "document-format-replication",
+                "description": description,
+                "enabled": True,
+            }
+        ]
+
+        with patch.object(skills, "discover_skills", return_value=discovered):
+            prompt = skills.build_skills_prompt()
+
+        self.assertIn(description, prompt)
+        self.assertNotIn("...", prompt)
 
 
 class InstallSkillZipTests(unittest.TestCase):
@@ -122,13 +140,14 @@ class SyncBuiltinSkillsTests(unittest.TestCase):
             )
             set_enabled.assert_called_once_with("doc-helper", True)
 
-    def test_does_not_overwrite_existing_folder_or_reset_its_state(self) -> None:
+    def test_refreshes_existing_builtin_files_without_resetting_state(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir_str:
             temp_dir = Path(temp_dir_str)
             source_root = temp_dir / "builtin"
             skills_root = temp_dir / "skills"
             self._write_skill(source_root, "doc-helper", "doc-helper", "builtin")
-            existing = self._write_skill(skills_root, "DOC-HELPER", "custom-helper", "user content")
+            existing = self._write_skill(skills_root, "DOC-HELPER", "custom-helper", "old bundled content")
+            (existing / "user-notes.md").write_text("keep me", encoding="utf-8")
 
             with (
                 patch.object(skills, "get_builtin_skills_dir", return_value=source_root),
@@ -139,7 +158,8 @@ class SyncBuiltinSkillsTests(unittest.TestCase):
                 result = skills.sync_builtin_skills()
 
             self.assertEqual(result, {"copied": [], "skipped": ["doc-helper"], "invalid": []})
-            self.assertIn("user content", (existing / "SKILL.md").read_text(encoding="utf-8"))
+            self.assertIn("builtin", (existing / "SKILL.md").read_text(encoding="utf-8"))
+            self.assertEqual((existing / "user-notes.md").read_text(encoding="utf-8"), "keep me")
             set_enabled.assert_not_called()
 
     def test_skips_duplicate_frontmatter_name_and_invalid_directories(self) -> None:
@@ -169,6 +189,26 @@ class SyncBuiltinSkillsTests(unittest.TestCase):
             )
             self.assertFalse((skills_root / "builtin-folder").exists())
             set_enabled.assert_not_called()
+
+    def test_discovery_marks_bundled_skill_as_builtin(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir_str:
+            temp_dir = Path(temp_dir_str)
+            source_root = temp_dir / "builtin"
+            skills_root = temp_dir / "skills"
+            self._write_skill(source_root, "doc-helper", "Doc Helper", "bundled")
+            self._write_skill(skills_root, "doc-helper", "Doc Helper", "installed")
+            self._write_skill(skills_root, "user-helper", "User Helper", "custom")
+
+            with (
+                patch.object(skills, "get_builtin_skills_dir", return_value=source_root),
+                patch.object(skills, "_skills_root", return_value=skills_root),
+                patch.object(skills, "_load_skill_enable_map", return_value={}),
+            ):
+                discovered = skills.discover_skills(include_disabled=True)
+
+            by_folder = {str(item["folder"]): item for item in discovered}
+            self.assertTrue(by_folder["doc-helper"]["builtin"])
+            self.assertFalse(by_folder["user-helper"]["builtin"])
 
 
 class OpenSkillDirectoryTests(unittest.TestCase):

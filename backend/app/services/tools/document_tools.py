@@ -8,6 +8,7 @@ import json
 import re
 from datetime import datetime
 from pathlib import Path
+from typing import Literal
 from urllib.parse import unquote, urlparse
 from urllib.request import Request, urlopen
 
@@ -35,6 +36,7 @@ _MAX_DOC_JSON_CHARS = 100_000
 DocIdInput = int | str | None
 ParaIdInput = int | str | None
 RequiredParaIdInput = int | str
+BreakType = Literal["wdLineBreak", "wdPageBreak", "wdSectionBreakNextPage"]
 
 
 def _parse_int_like(value: object) -> int | None:
@@ -286,6 +288,9 @@ def _compact_doc_json(doc_json: dict) -> str:
         if not isinstance(p, dict):
             continue
         para_compact = {"paraIndex": p.get("paraIndex"), "paraID": p.get("paraID"), "runs": []}
+        if p.get("pageStart") is not None and p.get("pageEnd") is not None:
+            para_compact["pageStart"] = p["pageStart"]
+            para_compact["pageEnd"] = p["pageEnd"]
         for r in p.get("runs", []):
             if isinstance(r, dict):
                 if r.get("text") is not None:
@@ -680,6 +685,84 @@ def _delete_document_impl(paraIDs: list[int | str], docId: DocIdInput) -> str:
     return f"Frontend notified to delete paragraphs by paraIDs: {deduped_para_ids}"
 
 
+_BREAK_TYPES = {
+    "wdLineBreak": "仅换行（Shift+Enter）",
+    "wdPageBreak": "分页，下一页继续且保持页面设置",
+    "wdSectionBreakNextPage": "下一页分节，可独立设置页眉、页脚、页码和纸张方向",
+}
+
+
+def _insert_break_impl(paraID: RequiredParaIdInput, breakType: BreakType | str) -> str:
+    """在指定段落后插入换行、分页或下一页分节符。"""
+    normalized_para_id = _normalize_para_id(paraID)
+    if normalized_para_id is None:
+        raise ValueError("insert_break requires a valid integer paraID")
+
+    normalized_break_type = str(breakType or "").strip()
+    if normalized_break_type not in _BREAK_TYPES:
+        allowed = ", ".join(_BREAK_TYPES)
+        raise ValueError(f"insert_break breakType must be one of: {allowed}")
+
+    writer = get_stream_writer()
+    if writer:
+        writer(
+            {
+                "type": "insert_break",
+                "paraID": normalized_para_id,
+                "breakType": normalized_break_type,
+                "content": f"↩️ 已在段落 {normalized_para_id} 后插入{_BREAK_TYPES[normalized_break_type]}",
+            }
+        )
+    logger.info(
+        "[insert_break] 请求前端插入断行 (paraID=%s, breakType=%s)",
+        normalized_para_id,
+        normalized_break_type,
+    )
+    return f"Frontend notified to insert {normalized_break_type} break after paragraph {normalized_para_id}"
+
+
+def _create_document_impl() -> str:
+    """请求前端创建并打开一个新的空白 DOCX 文档。"""
+    writer = get_stream_writer()
+    if writer:
+        writer(
+            {
+                "type": "create_document",
+                "format": "docx",
+                "content": "📄 正在创建新的空白 DOCX 文档",
+            }
+        )
+    logger.info("[create_document] 请求前端创建并打开新的空白 DOCX 文档")
+
+    # 创建文档是异步的：如果后续紧接着调用 generate_document，必须等新文档
+    # 真正打开后再继续，否则内容可能误写入原活动文档。
+    chat_id = _current_chat_id.get(None)
+    if chat_id:
+        q = _pending_tool_requests.get(chat_id)
+        loop = _pending_loops.get(chat_id)
+        if q and loop:
+            future = asyncio.run_coroutine_threadsafe(
+                asyncio.wait_for(q.get(), timeout=60),
+                loop,
+            )
+            try:
+                result = future.result(timeout=65)
+                if result.get("type") == "stop" or result.get("error") == "stopped_by_user":
+                    return "Create document stopped by user"
+                if result.get("success") is False or result.get("error"):
+                    return f"Failed to create a new blank DOCX document: {result.get('error') or 'unknown frontend error'}"
+                document_id = result.get("documentId")
+                suffix = f" (documentId={document_id})" if document_id is not None else ""
+                return f"New blank DOCX document created and opened{suffix}"
+            except (TimeoutError, concurrent.futures.TimeoutError):
+                logger.warning("[create_document] ⏰ 等待前端创建新文档超时")
+                return "Frontend was notified to create a new blank DOCX document, but the frontend response timed out"
+            except Exception as e:
+                logger.error("[create_document] ❌ 等待前端创建结果失败: %s", e)
+
+    return "Frontend notified to create and open a new blank DOCX document"
+
+
 # endregion
 
 
@@ -706,7 +789,7 @@ def build_read_document(description: str):
             startParaID: Starting paragraph ID (int-like, supports signed numeric strings), used in paraID mode.
             endParaID: Ending paragraph ID (int-like), used in paraID mode. Defaults to startParaID.
             docId: Document ID (int-like). Positive/negative are both allowed. 0 means current active document.
-            mode: Read mode. "lightweight" reads paragraph text and IDs only. "full" reads text, styles, tables, and images.
+            mode: Read mode. "lightweight" reads paragraph text and IDs only. "full" reads text, styles, tables, images, and client-provided paragraph page ranges.
         """
         return _read_document_impl(startParaIndex, endParaIndex, startParaID, endParaID, docId, mode)
 
@@ -770,6 +853,28 @@ def build_delete_document(description: str):
     return delete_document
 
 
+def build_insert_break(description: str):
+    """根据传入的 description 构造 insert_break 工具实例。"""
+
+    @tool(description=description)
+    def insert_break(paraID: RequiredParaIdInput, breakType: BreakType) -> str:
+        """Insert a line, page, or next-page section break after a paragraph."""
+        return _insert_break_impl(paraID, breakType)
+
+    return insert_break
+
+
+def build_create_document(description: str):
+    """根据传入的 description 构造 create_document 工具实例。"""
+
+    @tool(description=description)
+    def create_document() -> str:
+        """Create and open a new blank DOCX document in the active Word/WPS application."""
+        return _create_document_impl()
+
+    return create_document
+
+
 # endregion
 
 
@@ -778,11 +883,15 @@ __all__ = [
     "build_generate_document",
     "build_search_document",
     "build_delete_document",
+    "build_insert_break",
+    "build_create_document",
     # 内部实现也导出，便于子智能体或测试直接复用
     "_read_document_impl",
     "_generate_document_impl",
     "_search_document_impl",
     "_delete_document_impl",
+    "_insert_break_impl",
+    "_create_document_impl",
     "_compact_doc_json",
     "_ensure_image_payload_shape",
 ]

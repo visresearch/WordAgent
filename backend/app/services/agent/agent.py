@@ -118,12 +118,23 @@ def _summarize_custom_event(chunk: Any) -> str:
         "search_document",
         "query_complete",
         "delete_document",
+        "insert_break",
+        "create_document",
         "generate_complete",
     }:
         content = chunk.get("content")
         if content:
             parts.append(str(content))
-        for key in ("docId", "insertParaID", "startParaIndex", "endParaIndex", "startParaID", "endParaID"):
+        for key in (
+            "docId",
+            "insertParaID",
+            "paraID",
+            "breakType",
+            "startParaIndex",
+            "endParaIndex",
+            "startParaID",
+            "endParaID",
+        ):
             if key in chunk and chunk.get(key) is not None:
                 parts.append(f"{key}={chunk.get(key)}")
     else:
@@ -480,6 +491,8 @@ def build_graph(llm_with_tools, all_tools: list):
                         "read_document",
                         "generate_document",
                         "delete_document",
+                        "insert_break",
+                        "create_document",
                         "list_file",
                         "read_file",
                         "edit_file",

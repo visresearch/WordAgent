@@ -59,6 +59,8 @@ _TOOL_USAGE_FILES = {
     "search_document": "system-prompt-tool-usage-search-document.md",
     "generate_document": "system-prompt-tool-usage-generate-document.md",
     "delete_document": "system-prompt-tool-usage-delete-document.md",
+    "insert_break": "system-prompt-tool-usage-insert-break.md",
+    "create_document": "system-prompt-tool-usage-create-document.md",
     "create_workflow": "system-prompt-tool-usage-create-workflow.md",
     "review_document": "system-prompt-tool-usage-review-document.md",
     "load_skill_context": "system-prompt-tool-usage-load-skill-context.md",
@@ -137,12 +139,17 @@ def get_agent_prompt(agent_name: str) -> str:
         ]
     elif agent_name == "writer":
         tool_prompts = [
+            _load_prompt_content(_TOOL_USAGE_FILES.get("load_skill_context", "")),
             _load_prompt_content(_TOOL_USAGE_FILES.get("read_document", "")),
             _load_prompt_content(_TOOL_USAGE_FILES.get("search_document", "")),
             _load_prompt_content(_TOOL_USAGE_FILES.get("generate_document", "")),
             _load_prompt_content(_TOOL_USAGE_FILES.get("delete_document", "")),
+            _load_prompt_content(_TOOL_USAGE_FILES.get("insert_break", "")),
+            _load_prompt_content(_TOOL_USAGE_FILES.get("create_document", "")),
             _load_prompt_content("system-prompt-default-recommend-document-style.md"),
         ]
+        if _skills_prompt_cache:
+            tool_prompts.append(_skills_prompt_cache)
     elif agent_name == "reviewer":
         tool_prompts = [
             _load_prompt_content(_TOOL_USAGE_FILES.get("review_document", "")),

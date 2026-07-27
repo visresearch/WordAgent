@@ -4,7 +4,11 @@
 
 ### Added
 - 添加CONTRIBUTING.md
+- 添加调整过后的内置skill
 - 前端添加中英文切换
+- read_document工具full模式返回值添加page信息
+- 添加insert_break工具，插入分页符
+- 添加create_document工具，创建新文档
 
 ### Changed
 - 更改temputure默认值和取值范围
@@ -18,6 +22,8 @@
 - 修复未定义的Microsoft word旧内容控件
 - 优化上下文压缩的系统提示词
 - 取消加载SKILL上下文最大限制截断
+- 修复空白段落的bug
+- 修复read_document工具没有读取到文档图片样式信息的问题
 
 ## [v0.5.2]
 

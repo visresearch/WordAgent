@@ -846,6 +846,10 @@ function executeLightweightTextQuery(query, docId = 0) {
 
   for (let i = 1; i <= totalParas && matches.length < MAX_MATCHES; i++) {
     const para = doc.Paragraphs.Item(i);
+    const paragraphId = getParagraphParaID(para);
+    if (paragraphId === null) {
+      continue;
+    }
     const text = cleanText(para?.Range?.Text || '');
     if (!text) {
       continue;
@@ -859,7 +863,7 @@ function executeLightweightTextQuery(query, docId = 0) {
     matches.push({
       text: text.substring(0, 200),
       paragraphIndex: i - 1,
-      paragraphId: getParagraphParaID(para, null)
+      paragraphId
     });
   }
 
@@ -890,15 +894,16 @@ async function parseDocumentRangeLightweight(doc, startParaIndex, endParaIndex) 
 
   for (let idx = startParaIndex; idx <= endParaIndex; idx++) {
     const para = doc.Paragraphs.Item(idx + 1);
-    const text = cleanText(para?.Range?.Text || '');
-    const paraID = getParagraphParaID(para, idx);
-
-    result.paragraphs.push({
-      pStyle: '',
-      runs: text ? [{ text, rStyle: '' }] : [],
-      paraIndex: idx,
-      paraID
-    });
+    const paraID = getParagraphParaID(para);
+    if (paraID !== null) {
+      const text = cleanText(para?.Range?.Text || '');
+      result.paragraphs.push({
+        pStyle: '',
+        runs: text ? [{ text, rStyle: '' }] : [],
+        paraIndex: idx,
+        paraID
+      });
+    }
 
     const parsed = idx - startParaIndex + 1;
     if (parsed % LIGHTWEIGHT_READ_CHUNK_SIZE === 0 && idx < endParaIndex) {
@@ -923,7 +928,7 @@ function resolveParaIDRangeToIndices(doc, startParaID, endParaID) {
 
   for (let i = 1; i <= totalParas; i++) {
     const para = doc.Paragraphs.Item(i);
-    const pid = getParagraphParaID(para, null);
+    const pid = getParagraphParaID(para);
     if (pid === startParaID && startIndex === -1) {
       startIndex = i - 1;
     }
@@ -1460,6 +1465,41 @@ async function deleteSkill(folder) {
   return response.data;
 }
 
+/**
+ * 创建并打开一个新的空白 DOCX 文档。
+ * WPS 的 Documents.Add 默认创建可保存为 DOCX 的空白文档。
+ */
+function createDocument() {
+  try {
+    const app = window.Application;
+    if (!app?.Documents?.Add) {
+      throw new Error('WPS 文档 API 不可用');
+    }
+    let document;
+    try {
+      // WdNewBlankDocument = 0；Visible=true，创建可保存为 DOCX 的空白文档。
+      document = app.Documents.Add('', false, 0, true);
+    } catch (firstError) {
+      // 兼容不接受可选参数的旧版 WPS API。
+      console.warn('[WPS] 带 DOCX 参数创建文档失败，回退到 Documents.Add():', firstError);
+      document = app.Documents.Add();
+    }
+    if (!document) {
+      throw new Error('WPS 未返回新文档对象');
+    }
+    try {
+      document?.Activate?.();
+    } catch (e) {
+      // 新文档通常已经是活动文档，Activate 失败不影响创建结果。
+    }
+    wsManager.clearDocumentCache();
+    return { success: true, documentId: document?.DocID ?? null };
+  } catch (error) {
+    console.error('[WPS] 创建新 DOCX 文档失败:', error);
+    return { success: false, error: error?.message || String(error) };
+  }
+}
+
 // ============== 导出 ==============
 
 export default {
@@ -1473,6 +1513,7 @@ export default {
 
   // WebSocket 管理
   wsManager,
+  createDocument,
 
   // 文件上传
   uploadFiles,
@@ -1527,6 +1568,7 @@ export {
   getDocumentById,
 
   wsManager,
+  createDocument,
 
   uploadFiles,
 

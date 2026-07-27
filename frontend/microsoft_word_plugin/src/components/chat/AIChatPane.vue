@@ -1048,6 +1048,43 @@ export default {
         return;
       }
 
+      // 后端请求创建并打开新的空白 DOCX 文档
+      if (data.type === 'create_document') {
+        const pendingPart = {
+          type: 'status',
+          content: t('chat.createDocumentPending'),
+          loading: true
+        };
+        msg.contentParts.push(pendingPart);
+        api.createDocument()
+          .then((result) => {
+            if (!result?.success) {
+              throw new Error(result?.error || 'Word 未返回新文档对象');
+            }
+            pendingPart.content = t('chat.createDocumentSuccess');
+            pendingPart.loading = false;
+            msg._docId = this._toIntOrDefault(result.documentId, 0);
+            api.wsManager.send({
+              type: 'create_document_response',
+              success: true,
+              documentId: msg._docId
+            }).catch((sendError) => console.warn('[AIChatPane] 回传新文档创建结果失败:', sendError));
+          })
+          .catch((error) => {
+            pendingPart.content = t('chat.createDocumentFailed', { error: error?.message || error });
+            pendingPart.loading = false;
+            console.error('[AIChatPane] 创建 Word 空白 DOCX 失败:', error);
+            api.wsManager.send({
+              type: 'create_document_response',
+              success: false,
+              error: error?.message || String(error)
+            }).catch((sendError) => console.warn('[AIChatPane] 回传新文档创建错误失败:', sendError));
+          })
+          .finally(() => this.scrollToBottom());
+        this.scrollToBottom();
+        return;
+      }
+
       // 生成文档中
       if (data.type === 'generate_document') {
         msg.contentParts.push({

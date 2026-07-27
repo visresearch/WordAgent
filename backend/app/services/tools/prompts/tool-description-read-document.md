@@ -14,4 +14,4 @@ Read a paragraph range from the Word document.
 - Skip if recent context already covers the needed range.
 - Provide either paraIndex range OR paraID range (prefer paraID when IDs are known).
 - Use `mode="lightweight"` for broad reading, outline/summary discovery, and understanding article text. It returns paragraph text plus paragraph indices/IDs, but no style, table, image, or character formatting detail.
-- Use `mode="full"` when you need precise style/layout information, tables/images, or when preparing to edit/rewrite content while preserving formatting.
+- Use `mode="full"` when you need precise style/layout information, tables/images, or when preparing to edit/rewrite content while preserving formatting. WPS full-mode paragraph objects also include `pageStart` and `pageEnd`, the 1-based pages containing the paragraph's first and last positions. Clients that cannot obtain native page information omit these fields.

@@ -1111,6 +1111,40 @@ function getConfig() {
   return { ...CONFIG };
 }
 
+/**
+ * 创建并打开一个新的空白 DOCX 文档。
+ * Office.js 通过 Word.Application.createDocument 创建临时文档，
+ * 再调用 DocumentCreated.open() 在 Word 中打开它。
+ */
+async function createDocument() {
+  try {
+    if (typeof Word === 'undefined' || typeof Word.run !== 'function') {
+      throw new Error('Microsoft Word API 不可用');
+    }
+
+    await Word.run(async (context) => {
+      const application = context.application;
+      if (typeof application.createDocument !== 'function') {
+        throw new Error('当前 Office.js 版本不支持创建新文档');
+      }
+
+      const createdDocument = application.createDocument();
+      await context.sync();
+      if (!createdDocument || typeof createdDocument.open !== 'function') {
+        throw new Error('Word 未返回可打开的新文档对象');
+      }
+      createdDocument.open();
+      await context.sync();
+    });
+
+    wsManager.clearDocumentCache();
+    return { success: true, documentId: 0 };
+  } catch (error) {
+    console.error('[Word] 创建新 DOCX 文档失败:', error);
+    return { success: false, error: error?.message || String(error) };
+  }
+}
+
 // ============== 导出 ==============
 
 export default {
@@ -1121,6 +1155,7 @@ export default {
   parseDocumentRange,
 
   wsManager,
+  createDocument,
 
   getSessions,
   createSession,
@@ -1163,6 +1198,7 @@ export {
   fetchAvailableModels,
   parseDocumentRange,
   wsManager,
+  createDocument,
   getSessions,
   createSession,
   getLatestSession,

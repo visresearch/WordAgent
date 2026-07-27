@@ -24,8 +24,10 @@ _SHARED_TOOL_PROMPT_FILES_AFTER_PROJECT = [
 _SHARED_TOOL_PROMPT_FILES = _SHARED_TOOL_PROMPT_FILES_BEFORE_PROJECT + _SHARED_TOOL_PROMPT_FILES_AFTER_PROJECT
 
 _AGENT_ONLY_TOOL_PROMPT_FILES = [
+    "system-prompt-tool-usage-create-document.md",
     "system-prompt-tool-usage-generate-document.md",
     "system-prompt-tool-usage-delete-document.md",
+    "system-prompt-tool-usage-insert-break.md",
     "system-prompt-tool-usage-python-repl.md",
 ]
 

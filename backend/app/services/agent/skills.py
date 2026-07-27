@@ -23,6 +23,18 @@ def _skills_root() -> Path:
     return get_skills_dir()
 
 
+def _builtin_skill_folders() -> set[str]:
+    """Return bundled skill folder names normalized for comparisons."""
+    source_root = get_builtin_skills_dir()
+    if not source_root.exists() or not source_root.is_dir():
+        return set()
+    return {
+        child.name.casefold()
+        for child in source_root.iterdir()
+        if child.is_dir() and _find_skill_file(child) is not None
+    }
+
+
 def sync_builtin_skills() -> dict[str, list[str]]:
     """Copy missing bundled skills into the shared user skills directory."""
     source_root = get_builtin_skills_dir()
@@ -31,7 +43,7 @@ def sync_builtin_skills() -> dict[str, list[str]]:
 
     skills_root = _skills_root()
     existing_folders = {
-        child.name.casefold()
+        child.name.casefold(): child
         for child in skills_root.iterdir()
         if child.is_dir()
     }
@@ -63,14 +75,21 @@ def sync_builtin_skills() -> dict[str, list[str]]:
 
         folder_key = source_dir.name.casefold()
         name_key = skill_name.casefold()
-        if folder_key in existing_folders or name_key in existing_names:
+        existing_dir = existing_folders.get(folder_key)
+        if existing_dir is not None:
+            # Bundled files are application-managed. Refresh them on upgrade while
+            # preserving the user's enable state and any unrelated extra files.
+            shutil.copytree(source_dir, existing_dir, dirs_exist_ok=True)
+            skipped.append(source_dir.name)
+            continue
+        if name_key in existing_names:
             skipped.append(source_dir.name)
             continue
 
         destination = skills_root / source_dir.name
         shutil.copytree(source_dir, destination)
         set_skill_enabled(source_dir.name, True)
-        existing_folders.add(folder_key)
+        existing_folders[folder_key] = destination
         existing_names.add(name_key)
         copied.append(source_dir.name)
 
@@ -192,6 +211,7 @@ def discover_skills(include_disabled: bool = True) -> list[dict[str, str | bool]
         return []
 
     enabled_map = _load_skill_enable_map()
+    builtin_folders = _builtin_skill_folders()
     result: list[dict[str, str | bool]] = []
     for child in sorted(root.iterdir(), key=lambda p: p.name.lower()):
         if not child.is_dir():
@@ -221,6 +241,7 @@ def discover_skills(include_disabled: bool = True) -> list[dict[str, str | bool]
                 "description": description,
                 "entry": str(skill_file),
                 "enabled": enabled,
+                "builtin": child.name.casefold() in builtin_folders,
             }
         )
 
@@ -311,8 +332,6 @@ def build_skills_prompt() -> str:
     ]
     for s in skills:
         desc = s["description"].strip() or "(no description)"
-        if len(desc) > 160:
-            desc = desc[:160] + "..."
         lines.append(f"- {s['name']} (folder: {s['folder']}): {desc}")
 
     lines.extend(
@@ -375,9 +394,7 @@ def install_skill_zip(zip_path: Path, original_filename: str | None = None) -> d
             None,
         )
         if existing_dir is not None:
-            raise SkillAlreadyExistsError(
-                f"Skill 已存在：{existing_dir.name}。请先删除该同名 Skill，再重新上传。"
-            )
+            raise SkillAlreadyExistsError(f"Skill 已存在：{existing_dir.name}。请先删除该同名 Skill，再重新上传。")
 
         try:
             uploaded_skill_text = skill_md_candidates[0].read_text(encoding="utf-8", errors="ignore")
@@ -394,9 +411,7 @@ def install_skill_zip(zip_path: Path, original_filename: str | None = None) -> d
             None,
         )
         if existing_skill is not None:
-            raise SkillAlreadyExistsError(
-                f"Skill 已存在：{existing_skill['name']}。请先删除该同名 Skill，再重新上传。"
-            )
+            raise SkillAlreadyExistsError(f"Skill 已存在：{existing_skill['name']}。请先删除该同名 Skill，再重新上传。")
 
         shutil.copytree(skill_root, dest_dir)
 

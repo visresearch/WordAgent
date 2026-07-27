@@ -52,10 +52,12 @@ def initialize_tool_registry() -> None:
 
     from app.services.agent.tools import (
         delete_document,
+        create_document,
         generate_document,
+        insert_break,
         read_document,
         search_document,
     )
 
-    for tool in [read_document, search_document, generate_document, delete_document]:
+    for tool in [read_document, search_document, create_document, generate_document, delete_document, insert_break]:
         register_tool(tool)

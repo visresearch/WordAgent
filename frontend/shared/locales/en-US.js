@@ -39,7 +39,8 @@ export default {
     toggle: 'Enable or disable skill', openFolder: 'Open skill folder', delete: 'Delete', loadFailed: 'Failed to load skills',
     zipOnly: 'Only ZIP archives are supported', uploadZipOnly: 'Only ZIP archives are supported', uploadSuccess: 'Skill uploaded', uploadFailed: 'Failed to upload skill',
     updateFailed: 'Failed to update skill status', deleteConfirm: 'Delete skill: {name}?', deleteSuccess: 'Skill deleted',
-    deleteFailed: 'Failed to delete skill', openFailed: 'Failed to open skill folder'
+    deleteFailed: 'Failed to delete skill', openFailed: 'Failed to open skill folder',
+    builtinDeleteDisabled: 'Built-in skills cannot be deleted'
   },
   model: {
     title: 'AI provider configuration', subtitle: 'Manage AI providers and models', configured: 'Configured providers',
@@ -128,7 +129,7 @@ export default {
     selectionRangeUnavailable: 'Could not determine the selection range', selectContentFirst: 'Select text, an image, or a table in the document first.',
     selectionFailed: 'Could not process the selected content: {error}', insertFailed: 'Insertion failed. Make sure a Word document is open.', unnamedDocument: 'Untitled document',
     searchComplete: 'Search complete', documentReadComplete: 'Document read complete', prepareDelete: 'Preparing to delete paragraph IDs ({ids})',
-    deleteComplete: 'Deletion complete', documentGenerated: 'Document generated', errorLabel: 'Error: {error}',
+    deleteComplete: 'Deletion complete', insertBreakSuccess: 'Document break inserted', insertBreakFailed: 'Failed to insert document break: {error}', createDocumentPending: 'Creating a new blank DOCX document', createDocumentSuccess: 'A new blank DOCX document was created and opened', createDocumentFailed: 'Failed to create a new DOCX document: {error}', documentGenerated: 'Document generated', errorLabel: 'Error: {error}',
     paragraphCount: '{count} paragraphs', tableCount: '{count} tables', pendingAddition: 'Pending addition', pendingDeletion: 'Pending deletion',
     input: {
       attachment: 'Attachment', removeFile: 'Remove file', paragraphRange: 'Paragraphs {start} - {end}', clearSelection: 'Clear selection',

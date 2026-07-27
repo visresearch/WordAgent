@@ -58,7 +58,7 @@
 </template>
 
 <script>
-import { generateDocxFromJSON, deleteDocxPara, getParagraphParaID } from '../js/docxJsonConverter.js';
+import { generateDocxFromJSON, deleteDocxPara, insertBreakAfterParagraph, getParagraphParaID } from '../js/docxJsonConverter.js';
 import api, { getDocumentById } from '../js/api.js';
 import ChatMessages from './ChatMessages.vue';
 import ChatInput from './ChatInput.vue';
@@ -1354,6 +1354,68 @@ export default {
         return;
       }
 
+      // 后端请求在活动文档中插入原生换行/分页/下一页分节符
+      if (data.type === 'insert_break') {
+        const paraID = this._toIntOrNull(data.paraID);
+        const breakType = data.breakType;
+        console.log('[AIChatPane] 后端请求插入断行:', { paraID, breakType });
+        const result = insertBreakAfterParagraph(paraID, breakType);
+        if (result.success) {
+          // 后续 search/read 必须重新读取，不能命中插入前的文档缓存。
+          api.wsManager.clearDocumentCache();
+          msg.contentParts.push({
+            type: 'status',
+            content: data.content || t('chat.insertBreakSuccess'),
+            loading: false
+          });
+        } else {
+          msg.contentParts.push({
+            type: 'status',
+            content: t('chat.insertBreakFailed', { error: result.error || t('common.unknownError') }),
+            loading: false
+          });
+          console.warn('[AIChatPane] 插入断行失败:', result.error);
+        }
+        this.scrollToBottom();
+        return;
+      }
+
+      // 后端请求创建并打开新的空白 DOCX 文档
+      if (data.type === 'create_document') {
+        const parts = msg.contentParts;
+        const pendingPart = {
+          type: 'status',
+          content: t('chat.createDocumentPending'),
+          loading: true
+        };
+        parts.push(pendingPart);
+        try {
+          const result = api.createDocument();
+          if (!result?.success) {
+            throw new Error(result?.error || 'WPS 未返回新文档对象');
+          }
+          pendingPart.content = t('chat.createDocumentSuccess');
+          pendingPart.loading = false;
+          msg._docId = this._toIntOrDefault(result.documentId, 0);
+          api.wsManager.send({
+            type: 'create_document_response',
+            success: true,
+            documentId: msg._docId
+          }).catch((error) => console.warn('[AIChatPane] 回传新文档创建结果失败:', error));
+        } catch (error) {
+          pendingPart.content = t('chat.createDocumentFailed', { error: error?.message || error });
+          pendingPart.loading = false;
+          console.error('[AIChatPane] 创建 WPS 空白 DOCX 失败:', error);
+          api.wsManager.send({
+            type: 'create_document_response',
+            success: false,
+            error: error?.message || String(error)
+          }).catch((sendError) => console.warn('[AIChatPane] 回传新文档创建错误失败:', sendError));
+        }
+        this.scrollToBottom();
+        return;
+      }
+
       if (data.type === 'generate_document') {
         console.log('[AIChatPane] 生成文档中...');
         msg.contentParts.push({
@@ -1963,7 +2025,7 @@ export default {
           const matchedParas = [];
           for (let pi = 1; pi <= pdDoc.Paragraphs.Count; pi++) {
             const para = pdDoc.Paragraphs.Item(pi);
-            const rawPid = getParagraphParaID(para, null);
+            const rawPid = getParagraphParaID(para);
             const pid = Number(rawPid);
             if (Number.isInteger(pid) && targetIds.has(pid)) {
               matchedParas.push(para);
@@ -2083,7 +2145,7 @@ export default {
         const targetSet = new Set(targets);
         for (let i = 1; i <= doc.Paragraphs.Count; i++) {
           const para = doc.Paragraphs.Item(i);
-          const rawPid = getParagraphParaID(para, null);
+          const rawPid = getParagraphParaID(para);
           const pid = Number(rawPid);
           if (Number.isInteger(pid) && targetSet.has(pid)) {
             this._rangeForDeleteMarking(para).Font.HighlightColorIndex = 0; // wdNoHighlight

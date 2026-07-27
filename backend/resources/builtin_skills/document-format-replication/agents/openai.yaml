@@ -1,0 +1,4 @@
+interface:
+  display_name: "Document Format Replication"
+  short_description: "Replicate a reference document format precisely"
+  default_prompt: "Use $document-format-replication to analyze my reference document and reproduce its formatting in a new Word document."

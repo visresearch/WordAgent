@@ -34,8 +34,7 @@ class ContextOverflowRetryTests(unittest.IsolatedAsyncioTestCase):
                     if not isinstance(node, ast.Try):
                         continue
                     handler_names = [
-                        handler.type.id if isinstance(handler.type, ast.Name) else None
-                        for handler in node.handlers
+                        handler.type.id if isinstance(handler.type, ast.Name) else None for handler in node.handlers
                     ]
                     if "ContextOverflowError" in handler_names and "Exception" in handler_names:
                         matching_handlers.append((node, handler_names))

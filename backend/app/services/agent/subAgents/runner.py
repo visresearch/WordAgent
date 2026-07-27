@@ -38,7 +38,7 @@ SUB_AGENT_TOOLS: dict[str, list[str]] = {
     "reviewer": ["read_document", "search_document"],
     "explore": ["read_document", "search_document"],
     "plan": ["read_document", "search_document"],
-    "general-purpose": ["read_document", "search_document", "generate_document", "delete_document"],
+    "general-purpose": ["read_document", "search_document", "create_document", "generate_document", "delete_document", "insert_break"],
 }
 
 
@@ -51,7 +51,9 @@ def _get_all_tools() -> dict[str, Any]:
     """获取所有可用工具。"""
     from app.services.agent.tools import (
         delete_document,
+        create_document,
         generate_document,
+        insert_break,
         read_document,
         search_document,
     )
@@ -60,7 +62,9 @@ def _get_all_tools() -> dict[str, Any]:
         "read_document": read_document,
         "search_document": search_document,
         "generate_document": generate_document,
+        "insert_break": insert_break,
         "delete_document": delete_document,
+        "create_document": create_document,
     }
 
 
