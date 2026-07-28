@@ -74,41 +74,6 @@
       </label>
     </div>
 
-    <!-- 校对显示模式 -->
-    <div class="setting-group">
-      <div class="group-title">
-        {{ $t('general.proofreadMode') }}
-      </div>
-      <div class="radio-group">
-        <label class="radio-item" :class="{ active: localSettings.proofreadMode === 'redblue' }">
-          <input
-            v-model="localSettings.proofreadMode"
-            type="radio"
-            value="redblue"
-            @change="emitChange"
-          />
-          <span class="radio-circle"></span>
-          <div class="radio-content">
-            <span class="radio-title">{{ $t('general.redblue') }}</span>
-            <span class="radio-desc">{{ $t('general.redblueDesc') }}</span>
-          </div>
-        </label>
-        <label class="radio-item" :class="{ active: localSettings.proofreadMode === 'revision' }">
-          <input
-            v-model="localSettings.proofreadMode"
-            type="radio"
-            value="revision"
-            @change="emitChange"
-          />
-          <span class="radio-circle"></span>
-          <div class="radio-content">
-            <span class="radio-title">{{ $t('general.revision') }}</span>
-            <span class="radio-desc">{{ $t('general.revisionDesc') }}</span>
-          </div>
-        </label>
-      </div>
-    </div>
-
     <!-- 网络代理 独立 section -->
     <div class="section-divider"></div>
 

@@ -19,6 +19,11 @@
   <Hosts>
     <Host Name="Document"/>
   </Hosts>
+  <Requirements>
+    <Sets DefaultMinVersion="1.6">
+      <Set Name="WordApi"/>
+    </Sets>
+  </Requirements>
   <DefaultSettings>
     <SourceLocation DefaultValue="https://localhost:3000/taskpane.html"/>
     <RequestedWidth>450</RequestedWidth>

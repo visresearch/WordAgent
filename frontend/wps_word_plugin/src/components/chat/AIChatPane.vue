@@ -59,12 +59,18 @@
 
 <script>
 import { generateDocxFromJSON, deleteDocxPara, insertBreakAfterParagraph, getParagraphParaID } from '../js/docxJsonConverter.js';
+import {
+  abortTrackedEdit,
+  beginTrackedEdit,
+  finishTrackedEdit,
+  hasRevisionBatch,
+  settleRevisionBatch
+} from '../js/revisionPreview.js';
 import api, { getDocumentById } from '../js/api.js';
 import ChatMessages from './ChatMessages.vue';
 import ChatInput from './ChatInput.vue';
 import SessionPane from './SessionPane.vue';
 import { sessionState } from '../../sessionState.js';
-import { settingsState } from '../../settingsState.js';
 import { t } from '../../i18n/index.js';
 
 export default {
@@ -102,8 +108,6 @@ export default {
       isWide: false,
       tokenStats: { current: 0, max: 200000, percentage: 0 },
       enableThinking: true,  // 是否启用深度思考
-      _proofreadModeInitialized: false,
-      _proofreadModeLoadPromise: null,
       _initializing: false   // 是否正在初始化，防止 ensureSession 创建重复会话
     };
   },
@@ -126,7 +130,6 @@ export default {
   mounted() {
     this.loadModels();
     this.initSessionAndLoadHistory();
-    this._loadProofreadMode();
     this._loadWenceTempDir();
 
     // 监听窗口宽度变化（600px 阈值）
@@ -382,6 +385,24 @@ export default {
           return;
         }
 
+        const pendingRevisionInsertions = this.pendingInsertions
+          .filter((item) => item.msg === msg && hasRevisionBatch(item._revisionBatchId))
+          .sort((a, b) => (b.insertStartPos ?? -1) - (a.insertStartPos ?? -1));
+        if (pendingRevisionInsertions.length > 0) {
+          for (const item of pendingRevisionInsertions) {
+            settleRevisionBatch(item._revisionBatchId, 'reject');
+            item._revisionBatchId = null;
+          }
+          this.pendingInsertions = this.pendingInsertions.filter((item) => item.msg !== msg);
+          msg._revisionBatchId = null;
+          msg.documentReverted = true;
+          if (this.pendingInsertions.length === 0) {
+            this.pendingDocument = null;
+            this.pendingDocumentMsg = null;
+          }
+          return;
+        }
+
         if (!msg.insertStartPos && msg.insertStartPos !== 0) {
           console.log('该消息没有可撤销的文档内容（可能还未输出到文档）');
           return;
@@ -392,16 +413,6 @@ export default {
         console.log(`准备删除插入范围: ${startPos} - ${endPos}`);
 
         try {
-          try {
-            const insertedRange = doc.Range(startPos, endPos);
-            while (insertedRange.Comments.Count > 0) {
-              insertedRange.Comments.Item(1).Delete();
-            }
-            console.log('删除批注完成');
-          } catch (commentErr) {
-            console.log('删除批注:', commentErr.message);
-          }
-
           const range = doc.Range(startPos, endPos);
           range.Delete();
 
@@ -430,6 +441,7 @@ export default {
         this.currentStreamCtrl.abort();
         this.currentStreamCtrl = null;
       }
+      this._createDeleteRevisions();
       this.isLoading = false;
     },
 
@@ -1151,6 +1163,7 @@ export default {
           } else {
             aiMsg.content = t('chat.networkError', { error: errMsg });
           }
+          this._createDeleteRevisions();
           this.isLoading = false;
           this._streamingSessionId = null;
           this.currentStreamCtrl = null;
@@ -1162,6 +1175,9 @@ export default {
         },
 
         onComplete: () => {
+          // 必须等本轮所有插入完成后再创建删除修订，避免新增内容落入
+          // 待删除段落的修订范围，确认时被一并删除。
+          this._createDeleteRevisions();
           this.isLoading = false;
           this._streamingSessionId = null;
 
@@ -1592,11 +1608,11 @@ export default {
         paraIDs,
         docId: docId,
         preview: t('chat.deletePreview', { ids: paraIDs.join(', ') }),
-        _commentAdded: false,
+        _revisionCreated: false,
         _markingMode: null
       });
-      // 立即标注删除内容（蓝色高亮/删除批注），但不立刻删除正文。
-      this._addDeleteComments(docId);
+      // 先记录删除意图。本轮所有新增完成后再创建删除 Revision，
+      // 避免替换文本被包含进旧段落的删除修订范围。
     },
 
     _applyImmediateInsertion(insItem) {
@@ -1608,9 +1624,12 @@ export default {
         return false;
       }
 
+      let trackedEdit = null;
       try {
+        trackedEdit = beginTrackedEdit(doc);
         const result = generateDocxFromJSON(insItem.documentJson, doc, insItem.insertParaID);
         if (!result || !result.success) {
+          abortTrackedEdit(trackedEdit);
           console.error('[AIChatPane] 即时插入失败:', result?.error || '(unknown)');
           return false;
         }
@@ -1628,6 +1647,16 @@ export default {
         insItem.insertStartPos = result.startPos;
         insItem.insertEndPos = result.endPos;
         insItem._alreadyInserted = true;
+        const revisionBatch = finishTrackedEdit(
+          trackedEdit,
+          { start: result.startPos, end: result.endPos },
+          'insert'
+        );
+        insItem._revisionBatchId = revisionBatch.batchId;
+        insItem._markingMode = revisionBatch.batchId ? 'revision' : 'revision-unavailable';
+        if (!revisionBatch.batchId) {
+          console.warn('[AIChatPane] WPS 未返回本次插入产生的 Revision，取消时将按插入范围回滚');
+        }
 
         // 记录本次流中已执行的插入，供后续 delete_document 做索引偏移
         const paraCount = (insItem.documentJson?.paragraphs || []).length;
@@ -1647,6 +1676,7 @@ export default {
           insItem.msg._docId = this._toIntOrDefault(insItem.docId, 0);
           insItem.msg._insertParaID = insItem.insertParaID;
           insItem.msg.documentJson = insItem.documentJson;
+          insItem.msg._revisionBatchId = insItem._revisionBatchId || null;
         }
         this.pendingInsertions.push(insItem);
         this.pendingDocumentMsg = insItem.msg || null;
@@ -1663,9 +1693,6 @@ export default {
           summary += `, ${t('chat.tableCount', { count: totalTableCount })}`;
         }
         this.pendingDocument = { preview: t('chat.generatedPending', { summary }) };
-        // 立即给新增内容标注（红色高亮/添加批注）
-        this._addInsertComment(doc, insItem, insItem.docId);
-
         console.log(
           '[AIChatPane] 文档已即时插入:',
           `docId=${this._toIntOrDefault(insItem.docId, 0)}`,
@@ -1674,6 +1701,7 @@ export default {
         );
         return true;
       } catch (e) {
+        abortTrackedEdit(trackedEdit);
         console.error('[AIChatPane] 即时插入异常:', e);
         return false;
       }
@@ -1683,46 +1711,28 @@ export default {
      * 一键确认所有待处理操作（删除 + 生成）
      */
     confirmPending() {
-      // 1) 先确认新增：仅清除新增标记，保留内容
-      // 必须先做这一步，避免后续删除正文导致 insertStartPos/insertEndPos 漂移而漏删批注。
-      const insertDocIds = new Set();
+      // 流异常结束或用户提前确认时，确保尚未创建的删除修订先被创建。
+      this._createDeleteRevisions();
+      // 先接受新增修订，再接受删除修订。
       for (const ins of this.pendingInsertions) {
-        const normalizedDocId = this._toIntOrDefault(ins.docId, 0);
-        insertDocIds.add(normalizedDocId);
         const doc = this._resolveTargetDoc(ins.docId);
         if (!doc) {
           continue;
         }
         try {
-          if (ins._markingMode === 'highlight') {
-            if (ins.insertStartPos !== undefined && ins.insertEndPos !== undefined) {
-              const range = doc.Range(ins.insertStartPos, ins.insertEndPos);
-              range.Font.HighlightColorIndex = 0;
+          if (ins._markingMode === 'revision' && hasRevisionBatch(ins._revisionBatchId)) {
+            const settled = settleRevisionBatch(ins._revisionBatchId, 'accept');
+            console.log('[AIChatPane] 已接受新增内容修订:', settled);
+            if (ins.msg) {
+              ins.msg._revisionBatchId = null;
             }
-          } else if (ins._markingMode === 'comment') {
-            this._removeCommentsByAuthorInRange(
-              doc,
-              '文策AI-添加',
-              ins.insertStartPos,
-              ins.insertEndPos,
-              { fallbackText: t('chat.pendingAddition') }
-            );
+            ins._revisionBatchId = null;
           }
         } catch (e) {
-          console.warn('[AIChatPane] confirmPending 清理新增标记失败:', e);
+          console.warn('[AIChatPane] 接受新增修订失败:', e);
         }
       }
 
-      // 兜底：按文档再清一次新增批注，覆盖“位置漂移”与“作者字段未正确写入”等偶发情况。
-      for (const docId of insertDocIds) {
-        const doc = this._resolveTargetDoc(docId);
-        if (!doc) {
-          continue;
-        }
-        this._removeCommentsByAuthorInRange(doc, '文策AI-添加', null, null, { fallbackText: t('chat.pendingAddition') });
-      }
-
-      // 2) 确认删除：按 paraID 删除（不依赖索引偏移）
       const deletes = [...this.pendingDeletes];
       for (const d of deletes) {
         const doc = this._resolveTargetDoc(d.docId);
@@ -1730,11 +1740,16 @@ export default {
           continue;
         }
         try {
-          // 先移除可视标记，再执行删除
-          if (d._markingMode === 'highlight') {
-            this._clearHighlightOnParaIDs(d.paraIDs, d.docId);
-          } else if (d._markingMode === 'comment') {
-            this._removeCommentsByAuthorInRange(doc, '文策AI-删除');
+          if (d._markingMode === 'revision' && hasRevisionBatch(d._revisionBatchId)) {
+            const settled = settleRevisionBatch(d._revisionBatchId, 'accept');
+            console.log('[AIChatPane] 已接受删除内容修订:', settled);
+            d._revisionBatchId = null;
+            continue;
+          }
+
+          if (d._markingMode === 'revision-unavailable') {
+            // 原生修订创建失败时已撤销预删除；确认阶段按普通删除执行。
+            console.warn('[AIChatPane] 原生删除修订不可用，确认时执行普通删除');
           }
           const result = deleteDocxPara(d.paraIDs, doc);
           console.log('[AIChatPane] confirmPending 删除结果:', result?.message || result?.error || '(unknown)');
@@ -1754,24 +1769,27 @@ export default {
      * 一键取消所有待处理操作（移除删除标记 + 撤销生成）
      */
     cancelPending() {
-      // 1) 取消删除：仅移除删除标记，不删正文
+      // 先拒绝删除修订以恢复原文。
       for (const pd of this.pendingDeletes) {
         const doc = this._resolveTargetDoc(pd.docId);
         if (!doc) {
           continue;
         }
         try {
-          if (pd._markingMode === 'highlight') {
-            this._clearHighlightOnParaIDs(pd.paraIDs, pd.docId);
-          } else if (pd._markingMode === 'comment') {
-            this._removeCommentsByAuthorInRange(doc, '文策AI-删除');
+          if (pd._markingMode === 'revision' && hasRevisionBatch(pd._revisionBatchId)) {
+            const settled = settleRevisionBatch(pd._revisionBatchId, 'reject');
+            console.log('[AIChatPane] 已拒绝删除内容修订:', settled);
+            pd._revisionBatchId = null;
+          } else if (pd._markingMode === 'revision-unavailable') {
+            // 原生修订创建失败时已撤销预删除，取消无需再修改正文。
+            console.warn('[AIChatPane] 原生删除修订不可用，已保留原文');
           }
         } catch (e) {
           console.warn('[AIChatPane] cancelPending 清理删除标记失败:', e);
         }
       }
 
-      // 2) 取消新增：移除新增标记并回滚新增正文（倒序，避免位置串扰）
+      // 再倒序拒绝新增修订，避免位置变化影响后续批次。
       const inserts = [...this.pendingInsertions].sort(
         (a, b) => (b.insertStartPos ?? -1) - (a.insertStartPos ?? -1)
       );
@@ -1781,17 +1799,16 @@ export default {
           continue;
         }
         try {
-          if (ins._markingMode === 'highlight') {
-            if (ins.insertStartPos !== undefined && ins.insertEndPos !== undefined) {
-              const range = doc.Range(ins.insertStartPos, ins.insertEndPos);
-              range.Font.HighlightColorIndex = 0;
-              range.Delete();
+          if (ins._markingMode === 'revision' && hasRevisionBatch(ins._revisionBatchId)) {
+            const settled = settleRevisionBatch(ins._revisionBatchId, 'reject');
+            console.log('[AIChatPane] 已拒绝新增内容修订:', settled);
+            if (ins.msg) {
+              ins.msg._revisionBatchId = null;
             }
-          } else if (ins._markingMode === 'comment') {
-            this._removeCommentsByAuthorInRange(doc, '文策AI-添加', ins.insertStartPos, ins.insertEndPos);
+            ins._revisionBatchId = null;
+          } else if (ins._markingMode === 'revision-unavailable') {
             if (ins.insertStartPos !== undefined && ins.insertEndPos !== undefined) {
-              const range = doc.Range(ins.insertStartPos, ins.insertEndPos);
-              range.Delete();
+              doc.Range(ins.insertStartPos, ins.insertEndPos).Delete();
             }
           }
         } catch (e) {
@@ -1805,45 +1822,6 @@ export default {
       this.pendingDocumentMsg = null;
       this._streamInsertions = [];
       console.log('用户取消了所有待确认标记与操作');
-    },
-
-    _removeCommentsByAuthorInRange(doc, author, startPos = null, endPos = null, options = {}) {
-      const fallbackText = typeof options?.fallbackText === 'string' ? options.fallbackText : '';
-      try {
-        const comments = doc.Comments;
-        for (let i = comments.Count; i >= 1; i--) {
-          const comment = comments.Item(i);
-          let authorMatched = true;
-          if (author) {
-            authorMatched = comment.Author === author;
-          }
-
-          let textMatched = false;
-          if (fallbackText) {
-            try {
-              const cText = String(comment?.Range?.Text || '');
-              textMatched = cText.includes(fallbackText);
-            } catch (e) {
-              textMatched = false;
-            }
-          }
-
-          if (!authorMatched && !textMatched) {
-            continue;
-          }
-          if (startPos === null || endPos === null) {
-            comment.Delete();
-            continue;
-          }
-          const scope = comment.Scope;
-          const overlap = !(scope.End < startPos || scope.Start > endPos);
-          if (overlap) {
-            comment.Delete();
-          }
-        }
-      } catch (e) {
-        console.warn('[AIChatPane] 删除批注失败:', e);
-      }
     },
 
     /**
@@ -1863,111 +1841,29 @@ export default {
         }
 
         // 执行文档插入
+        let trackedEdit = null;
+        trackedEdit = beginTrackedEdit(doc);
         const result = generateDocxFromJSON(ins.documentJson, doc, ins.insertParaID);
         if (result.success) {
           console.log('[AIChatPane] 文档已插入, docId:', ins.docId, ', 范围:', result.startPos, '-', result.endPos);
           ins.insertStartPos = result.startPos;
           ins.insertEndPos = result.endPos;
 
-          // 为该插入内容添加批注
-          await this._addInsertComment(doc, ins, ins.docId);
+          const revisionBatch = finishTrackedEdit(
+            trackedEdit,
+            { start: result.startPos, end: result.endPos },
+            'insert'
+          );
+          ins._revisionBatchId = revisionBatch.batchId;
+          ins._markingMode = revisionBatch.batchId ? 'revision' : 'revision-unavailable';
         } else {
+          abortTrackedEdit(trackedEdit);
           console.error('[AIChatPane] 文档插入失败:', result.error);
         }
       }
 
       // 清理待处理列表
       this.pendingInsertions = [];
-    },
-
-    /**
-     * 为单个插入操作添加批注
-     * @param {Object} doc - 文档对象
-     * @param {Object} ins - 插入项 {insertStartPos, insertEndPos, docId}
-     * @param {string|null} docId - 文档 ID
-     */
-    async _addInsertComment(doc, ins, docId = null) {
-      if (!doc || ins.insertStartPos === null || ins.insertEndPos === null) {
-        return;
-      }
-
-      const mode = await this._getProofreadMode();
-      try {
-        const insertedRange = doc.Range(ins.insertStartPos, ins.insertEndPos);
-        if (mode === 'redblue') {
-          insertedRange.Font.HighlightColorIndex = 5; // wdPink (浅红)
-          ins._markingMode = 'highlight';
-          console.log('[AIChatPane] 已为插入内容添加浅红色高亮, docId:', docId);
-        } else {
-          try {
-            const comment = doc.Comments.Add(insertedRange, t('chat.pendingAddition'));
-            comment.Author = '文策AI-添加';
-            ins._markingMode = 'comment';
-            console.log('[AIChatPane] 已为插入内容添加批注, docId:', docId);
-          } catch (commentErr) {
-            // 批注失败，降级到高亮
-            insertedRange.Font.HighlightColorIndex = 5;
-            ins._markingMode = 'highlight';
-            console.warn('[AIChatPane] 批注失败，降级到浅红色高亮:', commentErr);
-          }
-        }
-        try {
-          insertedRange.Select();
-          const activeWindow = window.Application?.ActiveWindow;
-          if (activeWindow?.ScrollIntoView) {
-            activeWindow.ScrollIntoView(insertedRange, true);
-          }
-        } catch (revealErr) {
-          void revealErr;
-        }
-      } catch (e) {
-        console.warn('[AIChatPane] 添加插入批注失败:', e);
-      }
-    },
-
-    /**
-     * 统一添加所有待处理批注（在 insertToWord 完成后调用）
-     * @param {Object} insertMsg - 插入的消息对象
-     * @param {string|null} docId - 文档 ID，null 表示活动文档
-     */
-    async _addAllPendingComments(insertMsg, docId = null) {
-      const mode = await this._getProofreadMode();
-      const doc = Number.isInteger(docId) ? getDocumentById(docId) : window.Application.ActiveDocument;
-      if (!doc) {
-        console.warn('[AIChatPane] _addAllPendingComments: 无法获取文档对象');
-        return;
-      }
-      // 为生成的内容添加标注（使用 insertToWord 记录的范围）
-      if (insertMsg && insertMsg.insertStartPos !== undefined && insertMsg.insertEndPos !== undefined) {
-        try {
-          if (doc) {
-            const insertedRange = doc.Range(insertMsg.insertStartPos, insertMsg.insertEndPos);
-            if (mode === 'redblue') {
-              // 红蓝高亮模式：红色 = 添加
-              insertedRange.Font.HighlightColorIndex = 5; // wdPink (浅红)
-              insertMsg._markingMode = 'highlight';
-              console.log('[AIChatPane] 已为生成内容添加浅红色高亮');
-            } else {
-              // 修订模式：使用批注
-              try {
-                const comment = doc.Comments.Add(insertedRange, t('chat.pendingAddition'));
-                comment.Author = '文策AI-添加';
-                insertMsg._markingMode = 'comment';
-                console.log('[AIChatPane] 已为生成内容添加批注');
-              } catch (commentErr) {
-                // 批注失败，降级到高亮
-                insertedRange.Font.HighlightColorIndex = 5; // wdPink (浅红)
-                insertMsg._markingMode = 'highlight';
-                console.warn('[AIChatPane] 批注失败，降级到浅红色高亮:', commentErr);
-              }
-            }
-          }
-        } catch (e) {
-          console.warn('添加生成标注失败:', e);
-        }
-      }
-      // 为待删除内容添加标注（使用相同的 docId）
-      await this._addDeleteComments(docId);
     },
 
     /**
@@ -1994,8 +1890,7 @@ export default {
      * 为待删除内容添加标注（按 paraID）
      * @param {number|null} docId - 文档 ID，null 表示活动文档
      */
-    async _addDeleteComments(docId = null) {
-      const mode = await this._getProofreadMode();
+    _createDeleteRevisions(docId = null) {
       const doc = Number.isInteger(docId) ? getDocumentById(docId) : window.Application.ActiveDocument;
       if (!doc) {
         return;
@@ -2009,7 +1904,7 @@ export default {
         );
 
       for (const pd of this.pendingDeletes) {
-        if (pd._commentAdded) {
+        if (pd._revisionCreated) {
           continue;
         }
         try {
@@ -2035,64 +1930,68 @@ export default {
             continue;
           }
 
-          if (mode === 'redblue') {
-            // 红蓝高亮模式：蓝色 = 删除
-            for (const para of matchedParas) {
-              this._rangeForDeleteMarking(para).Font.HighlightColorIndex = 3; // wdTurquoise (浅蓝)
+          // 立即在 TrackRevisions 下执行删除，保留为待接受/拒绝的 Revision。
+          let trackedEdit = null;
+          let deleteResult = null;
+          try {
+            const targetRange = matchedParas.reduce(
+              (bounds, para) => {
+                const range = this._rangeForDeleteMarking(para);
+                return {
+                  start: Math.min(bounds.start, Number(range.Start)),
+                  end: Math.max(bounds.end, Number(range.End))
+                };
+              },
+              { start: Number.POSITIVE_INFINITY, end: Number.NEGATIVE_INFINITY }
+            );
+            trackedEdit = beginTrackedEdit(pdDoc);
+            deleteResult = deleteDocxPara([...targetIds], pdDoc);
+            if (!deleteResult?.success) {
+              abortTrackedEdit(trackedEdit);
+              throw new Error(deleteResult?.message || '删除段落失败');
             }
-            pd._commentAdded = true;
-            pd._markingMode = 'highlight';
-            console.log('[AIChatPane] 已添加删除浅蓝色高亮(paraIDs:', [...targetIds], ')');
-          } else {
-            // 修订模式：使用批注
-            try {
-              for (const para of matchedParas) {
-                const deleteRange = this._rangeForDeleteMarking(para);
-                const comment = pdDoc.Comments.Add(deleteRange, t('chat.pendingDeletion'));
-                comment.Author = '文策AI-删除';
+
+            const revisionBatch = finishTrackedEdit(trackedEdit, targetRange, 'delete');
+            pd._revisionCreated = true;
+            pd._revisionBatchId = revisionBatch.batchId;
+            pd._markingMode = revisionBatch.batchId ? 'revision' : 'revision-unavailable';
+
+            if (revisionBatch.batchId) {
+              console.log(
+                '[AIChatPane] 已创建原生删除修订(paraIDs:',
+                [...targetIds],
+                ', revisions:',
+                revisionBatch.revisionCount,
+                ')'
+              );
+            } else {
+              // 不允许静默降级到批注或红蓝高亮。撤回已经执行的删除，
+              // 让确认操作仍可按普通删除完成，取消则保留原文。
+              const undoCount = Number(deleteResult.deletedCount) || 1;
+              try {
+                window.Application.Undo(undoCount);
+              } catch (undoError) {
+                console.error('[AIChatPane] 原生修订创建失败且撤销删除失败:', undoError);
               }
-              pd._commentAdded = true;
-              pd._markingMode = 'comment';
-              console.log('[AIChatPane] 已添加删除标记批注(paraIDs:', [...targetIds], ')');
-            } catch (commentErr) {
-              // 批注失败，降级到高亮
-              for (const para of matchedParas) {
-                this._rangeForDeleteMarking(para).Font.HighlightColorIndex = 3; // wdTurquoise (浅蓝)
-              }
-              pd._commentAdded = true;
-              pd._markingMode = 'highlight';
-              console.warn('[AIChatPane] 批注失败，降级到浅蓝色高亮:', commentErr);
+              console.warn('[AIChatPane] WPS 未返回删除 Revision，已撤销预删除且不使用批注/高亮降级');
             }
+          } catch (revisionError) {
+            abortTrackedEdit(trackedEdit);
+            if (deleteResult?.success) {
+              try {
+                window.Application.Undo(Number(deleteResult.deletedCount) || 1);
+              } catch (undoError) {
+                console.error('[AIChatPane] 创建修订失败后撤销删除失败:', undoError);
+              }
+            }
+            pd._revisionCreated = true;
+            pd._markingMode = 'revision-unavailable';
+            console.warn('[AIChatPane] 创建 WPS 原生删除修订失败:', revisionError);
           }
         } catch (e) {
           console.warn('[AIChatPane] 标记删除段落失败:', e);
         }
       }
-    },
-
-    /**
-     * 加载校对模式设置
-     */
-    async _loadProofreadMode() {
-      if (this._proofreadModeLoadPromise) {
-        return this._proofreadModeLoadPromise;
-      }
-
-      this._proofreadModeLoadPromise = (async () => {
-        try {
-          const data = await api.getSettings();
-          if (data && data.proofreadMode) {
-            settingsState.proofreadMode = data.proofreadMode;
-            this._proofreadModeInitialized = true;
-          }
-        } catch (e) {
-          console.warn('加载校对模式设置失败:', e);
-        } finally {
-          this._proofreadModeLoadPromise = null;
-        }
-      })();
-
-      return this._proofreadModeLoadPromise;
     },
 
     /**
@@ -2111,48 +2010,6 @@ export default {
         } catch {}
       } catch (e) {
         console.warn('加载图片临时目录失败:', e);
-      }
-    },
-
-    /**
-     * 获取当前校对模式（确保已加载）
-     * @returns {Promise<'revision'|'redblue'>}
-     */
-    async _getProofreadMode() {
-      if (!this._proofreadModeInitialized) {
-        await this._loadProofreadMode();
-      }
-      return settingsState.proofreadMode === 'redblue' ? 'redblue' : 'revision';
-    },
-
-    /**
-     * 清除指定 paraIDs 对应段落的高亮
-     * @param {number[]} paraIDs - 段落ID数组
-     * @param {number|null} docId - 文档 ID，null 表示活动文档
-     */
-    _clearHighlightOnParaIDs(paraIDs, docId = null) {
-      try {
-        const doc = Number.isInteger(docId) ? getDocumentById(docId) : window.Application.ActiveDocument;
-        if (!doc) {
-          return;
-        }
-        const targets = Array.isArray(paraIDs)
-          ? paraIDs.map(v => Number(v)).filter(v => Number.isInteger(v))
-          : [];
-        if (!targets.length) {
-          return;
-        }
-        const targetSet = new Set(targets);
-        for (let i = 1; i <= doc.Paragraphs.Count; i++) {
-          const para = doc.Paragraphs.Item(i);
-          const rawPid = getParagraphParaID(para);
-          const pid = Number(rawPid);
-          if (Number.isInteger(pid) && targetSet.has(pid)) {
-            this._rangeForDeleteMarking(para).Font.HighlightColorIndex = 0; // wdNoHighlight
-          }
-        }
-      } catch (e) {
-        console.warn('[AIChatPane] 清除高亮失败:', e);
       }
     },
 
@@ -2212,7 +2069,15 @@ export default {
           msg.docLengthBefore = doc.Content.End;
           console.log('记录插入前文档长度:', msg.docLengthBefore);
 
-          const result = generateDocxFromJSON(jsonData, doc, insertParaID);
+          let trackedEdit = null;
+          let result;
+          try {
+            trackedEdit = beginTrackedEdit(doc);
+            result = generateDocxFromJSON(jsonData, doc, insertParaID);
+          } catch (revisionError) {
+            abortTrackedEdit(trackedEdit);
+            throw revisionError;
+          }
 
           if (result.success) {
             console.log('带格式的文档内容已成功插入');
@@ -2222,8 +2087,34 @@ export default {
             msg.insertEndPos = result.endPos;
             console.log('记录插入范围用于撤销:', msg.insertStartPos, '-', msg.insertEndPos);
 
-            // 批注将在 _addAllPendingComments 中统一添加
+            const revisionBatch = finishTrackedEdit(
+              trackedEdit,
+              { start: result.startPos, end: result.endPos },
+              'insert'
+            );
+            const pendingItem = {
+              documentJson: jsonData,
+              docId: this._toIntOrDefault(docId, 0),
+              insertParaID,
+              msg,
+              insertStartPos: result.startPos,
+              insertEndPos: result.endPos,
+              _alreadyInserted: true,
+              _revisionBatchId: revisionBatch.batchId,
+              _markingMode: revisionBatch.batchId ? 'revision' : 'revision-unavailable'
+            };
+            msg._revisionBatchId = revisionBatch.batchId;
+            this.pendingInsertions.push(pendingItem);
+            this.pendingDocumentMsg = msg;
+            const paragraphCount = (jsonData.paragraphs || []).length;
+            const tableCount = (jsonData.tables || []).length;
+            let summary = t('chat.paragraphCount', { count: paragraphCount });
+            if (tableCount > 0) {
+              summary += `, ${t('chat.tableCount', { count: tableCount })}`;
+            }
+            this.pendingDocument = { preview: t('chat.generatedPending', { summary }) };
           } else {
+            abortTrackedEdit(trackedEdit);
             console.error('生成文档失败:', result.error);
             this.insertPlainText(content);
           }
