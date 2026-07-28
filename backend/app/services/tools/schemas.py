@@ -47,9 +47,8 @@ class Paragraph(BaseModel):
     pStyle: str = Field(
         description=(
             'Paragraph style reference ID, e.g. "pS_1", mapped to document.styles["pS_1"]. '
-            "Required for every non-empty paragraph. Use an empty string only for a blank paragraph whose runs array is empty."
-        ),
-        default="",
+            "Required and non-empty for every paragraph, including blank paragraphs whose runs array is empty."
+        )
     )
     runs: list[Run] = Field(
         description="Array of runs. A paragraph can contain multiple runs with different formatting."
@@ -65,10 +64,10 @@ class Paragraph(BaseModel):
     )
 
     @model_validator(mode="after")
-    def validate_empty_paragraph_shape(self):
-        """If runs is empty, paragraph is considered blank and pStyle must be empty."""
-        if not self.runs and self.pStyle != "":
-            raise ValueError("Blank paragraph requires empty pStyle when runs is an empty array")
+    def validate_paragraph_style(self):
+        """Every paragraph, including a blank one, must reference a paragraph style."""
+        if not self.pStyle.strip():
+            raise ValueError("Every paragraph requires a non-empty pStyle, including paragraphs with runs=[]")
         return self
 
 
@@ -82,7 +81,7 @@ class CellParagraph(BaseModel):
         ),
         default="",
     )
-    pStyle: str = Field(description='Paragraph style reference ID, e.g. "pS_1"', default="")
+    pStyle: str = Field(description='Required non-empty paragraph style reference ID, e.g. "pS_1"')
     rStyle: str | None = Field(
         default=None,
         description=(
@@ -94,6 +93,12 @@ class CellParagraph(BaseModel):
         description="Array of runs. A cell paragraph can contain multiple runs with different formatting.",
         default_factory=list,
     )
+
+    @model_validator(mode="after")
+    def validate_paragraph_style(self):
+        if not self.pStyle.strip():
+            raise ValueError("Every table-cell paragraph requires a non-empty pStyle")
+        return self
 
 
 class Cell(BaseModel):
@@ -146,11 +151,24 @@ class Table(BaseModel):
     )
 
 
-class DocumentOutput(BaseModel):
-    """Document output schema. paragraphs and tables are independent top-level fields."""
+class TableBlock(BaseModel):
+    """A table block rendered at its exact position in the ordered paragraphs array."""
 
-    paragraphs: list[Paragraph] = Field(description="Paragraph array; every item must be a Paragraph object")
-    tables: list[Table] = Field(default_factory=list, description="Table array; every item must be a Table object")
+    tables: list[Table] = Field(
+        description="One or more tables rendered here in list order",
+        min_length=1,
+    )
+
+
+class DocumentOutput(BaseModel):
+    """Document output schema whose paragraphs array is an ordered block stream."""
+
+    paragraphs: list[Paragraph | TableBlock] = Field(
+        description=(
+            "Ordered content blocks. Each item is either a paragraph {pStyle, runs} or a table block "
+            "{tables: [Table, ...]}. A table block is rendered exactly between its neighboring items."
+        )
+    )
     styles: dict[str, list] = Field(
         description="Style dictionary (required). Key is style ID (e.g. pS_1, rS_1, cS_1, tS_1); value is style array."
         " Must include all styles referenced by pStyle/rStyle/cStyle/tStyle.\n"
@@ -164,20 +182,20 @@ class DocumentOutput(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def filter_invalid_paragraphs(cls, data):
-        """Filter invalid items from paragraphs."""
+    def normalize_ordered_blocks(cls, data):
+        """Filter invalid items and preserve explicit table blocks."""
+        if isinstance(data, dict) and "tables" in data:
+            raise ValueError('Top-level "tables" is no longer supported; place {"tables": [...]} blocks in paragraphs')
         if isinstance(data, dict) and "paragraphs" in data:
             cleaned = []
-            for p in data["paragraphs"]:
-                if isinstance(p, Paragraph):
-                    cleaned.append(p)
-                elif isinstance(p, dict):
-                    # 跳过没有 runs 的非法段落
-                    if "runs" not in p:
-                        continue
-                    cleaned.append(p)
-                # 跳过字符串等非法类型
-            data["paragraphs"] = cleaned
+            for block in data["paragraphs"]:
+                if isinstance(block, (Paragraph, TableBlock)):
+                    cleaned.append(block)
+                elif isinstance(block, dict) and "tables" in block:
+                    cleaned.append(TableBlock.model_validate(block))
+                elif isinstance(block, dict) and "runs" in block:
+                    cleaned.append(block)
+            return {**data, "paragraphs": cleaned}
         return data
 
     @model_validator(mode="after")
@@ -186,35 +204,33 @@ class DocumentOutput(BaseModel):
         style_keys = set(self.styles.keys())
         missing: set[str] = set()
 
-        for para in self.paragraphs:
-            if not para.runs:
+        for block in self.paragraphs:
+            if isinstance(block, Paragraph):
+                if not block.pStyle:
+                    raise ValueError("Every paragraph must use a defined non-empty pStyle, including blank paragraphs")
+                if block.pStyle not in style_keys:
+                    missing.add(block.pStyle)
+                for run in block.runs:
+                    if run.rStyle and run.rStyle not in style_keys:
+                        missing.add(run.rStyle)
                 continue
-            if not para.pStyle:
-                raise ValueError(
-                    'Non-empty paragraphs must use a defined pStyle such as "pS_3"; pStyle="" is only allowed when runs=[]'
-                )
-            if para.pStyle not in style_keys:
-                missing.add(para.pStyle)
-            for run in para.runs:
-                if run.rStyle and run.rStyle not in style_keys:
-                    missing.add(run.rStyle)
 
-        for table in self.tables:
-            if table.tStyle not in style_keys:
-                missing.add(table.tStyle)
-            for row in table.cells:
-                for cell in row:
-                    if cell.cStyle not in style_keys:
-                        missing.add(cell.cStyle)
-                    if cell.rStyle and cell.rStyle not in style_keys:
-                        missing.add(cell.rStyle)
-                    if cell.paragraphs:
-                        for cp in cell.paragraphs:
-                            if cp.pStyle and cp.pStyle not in style_keys:
-                                missing.add(cp.pStyle)
-                            for run in cp.runs:
-                                if run.rStyle and run.rStyle not in style_keys:
-                                    missing.add(run.rStyle)
+            for table in block.tables:
+                if table.tStyle not in style_keys:
+                    missing.add(table.tStyle)
+                for row in table.cells:
+                    for cell in row:
+                        if cell.cStyle not in style_keys:
+                            missing.add(cell.cStyle)
+                        if cell.rStyle and cell.rStyle not in style_keys:
+                            missing.add(cell.rStyle)
+                        if cell.paragraphs:
+                            for cp in cell.paragraphs:
+                                if cp.pStyle not in style_keys:
+                                    missing.add(cp.pStyle)
+                                for run in cp.runs:
+                                    if run.rStyle and run.rStyle not in style_keys:
+                                        missing.add(run.rStyle)
 
         if missing:
             refs = ", ".join(sorted(missing))

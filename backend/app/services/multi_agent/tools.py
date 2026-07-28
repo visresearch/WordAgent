@@ -73,7 +73,15 @@ edit_file = build_edit_file(get_tool_description("edit_file"))
 
 PLANNER_TOOLS = [create_workflow]
 OUTLINE_TOOLS = [read_document, search_document]
-WRITER_TOOLS = [load_skill_context, read_document, search_document, create_document, generate_document, delete_document, insert_break]
+WRITER_TOOLS = [
+    load_skill_context,
+    read_document,
+    search_document,
+    create_document,
+    generate_document,
+    delete_document,
+    insert_break,
+]
 REVIEWER_TOOLS = [review_document]
 # Research and Writer can load skills; MCP tools are added to Research at runtime.
 RESEARCH_TOOLS = [load_skill_context, list_file, read_file, edit_file]

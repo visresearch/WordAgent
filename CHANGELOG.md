@@ -14,10 +14,12 @@
 ### Changed
 - 更改temputure默认值和取值范围
 - 更新所有py依赖
-- 更新所有node依赖
+- 更新所有node依赖部分
 - 更新官网web文档
 - 将WPS红蓝批注改为原生的修订模式
 - 将Microsoft Word红蓝高亮修改为原生的修订模式
+- 修改generate_document工具schema中table字段，把table放到了paragraphs的中间，用来表示表格是段落的一部分，表示表格在段落中的位置(read_document工具的json schema未修改)
+- 规定空段落也必须要有pStyle
 
 ### Fixed
 - 修复上下文溢出重试的bug
@@ -29,6 +31,7 @@
 - 修复read_document工具没有读取到文档图片样式信息的问题
 - 修复insertParaID参数为0时的规则，不再只允许空文章
 - 修复换行换页导致的锚点定位错误的bug
+- 同步修复删除工具的提示词，取消pending删除段落机制，删除段落在修订模式下立即生效
 
 ## [v0.5.2]
 

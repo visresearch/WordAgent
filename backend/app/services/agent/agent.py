@@ -93,11 +93,20 @@ def _summarize_custom_event(chunk: Any) -> str:
     if event_type == "json":
         content = chunk.get("content")
         if isinstance(content, dict):
-            paragraphs = content.get("paragraphs")
-            tables = content.get("tables")
+            blocks = content.get("paragraphs")
             styles = content.get("styles")
-            parts.append(f"paragraphs={len(paragraphs) if isinstance(paragraphs, list) else 0}")
-            parts.append(f"tables={len(tables) if isinstance(tables, list) else 0}")
+            paragraphs = (
+                [block for block in blocks if isinstance(block, dict) and "runs" in block]
+                if isinstance(blocks, list)
+                else []
+            )
+            table_count = sum(
+                len(block.get("tables", []))
+                for block in blocks or []
+                if isinstance(block, dict) and isinstance(block.get("tables"), list)
+            )
+            parts.append(f"paragraphs={len(paragraphs)}")
+            parts.append(f"tables={table_count}")
             parts.append(f"styles={len(styles) if isinstance(styles, dict) else 0}")
             if "insertParaID" in content:
                 parts.append(f"insertParaID={content.get('insertParaID')}")

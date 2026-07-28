@@ -1,14 +1,14 @@
 ## generate_document Usage Policy
 
 - Use for content creation/insertion; do not use for delete-only or analysis-only tasks.
-- For rewrite/polish/translate: `read_document` if needed, `delete_document` old range, then `generate_document` replacement at the same index.
+- For rewrite/polish/translate: `read_document` if needed, call `delete_document` for the old range, then use its returned `replacementInsertParaID` as the replacement `generate_document.insertParaID`.
 - Output only changed/new content; never re-generate unchanged full documents.
 - Long output: split into ordered batches and keep insertion order deterministic.
 - Keep original style intent unless the user asks for formatting changes.
 - Validate before calling: raw object payload, complete `styles`, valid style references, correct `insertParaID`.
 - The tool call arguments must be one balanced JSON object. Do not add an extra `}` or `]` after the final field.
 - Style reference closure is mandatory: every non-empty `pStyle`, `rStyle`, `cStyle`, and `tStyle` used anywhere in the payload must exist as a key in `document.styles`.
-- Never use `pStyle: ""` for paragraphs containing text or images. Empty `pStyle` is only valid for a blank paragraph with `runs: []`.
+- Every paragraph, including a blank paragraph with `runs: []`, must use a non-empty `pStyle` defined in `document.styles`. Never use `pStyle: ""`.
 - For ordinary body paragraphs, use `pS_3` with `rS_2` unless the requested format requires another defined style.
 - English text in body paragraphs must use a character style whose font is `Times New Roman`; split mixed Chinese-English paragraphs into separate runs when necessary, while preserving the template's Chinese font for Chinese text.
 - JSON safety: inside generated document text fields (`run.text`, table `cell.text`, table paragraph text), do not use raw ASCII double quote characters (`"`). Use Chinese quotation marks such as `“...”` or `「...」` for quoted phrases.
@@ -19,4 +19,4 @@
 - Do not call `read_document` merely to rediscover the ending anchor when `lastParagraph` is present.
 - Images must be inline runs with a single `url`; keep URLs unchanged and preserve aspect ratio.
 - If paragraph location is uncertain, re-read/search and use paragraph IDs for follow-up delete operations.
-- If deletes are confirmed later by the frontend, continue the full planned workflow; do not wait for per-delete confirmation.
+- For replacements, call `generate_document` only after `delete_document` reports that the intended paragraphs were deleted, and use its `replacementInsertParaID`. Native revision acceptance can happen later and does not block the Agent workflow.

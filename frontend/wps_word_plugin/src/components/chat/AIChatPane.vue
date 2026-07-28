@@ -27,7 +27,7 @@
         :selections="selections"
         :uploaded-files="uploadedFiles"
         :pending-document="pendingDocument"
-        :pending-deletes="pendingDeletes"
+        :delete-revisions="deleteRevisions"
         :token-stats="tokenStats"
         :enable-thinking="enableThinking"
         @update:mode="mode = $event"
@@ -64,7 +64,8 @@ import {
   beginTrackedEdit,
   finishTrackedEdit,
   hasRevisionBatch,
-  settleRevisionBatch
+  settleRevisionBatch,
+  settleAllDocumentRevisions
 } from '../js/revisionPreview.js';
 import api, { getDocumentById } from '../js/api.js';
 import ChatMessages from './ChatMessages.vue';
@@ -97,7 +98,7 @@ export default {
       currentSessionTitle: null,
       pendingDocument: null,
       pendingDocumentMsg: null,
-      pendingDeletes: [],  // [{paraIDs, docId, preview, ...}] 待确认删除列表
+      deleteRevisions: [],  // 已立即执行、等待统一接受/拒绝的原生删除修订
       pendingInsertions: [],  // [{documentJson, docId, insertParaID, msg}] 待确认的文档插入列表
       _streamInsertions: [], // [{insertParaID, count, docId}] 当前流式中已执行的插入操作
       historyLoading: false,
@@ -249,6 +250,21 @@ export default {
         : t('chat.documentGenerated');
     },
 
+    _countDocumentContent(documentJson) {
+      const blocks = Array.isArray(documentJson?.paragraphs) ? documentJson.paragraphs : [];
+      return blocks.reduce(
+        (counts, block) => {
+          if (Array.isArray(block?.tables)) {
+            counts.tableCount += block.tables.length;
+          } else {
+            counts.paragraphCount += 1;
+          }
+          return counts;
+        },
+        { paragraphCount: 0, tableCount: 0 }
+      );
+    },
+
     _syncPendingDocumentPreview() {
       if (this.pendingInsertions.length === 0) {
         this.pendingDocument = null;
@@ -256,11 +272,11 @@ export default {
         return;
       }
       const paragraphCount = this.pendingInsertions.reduce(
-        (sum, item) => sum + ((item.documentJson?.paragraphs || []).length),
+        (sum, item) => sum + this._countDocumentContent(item.documentJson).paragraphCount,
         0
       );
       const tableCount = this.pendingInsertions.reduce(
-        (sum, item) => sum + ((item.documentJson?.tables || []).length),
+        (sum, item) => sum + this._countDocumentContent(item.documentJson).tableCount,
         0
       );
       this.pendingDocument = {
@@ -474,7 +490,6 @@ export default {
         this.currentStreamCtrl.abort();
         this.currentStreamCtrl = null;
       }
-      this._createDeleteRevisions();
       this.isLoading = false;
     },
 
@@ -1196,7 +1211,6 @@ export default {
           } else {
             aiMsg.content = t('chat.networkError', { error: errMsg });
           }
-          this._createDeleteRevisions();
           this.isLoading = false;
           this._streamingSessionId = null;
           this.currentStreamCtrl = null;
@@ -1208,9 +1222,6 @@ export default {
         },
 
         onComplete: () => {
-          // 必须等本轮所有插入完成后再创建删除修订，避免新增内容落入
-          // 待删除段落的修订范围，确认时被一并删除。
-          this._createDeleteRevisions();
           this.isLoading = false;
           this._streamingSessionId = null;
 
@@ -1357,7 +1368,7 @@ export default {
         return;
       }
 
-      // 后端请求删除文档段落：立即标注删除范围（真正删除在用户确认时执行）
+      // 后端请求删除文档段落：立即在原生修订模式下执行，并回传真实结果。
       if (data.type === 'delete_document') {
         const paraIDs = Array.isArray(data.paraIDs)
           ? data.paraIDs.map(v => Number(v)).filter(v => Number.isInteger(v))
@@ -1366,12 +1377,13 @@ export default {
         msg.contentParts.push({
           type: 'status',
           content: data.content || t('chat.prepareDelete', { ids: paraIDs.join(', ') }),
-          loading: false
+          loading: true
         });
         this.scrollToBottom();
         this._applyImmediateDelete({
           paraIDs,
-          docId: this._toIntOrDefault(data.docId, 0)
+          docId: this._toIntOrDefault(data.docId, 0),
+          requestId: data.requestId || null
         });
         return;
       }
@@ -1643,6 +1655,16 @@ export default {
     },
 
     _applyImmediateDelete(payload) {
+      const sendResult = (result) => {
+        if (!payload?.requestId) {
+          return;
+        }
+        api.wsManager.send({
+          type: 'delete_response',
+          requestId: payload.requestId,
+          ...result
+        }).catch((error) => console.warn('[AIChatPane] 回传删除结果失败:', error));
+      };
       const docId = this._toIntOrDefault(payload?.docId, 0);
       const paraIDs = Array.isArray(payload?.paraIDs)
         ? payload.paraIDs.map(v => Number(v)).filter(v => Number.isInteger(v))
@@ -1650,22 +1672,139 @@ export default {
       const doc = this._resolveTargetDoc(docId);
       if (!doc) {
         console.warn('[AIChatPane] _applyImmediateDelete: 无法获取文档对象 docId=', docId);
-        return;
+        sendResult({ success: false, deletedCount: 0, error: `无法获取文档 docId=${docId}` });
+        return false;
       }
       if (!paraIDs.length) {
         console.warn('[AIChatPane] _applyImmediateDelete: paraIDs 为空');
-        return;
+        sendResult({ success: false, deletedCount: 0, error: 'delete_document 缺少有效 paraIDs' });
+        return false;
       }
 
-      this.pendingDeletes.push({
-        paraIDs,
-        docId: docId,
-        preview: t('chat.deletePreview', { ids: paraIDs.join(', ') }),
-        _revisionCreated: false,
-        _markingMode: null
-      });
-      // 先记录删除意图。本轮所有新增完成后再创建删除 Revision，
-      // 避免替换文本被包含进旧段落的删除修订范围。
+      const targetIds = new Set(paraIDs);
+      const matchedParas = [];
+      const matchedIds = new Set();
+      let firstMatchedIndex = null;
+      for (let pi = 1; pi <= doc.Paragraphs.Count; pi++) {
+        const para = doc.Paragraphs.Item(pi);
+        const pid = Number(getParagraphParaID(para));
+        if (Number.isInteger(pid) && targetIds.has(pid)) {
+          matchedParas.push(para);
+          matchedIds.add(pid);
+          if (firstMatchedIndex === null) {
+            firstMatchedIndex = pi;
+          }
+        }
+      }
+      const missingParaIDs = paraIDs.filter((pid) => !matchedIds.has(pid));
+      if (matchedParas.length === 0) {
+        const error = '未找到匹配 paraIDs 的段落；这些 ID 可能已经被删除或已经失效';
+        sendResult({ success: false, deletedCount: 0, missingParaIDs, error });
+        return false;
+      }
+
+      // A paragraph carrying a pending deletion Revision still exists in the
+      // WPS object model. It must never be reused as the replacement anchor:
+      // text inserted there can become part of the deletion and disappear on
+      // Accept(). Return the nearest surviving paragraph before the range.
+      let replacementInsertParaID = 0;
+      for (let pi = Number(firstMatchedIndex) - 1; pi >= 1; pi--) {
+        const previousID = Number(getParagraphParaID(doc.Paragraphs.Item(pi)));
+        if (Number.isInteger(previousID) && !targetIds.has(previousID)) {
+          replacementInsertParaID = previousID;
+          break;
+        }
+      }
+
+      const targetRange = matchedParas.reduce(
+        (bounds, para) => {
+          const range = this._rangeForDeleteMarking(para);
+          return {
+            start: Math.min(bounds.start, Number(range.Start)),
+            end: Math.max(bounds.end, Number(range.End))
+          };
+        },
+        { start: Number.POSITIVE_INFINITY, end: Number.NEGATIVE_INFINITY }
+      );
+
+      let trackedEdit = null;
+      let deleteResult = null;
+      try {
+        trackedEdit = beginTrackedEdit(doc);
+        deleteResult = deleteDocxPara([...matchedIds], doc);
+        if (!deleteResult || Number(deleteResult.deletedCount) === 0) {
+          abortTrackedEdit(trackedEdit);
+          const error = deleteResult?.message || '删除段落失败';
+          sendResult({
+            success: false,
+            deletedCount: 0,
+            missingParaIDs,
+            failedParaIDs: deleteResult?.failedParaIDs || [],
+            replacementInsertParaID,
+            error
+          });
+          return false;
+        }
+
+        const revisionBatch = finishTrackedEdit(trackedEdit, targetRange, 'delete');
+        if (!revisionBatch.batchId) {
+          try {
+            window.Application.Undo(Number(deleteResult.deletedCount) || 1);
+          } catch (undoError) {
+            console.error('[AIChatPane] 未检测到删除修订且撤销失败:', undoError);
+          }
+          const error = 'WPS 未创建原生删除修订，已撤销本次删除';
+          sendResult({ success: false, deletedCount: 0, missingParaIDs, replacementInsertParaID, error });
+          return false;
+        }
+
+        this.deleteRevisions.push({
+          paraIDs: [...matchedIds],
+          docId,
+          replacementInsertParaID,
+          preview: t('chat.deletePreview', { ids: [...matchedIds].join(', ') }),
+          _revisionCreated: true,
+          _revisionBatchId: revisionBatch.batchId,
+          _markingMode: 'revision'
+        });
+        api.wsManager.clearDocumentCache();
+
+        const failedParaIDs = Array.isArray(deleteResult.failedParaIDs)
+          ? deleteResult.failedParaIDs
+          : [];
+        const fullyDeleted = missingParaIDs.length === 0
+          && failedParaIDs.length === 0
+          && Number(deleteResult.deletedCount) === matchedIds.size;
+        sendResult({
+          success: fullyDeleted,
+          deletedCount: Number(deleteResult.deletedCount) || 0,
+          missingParaIDs,
+          failedParaIDs,
+          replacementInsertParaID,
+          revisionCount: revisionBatch.revisionCount,
+          ...(fullyDeleted ? {} : { error: '部分段落未删除；请重新读取文档后仅重试仍存在的 paraID' })
+        });
+        return fullyDeleted;
+      } catch (error) {
+        abortTrackedEdit(trackedEdit);
+        if (deleteResult?.success) {
+          try {
+            window.Application.Undo(Number(deleteResult.deletedCount) || 1);
+          } catch (undoError) {
+            console.error('[AIChatPane] 删除异常后撤销失败:', undoError);
+          }
+        }
+        const message = error?.message || String(error);
+        console.warn('[AIChatPane] 创建 WPS 原生删除修订失败:', message);
+        sendResult({
+          success: false,
+          deletedCount: 0,
+          missingParaIDs,
+          replacementInsertParaID,
+          error: message
+        });
+        return false;
+      }
     },
 
     _applyImmediateInsertion(insItem) {
@@ -1685,6 +1824,19 @@ export default {
       if (!doc) {
         console.warn('[AIChatPane] _applyImmediateInsertion: 无法获取文档对象 docId=', insItem.docId);
         sendResult({ success: false, error: `无法获取文档 docId=${insItem.docId}` });
+        return false;
+      }
+
+      const conflictingDelete = this.deleteRevisions.find(
+        (item) => this._toIntOrDefault(item.docId, 0) === insItem.docId
+          && Array.isArray(item.paraIDs)
+          && item.paraIDs.some((paraID) => Number(paraID) === insItem.insertParaID)
+      );
+      if (conflictingDelete) {
+        const safeAnchor = this._toIntOrDefault(conflictingDelete.replacementInsertParaID, 0);
+        const error = `insertParaID ${insItem.insertParaID} 正处于待接受的删除修订中；请改用 delete_document 返回的 replacementInsertParaID=${safeAnchor}`;
+        console.warn('[AIChatPane] 拒绝在待删除段落内插入:', error);
+        sendResult({ success: false, error, replacementInsertParaID: safeAnchor });
         return false;
       }
 
@@ -1724,8 +1876,7 @@ export default {
         }
 
         // 记录本次流中已执行的插入，供后续 delete_document 做索引偏移
-        const paraCount = (insItem.documentJson?.paragraphs || []).length;
-        const tableCount = (insItem.documentJson?.tables || []).length;
+        const { paragraphCount: paraCount, tableCount } = this._countDocumentContent(insItem.documentJson);
         const shiftCount = paraCount + tableCount;
         if (shiftCount > 0) {
           this._streamInsertions.push({
@@ -1746,11 +1897,11 @@ export default {
         this.pendingInsertions.push(insItem);
         this.pendingDocumentMsg = insItem.msg || null;
         const totalParaCount = this.pendingInsertions.reduce(
-          (sum, item) => sum + ((item.documentJson?.paragraphs || []).length),
+          (sum, item) => sum + this._countDocumentContent(item.documentJson).paragraphCount,
           0
         );
         const totalTableCount = this.pendingInsertions.reduce(
-          (sum, item) => sum + ((item.documentJson?.tables || []).length),
+          (sum, item) => sum + this._countDocumentContent(item.documentJson).tableCount,
           0
         );
         this.pendingDocument = {
@@ -1777,85 +1928,46 @@ export default {
     },
 
     /**
-     * 一键确认所有待处理操作（删除 + 生成）
+     * 接受本轮已经执行的原生增删修订。
      */
     confirmPending() {
-      // 流异常结束或用户提前确认时，确保尚未创建的删除修订先被创建。
-      this._createDeleteRevisions();
-      // 先接受新增修订，再接受删除修订。
-      const remainingInsertions = [];
+      // 与 WPS“审阅 → 接受对文档的所有修订”使用同一集合级接口。
+      // 不再逐条处理缓存的 Revision 对象，因为每次 Accept() 都可能使
+      // WPS 重排/合并集合，导致后续对象引用错位并误删新增内容。
+      const documentResults = new Map();
+      const pendingItems = [...this.pendingInsertions, ...this.deleteRevisions];
+      for (const item of pendingItems) {
+        const documentKey = this._toIntOrDefault(item.docId, 0);
+        const doc = this._resolveTargetDoc(item.docId);
+        if (!doc || documentResults.has(documentKey)) {
+          continue;
+        }
+        const settled = settleAllDocumentRevisions(doc, 'accept');
+        documentResults.set(documentKey, settled);
+        console.log('[AIChatPane] WPS 原生接受文档全部修订:', settled);
+      }
+
+      const operationSettled = (item) => {
+        const documentKey = this._toIntOrDefault(item.docId, 0);
+        return Boolean(documentResults.get(documentKey)?.success);
+      };
       for (const ins of this.pendingInsertions) {
-        const doc = this._resolveTargetDoc(ins.docId);
-        if (!doc) {
-          remainingInsertions.push(ins);
-          continue;
-        }
-        try {
-          if (ins._markingMode === 'revision' && hasRevisionBatch(ins._revisionBatchId)) {
-            const settled = settleRevisionBatch(ins._revisionBatchId, 'accept');
-            console.log('[AIChatPane] 已接受新增内容修订:', settled);
-            if (!settled.success) {
-              remainingInsertions.push(ins);
-              continue;
-            }
-            if (ins.msg) {
-              ins.msg._revisionBatchId = null;
-            }
-            ins._revisionBatchId = null;
-          }
-        } catch (e) {
-          console.warn('[AIChatPane] 接受新增修订失败:', e);
-          remainingInsertions.push(ins);
+        if (operationSettled(ins) && ins.msg) {
+          ins.msg._revisionBatchId = null;
         }
       }
-
-      const remainingDeletes = [];
-      const deletes = [...this.pendingDeletes];
-      for (const d of deletes) {
-        const doc = this._resolveTargetDoc(d.docId);
-        if (!doc) {
-          remainingDeletes.push(d);
-          continue;
-        }
-        try {
-          if (d._markingMode === 'revision' && hasRevisionBatch(d._revisionBatchId)) {
-            const settled = settleRevisionBatch(d._revisionBatchId, 'accept');
-            console.log('[AIChatPane] 已接受删除内容修订:', settled);
-            if (settled.success) {
-              d._revisionBatchId = null;
-            } else {
-              remainingDeletes.push(d);
-            }
-            continue;
-          }
-
-          if (d._markingMode === 'revision-unavailable') {
-            // 原生修订创建失败时已撤销预删除；确认阶段按普通删除执行。
-            console.warn('[AIChatPane] 原生删除修订不可用，确认时执行普通删除');
-          }
-          const result = deleteDocxPara(d.paraIDs, doc);
-          console.log('[AIChatPane] confirmPending 删除结果:', result?.message || result?.error || '(unknown)');
-          if (!result?.success) {
-            remainingDeletes.push(d);
-          }
-        } catch (e) {
-          console.warn('[AIChatPane] confirmPending 删除失败:', e);
-          remainingDeletes.push(d);
-        }
-      }
-
-      this.pendingDeletes = remainingDeletes;
-      this.pendingInsertions = remainingInsertions;
+      this.pendingInsertions = this.pendingInsertions.filter((item) => !operationSettled(item));
+      this.deleteRevisions = this.deleteRevisions.filter((item) => !operationSettled(item));
       this._syncPendingDocumentPreview();
       this._streamInsertions = [];
     },
 
     /**
-     * 一键取消所有待处理操作（移除删除标记 + 撤销生成）
+     * 拒绝本轮已经执行的原生增删修订。
      */
     cancelPending() {
       // 先拒绝删除修订以恢复原文。
-      for (const pd of this.pendingDeletes) {
+      for (const pd of this.deleteRevisions) {
         const doc = this._resolveTargetDoc(pd.docId);
         if (!doc) {
           continue;
@@ -1865,9 +1977,6 @@ export default {
             const settled = settleRevisionBatch(pd._revisionBatchId, 'reject');
             console.log('[AIChatPane] 已拒绝删除内容修订:', settled);
             pd._revisionBatchId = null;
-          } else if (pd._markingMode === 'revision-unavailable') {
-            // 原生修订创建失败时已撤销预删除，取消无需再修改正文。
-            console.warn('[AIChatPane] 原生删除修订不可用，已保留原文');
           }
         } catch (e) {
           console.warn('[AIChatPane] cancelPending 清理删除标记失败:', e);
@@ -1901,7 +2010,7 @@ export default {
         }
       }
 
-      this.pendingDeletes = [];
+      this.deleteRevisions = [];
       this.pendingInsertions = [];
       this.pendingDocument = null;
       this.pendingDocumentMsg = null;
@@ -1969,114 +2078,6 @@ export default {
         void e2;
       }
       return rng;
-    },
-
-    /**
-     * 为待删除内容添加标注（按 paraID）
-     * @param {number|null} docId - 文档 ID，null 表示活动文档
-     */
-    _createDeleteRevisions(docId = null) {
-      const doc = Number.isInteger(docId) ? getDocumentById(docId) : window.Application.ActiveDocument;
-      if (!doc) {
-        return;
-      }
-
-      const idSet = (ids) =>
-        new Set(
-          (Array.isArray(ids) ? ids : [])
-            .map((v) => Number(v))
-            .filter((v) => Number.isInteger(v))
-        );
-
-      for (const pd of this.pendingDeletes) {
-        if (pd._revisionCreated) {
-          continue;
-        }
-        try {
-          // 每个 pendingDelete 可能属于不同文档
-          const pdDoc = Number.isInteger(pd.docId) ? getDocumentById(pd.docId) : doc;
-          if (!pdDoc) {
-            continue;
-          }
-          const targetIds = idSet(pd.paraIDs);
-          if (!targetIds.size) {
-            continue;
-          }
-          const matchedParas = [];
-          for (let pi = 1; pi <= pdDoc.Paragraphs.Count; pi++) {
-            const para = pdDoc.Paragraphs.Item(pi);
-            const rawPid = getParagraphParaID(para);
-            const pid = Number(rawPid);
-            if (Number.isInteger(pid) && targetIds.has(pid)) {
-              matchedParas.push(para);
-            }
-          }
-          if (!matchedParas.length) {
-            continue;
-          }
-
-          // 立即在 TrackRevisions 下执行删除，保留为待接受/拒绝的 Revision。
-          let trackedEdit = null;
-          let deleteResult = null;
-          try {
-            const targetRange = matchedParas.reduce(
-              (bounds, para) => {
-                const range = this._rangeForDeleteMarking(para);
-                return {
-                  start: Math.min(bounds.start, Number(range.Start)),
-                  end: Math.max(bounds.end, Number(range.End))
-                };
-              },
-              { start: Number.POSITIVE_INFINITY, end: Number.NEGATIVE_INFINITY }
-            );
-            trackedEdit = beginTrackedEdit(pdDoc);
-            deleteResult = deleteDocxPara([...targetIds], pdDoc);
-            if (!deleteResult?.success) {
-              abortTrackedEdit(trackedEdit);
-              throw new Error(deleteResult?.message || '删除段落失败');
-            }
-
-            const revisionBatch = finishTrackedEdit(trackedEdit, targetRange, 'delete');
-            pd._revisionCreated = true;
-            pd._revisionBatchId = revisionBatch.batchId;
-            pd._markingMode = revisionBatch.batchId ? 'revision' : 'revision-unavailable';
-
-            if (revisionBatch.batchId) {
-              console.log(
-                '[AIChatPane] 已创建原生删除修订(paraIDs:',
-                [...targetIds],
-                ', revisions:',
-                revisionBatch.revisionCount,
-                ')'
-              );
-            } else {
-              // 不允许静默降级到批注或红蓝高亮。撤回已经执行的删除，
-              // 让确认操作仍可按普通删除完成，取消则保留原文。
-              const undoCount = Number(deleteResult.deletedCount) || 1;
-              try {
-                window.Application.Undo(undoCount);
-              } catch (undoError) {
-                console.error('[AIChatPane] 原生修订创建失败且撤销删除失败:', undoError);
-              }
-              console.warn('[AIChatPane] WPS 未返回删除 Revision，已撤销预删除且不使用批注/高亮降级');
-            }
-          } catch (revisionError) {
-            abortTrackedEdit(trackedEdit);
-            if (deleteResult?.success) {
-              try {
-                window.Application.Undo(Number(deleteResult.deletedCount) || 1);
-              } catch (undoError) {
-                console.error('[AIChatPane] 创建修订失败后撤销删除失败:', undoError);
-              }
-            }
-            pd._revisionCreated = true;
-            pd._markingMode = 'revision-unavailable';
-            console.warn('[AIChatPane] 创建 WPS 原生删除修订失败:', revisionError);
-          }
-        } catch (e) {
-          console.warn('[AIChatPane] 标记删除段落失败:', e);
-        }
-      }
     },
 
     /**
@@ -2191,8 +2192,8 @@ export default {
             msg._revisionBatchId = revisionBatch.batchId;
             this.pendingInsertions.push(pendingItem);
             this.pendingDocumentMsg = msg;
-            const paragraphCount = (jsonData.paragraphs || []).length;
-            const tableCount = (jsonData.tables || []).length;
+            const paragraphCount = this._countDocumentContent(jsonData).paragraphCount;
+            const tableCount = this._countDocumentContent(jsonData).tableCount;
             this.pendingDocument = {
               preview: this._buildGeneratedDocumentPreview(paragraphCount, tableCount)
             };

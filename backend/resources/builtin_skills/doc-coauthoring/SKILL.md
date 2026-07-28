@@ -25,7 +25,7 @@ Use the active Word document as the primary deliverable:
 - For any other position, use real paragraph IDs returned by `read_document` or `search_document`.
 - Insert long drafts in ordered batches.
 - Preserve existing styles unless the user requests a redesign.
-- For a replacement, read the target, call `delete_document` once for its paragraph IDs, then insert the replacement with `generate_document`. Deletion is pending in the Word UI, so do not repeat it when the old text remains visible.
+- For a replacement, read the target, call `delete_document` once for its paragraph IDs, verify the returned deletion result, then insert the replacement with `generate_document` using the returned `replacementInsertParaID`. If only some IDs were deleted, re-read and retry only the remaining IDs.
 - Change only requested sections.
 
 For each section, clarify the claim, evidence, implications, and action. Present meaningful alternatives when choices remain. Incorporate free-form feedback directly.

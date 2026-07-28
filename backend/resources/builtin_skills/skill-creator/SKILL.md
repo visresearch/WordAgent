@@ -28,7 +28,7 @@ description: What the skill does and the user intents that should trigger it.
 ---
 ```
 
-Put critical behavior in `SKILL.md` and keep it below 3000 characters. WordAgent loads at most 3000 characters per Markdown file and 12000 across the skill. It automatically loads companion `*.md` files in path order, so keep them short and consistent. Use `references/` for focused guidance, `scripts/` for deterministic logic, and `assets/` for templates or media.
+Put critical behavior in `SKILL.md`. WordAgent loads the complete `SKILL.md` and companion `*.md` files in path order without character truncation, so keep them focused and consistent to avoid unnecessary context usage. Use `references/` for focused guidance, `scripts/` for deterministic logic, and `assets/` for templates or media.
 
 Use only WordAgent tools: `load_skill_context`, `read_document`, `search_document`, `generate_document`, `delete_document`, `list_file`, `read_file`, `edit_file`, `python_repl`, `run_sub_agent`, and available MCP tools.
 
@@ -36,8 +36,8 @@ For Word editing skills, encode these rules explicitly:
 
 - read existing content and obtain real paragraph IDs
 - use `insertParaID=0` to insert at the document start, including in a non-empty document
-- replace content with one `delete_document` call followed by `generate_document`
-- do not repeat a deletion while Word UI confirmation is pending
+- replace content with one `delete_document` call followed by `generate_document`, using the returned `replacementInsertParaID` rather than a just-deleted paragraph ID
+- after `delete_document`, check `success`, `deletedCount`, `missingParaIDs`, and `failedParaIDs`; UI confirmation only accepts or rejects the native revisions already created
 - preserve unaffected content and styles
 
 Do not depend on vendor-specific tools, artifact systems, CLI commands, or unavailable browser workflows.

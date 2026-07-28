@@ -13,7 +13,7 @@ Load this skill before planning or editing whenever the request asks to imitate,
 
 For any strict or template-based replication, preserve every layout-bearing element that appears in the reference. In particular:
 
-- Keep every paragraph in order, including intentional blank paragraphs (空白段落) whose `runs` are empty. Never delete, merge, or “clean up” blank paragraphs because they appear to contain no text.
+- Keep every paragraph in order, including intentional blank paragraphs (空白段落) whose `runs` are empty. Every paragraph must retain a non-empty `pStyle` defined in `styles`; a blank paragraph is `{ "pStyle": "<defined pS_*>", "runs": [] }`, never `{ "pStyle": "", "runs": [] }`. Never delete, merge, or “clean up” blank paragraphs because they appear to contain no text.
 - Reproduce page breaks (分页符) and section breaks (分节符) at their original positions. A next-page break, line break, and next-page section break have different semantics; do not represent them as ordinary text or substitute `\\n`. When the API exposes them, use `insert_break` with the exact `breakType` (`wdLineBreak`, `wdPageBreak`, or `wdSectionBreakNextPage`) and the preceding paragraph's `paraID`.
 - Preserve cover images, tables, fixed labels, and spacing, as well as headers, footers, page numbers, margins, paper settings, orientation, and section boundaries. Preserve table merges, row heights, column widths, image dimensions, positions, and wrapping.
 - Preserve run boundaries and mixed-language font assignments (body English must remain Times New Roman where required); do not flatten runs into one plain-text run.
@@ -79,7 +79,7 @@ Map each target component to an exact reference block before writing. A typical 
 
 Clone each mapped block mechanically:
 
-1. Copy its `paragraphs`, `tables`, and all referenced entries from `styles`.
+1. Copy its ordered `paragraphs` stream, including every `{ "tables": [...] }` block, plus all referenced entries from `styles`. Keep every table block at its exact source position; never emit a parallel top-level `tables` array.
 2. For fixed template content, keep every `run.text` value unchanged.
 3. For a variable field, change only the intended `run.text`; preserve the paragraph object, run count, run order, and all style references.
 4. For new prose, duplicate the matching body or heading exemplar for every new paragraph and replace only its text. Preserve distinct runs when the exemplar uses mixed formatting.
@@ -108,14 +108,14 @@ Preserve structural content that carries layout, including section boundaries, h
 
 1. Locate the exact target paragraphs with `search_document` and confirm them with `read_document`.
 2. Call `delete_document` once for the confirmed paragraph IDs.
-3. Insert replacement content with `generate_document` at a real neighboring `paraID`.
+3. Insert replacement content with `generate_document` using the `replacementInsertParaID` returned by `delete_document`; never reuse a just-deleted paraID that remains visible as a native revision.
 4. Use the cloned reference block as the generated payload and replace only approved text fields.
 
-Do not repeatedly delete content while deletion is awaiting user confirmation. Do not rebuild an intact template from scratch when targeted replacement preserves more formatting.
+Check the immediate `delete_document` result before generating replacement content. On partial failure, re-read and retry only IDs that still exist. Do not rebuild an intact template from scratch when targeted replacement preserves more formatting.
 
 ### Blank or independent target
 
-Use `insertParaID=0` whenever content must begin at the document start, including in a non-empty document. Use a real nonzero paragraph ID to insert after that paragraph. Generate in stable component order: cover/front matter, main body, then references/back matter. Include complete cloned style definitions in every payload and preserve style-reference closure for paragraphs, runs, tables, cells, and cell paragraphs.
+Use `insertParaID=0` whenever content must begin at the document start, including in a non-empty document. Use a real nonzero paragraph ID to insert after that paragraph. Generate in stable component order: cover/front matter, main body, then references/back matter. Inside each payload, keep paragraph objects and `{ "tables": [...] }` blocks in exact visual order, including surrounding blank paragraphs. Include complete cloned style definitions and preserve style-reference closure for paragraphs, runs, tables, cells, and cell paragraphs.
 
 Use the content source only for the new thesis subject matter. Fixed text from the format reference is allowed and required; unrelated prose from the format reference must not leak into the new body.
 

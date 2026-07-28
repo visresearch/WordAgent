@@ -13,7 +13,8 @@ _pending_tool_requests: dict[str, asyncio.Queue] = {}
 _pending_loops: dict[str, asyncio.AbstractEventLoop] = {}
 # Correlated frontend responses for mutating tools. Read/search retain the
 # legacy per-session queue, while generate/insert_break use requestId so
-# concurrent tool calls cannot consume each other's responses.
+# concurrent tool calls cannot consume each other's responses. This includes
+# generate_document, delete_document, and insert_break.
 _pending_tool_response_waiters: dict[str, dict[str, asyncio.Future]] = {}
 _pending_tool_response_backlog: dict[str, dict[str, dict]] = {}
 # 存储每个会话的停止状态（用户点击停止后置为 True）
@@ -74,6 +75,7 @@ def request_stop(chat_id: str):
         except Exception:
             pass
     if loop:
+
         async def stop_correlated_waiters():
             for waiter in _pending_tool_response_waiters.get(chat_id, {}).values():
                 if not waiter.done():

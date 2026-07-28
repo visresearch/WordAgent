@@ -42,7 +42,7 @@ class GenerateDocumentSummaryTests(unittest.TestCase):
                 "pageEnd": 3,
             },
         }
-        document = DocumentOutput(paragraphs=[], tables=[], styles={})
+        document = DocumentOutput(paragraphs=[], styles={})
         with (
             patch("app.services.tools.document_tools.get_stream_writer", return_value=events.append),
             patch("app.services.tools.document_tools._wait_for_frontend_mutation", return_value=frontend_response),

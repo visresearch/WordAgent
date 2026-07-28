@@ -132,9 +132,13 @@ async def chat_websocket(websocket: WebSocket):
 
        ``requestId`` 必须原样回传；失败时提供 ``error``。
 
-    7. 删除结果（当前仅记录日志，不阻塞工具）：
-       ``{"type":"delete_response","deletedCount":3}``，或
-       ``{"type":"delete_response","cancelled":true}``。
+    7. 删除结果：
+       ``{"type":"delete_response","requestId":"...",``
+       ``"success":true,"deletedCount":3,"missingParaIDs":[],``
+       ``"failedParaIDs":[],"replacementInsertParaID":88}``。
+
+       ``requestId`` 必须原样回传。删除会立即在原生修订模式下执行；失败时使用
+       ``success:false`` 并提供 ``error``。
 
     8. 停止当前请求：``{"type":"stop"}``。
 
@@ -164,7 +168,8 @@ async def chat_websocket(websocket: WebSocket):
          请求前端执行 ``generate_document``；执行后须回传同一 ``requestId``。
        - ``{"type":"generate_complete","content":"...","docId":0,``
          ``"insertParaID":123,"requestId":"..."}``。
-       - ``{"type":"delete_document","content":"...","paraIDs":[...],"docId":0}``。
+       - ``{"type":"delete_document","content":"...","paraIDs":[...],``
+         ``"docId":0,"requestId":"..."}``；前端执行后须回传同一 ``requestId``。
        - ``{"type":"insert_break","content":"...","paraID":123,``
          ``"breakType":"wdLineBreak|wdPageBreak|wdSectionBreakNextPage",``
          ``"requestId":"..."}``。
@@ -175,9 +180,9 @@ async def chat_websocket(websocket: WebSocket):
        - ``{"type":"done"}``：本轮流结束；服务端保证最多发送一次正常结束事件。
        - ``{"type":"error","content":"..."}``：终止性错误，通常随后发送 ``done``。
 
-    ``generate_document_response`` 与 ``insert_break_response`` 使用 ``requestId``
-    进行关联，允许回包乱序且不会被其他并发工具调用消费。读取、查询和创建文档
-    仍使用会话级回调队列。
+    ``generate_document_response``、``delete_response`` 与
+    ``insert_break_response`` 使用 ``requestId`` 进行关联，允许回包乱序且不会被
+    其他并发工具调用消费。读取、查询和创建文档仍使用会话级回调队列。
     """
     await websocket.accept()
     chat_id = str(uuid.uuid4())
@@ -329,8 +334,11 @@ async def chat_websocket(websocket: WebSocket):
                             else:
                                 await submit_tool_response(chat_id, incoming)
                         elif incoming_type == "delete_response":
-                            # delete_document 为非阻塞工具，不再等待前端回传，仅记录日志
-                            logger.info(f"[WebSocket] 收到前端删除结果（仅记录）: {incoming}")
+                            logger.info(f"[WebSocket] 收到前端删除结果: {incoming}")
+                            if active_mode == "plan":
+                                await ma_submit_tool_response(chat_id, incoming)
+                            else:
+                                await submit_tool_response(chat_id, incoming)
                         elif incoming_type in {
                             "create_document_response",
                             "generate_document_response",

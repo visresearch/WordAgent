@@ -38,7 +38,14 @@ SUB_AGENT_TOOLS: dict[str, list[str]] = {
     "reviewer": ["read_document", "search_document"],
     "explore": ["read_document", "search_document"],
     "plan": ["read_document", "search_document"],
-    "general-purpose": ["read_document", "search_document", "create_document", "generate_document", "delete_document", "insert_break"],
+    "general-purpose": [
+        "read_document",
+        "search_document",
+        "create_document",
+        "generate_document",
+        "delete_document",
+        "insert_break",
+    ],
 }
 
 

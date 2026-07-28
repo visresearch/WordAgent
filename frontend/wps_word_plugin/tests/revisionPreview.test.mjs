@@ -5,7 +5,8 @@ import {
   beginTrackedEdit,
   finishTrackedEdit,
   hasRevisionBatch,
-  settleRevisionBatch
+  settleRevisionBatch,
+  settleAllDocumentRevisions
 } from '../src/components/js/revisionPreview.js';
 
 function revision({ type, start, end, text, author = 'tester', date = '2026-07-28', acceptFailures = 0 }) {
@@ -31,7 +32,7 @@ function revision({ type, start, end, text, author = 'tester', date = '2026-07-2
 }
 
 function documentWith(revisions = []) {
-  return {
+  const doc = {
     TrackRevisions: false,
     TrackFormatting: true,
     ShowRevisions: false,
@@ -44,7 +45,6 @@ function documentWith(revisions = []) {
     },
     _items: revisions,
     get Revisions() {
-      const doc = this;
       return {
         get Count() {
           return doc._items.length;
@@ -53,10 +53,23 @@ function documentWith(revisions = []) {
           const item = doc._items[index - 1];
           item.Index = index;
           return item;
+        },
+        AcceptAll() {
+          for (const item of doc._items) {
+            item.accepted += 1;
+          }
+          doc._items = [];
+        },
+        RejectAll() {
+          for (const item of doc._items) {
+            item.rejected += 1;
+          }
+          doc._items = [];
         }
       };
     }
   };
+  return doc;
 }
 
 test('只接受本次跟踪编辑产生的修订', () => {
@@ -199,4 +212,47 @@ test('拒绝删除修订时恢复原文且不处理已有修订', () => {
   assert.equal(result.handled, 1);
   assert.equal(deleted.rejected, 1);
   assert.equal(existing.rejected, 0);
+});
+
+test('删除批次不会接管因 WPS 合并而看起来新出现的纯插入修订', () => {
+  const oldInsertion = revision({ type: 1, start: 8, end: 12, text: '新增段落' });
+  const doc = documentWith([oldInsertion]);
+  const state = beginTrackedEdit(doc);
+
+  // WPS 在邻近删除后可能用新的 COM Revision 对象表示原有插入，且文本或范围发生变化。
+  const recreatedInsertion = revision({ type: 1, start: 8, end: 18, text: '新增段落扩展' });
+  const deleted = revision({ type: 2, start: 20, end: 24, text: '旧段落' });
+  doc._items = [recreatedInsertion, deleted];
+
+  const batch = finishTrackedEdit(state, { start: 20, end: 24 }, 'delete');
+  assert.equal(batch.revisionCount, 1);
+
+  const result = settleRevisionBatch(batch.batchId, 'accept');
+  assert.equal(result.success, true);
+  assert.equal(deleted.accepted, 1);
+  assert.equal(recreatedInsertion.accepted, 0);
+});
+
+test('确认键使用 WPS 原生 AcceptAll 一次性接受增删修订', () => {
+  const doc = documentWith();
+
+  const insertState = beginTrackedEdit(doc);
+  const inserted = revision({ type: 1, start: 10, end: 20, text: '新增内容' });
+  doc._items.push(inserted);
+  const insertBatch = finishTrackedEdit(insertState, { start: 10, end: 20 }, 'insert');
+
+  const deleteState = beginTrackedEdit(doc);
+  const deleted = revision({ type: 2, start: 30, end: 40, text: '旧内容' });
+  doc._items.push(deleted);
+  const deleteBatch = finishTrackedEdit(deleteState, { start: 30, end: 40 }, 'delete');
+
+  const result = settleAllDocumentRevisions(doc, 'accept');
+
+  assert.equal(result.success, true);
+  assert.equal(result.handled, 2);
+  assert.equal(inserted.accepted, 1);
+  assert.equal(deleted.accepted, 1);
+  assert.equal(hasRevisionBatch(insertBatch.batchId), false);
+  assert.equal(hasRevisionBatch(deleteBatch.batchId), false);
+  assert.equal(doc._items.length, 0);
 });

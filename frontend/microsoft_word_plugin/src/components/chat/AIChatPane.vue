@@ -27,7 +27,7 @@
         :selections="selections"
         :uploaded-files="uploadedFiles"
         :pending-document="pendingDocument"
-        :pending-deletes="pendingDeletes"
+        :delete-revisions="deleteRevisions"
         :token-stats="tokenStats"
         :enable-thinking="enableThinking"
         @update:mode="mode = $event"
@@ -106,7 +106,7 @@ export default {
       currentSessionTitle: null,
       pendingDocument: null,
       pendingDocumentMsg: null,
-      pendingDeletes: [],  // [{paraIDs, docId, preview, msg}] 待确认删除列表
+      deleteRevisions: [],  // 已立即执行、等待统一接受/拒绝的原生删除修订
       pendingInsertions: [], // [{documentJson, docId, insertParaID, msg}] 待确认的文档插入列表
       _streamInsertions: [], // [{insertParaID, count, docId}] 当前流式中已执行的插入操作
       hasHistory: false,
@@ -316,7 +316,6 @@ export default {
         this.currentStreamCtrl.abort();
         this.currentStreamCtrl = null;
       }
-      this._queueDeleteRevisions();
       this.isLoading = false;
       this._streamingSessionId = null;
     },
@@ -884,7 +883,6 @@ export default {
           } else {
             aiMsg.content = t('chat.networkError', { error: errMsg });
           }
-          this._queueDeleteRevisions();
           this.isLoading = false;
           this._streamingSessionId = null;
           this.currentStreamCtrl = null;
@@ -896,8 +894,6 @@ export default {
         },
 
         onComplete: () => {
-          // 等所有插入完成后再创建删除修订，避免替换内容落入旧段落的删除范围。
-          this._queueDeleteRevisions();
           this.isLoading = false;
           this._streamingSessionId = null;
 
@@ -1018,23 +1014,33 @@ export default {
         return;
       }
 
-      // 后端请求删除文档段落：立即标记删除范围（真正删除在用户确认时执行）
+      // 后端请求删除文档段落：立即在原生修订模式下执行，并回传真实结果。
       if (data.type === 'delete_document') {
         const paraIDs = this._normalizeParaIdList(data.paraIDs);
         console.log('[AIChatPane] 后端请求删除文档段落, paraIDs:', paraIDs, 'docId:', data.docId);
         msg.contentParts.push({
           type: 'status',
           content: data.content || t('chat.prepareDelete', { ids: paraIDs.join(', ') }),
-          loading: false
+          loading: true
         });
         this.scrollToBottom();
         this._insertQueue = this._insertQueue
           .then(() => this._applyImmediateDelete({
             paraIDs,
-            docId: this._toIntOrDefault(data.docId, 0)
+            docId: this._toIntOrDefault(data.docId, 0),
+            requestId: data.requestId || null
           }))
           .catch((e) => {
             console.warn("[AIChatPane] apply immediate delete failed:", e);
+            if (data.requestId) {
+              api.wsManager.send({
+                type: 'delete_response',
+                requestId: data.requestId,
+                success: false,
+                deletedCount: 0,
+                error: e?.message || String(e)
+              }).catch((sendError) => console.warn('[AIChatPane] 回传删除异常失败:', sendError));
+            }
           });
         return;
       }
@@ -1427,6 +1433,21 @@ export default {
         : t('chat.documentGenerated');
     },
 
+    _countDocumentContent(documentJson) {
+      const blocks = Array.isArray(documentJson?.paragraphs) ? documentJson.paragraphs : [];
+      return blocks.reduce(
+        (counts, block) => {
+          if (Array.isArray(block?.tables)) {
+            counts.tableCount += block.tables.length;
+          } else {
+            counts.paragraphCount += 1;
+          }
+          return counts;
+        },
+        { paragraphCount: 0, tableCount: 0 }
+      );
+    },
+
     _refreshPendingDocumentSummary() {
       if (this.pendingInsertions.length === 0) {
         this.pendingDocument = null;
@@ -1435,11 +1456,11 @@ export default {
       }
 
       const totalParaCount = this.pendingInsertions.reduce(
-        (sum, item) => sum + ((item.documentJson?.paragraphs || []).length),
+        (sum, item) => sum + this._countDocumentContent(item.documentJson).paragraphCount,
         0
       );
       const totalTableCount = this.pendingInsertions.reduce(
-        (sum, item) => sum + ((item.documentJson?.tables || []).length),
+        (sum, item) => sum + this._countDocumentContent(item.documentJson).tableCount,
         0
       );
 
@@ -1450,21 +1471,95 @@ export default {
     },
 
     async _applyImmediateDelete(payload) {
+      const sendResult = async (result) => {
+        if (!payload?.requestId) {
+          return;
+        }
+        try {
+          await api.wsManager.send({
+            type: 'delete_response',
+            requestId: payload.requestId,
+            ...result
+          });
+        } catch (error) {
+          console.warn('[AIChatPane] 回传 Word 删除结果失败:', error);
+        }
+      };
       const docId = this._toIntOrDefault(payload?.docId, 0);
       const paraIDs = this._normalizeParaIdList(payload?.paraIDs);
       if (!paraIDs.length) {
-        return;
+        await sendResult({ success: false, deletedCount: 0, error: 'delete_document 缺少有效 paraIDs' });
+        return false;
       }
 
-      this.pendingDeletes.push({
-        paraIDs,
-        docId,
-        preview: t('chat.deletePreview', { ids: paraIDs.join(', ') }),
-        _revisionCreated: false,
-        _markingMode: null
-      });
-      // 只记录删除意图。等本轮全部插入结束后再创建删除修订，避免
-      // 新插入的替换文字被包含进旧段落的删除范围。
+      let trackedEdit = null;
+      let deleteResult = null;
+      try {
+        trackedEdit = await beginTrackedEdit();
+        deleteResult = await deleteDocxPara(paraIDs);
+        if (!deleteResult?.success) {
+          await abortTrackedEdit(trackedEdit);
+          const error = deleteResult?.message || '删除段落失败';
+          await sendResult({
+            success: false,
+            deletedCount: Number(deleteResult?.deletedCount) || 0,
+            missingParaIDs: deleteResult?.missingParaIDs || paraIDs,
+            replacementInsertParaID: deleteResult?.replacementInsertParaID ?? null,
+            error
+          });
+          return false;
+        }
+
+        const revisionBatch = await finishTrackedEdit(trackedEdit, 'delete');
+        if (!revisionBatch.batchId) {
+          await undoLastDocumentAction();
+          const error = 'Microsoft Word 未创建原生删除修订，已撤销本次删除';
+          await sendResult({
+            success: false,
+            deletedCount: 0,
+            missingParaIDs: [],
+            replacementInsertParaID: deleteResult?.replacementInsertParaID ?? null,
+            error
+          });
+          return false;
+        }
+
+        this.deleteRevisions.push({
+          paraIDs: deleteResult.deletedParaIDs || paraIDs,
+          docId,
+          replacementInsertParaID: deleteResult.replacementInsertParaID ?? '0',
+          preview: t('chat.deletePreview', { ids: paraIDs.join(', ') }),
+          _revisionCreated: true,
+          _revisionBatchId: revisionBatch.batchId,
+          _markingMode: 'revision'
+        });
+        api.wsManager.clearDocumentCache();
+
+        const missingParaIDs = deleteResult.missingParaIDs || [];
+        const fullyDeleted = missingParaIDs.length === 0;
+        await sendResult({
+          success: fullyDeleted,
+          deletedCount: Number(deleteResult.deletedCount) || 0,
+          missingParaIDs,
+          replacementInsertParaID: deleteResult.replacementInsertParaID ?? '0',
+          revisionCount: revisionBatch.revisionCount,
+          ...(fullyDeleted ? {} : { error: '部分 paraID 未找到；请重新读取文档后仅处理仍存在的段落' })
+        });
+        return fullyDeleted;
+      } catch (error) {
+        await abortTrackedEdit(trackedEdit);
+        if (deleteResult?.success) {
+          try {
+            await undoLastDocumentAction();
+          } catch (undoError) {
+            console.error('[AIChatPane] Word 删除异常后撤销失败:', undoError);
+          }
+        }
+        const message = error?.message || String(error);
+        console.warn('[AIChatPane] 创建 Microsoft Word 原生删除修订失败:', message);
+        await sendResult({ success: false, deletedCount: 0, missingParaIDs: [], error: message });
+        return false;
+      }
     },
 
     async _applyImmediateInsertion(insItem) {
@@ -1487,6 +1582,18 @@ export default {
       if (requestedInsertParaID === null) {
         console.error('[AIChatPane] generate_document 缺少必填 insertParaID:', insItem);
         await sendResult({ success: false, error: 'generate_document 缺少必填 insertParaID' });
+        return false;
+      }
+      const conflictingDelete = this.deleteRevisions.find(
+        (item) => this._toIntOrDefault(item.docId, 0) === normalizedDocId
+          && Array.isArray(item.paraIDs)
+          && item.paraIDs.some((paraID) => this._toParaIdOrNull(paraID) === requestedInsertParaID)
+      );
+      if (conflictingDelete) {
+        const safeAnchor = this._toParaIdOrNull(conflictingDelete.replacementInsertParaID) || '0';
+        const error = `insertParaID ${requestedInsertParaID} 正处于待接受的删除修订中；请改用 delete_document 返回的 replacementInsertParaID=${safeAnchor}`;
+        console.warn('[AIChatPane] 拒绝在 Word 待删除段落内插入:', error);
+        await sendResult({ success: false, error, replacementInsertParaID: safeAnchor });
         return false;
       }
       const docPayload = { ...(insItem.documentJson || {}) };
@@ -1515,8 +1622,7 @@ export default {
         });
       }
 
-      const paraCount = (docPayload.paragraphs || []).length;
-      const tableCount = (docPayload.tables || []).length;
+      const { paragraphCount: paraCount, tableCount } = this._countDocumentContent(docPayload);
       const shiftCount = paraCount + tableCount;
       const insertedParaIDs = this._normalizeParaIdList(result.insertedParaIDs || []);
 
@@ -1619,65 +1725,8 @@ export default {
       return true;
     },
 
-    _queueDeleteRevisions() {
-      this._insertQueue = this._insertQueue
-        .then(() => this._createDeleteRevisions())
-        .catch((error) => {
-          console.warn('[AIChatPane] 创建删除修订队列失败:', error);
-        });
-      return this._insertQueue;
-    },
-
-    async _createDeleteRevisions() {
-      for (const pd of this.pendingDeletes) {
-        if (pd._revisionCreated) {
-          continue;
-        }
-        const paraIDs = this._normalizeParaIdList(pd.paraIDs || []);
-        if (!paraIDs.length) {
-          continue;
-        }
-        let trackedEdit = null;
-        let deleteResult = null;
-        try {
-          trackedEdit = await beginTrackedEdit();
-          deleteResult = await deleteDocxPara(paraIDs);
-          if (!deleteResult?.success) {
-            await abortTrackedEdit(trackedEdit);
-            throw new Error(deleteResult?.message || '删除段落失败');
-          }
-
-          const revisionBatch = await finishTrackedEdit(trackedEdit, 'delete');
-          pd._revisionCreated = true;
-          pd._revisionBatchId = revisionBatch.batchId;
-          pd._markingMode = revisionBatch.batchId ? 'revision' : 'revision-unavailable';
-          if (revisionBatch.batchId) {
-            console.log('[AIChatPane] 已创建 Microsoft Word 原生删除修订:', {
-              paraIDs,
-              revisionCount: revisionBatch.revisionCount
-            });
-          } else {
-            await undoLastDocumentAction();
-            console.warn('[AIChatPane] 未检测到原生删除修订，已撤销预删除且不会降级为批注/高亮');
-          }
-        } catch (error) {
-          await abortTrackedEdit(trackedEdit);
-          if (deleteResult?.success) {
-            try {
-              await undoLastDocumentAction();
-            } catch (undoError) {
-              console.error('[AIChatPane] 创建删除修订失败后撤销删除失败:', undoError);
-            }
-          }
-          pd._revisionCreated = true;
-          pd._markingMode = 'revision-unavailable';
-          console.warn('[AIChatPane] 创建 Microsoft Word 原生删除修订失败:', paraIDs, error);
-        }
-      }
-    },
-
     /**
-     * 一键确认所有待处理操作（删除 + 生成）
+     * 接受本轮已经执行的原生增删修订。
      */
     async confirmPending() {
       try {
@@ -1685,8 +1734,6 @@ export default {
       } catch (e) {
         console.warn("[AIChatPane] pending operation queue failed before confirm:", e);
       }
-      await this._createDeleteRevisions();
-
       for (const ins of this.pendingInsertions) {
         if (ins._markingMode === 'revision' && hasRevisionBatch(ins._revisionBatchId)) {
           const settled = await settleRevisionBatch(ins._revisionBatchId, 'accept');
@@ -1700,20 +1747,17 @@ export default {
         }
       }
 
-      for (const pd of this.pendingDeletes) {
+      for (const pd of this.deleteRevisions) {
         if (pd._markingMode === 'revision' && hasRevisionBatch(pd._revisionBatchId)) {
           const settled = await settleRevisionBatch(pd._revisionBatchId, 'accept');
           console.log('[AIChatPane] 已接受删除内容修订:', settled);
           if (settled.success) {
             pd._revisionBatchId = null;
           }
-        } else if (pd._markingMode === 'revision-unavailable') {
-          // 创建原生修订失败时预删除已经撤销；确认阶段再执行普通删除。
-          await deleteDocxPara(pd.paraIDs || []);
         }
       }
 
-      this.pendingDeletes = [];
+      this.deleteRevisions = [];
       this.pendingInsertions = [];
       this.pendingDocument = null;
       this.pendingDocumentMsg = null;
@@ -1721,7 +1765,7 @@ export default {
     },
 
     /**
-     * 一键取消所有待处理操作（移除删除标记 + 回滚新增）
+     * 拒绝本轮已经执行的原生增删修订。
      */
     async cancelPending() {
       try {
@@ -1730,7 +1774,7 @@ export default {
         console.warn("[AIChatPane] pending operation queue failed before cancel:", e);
       }
 
-      for (const pd of this.pendingDeletes) {
+      for (const pd of this.deleteRevisions) {
         if (pd._markingMode === 'revision' && hasRevisionBatch(pd._revisionBatchId)) {
           const settled = await settleRevisionBatch(pd._revisionBatchId, 'reject');
           console.log('[AIChatPane] 已拒绝删除内容修订:', settled);
@@ -1754,7 +1798,7 @@ export default {
         }
       }
 
-      this.pendingDeletes = [];
+      this.deleteRevisions = [];
       this.pendingInsertions = [];
       this.pendingDocument = null;
       this.pendingDocumentMsg = null;
@@ -1835,7 +1879,7 @@ export default {
             await this._insertPlainText(content);
           } else {
             // 计算插入范围并记录到 msg（用于撤销）
-            const newParaCount = jsonData.paragraphs?.length || 0;
+            const newParaCount = this._countDocumentContent(jsonData).paragraphCount;
             if (newParaCount > 0) {
               try {
                 await Word.run(async (context) => {
@@ -1861,8 +1905,6 @@ export default {
                   }
                 });
               } catch (e) { /* ignore */ }
-
-              // 批注将在 _addAllPendingComments 中统一添加
             }
           }
         } else {

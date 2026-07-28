@@ -273,6 +273,18 @@ export function finishTrackedEdit(state, target, kind) {
     created = targetCandidates.slice(Math.max(0, targetCandidates.length - addedCount));
   }
 
+  if (kind === 'delete') {
+    // WPS may recreate or merge an already-pending insertion Revision when a
+    // nearby paragraph is deleted. Such an insertion can look "new" to the
+    // before/after snapshot, but it does not belong to the delete batch.
+    // Accepting it again after the insertion batch has been settled can make
+    // the newly generated paragraph disappear. Keep delete/replace revisions
+    // and structural/format revisions, but never adopt a pure insertion here.
+    created = created.filter(
+      (item) => !INSERT_REVISION_TYPES.has(item.type) || DELETE_REVISION_TYPES.has(item.type)
+    );
+  }
+
   if ((kind === 'insert' || kind === 'delete') && !created.some((item) => expectedType(item, kind))) {
     created = [];
   }
@@ -343,6 +355,65 @@ export function settleRevisionBatch(batchId, action) {
   revisionBatches.delete(batchId);
   releaseDocumentPreviewState(batch.doc);
   return { success: true, handled, failed };
+}
+
+/**
+ * 使用 WPS 集合级原生接口处理全部修订，与“审阅 → 接受/拒绝所有修订”一致。
+ * 不能循环处理缓存的 Revision 对象：每次 Accept()/Reject() 后 WPS 都可能
+ * 重排或合并集合，使后续批次保存的 COM 对象引用指向错误范围。
+ */
+export function settleAllDocumentRevisions(doc, action) {
+  if (!doc) {
+    return { success: false, handled: 0, error: '缺少 WPS Document 对象' };
+  }
+  if (action !== 'accept' && action !== 'reject') {
+    return { success: false, handled: 0, error: 'action 必须是 accept 或 reject' };
+  }
+
+  const revisions = safeRead(() => doc.Revisions);
+  if (!revisions) {
+    return { success: false, handled: 0, error: '当前 WPS 文档不支持 Revisions 集合' };
+  }
+  const handled = Number(safeRead(() => revisions.Count, 0)) || 0;
+
+  try {
+    if (action === 'accept') {
+      if (typeof revisions.AcceptAll === 'function') {
+        revisions.AcceptAll();
+      } else if (typeof doc.AcceptAllRevisions === 'function') {
+        doc.AcceptAllRevisions();
+      } else {
+        throw new Error('当前 WPS 版本不支持 Revisions.AcceptAll()');
+      }
+    } else if (typeof revisions.RejectAll === 'function') {
+      revisions.RejectAll();
+    } else if (typeof doc.RejectAllRevisions === 'function') {
+      doc.RejectAllRevisions();
+    } else {
+      throw new Error('当前 WPS 版本不支持 Revisions.RejectAll()');
+    }
+  } catch (error) {
+    return { success: false, handled: 0, error: error?.message || String(error) };
+  }
+
+  for (const [batchId, batch] of revisionBatches.entries()) {
+    if (batch.doc === doc) {
+      revisionBatches.delete(batchId);
+    }
+  }
+
+  const previewState = documentPreviewStates.get(doc);
+  if (previewState) {
+    try {
+      doc.ShowRevisions = previewState.previousShowRevisions;
+      restoreRevisionView(previewState);
+    } catch (error) {
+      console.warn('[revisionPreview] 整体处理修订后恢复显示设置失败:', error);
+    }
+    documentPreviewStates.delete(doc);
+  }
+
+  return { success: true, handled };
 }
 
 export function hasRevisionBatch(batchId) {

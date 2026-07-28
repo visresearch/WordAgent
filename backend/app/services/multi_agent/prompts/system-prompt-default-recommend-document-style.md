@@ -24,7 +24,7 @@ Use this map for new content and include every style referenced in the payload:
 ### Style rules
 - `styles` is mandatory; style values are arrays.
 - Every style ID used in `paragraphs`, `runs`, `tables`, or cells must appear in `styles`.
-- Never use `pStyle: ""` for a paragraph containing text or images. Use `pS_3` for ordinary body text. Empty `pStyle` is only for `{ "pStyle": "", "runs": [] }`.
+- Every paragraph, including a blank paragraph with `runs: []`, must use a non-empty `pStyle` defined in `styles`. Use `pS_3` for ordinary body text and ordinary blank lines unless another defined style is required.
 - `pS_1`: title. `pS_2`: section heading. `pS_4`: subsection. `pS_3`: body. `pS_5`: table cell. `pS_6`: figure/chart caption.
 - `rS_1`: Chinese heading. `rS_2`: Chinese body. `rS_3`: English/number heading. `rS_4`: English/number body. `rS_5`: caption.
 - English text in body paragraphs must use `Times New Roman`. In mixed Chinese-English paragraphs, split runs by script and assign the English runs a `Times New Roman` character style; keep Chinese runs in the template's Chinese font.

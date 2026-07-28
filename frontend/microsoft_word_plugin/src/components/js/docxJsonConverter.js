@@ -656,6 +656,23 @@ function makePStyle(
   ];
 }
 
+function readParagraphPStyle(para) {
+  let styleName = "";
+  try {
+    styleName = para?.style || "";
+  } catch (e) {}
+  return makePStyle(
+    getAlignmentName(para?.alignment),
+    para?.lineSpacing || 0,
+    para?.leftIndent || 0,
+    para?.rightIndent || 0,
+    para?.firstLineIndent || 0,
+    para?.spaceBefore || 0,
+    para?.spaceAfter || 0,
+    styleName
+  );
+}
+
 function makeRStyle(
   fontName,
   fontSize,
@@ -2271,7 +2288,7 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
           // 表格内段落
           if (para.tableNestingLevel > 0) {
             rangeResult.paragraphs.push({
-              pStyle: "",
+              pStyle: readParagraphPStyle(para),
               runs: [],
               paraIndex: idx,
               paraID: paraID,
@@ -2287,10 +2304,15 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
             const picRuns = [];
             await appendParagraphInlinePictureRuns(picRuns, para, context);
             if (picRuns.length === 0) {
-              rangeResult.paragraphs.push({ pStyle: "", runs: [], paraIndex: idx, paraID: paraID });
+              rangeResult.paragraphs.push({
+                pStyle: readParagraphPStyle(para),
+                runs: [],
+                paraIndex: idx,
+                paraID: paraID,
+              });
             } else {
               rangeResult.paragraphs.push({
-                pStyle: DEFAULT_IMAGE_PSTYLE,
+                pStyle: readParagraphPStyle(para),
                 runs: picRuns,
                 paraIndex: idx,
                 paraID: paraID,
@@ -2386,16 +2408,7 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
           ensureRunsHaveFontName(runs, documentFallbackFontName);
 
           rangeResult.paragraphs.push({
-            pStyle: makePStyle(
-              getAlignmentName(para.alignment),
-              para.lineSpacing || 0,
-              para.leftIndent || 0,
-              para.rightIndent || 0,
-              para.firstLineIndent || 0,
-              para.spaceBefore || 0,
-              para.spaceAfter || 0,
-              styleName
-            ),
+            pStyle: readParagraphPStyle(para),
             runs: runs,
             paraIndex: idx,
             paraID: paraID,
@@ -2768,10 +2781,15 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
             const picRuns = [];
             await appendParagraphInlinePictureRuns(picRuns, para, context);
             if (picRuns.length === 0) {
-              result.paragraphs.push({ pStyle: "", runs: [], paraIndex: _paraIdx, paraID: paraID });
+              result.paragraphs.push({
+                pStyle: readParagraphPStyle(para),
+                runs: [],
+                paraIndex: _paraIdx,
+                paraID: paraID,
+              });
             } else {
               result.paragraphs.push({
-                pStyle: DEFAULT_IMAGE_PSTYLE,
+                pStyle: readParagraphPStyle(para),
                 runs: picRuns,
                 paraIndex: _paraIdx,
                 paraID: paraID,
@@ -2954,16 +2972,7 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
           ensureRunsHaveFontName(runs, documentFallbackFontName);
 
           const paragraphData = {
-            pStyle: makePStyle(
-              getAlignmentName(para.alignment),
-              para.lineSpacing || 0,
-              para.leftIndent || 0,
-              para.rightIndent || 0,
-              para.firstLineIndent || 0,
-              para.spaceBefore || 0,
-              para.spaceAfter || 0,
-              styleName
-            ),
+            pStyle: readParagraphPStyle(para),
             runs: runs,
             paraIndex: _paraIdx,
             paraID: paraID,
@@ -2984,6 +2993,44 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
 
 // ============== 生成函数 ==============
 
+function expandOrderedDocumentBlocks(blocks) {
+  const elements = [];
+  for (const block of Array.isArray(blocks) ? blocks : []) {
+    if (block && Array.isArray(block.tables)) {
+      for (const table of block.tables) {
+        elements.push({ type: "table", data: table });
+      }
+    } else {
+      elements.push({ type: "paragraph", data: block });
+    }
+  }
+  return elements;
+}
+
+function applyGeneratedParagraphStyle(paragraph, pStyle) {
+  const alignment = pStyle[PSTYLE.ALIGNMENT] || "left";
+  const lineSpacing = pStyle[PSTYLE.LINE_SPACING] || 0;
+  const indentLeft = pStyle[PSTYLE.INDENT_LEFT] || 0;
+  const indentRight = pStyle[PSTYLE.INDENT_RIGHT] || 0;
+  const indentFirstLine = pStyle[PSTYLE.INDENT_FIRST_LINE] || 0;
+  const spaceBefore = pStyle[PSTYLE.SPACE_BEFORE] || 0;
+  const spaceAfter = pStyle[PSTYLE.SPACE_AFTER] || 0;
+  const styleName = pStyle[PSTYLE.STYLE_NAME] || "";
+
+  if (styleName) {
+    try {
+      paragraph.style = styleName;
+    } catch (e) {}
+  }
+  paragraph.alignment = getAlignmentValue(alignment);
+  paragraph.leftIndent = indentLeft;
+  paragraph.rightIndent = indentRight;
+  paragraph.firstLineIndent = indentFirstLine;
+  paragraph.spaceBefore = spaceBefore;
+  paragraph.spaceAfter = spaceAfter;
+  if (lineSpacing) paragraph.lineSpacing = lineSpacing;
+}
+
 /**
  * 从 JSON 数据生成 Word 文档（异步，基于 Office.js API）
  *
@@ -2994,8 +3041,11 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
  */
 async function generateDocxFromJSON(jsonData, _insertLocation = "selection", insertParaID) {
   try {
-    if (!jsonData || (!jsonData.paragraphs && !jsonData.tables)) {
+    if (!jsonData || !Array.isArray(jsonData.paragraphs)) {
       return { error: "JSON数据格式不正确" };
+    }
+    if (Array.isArray(jsonData.tables) && jsonData.tables.length > 0) {
+      return { error: "顶层 tables 已停用，请将表格块放入 paragraphs 数组的目标位置" };
     }
 
     const styles = jsonData.styles || {};
@@ -3045,39 +3095,12 @@ async function generateDocxFromJSON(jsonData, _insertLocation = "selection", ins
         }
       }
 
-      // 合并段落和表格，按位置排序
-      const elements = [];
+      // paragraphs 是唯一的有序内容流：普通项是段落，{tables:[...]} 项是表格块。
+      // 严格按数组顺序展开，不再为表格猜测 position 或默认位置。
+      const elements = expandOrderedDocumentBlocks(jsonData.paragraphs);
 
-      if (jsonData.paragraphs) {
-        jsonData.paragraphs.forEach((para, index) => {
-          elements.push({ type: "paragraph", data: para, position: para.position || index * 1000 });
-        });
-      }
-
-      if (jsonData.tables) {
-        jsonData.tables.forEach((table, index) => {
-          elements.push({
-            type: "table",
-            data: table,
-            position: table.position || (index + 0.5) * 10000,
-          });
-        });
-      }
-
-      elements.sort((a, b) => a.position - b.position);
-
-      // 预处理：合并连续空段落
-      const processedElements = [];
-      let consecutiveEmptyCount = 0;
-      for (const element of elements) {
-        if (element.type === "paragraph" && isEmptyParagraph(element.data)) {
-          consecutiveEmptyCount++;
-          if (consecutiveEmptyCount <= 2) processedElements.push(element);
-        } else {
-          consecutiveEmptyCount = 0;
-          processedElements.push(element);
-        }
-      }
+      // 不压缩空白段落：有序块中的每一项都必须保留其精确位置。
+      const processedElements = elements;
 
       // 插入内容
       for (let i = 0; i < processedElements.length; i++) {
@@ -3086,18 +3109,11 @@ async function generateDocxFromJSON(jsonData, _insertLocation = "selection", ins
         if (element.type === "paragraph") {
           const para = element.data;
           const pStyle = resolveStyle(styles, para.pStyle, DEFAULT_PSTYLE);
-          const alignment = pStyle[PSTYLE.ALIGNMENT] || "left";
-          const lineSpacing = pStyle[PSTYLE.LINE_SPACING] || 0;
-          const indentLeft = pStyle[PSTYLE.INDENT_LEFT] || 0;
-          const indentRight = pStyle[PSTYLE.INDENT_RIGHT] || 0;
-          const indentFirstLine = pStyle[PSTYLE.INDENT_FIRST_LINE] || 0;
-          const spaceBefore = pStyle[PSTYLE.SPACE_BEFORE] || 0;
-          const spaceAfter = pStyle[PSTYLE.SPACE_AFTER] || 0;
-          const styleName = pStyle[PSTYLE.STYLE_NAME] || "";
 
           // 空段落（无 runs）
           if (isEmptyParagraph(para)) {
             const inserted = targetRange.insertParagraph("", Word.InsertLocation.after);
+            applyGeneratedParagraphStyle(inserted, pStyle);
             targetRange = inserted;
             const paraID = assignParagraphBookmarkID(inserted, existingParaIDs, para.paraID);
             if (paraID) {
@@ -3114,24 +3130,11 @@ async function generateDocxFromJSON(jsonData, _insertLocation = "selection", ins
           }
 
           const newParagraph = targetRange.insertParagraph("", Word.InsertLocation.after);
-
-          if (styleName) {
-            try {
-              newParagraph.style = styleName;
-            } catch (e) {}
-          }
+          applyGeneratedParagraphStyle(newParagraph, pStyle);
           const paraID = assignParagraphBookmarkID(newParagraph, existingParaIDs, para.paraID);
           if (paraID) {
             insertedParaIDs.push(paraID);
           }
-
-          newParagraph.alignment = getAlignmentValue(alignment);
-          if (indentLeft) newParagraph.leftIndent = indentLeft;
-          if (indentRight) newParagraph.rightIndent = indentRight;
-          if (indentFirstLine) newParagraph.firstLineIndent = indentFirstLine;
-          if (spaceBefore) newParagraph.spaceBefore = spaceBefore;
-          if (spaceAfter) newParagraph.spaceAfter = spaceAfter;
-          if (lineSpacing) newParagraph.lineSpacing = lineSpacing;
 
           for (const run of paraRuns) {
             const isImageRun = run && run.text == null && run.url;
@@ -3411,6 +3414,14 @@ async function generateDocxFromJSON(jsonData, _insertLocation = "selection", ins
           }
 
           targetRange = newTable.getRange("After");
+          if (i === processedElements.length - 1) {
+            const trailingParagraph = targetRange.insertParagraph("", Word.InsertLocation.after);
+            const trailingParaID = assignParagraphBookmarkID(trailingParagraph, existingParaIDs);
+            if (trailingParaID) {
+              insertedParaIDs.push(trailingParaID);
+            }
+            targetRange = trailingParagraph;
+          }
         }
       }
 
@@ -3432,8 +3443,11 @@ async function generateDocxFromJSON(jsonData, _insertLocation = "selection", ins
       await context.sync();
       await ensureAllParagraphsHaveHiddenBookmarks(context);
 
-      const paraCount = jsonData.paragraphs?.length || 0;
-      const tableCount = jsonData.tables?.length || 0;
+      const paraCount = jsonData.paragraphs.filter((block) => !Array.isArray(block?.tables)).length;
+      const tableCount = jsonData.paragraphs.reduce(
+        (count, block) => count + (Array.isArray(block?.tables) ? block.tables.length : 0),
+        0
+      );
       return {
         success: true,
         message: `文档生成成功！${paraCount} 段落 / ${tableCount} 表格`,
@@ -3611,7 +3625,25 @@ async function deleteDocxPara(paraIDs) {
       }
 
       if (targets.length === 0) {
-        return { success: false, deletedCount: 0, message: "未找到匹配 paraIDs 的段落" };
+        return {
+          success: false,
+          deletedCount: 0,
+          deletedParaIDs: [],
+          missingParaIDs: normalizedIDs,
+          message: "未找到匹配 paraIDs 的段落",
+        };
+      }
+
+      const foundIDs = new Set(targets.map((target) => target.paraID));
+      const missingParaIDs = normalizedIDs.filter((paraID) => !foundIDs.has(paraID));
+      const firstTargetIndex = Math.min(...targets.map((target) => target.paraIndex));
+      let replacementInsertParaID = "0";
+      for (let idx = firstTargetIndex - 1; idx >= 0; idx--) {
+        const previousID = allParaIDs[idx];
+        if (previousID && !foundIDs.has(previousID)) {
+          replacementInsertParaID = previousID;
+          break;
+        }
       }
 
       let deletedCount = 0;
@@ -3629,6 +3661,9 @@ async function deleteDocxPara(paraIDs) {
       return {
         success: deletedCount > 0,
         deletedCount,
+        deletedParaIDs: targets.map((target) => target.paraID),
+        missingParaIDs,
+        replacementInsertParaID,
         message: `成功删除 ${deletedCount} 个段落（按 paraID），清理 ${deletedBookmarkCount} 个段落书签`,
       };
     });
@@ -3726,6 +3761,8 @@ export default {
   loadImageAsBase64ForInsert,
   findParaIndexRangeByParaIDs,
   isDocumentStartInsertParaID,
+  expandOrderedDocumentBlocks,
+  applyGeneratedParagraphStyle,
 };
 
 export {
@@ -3758,5 +3795,7 @@ export {
   loadImageAsBase64ForInsert,
   findParaIndexRangeByParaIDs,
   isDocumentStartInsertParaID,
+  expandOrderedDocumentBlocks,
+  applyGeneratedParagraphStyle,
   resolveParagraphParaIDs,
 };

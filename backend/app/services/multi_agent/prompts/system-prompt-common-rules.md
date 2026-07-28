@@ -10,7 +10,8 @@
 - All document content MUST be output via `generate_document` tool. Never output text directly.
 - Use style reference IDs: `pS_*`, `rS_*`, `cS_*`, `tS_*`.
 - Define ALL referenced styles in the `styles` dictionary.
-- A paragraph with text or images must use a non-empty `pStyle` such as `pS_3`; `pStyle: ""` is valid only for a blank paragraph with `runs: []`.
+- Keep paragraphs and `{tables:[...]}` blocks in one ordered `paragraphs` array; never use a parallel top-level `tables` array.
+- Every paragraph must use a non-empty `pStyle` such as `pS_3`, including a blank paragraph with `runs: []`; the style must be defined in `document.styles`.
 - NO `null`, NO `None` in style arrays - use valid primitives.
 - Split long documents into multiple `generate_document` calls.
 

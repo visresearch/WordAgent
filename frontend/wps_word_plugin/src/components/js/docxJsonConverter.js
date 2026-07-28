@@ -382,6 +382,20 @@ function normalizeDocumentJsonInput(jsonData) {
   return jsonData;
 }
 
+function expandOrderedDocumentBlocks(blocks) {
+  const elements = [];
+  for (const block of Array.isArray(blocks) ? blocks : []) {
+    if (block && Array.isArray(block.tables)) {
+      for (const table of block.tables) {
+        elements.push({ type: 'table', data: table });
+      }
+    } else {
+      elements.push({ type: 'paragraph', data: block });
+    }
+  }
+  return elements;
+}
+
 function revealInsertedRange(doc, startPos, endPos) {
   try {
     const safeEnd = Math.max(startPos, endPos - 1);
@@ -507,6 +521,25 @@ function deduplicateStyles(result) {
  */
 function makePStyle(alignment, lineSpacing, indentLeft, indentRight, indentFirstLine, spaceBefore, spaceAfter, styleName) {
   return [alignment, lineSpacing, indentLeft, indentRight, indentFirstLine, spaceBefore, spaceAfter, styleName];
+}
+
+function readParagraphPStyle(para) {
+  const paraFormat = para?.Format;
+  let styleName = '';
+  try {
+    styleName = para?.Style?.NameLocal || para?.Style?.Name || '';
+  } catch (e) {}
+  return [
+    getAlignmentName(paraFormat?.Alignment),
+    paraFormat?.LineSpacing || 0,
+    paraFormat?.LeftIndent || 0,
+    paraFormat?.RightIndent || 0,
+    paraFormat?.FirstLineIndent || 0,
+    paraFormat?.SpaceBefore || 0,
+    paraFormat?.SpaceAfter || 0,
+    styleName,
+    paraFormat?.LineSpacingRule || 0
+  ];
 }
 
 /**
@@ -1932,7 +1965,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride, start
         // 空段落但有图片
         if ((!paraText || paraText.match(/^[\r\n\f\u0007]*$/)) && (paraInlineImages.length > 0 || paraFloatingImages.length > 0)) {
           result.paragraphs.push({
-            pStyle: DEFAULT_IMAGE_PSTYLE,
+            pStyle: readParagraphPStyle(para),
             runs: [],
             paraIndex: idx,
             paraID,
@@ -1944,7 +1977,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride, start
         if (!paraText || paraText.match(/^[\r\n\f\u0007]*$/)) {
           if (paraInlineImages.length === 0 && paraFloatingImages.length === 0) {
             result.paragraphs.push({
-              pStyle: '',
+              pStyle: readParagraphPStyle(para),
               runs: [],
               paraIndex: idx,
               paraID,
@@ -1954,24 +1987,8 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride, start
           continue;
         }
 
-        const paraFormat = para.Format;
-        let styleName = '';
-        try {
-          styleName = para.Style.NameLocal || para.Style.Name || ''; 
-        } catch (e) {}
-
         const paragraphData = {
-          pStyle: [
-            getAlignmentName(paraFormat.Alignment),
-            paraFormat.LineSpacing || 0,
-            paraFormat.LeftIndent || 0,
-            paraFormat.RightIndent || 0,
-            paraFormat.FirstLineIndent || 0,
-            paraFormat.SpaceBefore || 0,
-            paraFormat.SpaceAfter || 0,
-            styleName,
-            paraFormat.LineSpacingRule || 0
-          ],
+          pStyle: readParagraphPStyle(para),
           runs: [],
           paraIndex: idx,
           paraID,
@@ -2363,7 +2380,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride, start
         // 空段落但有图片
         if ((!paraText || paraText.match(/^[\r\n\f\u0007]*$/)) && (paraInlineImages.length > 0 || paraFloatingImages.length > 0)) {
           result.paragraphs.push({
-            pStyle: DEFAULT_IMAGE_PSTYLE,
+            pStyle: readParagraphPStyle(para),
             runs: [],
             paraIndex: paraStartToIndex.get(paraStart) ?? -1,
             paraID,
@@ -2375,7 +2392,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride, start
         if (paraText.match(/^[\r\n\f\u0007]*$/)) {
           if (paraInlineImages.length === 0 && paraFloatingImages.length === 0) {
             result.paragraphs.push({
-              pStyle: '',
+              pStyle: readParagraphPStyle(para),
               runs: [],
               paraIndex: paraStartToIndex.get(paraStart) ?? -1,
               paraID,
@@ -2385,25 +2402,9 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride, start
           continue;
         }
 
-        const paraFormat = para.Format;
-        let styleName = '';
-        try {
-          styleName = para.Style.NameLocal || para.Style.Name || '';
-        } catch (e) {}
-
         const paragraphData = {
           // text: cleanText(paraText),
-          pStyle: [
-            getAlignmentName(paraFormat.Alignment),
-            paraFormat.LineSpacing || 0,
-            paraFormat.LeftIndent || 0,
-            paraFormat.RightIndent || 0,
-            paraFormat.FirstLineIndent || 0,
-            paraFormat.SpaceBefore || 0,
-            paraFormat.SpaceAfter || 0,
-            styleName,
-            paraFormat.LineSpacingRule || 0
-          ],
+          pStyle: readParagraphPStyle(para),
           runs: [],
           paraIndex: paraStartToIndex.get(paraStart) ?? -1,
           paraID,
@@ -2932,8 +2933,11 @@ function generateDocxFromJSON(jsonData, doc, insertParaID) {
   try {
     jsonData = normalizeDocumentJsonInput(jsonData);
 
-    if (!jsonData || (!jsonData.paragraphs && !jsonData.tables)) {
+    if (!jsonData || !Array.isArray(jsonData.paragraphs)) {
       return { error: 'JSON数据格式不正确' };
+    }
+    if (Array.isArray(jsonData.tables) && jsonData.tables.length > 0) {
+      return { error: '顶层 tables 已停用，请将表格块放入 paragraphs 数组的目标位置' };
     }
 
     // 提取样式字典
@@ -2954,45 +2958,12 @@ function generateDocxFromJSON(jsonData, doc, insertParaID) {
       }
     })();
 
-    // 合并段落和表格，按位置排序
-    const elements = [];
+    // paragraphs 是唯一的有序内容流：普通项是段落，{tables:[...]} 项是表格块。
+    // 严格按数组顺序展开，不再为表格猜测 paraIndex 或默认位置。
+    const elements = expandOrderedDocumentBlocks(jsonData.paragraphs);
 
-    if (jsonData.paragraphs) {
-      jsonData.paragraphs.forEach((para, index) => {
-        elements.push({ type: 'paragraph', data: para, position: para.paraIndex ?? (index * 1000) });
-      });
-    }
-
-    if (jsonData.tables) {
-      jsonData.tables.forEach((table, index) => {
-        elements.push({
-          type: 'table',
-          data: table,
-          position: table.paraIndex ?? ((index + 0.5) * 10000)
-        });
-      });
-    }
-
-    elements.sort((a, b) => a.position - b.position);
-
-    // 预处理：合并连续空段落
-    const processedElements = [];
-    let consecutiveEmptyCount = 0;
-
-    for (const element of elements) {
-      if (element.type === 'paragraph' && isEmptyParagraph(element.data)) {
-        if (processedElements.length === 0) {
-          continue;
-        }
-        consecutiveEmptyCount++;
-        if (consecutiveEmptyCount <= 1) {
-          processedElements.push(element);
-        }
-      } else {
-        consecutiveEmptyCount = 0;
-        processedElements.push(element);
-      }
-    }
+    // 不压缩空白段落：有序块中的每一项都必须保留其精确位置。
+    const processedElements = elements;
 
     // 确定插入起始位置
     let insertFallbackWarning = null;
@@ -3081,30 +3052,13 @@ function generateDocxFromJSON(jsonData, doc, insertParaID) {
 
         // 处理空段落
         if (isEmptyParagraph(para)) {
-          const prevElement = i > 0 ? processedElements[i - 1] : null;
-          const nextElement = i < processedElements.length - 1 ? processedElements[i + 1] : null;
-
-          const prevHasContent =
-            prevElement &&
-            (prevElement.type === 'table' ||
-              (prevElement.type === 'paragraph' &&
-                !isEmptyParagraph(prevElement.data) &&
-                prevElement.data.runs &&
-                prevElement.data.runs.length > 0));
-          const nextHasContent =
-            nextElement &&
-            (nextElement.type === 'table' ||
-              (nextElement.type === 'paragraph' &&
-                !isEmptyParagraph(nextElement.data) &&
-                nextElement.data.runs &&
-                nextElement.data.runs.length > 0));
-
-          if (prevHasContent || nextHasContent) {
-            const range = doc.Range(currentPos, currentPos);
-            range.Text = '\r';
-            currentPos += 1;
-            paraIndex++;
-          }
+          const paraStartPos = currentPos;
+          const range = doc.Range(currentPos, currentPos);
+          range.Text = '\r';
+          currentPos += 1;
+          applyParagraphStyleAtPosition(doc, paraStartPos, pStyle);
+          insertedParagraphStyles.push({ position: paraStartPos, pStyle: [...pStyle] });
+          paraIndex++;
           continue;
         }
 
@@ -3300,21 +3254,18 @@ function generateDocxFromJSON(jsonData, doc, insertParaID) {
  *
  * @param {number[]} paraIDs - 要删除的段落 paraID 列表（每个 ID 对应一个独立段落）
  * @param {Object} [docOverride] - 可选，指定文档对象，默认为 ActiveDocument
- * @returns {{ success: boolean, deletedCount: number, message: string }}
+ * @returns {{ success: boolean, deletedCount: number, deletedParaIDs: number[], failedParaIDs: number[], missingParaIDs: number[], message: string }}
  */
 function deleteDocxPara(paraIDs, docOverride) {
   if (!Array.isArray(paraIDs) || paraIDs.length === 0) {
-    return { success: false, deletedCount: 0, message: '未提供有效的 paraIDs 列表' };
-  }
-
-  const doc = docOverride || window.Application?.ActiveDocument;
-  if (!doc) {
-    return { success: false, deletedCount: 0, message: '没有打开的文档' };
-  }
-
-  const totalParas = doc.Paragraphs.Count;
-  if (totalParas === 0) {
-    return { success: false, deletedCount: 0, message: '文档中没有段落' };
+    return {
+      success: false,
+      deletedCount: 0,
+      deletedParaIDs: [],
+      failedParaIDs: [],
+      missingParaIDs: [],
+      message: '未提供有效的 paraIDs 列表'
+    };
   }
 
   const normalizedIDs = [...new Set(
@@ -3323,7 +3274,38 @@ function deleteDocxPara(paraIDs, docOverride) {
       .filter((v) => Number.isInteger(v))
   )];
   if (normalizedIDs.length === 0) {
-    return { success: false, deletedCount: 0, message: 'paraIDs 中没有有效整数ID' };
+    return {
+      success: false,
+      deletedCount: 0,
+      deletedParaIDs: [],
+      failedParaIDs: [],
+      missingParaIDs: [],
+      message: 'paraIDs 中没有有效整数ID'
+    };
+  }
+
+  const doc = docOverride || window.Application?.ActiveDocument;
+  if (!doc) {
+    return {
+      success: false,
+      deletedCount: 0,
+      deletedParaIDs: [],
+      failedParaIDs: [],
+      missingParaIDs: normalizedIDs,
+      message: '没有打开的文档'
+    };
+  }
+
+  const totalParas = doc.Paragraphs.Count;
+  if (totalParas === 0) {
+    return {
+      success: false,
+      deletedCount: 0,
+      deletedParaIDs: [],
+      failedParaIDs: [],
+      missingParaIDs: normalizedIDs,
+      message: '文档中没有段落'
+    };
   }
 
   const targets = [];
@@ -3340,13 +3322,23 @@ function deleteDocxPara(paraIDs, docOverride) {
     }
   }
 
+  const foundIDs = new Set(targets.map((target) => target.paraID));
+  const missingParaIDs = normalizedIDs.filter((paraID) => !foundIDs.has(paraID));
   if (targets.length === 0) {
-    return { success: false, deletedCount: 0, message: '未找到匹配 paraIDs 的段落' };
+    return {
+      success: false,
+      deletedCount: 0,
+      deletedParaIDs: [],
+      failedParaIDs: [],
+      missingParaIDs,
+      message: '未找到匹配 paraIDs 的段落'
+    };
   }
 
   // 从后往前删，避免位置偏移
   targets.sort((a, b) => b.start - a.start);
-  let deletedCount = 0;
+  const deletedParaIDs = [];
+  const failedParaIDs = [];
   for (const t of targets) {
     try {
       let delStart = t.start;
@@ -3355,16 +3347,24 @@ function deleteDocxPara(paraIDs, docOverride) {
         delStart -= 1;
       }
       doc.Range(delStart, delEnd).Delete();
-      deletedCount++;
+      deletedParaIDs.push(t.paraID);
     } catch (e) {
       console.log('删除段落失败:', e.message);
+      failedParaIDs.push(t.paraID);
     }
   }
 
+  const deletedCount = deletedParaIDs.length;
+  const fullyDeleted = deletedCount === normalizedIDs.length;
   return {
-    success: deletedCount > 0,
+    success: fullyDeleted,
     deletedCount,
-    message: `成功删除 ${deletedCount} 个段落（按 paraID）`
+    deletedParaIDs,
+    failedParaIDs,
+    missingParaIDs,
+    message: fullyDeleted
+      ? `成功删除 ${deletedCount} 个段落（按 paraID）`
+      : `仅删除 ${deletedCount}/${normalizedIDs.length} 个段落（按 paraID）`
   };
 }
 
@@ -3466,6 +3466,7 @@ export default {
   getParagraphPageRange,
   getParagraphLocationAtPosition,
   isDocumentStartInsertParaID,
+  expandOrderedDocumentBlocks,
   isCharacterInsideInlineImage,
 
   // 样式数组常量
@@ -3513,6 +3514,7 @@ export {
   getParagraphPageRange,
   getParagraphLocationAtPosition,
   isDocumentStartInsertParaID,
+  expandOrderedDocumentBlocks,
   isCharacterInsideInlineImage,
   PSTYLE,
   RSTYLE,
