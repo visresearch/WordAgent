@@ -898,7 +898,6 @@ async function parseDocumentRangeLightweight(doc, startParaIndex, endParaIndex) 
     if (paraID !== null) {
       const text = cleanText(para?.Range?.Text || '');
       result.paragraphs.push({
-        pStyle: '',
         runs: text ? [{ text, rStyle: '' }] : [],
         paraIndex: idx,
         paraID

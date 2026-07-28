@@ -93,11 +93,20 @@ def _summarize_custom_event(chunk: Any) -> str:
     if event_type == "json":
         content = chunk.get("content")
         if isinstance(content, dict):
-            paragraphs = content.get("paragraphs")
-            tables = content.get("tables")
+            blocks = content.get("paragraphs")
             styles = content.get("styles")
-            parts.append(f"paragraphs={len(paragraphs) if isinstance(paragraphs, list) else 0}")
-            parts.append(f"tables={len(tables) if isinstance(tables, list) else 0}")
+            paragraphs = (
+                [block for block in blocks if isinstance(block, dict) and "runs" in block]
+                if isinstance(blocks, list)
+                else []
+            )
+            table_count = sum(
+                len(block.get("tables", []))
+                for block in blocks or []
+                if isinstance(block, dict) and isinstance(block.get("tables"), list)
+            )
+            parts.append(f"paragraphs={len(paragraphs)}")
+            parts.append(f"tables={table_count}")
             parts.append(f"styles={len(styles) if isinstance(styles, dict) else 0}")
             if "insertParaID" in content:
                 parts.append(f"insertParaID={content.get('insertParaID')}")
@@ -644,8 +653,8 @@ def build_graph(llm_with_tools, all_tools: list):
                         "5) Do not put raw ASCII double quote characters inside generated text fields "
                         "(run.text, cell.text, or table paragraph text). Use Chinese quotation marks "
                         "such as “...” or 「...」 for quoted phrases. "
-                        "6) insertParaID is required. For non-empty documents, use a real paraID. "
-                        "For the first write into an empty document, use insertParaID=0."
+                        "6) insertParaID is required. Use insertParaID=0 to insert at the document start, "
+                        "or use a real nonzero paraID to insert after that paragraph."
                     )
                 ),
             ]

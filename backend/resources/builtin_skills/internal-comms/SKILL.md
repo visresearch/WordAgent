@@ -28,9 +28,9 @@ Confirm only material gaps such as audience, purpose, time period, desired actio
 
 Match the user's language and established company voice. Put the key message and required action first, then supporting context. Use scannable headings and short paragraphs or bullets.
 
-- Empty document: first write with `generate_document(..., insertParaID=0)`.
-- Existing document: read it and use real paragraph IDs.
-- Replacement: call `delete_document` once for the old paragraph IDs, then `generate_document` for the replacement. Do not repeat a pending deletion.
+- Document start: use `generate_document(..., insertParaID=0)`, including in an existing document.
+- Other positions: read the document and use real paragraph IDs.
+- Replacement: call `delete_document` once for the old paragraph IDs, verify its immediate execution result, then call `generate_document` with the returned `replacementInsertParaID`. On partial failure, re-read and retry only IDs that still exist.
 - Preserve existing formatting unless restyling is requested.
 - Change only the requested content.
 

@@ -24,9 +24,11 @@ from .callback import (
     register_loop,
     request_stop,
     submit_tool_response,
+    wait_for_tool_response,
 )
 from .document_tools import (
     _compact_doc_json,
+    _order_document_blocks,
     _delete_document_impl,
     _insert_break_impl,
     _create_document_impl,
@@ -54,6 +56,7 @@ from .schemas import (
     RangeFilter,
     Run,
     Table,
+    TableBlock,
 )
 from .skill_tools import build_load_skill_context
 from .subagent_tools import build_run_sub_agent
@@ -80,6 +83,7 @@ __all__ = [
     "register_loop",
     "request_stop",
     "submit_tool_response",
+    "wait_for_tool_response",
     # schemas
     "Cell",
     "CellParagraph",
@@ -90,6 +94,7 @@ __all__ = [
     "RangeFilter",
     "Run",
     "Table",
+    "TableBlock",
     # document tools (factories + impls)
     "build_read_document",
     "build_generate_document",
@@ -107,6 +112,7 @@ __all__ = [
     "_insert_break_impl",
     "_create_document_impl",
     "_compact_doc_json",
+    "_order_document_blocks",
     "_ensure_image_payload_shape",
     # skill tools
     "build_load_skill_context",

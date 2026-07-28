@@ -55,10 +55,10 @@
       </div>
     </div>
 
-    <!-- 统一的 AI 操作确认条（删除+生成合并显示） -->
-    <div v-if="pendingDeletes.length > 0 || pendingDocument" class="current-selection-bar pending-document-bar" :class="{ 'pending-delete-bar': pendingDeletes.length > 0 && !pendingDocument }">
+    <!-- 已执行的原生修订确认条（确认/取消只接受或拒绝修订，不触发正文操作） -->
+    <div v-if="deleteRevisions.length > 0 || pendingDocument" class="current-selection-bar pending-document-bar" :class="{ 'revision-delete-bar': deleteRevisions.length > 0 && !pendingDocument }">
       <div class="selection-bar-content">
-        <div class="selection-bar-icon pending-icon" :class="{ 'pending-delete-icon': pendingDeletes.length > 0 && !pendingDocument }">
+        <div class="selection-bar-icon pending-icon" :class="{ 'revision-delete-icon': deleteRevisions.length > 0 && !pendingDocument }">
           <svg
             width="14"
             height="14"
@@ -75,7 +75,7 @@
           <span class="selection-bar-preview">{{ pendingSummary }}</span>
         </div>
         <div v-if="!isLoading" class="pending-actions">
-          <button class="pending-btn confirm-btn" :class="{ 'delete-confirm-btn': pendingDeletes.length > 0 && !pendingDocument }" @click="$emit('confirm-pending')">
+          <button class="pending-btn confirm-btn" :class="{ 'delete-confirm-btn': deleteRevisions.length > 0 && !pendingDocument }" @click="$emit('confirm-pending')">
             {{ $t('common.confirm') }}
           </button>
           <button class="pending-btn cancel-btn" @click="$emit('cancel-pending')">
@@ -357,7 +357,7 @@ export default {
       type: Object,
       default: null
     },
-    pendingDeletes: {
+    deleteRevisions: {
       type: Array,
       default: () => []
     },
@@ -428,11 +428,14 @@ export default {
     },
     pendingSummary() {
       const parts = [];
-      if (this.pendingDeletes.length > 0) {
+      if (this.pendingDocument) {
+        parts.push(this.pendingDocument.preview);
+      }
+      if (this.deleteRevisions.length > 0) {
         // Prefer paraID-based counting (current protocol); fallback to legacy index-range counting.
         const seenParaIds = new Set();
         let totalDeleteParas = 0;
-        for (const d of this.pendingDeletes) {
+        for (const d of this.deleteRevisions) {
           if (Array.isArray(d?.paraIDs) && d.paraIDs.length > 0) {
             for (const pid of d.paraIDs) {
               const num = Number(pid);
@@ -449,10 +452,7 @@ export default {
         }
         parts.push(t('chat.deleteParagraphs', { count: totalDeleteParas }));
       }
-      if (this.pendingDocument) {
-        parts.push(this.pendingDocument.preview);
-      }
-      return t('chat.aiOperation', { actions: parts.join(', ') });
+      return t('chat.aiOperation', { actions: parts.join(t('chat.actionSeparator')) });
     },
     tokenRingOffset() {
       const max = this.tokenStats.max || 200000;
@@ -700,7 +700,7 @@ export default {
 }
 
 /* 删除预览条 */
-.pending-delete-bar {
+.revision-delete-bar {
   background: #fff5f5;
   border-top-color: #ffcccc;
   border-bottom-color: #ffcccc;
@@ -710,7 +710,7 @@ export default {
   color: #e74c3c !important;
 }
 
-.pending-delete-icon {
+.revision-delete-icon {
   color: #dc3545 !important;
 }
 

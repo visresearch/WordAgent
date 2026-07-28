@@ -42,11 +42,7 @@ def sync_builtin_skills() -> dict[str, list[str]]:
         raise FileNotFoundError(f"Builtin skills directory not found: {source_root}")
 
     skills_root = _skills_root()
-    existing_folders = {
-        child.name.casefold(): child
-        for child in skills_root.iterdir()
-        if child.is_dir()
-    }
+    existing_folders = {child.name.casefold(): child for child in skills_root.iterdir() if child.is_dir()}
     existing_names = {
         str(skill.get("name", "")).strip().casefold()
         for skill in discover_skills(include_disabled=True)

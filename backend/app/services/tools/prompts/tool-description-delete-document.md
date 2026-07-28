@@ -9,7 +9,9 @@ Delete a paragraph range from the Word document.
 - Add-only or analysis-only tasks: do not call this tool.
 
 ## Critical notes
-- Non-blocking: frontend marks/highlights the range; do not wait for confirmation.
-- Continue the planned workflow after calling this tool, including `generate_document` when needed.
+- The tool waits for the frontend to execute the deletion immediately under native Track Changes and returns the actual `deletedCount`.
+- User confirmation is not required before the Agent continues. The UI confirmation action only accepts or rejects revisions that already exist.
+- Continue the planned workflow only after checking the returned `success`, `deletedCount`, `missingParaIDs`, and `failedParaIDs`.
+- For a replacement, use the returned `replacementInsertParaID` as the next `generate_document.insertParaID`. A deleted paragraph remains in the native revision object model until acceptance, so reusing its paraID can place new text inside the deletion and make it disappear when revisions are accepted.
 - Use paraIDs returned by `search_document`/`read_document`. Avoid relying on stale paragraph indices.
-- Deletion is pending until user confirms in Word UI. If content still appears immediately after tool call, do NOT retry the same delete again.
+- On partial failure, re-read the document and retry only IDs that still exist. Never blindly repeat the full delete request.

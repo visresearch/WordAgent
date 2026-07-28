@@ -11,6 +11,12 @@ logger = get_logger(__name__)
 _pending_tool_requests: dict[str, asyncio.Queue] = {}
 # 存储每个会话的事件循环引用（供 tool 在同步线程中回到异步）
 _pending_loops: dict[str, asyncio.AbstractEventLoop] = {}
+# Correlated frontend responses for mutating tools. Read/search retain the
+# legacy per-session queue, while generate/insert_break use requestId so
+# concurrent tool calls cannot consume each other's responses. This includes
+# generate_document, delete_document, and insert_break.
+_pending_tool_response_waiters: dict[str, dict[str, asyncio.Future]] = {}
+_pending_tool_response_backlog: dict[str, dict[str, dict]] = {}
 # 存储每个会话的停止状态（用户点击停止后置为 True）
 _stop_requested_sessions: set[str] = set()
 # 当前线程使用的 chat_id（通过 contextvars 传递到 tool 函数中）
@@ -27,6 +33,8 @@ def create_tool_request(chat_id: str) -> asyncio.Queue:
     """为一个会话创建等待队列。"""
     q = asyncio.Queue()
     _pending_tool_requests[chat_id] = q
+    _pending_tool_response_waiters[chat_id] = {}
+    _pending_tool_response_backlog[chat_id] = {}
     _stop_requested_sessions.discard(chat_id)
     return q
 
@@ -49,6 +57,11 @@ def cleanup_tool_request(chat_id: str):
     """
     _pending_tool_requests.pop(chat_id, None)
     _pending_loops.pop(chat_id, None)
+    waiters = _pending_tool_response_waiters.pop(chat_id, {})
+    for waiter in waiters.values():
+        if not waiter.done():
+            waiter.cancel()
+    _pending_tool_response_backlog.pop(chat_id, None)
 
 
 def request_stop(chat_id: str):
@@ -59,6 +72,17 @@ def request_stop(chat_id: str):
     if q and loop:
         try:
             asyncio.run_coroutine_threadsafe(q.put({"type": "stop", "error": "stopped_by_user"}), loop)
+        except Exception:
+            pass
+    if loop:
+
+        async def stop_correlated_waiters():
+            for waiter in _pending_tool_response_waiters.get(chat_id, {}).values():
+                if not waiter.done():
+                    waiter.set_result({"type": "stop", "error": "stopped_by_user"})
+
+        try:
+            asyncio.run_coroutine_threadsafe(stop_correlated_waiters(), loop)
         except Exception:
             pass
 
@@ -79,6 +103,15 @@ async def submit_tool_response(chat_id: str, data: dict):
         # 停止后忽略迟到的工具回包，避免再次唤醒 agent 流程
         logger.info(f"[ToolCallback] ⛔ 忽略回传（已停止）session={chat_id}")
         return
+    request_id = str(data.get("requestId") or "").strip() if isinstance(data, dict) else ""
+    if request_id:
+        waiter = _pending_tool_response_waiters.get(chat_id, {}).get(request_id)
+        if waiter and not waiter.done():
+            waiter.set_result(data)
+        else:
+            _pending_tool_response_backlog.setdefault(chat_id, {})[request_id] = data
+        return
+
     q = _pending_tool_requests.get(chat_id)
     if q:
         data_type = data.get("type", "?") if isinstance(data, dict) else type(data).__name__
@@ -86,3 +119,20 @@ async def submit_tool_response(chat_id: str, data: dict):
         await q.put(data)
     else:
         logger.warning(f"[ToolCallback] ⚠️ 找不到 session {chat_id} 的等待队列")
+
+
+async def wait_for_tool_response(chat_id: str, request_id: str, timeout: float = 60) -> dict:
+    """Wait for one frontend response correlated by requestId."""
+    backlog = _pending_tool_response_backlog.setdefault(chat_id, {})
+    existing = backlog.pop(request_id, None)
+    if existing is not None:
+        return existing
+
+    loop = asyncio.get_running_loop()
+    waiter = loop.create_future()
+    waiters = _pending_tool_response_waiters.setdefault(chat_id, {})
+    waiters[request_id] = waiter
+    try:
+        return await asyncio.wait_for(waiter, timeout=timeout)
+    finally:
+        waiters.pop(request_id, None)

@@ -9,6 +9,7 @@
   <a href="https://www.langchain.com/langgraph"><img src="https://img.shields.io/badge/LangGraph-Multi--Agent-0B3D91" alt="LangGraph" /></a>
   <a href="frontend/microsoft_word_plugin/package.json"><img src="https://img.shields.io/badge/Node.js-v22%2B-339933?logo=node.js&logoColor=white" alt="Node.js" /></a>
   <a href="https://github.com/visresearch/WordAgent/releases"><img src="https://img.shields.io/github/v/release/visresearch/WordAgent?include_prereleases" alt="Version" /></a>
+  <a href="https://github.com/visresearch/WordAgent/releases"><img src="https://img.shields.io/github/downloads/visresearch/WordAgent/total?logo=github&label=Downloads" alt="Release Downloads" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License" /></a>
 </p>
 

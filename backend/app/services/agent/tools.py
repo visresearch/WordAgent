@@ -44,6 +44,7 @@ from app.services.tools import (
     register_loop,
     request_stop,
     submit_tool_response,
+    wait_for_tool_response,
 )
 
 
@@ -145,6 +146,7 @@ __all__ = [
     "register_loop",
     "request_stop",
     "submit_tool_response",
+    "wait_for_tool_response",
     # schemas (re-export)
     "DocumentOutput",
     "DocumentQuery",

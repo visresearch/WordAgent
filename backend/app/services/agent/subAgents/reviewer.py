@@ -23,12 +23,11 @@ class ReviewerSubAgent:
     ALLOWED_TOOLS: list[str] = [
         "read_document",
         "search_document",
-        "generate_document",
     ]
 
     def get_system_prompt(self, context: dict[str, Any] | None = None) -> str:
         """从 md 文件读取提示词。"""
-        prompt_file = Path(__file__).parent.parent / "prompts" / "agent-prompt-reviewer.md"
+        prompt_file = Path(__file__).resolve().parent / "prompts" / "agent-prompt-reviewer.md"
         if prompt_file.exists():
             return prompt_file.read_text(encoding="utf-8").strip()
         return "You are a professional document reviewer. Use read_document and search_document to review content."

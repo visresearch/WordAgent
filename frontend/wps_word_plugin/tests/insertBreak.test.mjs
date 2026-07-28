@@ -28,8 +28,19 @@ test('maps all break types to native WPS constants at paragraph end', () => {
   for (const [breakType, nativeType] of Object.entries({ wdLineBreak: 6, wdPageBreak: 7, wdSectionBreakNextPage: 2 })) {
     const doc = makeDocument();
     const result = insertBreakAfterParagraph('20', breakType, doc);
-    assert.deepEqual(result, { success: true, paraID: 20, breakType, position: 24 });
-    assert.deepEqual(doc.calls, [{ start: 24, end: 24 }, { type: nativeType }]);
+    assert.deepEqual(result, {
+      success: true,
+      paraID: 20,
+      breakType,
+      position: 24,
+      paragraphAfterBreak: {
+        paraID: 20,
+        paraIndex: 1,
+        pageStart: null,
+        pageEnd: null
+      }
+    });
+    assert.ok(doc.calls.some((call) => call.type === nativeType));
   }
 });
 

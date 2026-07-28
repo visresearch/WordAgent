@@ -38,7 +38,7 @@ Call `read_document` first to inspect the complete document structure, paragraph
 
 Use complete WordAgent style arrays and define every referenced style ID. Fonts may not exist on every WPS installation: preserve a suitable existing font or fall back to Arial/Calibri for Latin text and Microsoft YaHei/SimSun for Chinese text. Do not change the document language or wording merely to apply a theme.
 
-For an empty document, the first write uses `insertParaID=0`. For an existing document, use real paragraph IDs. Restyling existing content is a replacement operation: call `delete_document` once for each affected paragraph ID, then insert the same text with themed styles through `generate_document`. Do not repeatedly delete content that is awaiting confirmation in Word.
+Use `insertParaID=0` to insert at the document start, including in an existing document. For any other position, use a real paragraph ID. Restyling existing content is a replacement operation: call `delete_document` once for each affected paragraph ID, verify its immediate execution result, then insert the same text with themed styles through `generate_document` using the returned `replacementInsertParaID`. On partial failure, re-read and retry only IDs that still exist.
 
 Work in small ordered batches and preserve paragraph order, tables, links, images, and semantic emphasis. Unless the user requests a full redesign, modify only the selected range.
 

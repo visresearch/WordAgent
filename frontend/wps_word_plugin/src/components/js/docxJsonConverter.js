@@ -241,6 +241,83 @@ function getParagraphPageRange(doc, paraRange) {
   }
 }
 
+function getParagraphLocation(doc, paragraph, paraIndex) {
+  if (!paragraph || !Number.isInteger(paraIndex) || paraIndex < 0) {
+    return null;
+  }
+  const paraID = getParagraphParaID(paragraph);
+  if (paraID === null) {
+    return null;
+  }
+  const pages = getParagraphPageRange(doc, paragraph.Range);
+  return {
+    paraID,
+    paraIndex,
+    pageStart: pages.pageStart ?? null,
+    pageEnd: pages.pageEnd ?? null
+  };
+}
+
+function getParagraphLocationAtPosition(doc, position) {
+  const total = Number(doc?.Paragraphs?.Count || 0);
+  let fallback = null;
+  for (let index = 1; index <= total; index++) {
+    try {
+      const paragraph = doc.Paragraphs.Item(index);
+      const start = Number(paragraph.Range.Start);
+      const end = Number(paragraph.Range.End);
+      if (!Number.isFinite(start) || !Number.isFinite(end)) {
+        continue;
+      }
+      if (start <= position && position <= end) {
+        return getParagraphLocation(doc, paragraph, index - 1);
+      }
+      if (start <= position) {
+        fallback = getParagraphLocation(doc, paragraph, index - 1) || fallback;
+      }
+    } catch (error) {
+      void error;
+    }
+  }
+  return fallback;
+}
+
+function findParagraphAfterBreak(doc, position, pageBeforeBreak, breakType) {
+  const total = Number(doc?.Paragraphs?.Count || 0);
+  let positionCandidate = null;
+  let lastCandidate = null;
+  for (let index = 1; index <= total; index++) {
+    try {
+      const paragraph = doc.Paragraphs.Item(index);
+      const start = Number(paragraph.Range.Start);
+      const end = Number(paragraph.Range.End);
+      const location = getParagraphLocation(doc, paragraph, index - 1);
+      if (!location) {
+        continue;
+      }
+      lastCandidate = location;
+      if (
+        breakType !== 'wdLineBreak' &&
+        Number.isInteger(pageBeforeBreak) &&
+        Number.isInteger(location.pageStart) &&
+        location.pageStart > pageBeforeBreak &&
+        end >= position
+      ) {
+        return location;
+      }
+      const isAfterBreakPosition = breakType === 'wdLineBreak'
+        ? Number.isFinite(start) && Number.isFinite(end) && start <= position && end >= position
+        : Number.isFinite(start) && start >= position;
+      if (!positionCandidate && isAfterBreakPosition) {
+        positionCandidate = location;
+      }
+    } catch (error) {
+      void error;
+    }
+  }
+  return positionCandidate || lastCandidate;
+}
+
 // ============== 样式去重与解析 ==============
 
 /**
@@ -305,6 +382,20 @@ function normalizeDocumentJsonInput(jsonData) {
   return jsonData;
 }
 
+function expandOrderedDocumentBlocks(blocks) {
+  const elements = [];
+  for (const block of Array.isArray(blocks) ? blocks : []) {
+    if (block && Array.isArray(block.tables)) {
+      for (const table of block.tables) {
+        elements.push({ type: 'table', data: table });
+      }
+    } else {
+      elements.push({ type: 'paragraph', data: block });
+    }
+  }
+  return elements;
+}
+
 function revealInsertedRange(doc, startPos, endPos) {
   try {
     const safeEnd = Math.max(startPos, endPos - 1);
@@ -326,6 +417,10 @@ function revealInsertedRange(doc, startPos, endPos) {
 
 function isBlankWpsText(text) {
   return String(text || '').replace(/[\r\n\u0007]/g, '').trim() === '';
+}
+
+function isDocumentStartInsertParaID(value) {
+  return value === 0 || (typeof value === 'string' && value.trim() === '0');
 }
 
 function isEffectivelyEmptyDocument(doc) {
@@ -428,6 +523,25 @@ function makePStyle(alignment, lineSpacing, indentLeft, indentRight, indentFirst
   return [alignment, lineSpacing, indentLeft, indentRight, indentFirstLine, spaceBefore, spaceAfter, styleName];
 }
 
+function readParagraphPStyle(para) {
+  const paraFormat = para?.Format;
+  let styleName = '';
+  try {
+    styleName = para?.Style?.NameLocal || para?.Style?.Name || '';
+  } catch (e) {}
+  return [
+    getAlignmentName(paraFormat?.Alignment),
+    paraFormat?.LineSpacing || 0,
+    paraFormat?.LeftIndent || 0,
+    paraFormat?.RightIndent || 0,
+    paraFormat?.FirstLineIndent || 0,
+    paraFormat?.SpaceBefore || 0,
+    paraFormat?.SpaceAfter || 0,
+    styleName,
+    paraFormat?.LineSpacingRule || 0
+  ];
+}
+
 /**
  * 创建字符样式数组
  */
@@ -459,6 +573,57 @@ function getAlignmentValue(alignment) {
   }
   const map = { left: 0, center: 1, right: 2, justify: 3, distribute: 4 };
   return map[alignment] ?? 0;
+}
+
+/**
+ * Apply a resolved pStyle to the paragraph at a document position. WPS may
+ * rebuild paragraph boundaries after a tracked paragraph mark is inserted,
+ * so callers can safely apply this both before and after completing insertion.
+ */
+function applyParagraphStyleAtPosition(doc, position, pStyle) {
+  try {
+    const paragraph = doc.Range(position, position).Paragraphs.Item(1);
+    if (!paragraph) {
+      return false;
+    }
+
+    const style = Array.isArray(pStyle) ? pStyle : DEFAULT_PSTYLE;
+    const styleName = style[PSTYLE.STYLE_NAME] || '';
+    if (styleName) {
+      try {
+        paragraph.Style = styleName;
+      } catch (error) {
+        console.warn('应用样式失败:', error);
+      }
+    }
+
+    const paraFormat = paragraph.Format;
+    paraFormat.Alignment = getAlignmentValue(style[PSTYLE.ALIGNMENT] || 'left');
+    paraFormat.LeftIndent = style[PSTYLE.INDENT_LEFT] || 0;
+    paraFormat.RightIndent = style[PSTYLE.INDENT_RIGHT] || 0;
+    paraFormat.FirstLineIndent = style[PSTYLE.INDENT_FIRST_LINE] || 0;
+    paraFormat.SpaceBefore = style[PSTYLE.SPACE_BEFORE] || 0;
+    paraFormat.SpaceAfter = style[PSTYLE.SPACE_AFTER] || 0;
+
+    const lineSpacing = style[PSTYLE.LINE_SPACING] || 0;
+    const lineSpacingRule = style[PSTYLE.LINE_SPACING_RULE] || 0;
+    try {
+      if (lineSpacingRule >= 3 && lineSpacing > 0) {
+        paraFormat.LineSpacing = lineSpacing;
+        paraFormat.LineSpacingRule = lineSpacingRule;
+      } else {
+        // 0/1/2 are single, 1.5 and double spacing. Assign 0 explicitly so
+        // an inserted paragraph does not retain the anchor's spacing rule.
+        paraFormat.LineSpacingRule = lineSpacingRule;
+      }
+    } catch (error) {
+      console.warn('设置行距失败:', error);
+    }
+    return true;
+  } catch (error) {
+    console.warn('设置段落格式失败:', error);
+    return false;
+  }
 }
 
 /**
@@ -625,6 +790,22 @@ function cleanCellText(text) {
     return '';
   }
   return text.replace(/[\r\n\u0007\u0001]+$/g, '');
+}
+
+/**
+ * CellParagraph supports both the full {runs:[...]} form and the compact
+ * {text, rStyle} form. The backend schema keeps paragraph.text even when
+ * runs is empty, so WPS generation must not treat that paragraph as blank.
+ */
+function getCellParagraphRuns(paragraph) {
+  if (!paragraph || typeof paragraph !== 'object') {
+    return [];
+  }
+  if (Array.isArray(paragraph.runs) && paragraph.runs.length > 0) {
+    return paragraph.runs;
+  }
+  const text = cleanCellText(String(paragraph.text || ''));
+  return text ? [{ text, rStyle: paragraph.rStyle || null }] : [];
 }
 
 function getDocumentUsableWidth(doc) {
@@ -1784,7 +1965,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride, start
         // 空段落但有图片
         if ((!paraText || paraText.match(/^[\r\n\f\u0007]*$/)) && (paraInlineImages.length > 0 || paraFloatingImages.length > 0)) {
           result.paragraphs.push({
-            pStyle: DEFAULT_IMAGE_PSTYLE,
+            pStyle: readParagraphPStyle(para),
             runs: [],
             paraIndex: idx,
             paraID,
@@ -1796,7 +1977,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride, start
         if (!paraText || paraText.match(/^[\r\n\f\u0007]*$/)) {
           if (paraInlineImages.length === 0 && paraFloatingImages.length === 0) {
             result.paragraphs.push({
-              pStyle: '',
+              pStyle: readParagraphPStyle(para),
               runs: [],
               paraIndex: idx,
               paraID,
@@ -1806,24 +1987,8 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride, start
           continue;
         }
 
-        const paraFormat = para.Format;
-        let styleName = '';
-        try {
-          styleName = para.Style.NameLocal || para.Style.Name || ''; 
-        } catch (e) {}
-
         const paragraphData = {
-          pStyle: [
-            getAlignmentName(paraFormat.Alignment),
-            paraFormat.LineSpacing || 0,
-            paraFormat.LeftIndent || 0,
-            paraFormat.RightIndent || 0,
-            paraFormat.FirstLineIndent || 0,
-            paraFormat.SpaceBefore || 0,
-            paraFormat.SpaceAfter || 0,
-            styleName,
-            paraFormat.LineSpacingRule || 0
-          ],
+          pStyle: readParagraphPStyle(para),
           runs: [],
           paraIndex: idx,
           paraID,
@@ -2215,7 +2380,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride, start
         // 空段落但有图片
         if ((!paraText || paraText.match(/^[\r\n\f\u0007]*$/)) && (paraInlineImages.length > 0 || paraFloatingImages.length > 0)) {
           result.paragraphs.push({
-            pStyle: DEFAULT_IMAGE_PSTYLE,
+            pStyle: readParagraphPStyle(para),
             runs: [],
             paraIndex: paraStartToIndex.get(paraStart) ?? -1,
             paraID,
@@ -2227,7 +2392,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride, start
         if (paraText.match(/^[\r\n\f\u0007]*$/)) {
           if (paraInlineImages.length === 0 && paraFloatingImages.length === 0) {
             result.paragraphs.push({
-              pStyle: '',
+              pStyle: readParagraphPStyle(para),
               runs: [],
               paraIndex: paraStartToIndex.get(paraStart) ?? -1,
               paraID,
@@ -2237,25 +2402,9 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride, start
           continue;
         }
 
-        const paraFormat = para.Format;
-        let styleName = '';
-        try {
-          styleName = para.Style.NameLocal || para.Style.Name || '';
-        } catch (e) {}
-
         const paragraphData = {
           // text: cleanText(paraText),
-          pStyle: [
-            getAlignmentName(paraFormat.Alignment),
-            paraFormat.LineSpacing || 0,
-            paraFormat.LeftIndent || 0,
-            paraFormat.RightIndent || 0,
-            paraFormat.FirstLineIndent || 0,
-            paraFormat.SpaceBefore || 0,
-            paraFormat.SpaceAfter || 0,
-            styleName,
-            paraFormat.LineSpacingRule || 0
-          ],
+          pStyle: readParagraphPStyle(para),
           runs: [],
           paraIndex: paraStartToIndex.get(paraStart) ?? -1,
           paraID,
@@ -2609,7 +2758,7 @@ function generateTable(doc, tableData, currentPos, styles) {
 
             paraMetadata.push({ pStyle: para.pStyle });
 
-            for (const run of para.runs) {
+            for (const run of getCellParagraphRuns(para)) {
               const runText = cleanCellText(run.text || '');
               if (!runText) {
                 continue;
@@ -2729,7 +2878,9 @@ function generateTable(doc, tableData, currentPos, styles) {
         }
 
         cell.VerticalAlignment = getCellVerticalAlignmentValue(cStyle[CSTYLE.VERTICAL_ALIGNMENT] ?? 'center');
-      } catch (e) {}
+      } catch (e) {
+        console.warn(`[generateTable] 写入单元格失败 row=${row + 1}, col=${col + 1}:`, e);
+      }
     }
   }
 
@@ -2774,7 +2925,7 @@ function generateTable(doc, tableData, currentPos, styles) {
  * 从 JSON 数据生成 Word 文档
  * @param {Object} jsonData - JSON 数据
  * @param {Object} doc - 已存在的文档对象（可选，默认创建新文档）
- * @param {number|null} [insertParaID] - 可选，在指定段落 paraID 之后插入。
+ * @param {number|string|null} [insertParaID] - 0 表示文档开头；其他值表示在对应 paraID 段落之后插入。
  *   省略时在当前选区位置插入。
  * @returns {Object} - 成功返回 {success: true, doc, startPos, endPos}，失败返回 {error: string}
  */
@@ -2782,8 +2933,11 @@ function generateDocxFromJSON(jsonData, doc, insertParaID) {
   try {
     jsonData = normalizeDocumentJsonInput(jsonData);
 
-    if (!jsonData || (!jsonData.paragraphs && !jsonData.tables)) {
+    if (!jsonData || !Array.isArray(jsonData.paragraphs)) {
       return { error: 'JSON数据格式不正确' };
+    }
+    if (Array.isArray(jsonData.tables) && jsonData.tables.length > 0) {
+      return { error: '顶层 tables 已停用，请将表格块放入 paragraphs 数组的目标位置' };
     }
 
     // 提取样式字典
@@ -2804,56 +2958,24 @@ function generateDocxFromJSON(jsonData, doc, insertParaID) {
       }
     })();
 
-    // 合并段落和表格，按位置排序
-    const elements = [];
+    // paragraphs 是唯一的有序内容流：普通项是段落，{tables:[...]} 项是表格块。
+    // 严格按数组顺序展开，不再为表格猜测 paraIndex 或默认位置。
+    const elements = expandOrderedDocumentBlocks(jsonData.paragraphs);
 
-    if (jsonData.paragraphs) {
-      jsonData.paragraphs.forEach((para, index) => {
-        elements.push({ type: 'paragraph', data: para, position: para.paraIndex ?? (index * 1000) });
-      });
-    }
-
-    if (jsonData.tables) {
-      jsonData.tables.forEach((table, index) => {
-        elements.push({
-          type: 'table',
-          data: table,
-          position: table.paraIndex ?? ((index + 0.5) * 10000)
-        });
-      });
-    }
-
-    elements.sort((a, b) => a.position - b.position);
-
-    // 预处理：合并连续空段落
-    const processedElements = [];
-    let consecutiveEmptyCount = 0;
-
-    for (const element of elements) {
-      if (element.type === 'paragraph' && isEmptyParagraph(element.data)) {
-        if (processedElements.length === 0) {
-          continue;
-        }
-        consecutiveEmptyCount++;
-        if (consecutiveEmptyCount <= 1) {
-          processedElements.push(element);
-        }
-      } else {
-        consecutiveEmptyCount = 0;
-        processedElements.push(element);
-      }
-    }
+    // 不压缩空白段落：有序块中的每一项都必须保留其精确位置。
+    const processedElements = elements;
 
     // 确定插入起始位置
     let insertFallbackWarning = null;
     let currentPos;
-    if (isEffectivelyEmptyDocument(doc)) {
+    const insertAtDocumentStart = isDocumentStartInsertParaID(insertParaID);
+    if (insertAtDocumentStart || isEffectivelyEmptyDocument(doc)) {
       try {
-        currentPos = doc.Paragraphs.Item(1).Range.Start;
+        currentPos = doc.Content?.Start ?? doc.Paragraphs.Item(1).Range.Start;
       } catch (e) {
         currentPos = 0;
       }
-      console.log('[generateDocxFromJSON] 检测到空文档，占位段落将从文档起点插入');
+      console.log('[generateDocxFromJSON] 将从文档起点插入');
     } else if (insertParaID !== undefined && insertParaID !== null) {
       // 通过段落ID定位插入位置（在指定段落之后插入）
       const totalParas = doc.Paragraphs.Count;
@@ -2885,7 +3007,7 @@ function generateDocxFromJSON(jsonData, doc, insertParaID) {
     // 注意：不能直接用 tblRange.End 作为插入点，WPS 中在该位置插入文本仍可能落入表格
     try {
       const docTables = doc.Content.Tables;
-      if (docTables && docTables.Count > 0) {
+      if (!insertAtDocumentStart && docTables && docTables.Count > 0) {
         for (let ti = 1; ti <= docTables.Count; ti++) {
           const tbl = docTables.Item(ti);
           const tblRange = tbl.Range;
@@ -2914,6 +3036,7 @@ function generateDocxFromJSON(jsonData, doc, insertParaID) {
 
     const insertStartPos = currentPos;  // 记录插入起始位置
     let paraIndex = 0;
+    const insertedParagraphStyles = [];
     const docUsableWidth = getDocumentUsableWidth(doc);
 
     for (let i = 0; i < processedElements.length; i++) {
@@ -2924,42 +3047,18 @@ function generateDocxFromJSON(jsonData, doc, insertParaID) {
 
         // 获取段落样式
         const pStyle = resolveStyle(styles, para.pStyle, DEFAULT_PSTYLE);
-        const alignment = pStyle[PSTYLE.ALIGNMENT] || 'left';
-        const lineSpacing = pStyle[PSTYLE.LINE_SPACING] || 0;
-        const lineSpacingRule = pStyle[PSTYLE.LINE_SPACING_RULE] || 0;
         const indentLeft = pStyle[PSTYLE.INDENT_LEFT] || 0;
         const indentRight = pStyle[PSTYLE.INDENT_RIGHT] || 0;
-        const indentFirstLine = pStyle[PSTYLE.INDENT_FIRST_LINE] || 0;
-        const spaceBefore = pStyle[PSTYLE.SPACE_BEFORE] || 0;
-        const spaceAfter = pStyle[PSTYLE.SPACE_AFTER] || 0;
-        const styleName = pStyle[PSTYLE.STYLE_NAME] || '';
 
         // 处理空段落
         if (isEmptyParagraph(para)) {
-          const prevElement = i > 0 ? processedElements[i - 1] : null;
-          const nextElement = i < processedElements.length - 1 ? processedElements[i + 1] : null;
-
-          const prevHasContent =
-            prevElement &&
-            (prevElement.type === 'table' ||
-              (prevElement.type === 'paragraph' &&
-                !isEmptyParagraph(prevElement.data) &&
-                prevElement.data.runs &&
-                prevElement.data.runs.length > 0));
-          const nextHasContent =
-            nextElement &&
-            (nextElement.type === 'table' ||
-              (nextElement.type === 'paragraph' &&
-                !isEmptyParagraph(nextElement.data) &&
-                nextElement.data.runs &&
-                nextElement.data.runs.length > 0));
-
-          if (prevHasContent || nextHasContent) {
-            const range = doc.Range(currentPos, currentPos);
-            range.Text = '\r';
-            currentPos += 1;
-            paraIndex++;
-          }
+          const paraStartPos = currentPos;
+          const range = doc.Range(currentPos, currentPos);
+          range.Text = '\r';
+          currentPos += 1;
+          applyParagraphStyleAtPosition(doc, paraStartPos, pStyle);
+          insertedParagraphStyles.push({ position: paraStartPos, pStyle: [...pStyle] });
+          paraIndex++;
           continue;
         }
 
@@ -3054,49 +3153,14 @@ function generateDocxFromJSON(jsonData, doc, insertParaID) {
           }
         }
 
-        // 先设置段落格式 - 使用 Range 来精确定位刚插入的段落
-        // 必须在添加段落结束符（\r）之前设置格式
+        // WPS 修订模式可能在插入段落标记后重建段落。先应用一次，完成
+        // 全部内容插入后再按起点二次固化，避免继承锚点段落的 pStyle。
         try {
-          const insertedParaRange = doc.Range(paraStartPos, currentPos);
-          const insertedPara = insertedParaRange.Paragraphs.Item(1);
-          if (insertedPara) {
-            const paraFormat = insertedPara.Format;
-
-            // 如果有样式名称，先应用样式
-            if (styleName) {
-              try {
-                insertedPara.Style = styleName;
-              } catch (e) {
-                console.warn('应用样式失败:', e);
-              }
-            }
-
-            // 强制应用 JSON 中的所有段落格式（覆盖继承的格式和样式）
-            // 不使用条件判断，直接设置所有属性
-            paraFormat.Alignment = getAlignmentValue(alignment);
-            paraFormat.LeftIndent = indentLeft;
-            paraFormat.RightIndent = indentRight;
-            paraFormat.FirstLineIndent = indentFirstLine;
-            paraFormat.SpaceBefore = spaceBefore;
-            paraFormat.SpaceAfter = spaceAfter;
-
-            // 设置行距
-            // 预设档位 (0=单倍, 1=1.5倍, 2=双倍): WPS 自动计算行距，只需设置 Rule
-            // 显式档位 (3=至少, 4=固定值, 5=多倍): 需要先设磅值再设 Rule
-            try {
-              if (lineSpacingRule >= 3 && lineSpacing && lineSpacing > 0) {
-                paraFormat.LineSpacing = lineSpacing;
-                paraFormat.LineSpacingRule = lineSpacingRule;
-              } else if (lineSpacingRule > 0) {
-                paraFormat.LineSpacingRule = lineSpacingRule;
-              }
-            } catch (e) {
-              console.warn('设置行距失败:', e);
-            }
-          }
+          applyParagraphStyleAtPosition(doc, paraStartPos, pStyle);
+          insertedParagraphStyles.push({ position: paraStartPos, pStyle: [...pStyle] });
           paraIndex++;
-        } catch (e) {
-          console.warn('设置段落格式失败:', e);
+        } catch (error) {
+          console.warn('记录段落格式失败:', error);
         }
 
         // 段落格式设置完成后，再添加段落结束符
@@ -3144,6 +3208,17 @@ function generateDocxFromJSON(jsonData, doc, insertParaID) {
       currentPos += 1;
     }
 
+    // 段落结束符均已落定后重新应用 pStyle。尤其是向已有修订内容后继续
+    // 写入时，WPS 否则可能用锚点空段落的格式覆盖英文摘要等后续内容。
+    for (const item of insertedParagraphStyles) {
+      applyParagraphStyleAtPosition(doc, item.position, item.pStyle);
+    }
+
+    const lastParagraph = getParagraphLocationAtPosition(
+      doc,
+      Math.max(insertStartPos, currentPos - 1)
+    );
+
     revealInsertedRange(doc, insertStartPos, currentPos);
 
     try {
@@ -3164,6 +3239,7 @@ function generateDocxFromJSON(jsonData, doc, insertParaID) {
       doc,
       startPos: insertStartPos,
       endPos: currentPos,
+      lastParagraph,
       warning: insertFallbackWarning
     };
   } catch (error) {
@@ -3178,21 +3254,18 @@ function generateDocxFromJSON(jsonData, doc, insertParaID) {
  *
  * @param {number[]} paraIDs - 要删除的段落 paraID 列表（每个 ID 对应一个独立段落）
  * @param {Object} [docOverride] - 可选，指定文档对象，默认为 ActiveDocument
- * @returns {{ success: boolean, deletedCount: number, message: string }}
+ * @returns {{ success: boolean, deletedCount: number, deletedParaIDs: number[], failedParaIDs: number[], missingParaIDs: number[], message: string }}
  */
 function deleteDocxPara(paraIDs, docOverride) {
   if (!Array.isArray(paraIDs) || paraIDs.length === 0) {
-    return { success: false, deletedCount: 0, message: '未提供有效的 paraIDs 列表' };
-  }
-
-  const doc = docOverride || window.Application?.ActiveDocument;
-  if (!doc) {
-    return { success: false, deletedCount: 0, message: '没有打开的文档' };
-  }
-
-  const totalParas = doc.Paragraphs.Count;
-  if (totalParas === 0) {
-    return { success: false, deletedCount: 0, message: '文档中没有段落' };
+    return {
+      success: false,
+      deletedCount: 0,
+      deletedParaIDs: [],
+      failedParaIDs: [],
+      missingParaIDs: [],
+      message: '未提供有效的 paraIDs 列表'
+    };
   }
 
   const normalizedIDs = [...new Set(
@@ -3201,7 +3274,38 @@ function deleteDocxPara(paraIDs, docOverride) {
       .filter((v) => Number.isInteger(v))
   )];
   if (normalizedIDs.length === 0) {
-    return { success: false, deletedCount: 0, message: 'paraIDs 中没有有效整数ID' };
+    return {
+      success: false,
+      deletedCount: 0,
+      deletedParaIDs: [],
+      failedParaIDs: [],
+      missingParaIDs: [],
+      message: 'paraIDs 中没有有效整数ID'
+    };
+  }
+
+  const doc = docOverride || window.Application?.ActiveDocument;
+  if (!doc) {
+    return {
+      success: false,
+      deletedCount: 0,
+      deletedParaIDs: [],
+      failedParaIDs: [],
+      missingParaIDs: normalizedIDs,
+      message: '没有打开的文档'
+    };
+  }
+
+  const totalParas = doc.Paragraphs.Count;
+  if (totalParas === 0) {
+    return {
+      success: false,
+      deletedCount: 0,
+      deletedParaIDs: [],
+      failedParaIDs: [],
+      missingParaIDs: normalizedIDs,
+      message: '文档中没有段落'
+    };
   }
 
   const targets = [];
@@ -3218,13 +3322,23 @@ function deleteDocxPara(paraIDs, docOverride) {
     }
   }
 
+  const foundIDs = new Set(targets.map((target) => target.paraID));
+  const missingParaIDs = normalizedIDs.filter((paraID) => !foundIDs.has(paraID));
   if (targets.length === 0) {
-    return { success: false, deletedCount: 0, message: '未找到匹配 paraIDs 的段落' };
+    return {
+      success: false,
+      deletedCount: 0,
+      deletedParaIDs: [],
+      failedParaIDs: [],
+      missingParaIDs,
+      message: '未找到匹配 paraIDs 的段落'
+    };
   }
 
   // 从后往前删，避免位置偏移
   targets.sort((a, b) => b.start - a.start);
-  let deletedCount = 0;
+  const deletedParaIDs = [];
+  const failedParaIDs = [];
   for (const t of targets) {
     try {
       let delStart = t.start;
@@ -3233,16 +3347,24 @@ function deleteDocxPara(paraIDs, docOverride) {
         delStart -= 1;
       }
       doc.Range(delStart, delEnd).Delete();
-      deletedCount++;
+      deletedParaIDs.push(t.paraID);
     } catch (e) {
       console.log('删除段落失败:', e.message);
+      failedParaIDs.push(t.paraID);
     }
   }
 
+  const deletedCount = deletedParaIDs.length;
+  const fullyDeleted = deletedCount === normalizedIDs.length;
   return {
-    success: deletedCount > 0,
+    success: fullyDeleted,
     deletedCount,
-    message: `成功删除 ${deletedCount} 个段落（按 paraID）`
+    deletedParaIDs,
+    failedParaIDs,
+    missingParaIDs,
+    message: fullyDeleted
+      ? `成功删除 ${deletedCount} 个段落（按 paraID）`
+      : `仅删除 ${deletedCount}/${normalizedIDs.length} 个段落（按 paraID）`
   };
 }
 
@@ -3294,9 +3416,27 @@ function insertBreakAfterParagraph(paraID, breakType, docOverride) {
         return { success: false, error: `段落 ${normalizedParaID} 没有有效的 Range` };
       }
       const position = Math.max(start, end - 1);
+      const beforePages = getParagraphPageRange(doc, para.Range);
       const range = doc.Range(position, position);
       range.InsertBreak(INSERT_BREAK_TYPES[breakType]);
-      return { success: true, paraID: normalizedParaID, breakType, position };
+      try {
+        doc.Repaginate?.();
+      } catch (error) {
+        void error;
+      }
+      const paragraphAfterBreak = findParagraphAfterBreak(
+        doc,
+        position,
+        beforePages.pageEnd ?? null,
+        breakType
+      );
+      return {
+        success: true,
+        paraID: normalizedParaID,
+        breakType,
+        position,
+        paragraphAfterBreak
+      };
     } catch (error) {
       return { success: false, error: error?.message || String(error) };
     }
@@ -3317,12 +3457,16 @@ export default {
   // 辅助函数（供外部使用）
   cleanText,
   cleanCellText,
+  getCellParagraphRuns,
   makeInlineImageRun,
   exportImageToTemp,
   deduplicateStyles,
   resolveStyle,
   getParagraphParaID,
   getParagraphPageRange,
+  getParagraphLocationAtPosition,
+  isDocumentStartInsertParaID,
+  expandOrderedDocumentBlocks,
   isCharacterInsideInlineImage,
 
   // 样式数组常量
@@ -3338,6 +3482,7 @@ export default {
   // 格式转换函数
   getAlignmentName,
   getAlignmentValue,
+  applyParagraphStyleAtPosition,
   getTableAlignmentName,
   getTableAlignmentValue,
   getCellVerticalAlignmentName,
@@ -3360,12 +3505,16 @@ export {
   insertBreakAfterParagraph,
   cleanText,
   cleanCellText,
+  getCellParagraphRuns,
   makeInlineImageRun,
   exportImageToTemp,
   deduplicateStyles,
   resolveStyle,
   getParagraphParaID,
   getParagraphPageRange,
+  getParagraphLocationAtPosition,
+  isDocumentStartInsertParaID,
+  expandOrderedDocumentBlocks,
   isCharacterInsideInlineImage,
   PSTYLE,
   RSTYLE,
@@ -3375,6 +3524,7 @@ export {
   makeCStyle,
   getAlignmentName,
   getAlignmentValue,
+  applyParagraphStyleAtPosition,
   getTableAlignmentName,
   getTableAlignmentValue,
   getCellVerticalAlignmentName,

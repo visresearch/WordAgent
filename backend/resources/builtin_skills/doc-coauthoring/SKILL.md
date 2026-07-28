@@ -21,11 +21,12 @@ Agree on a short outline before a substantial draft. Start with the core decisio
 
 Use the active Word document as the primary deliverable:
 
-- For an empty document, make the first `generate_document` call with `insertParaID=0`.
-- For a non-empty document, use real paragraph IDs returned by `read_document` or `search_document`.
+- Use `insertParaID=0` to insert at the document start, including in a non-empty document.
+- For any other position, use real paragraph IDs returned by `read_document` or `search_document`.
 - Insert long drafts in ordered batches.
+- Plan page boundaries between batches. Covers, abstracts, tables of contents, references, appendices, and top-level chapters normally begin on fresh pages. Use `insert_break` with `wdPageBreak`, or `wdSectionBreakNextPage` when section settings change; never force pagination with repeated blank paragraphs.
 - Preserve existing styles unless the user requests a redesign.
-- For a replacement, read the target, call `delete_document` once for its paragraph IDs, then insert the replacement with `generate_document`. Deletion is pending in the Word UI, so do not repeat it when the old text remains visible.
+- For a replacement, read the target, call `delete_document` once for its paragraph IDs, verify the returned deletion result, then insert the replacement with `generate_document` using the returned `replacementInsertParaID`. If only some IDs were deleted, re-read and retry only the remaining IDs.
 - Change only requested sections.
 
 For each section, clarify the claim, evidence, implications, and action. Present meaningful alternatives when choices remain. Incorporate free-form feedback directly.

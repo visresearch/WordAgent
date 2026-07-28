@@ -243,7 +243,7 @@ export default {
             ? Number(jsonData.insertParaID)
             : null;
         if (insertParaID === null) {
-          this.showStatus('转换失败: 缺少必填 insertParaID（空文档首次写入使用 0）', 'error');
+          this.showStatus('转换失败: 缺少必填 insertParaID（文档开头使用 0）', 'error');
           return;
         }
         const result = await generateDocxFromJSON(jsonData, 'selection', insertParaID);
@@ -252,8 +252,11 @@ export default {
           return;
         }
 
-        const paraCount = jsonData.paragraphs?.length || 0;
-        const tableCount = jsonData.tables?.length || 0;
+        const paraCount = (jsonData.paragraphs || []).filter(block => !Array.isArray(block?.tables)).length;
+        const tableCount = (jsonData.paragraphs || []).reduce(
+          (count, block) => count + (Array.isArray(block?.tables) ? block.tables.length : 0),
+          0
+        );
         this.showStatus(`已写入文档：${paraCount} 段落 / ${tableCount} 表格`, 'success');
       } catch (e) {
         console.error('JSON 转文档出错:', e);

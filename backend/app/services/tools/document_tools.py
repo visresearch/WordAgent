@@ -6,6 +6,7 @@ import concurrent.futures
 import importlib
 import json
 import re
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
@@ -23,6 +24,7 @@ from .callback import (
     _pending_loops,
     _pending_tool_requests,
     is_stop_requested,
+    wait_for_tool_response,
 )
 from .schemas import DocumentOutput, DocumentQuery
 
@@ -66,6 +68,65 @@ def _normalize_doc_id(doc_id: DocIdInput) -> int:
 def _normalize_para_id(para_id: ParaIdInput) -> int | None:
     """Normalize paraID to integer; invalid values return None."""
     return _parse_int_like(para_id)
+
+
+def _format_generated_document_message(
+    para_count: int,
+    table_count: int,
+    image_count: int,
+) -> str:
+    """Build a generation summary without displaying zero-value item types."""
+    generated_counts = []
+    if para_count > 0:
+        generated_counts.append(f"{para_count} 个段落")
+    if table_count > 0:
+        generated_counts.append(f"{table_count} 个表格")
+    if image_count > 0:
+        generated_counts.append(f"{image_count} 张图片")
+
+    message = "📝 文档已生成"
+    if generated_counts:
+        message += f"，共 {'，'.join(generated_counts)}"
+    return message
+
+
+def _wait_for_frontend_mutation(request_id: str, timeout: float = 60) -> dict | None:
+    """Wait synchronously for a requestId-correlated frontend mutation result."""
+    chat_id = _current_chat_id.get(None)
+    if not chat_id or is_stop_requested(chat_id):
+        return None
+    loop = _pending_loops.get(chat_id)
+    if not loop:
+        return None
+    future = asyncio.run_coroutine_threadsafe(
+        wait_for_tool_response(chat_id, request_id, timeout=timeout),
+        loop,
+    )
+    try:
+        return future.result(timeout=timeout + 5)
+    except (TimeoutError, concurrent.futures.TimeoutError):
+        logger.warning("[DocumentTool] ⏰ 等待前端操作结果超时 requestId=%s", request_id)
+        return None
+    except Exception as exc:
+        logger.error("[DocumentTool] ❌ 等待前端操作结果失败 requestId=%s: %s", request_id, exc)
+        return None
+
+
+def _normalize_frontend_paragraph_location(value: object) -> dict | None:
+    if not isinstance(value, dict):
+        return None
+    para_id = _parse_int_like(value.get("paraID"))
+    para_index = _parse_int_like(value.get("paraIndex"))
+    if para_id is None or para_index is None:
+        return None
+    page_start = _parse_int_like(value.get("pageStart"))
+    page_end = _parse_int_like(value.get("pageEnd"))
+    return {
+        "paraID": para_id,
+        "paraIndex": para_index,
+        "pageStart": page_start,
+        "pageEnd": page_end,
+    }
 
 
 # region 图片 / 文档辅助
@@ -277,21 +338,117 @@ def _save_generated_document_json(doc_dict: dict) -> str | None:
         return None
 
 
+def _order_document_blocks(doc_json: dict) -> dict:
+    """Convert read_document's parallel paragraphs/tables into one verified ordered block stream."""
+    paragraphs = doc_json.get("paragraphs", [])
+    tables = doc_json.get("tables", [])
+    if not isinstance(paragraphs, list) or not isinstance(tables, list) or not tables:
+        result = dict(doc_json)
+        result.pop("tables", None)
+        result["paragraphs"] = paragraphs if isinstance(paragraphs, list) else []
+        return result
+
+    positioned: list[tuple[int, int, dict]] = []
+    unpositioned_tables: list[dict] = []
+    sequence = 0
+    table_ranges: list[tuple[int, int]] = []
+    for table in tables:
+        if not isinstance(table, dict):
+            continue
+        start = _parse_int_like(table.get("paraIndex"))
+        end = _parse_int_like(table.get("endParaIndex"))
+        if start is not None and start >= 0:
+            table_ranges.append((start, end if end is not None and end >= start else start))
+
+    for paragraph in paragraphs:
+        if not isinstance(paragraph, dict):
+            continue
+        para_index = _parse_int_like(paragraph.get("paraIndex"))
+        if paragraph.get("inTable") is True or (
+            para_index is not None and any(start <= para_index <= end for start, end in table_ranges)
+        ):
+            # The table block already represents these physical cell paragraphs.
+            continue
+        if para_index is None:
+            # Paragraphs already arrive in document order. Use their sequence only when
+            # the frontend omitted paraIndex; this never determines a table position.
+            para_index = sequence
+        positioned.append((para_index, 1, paragraph))
+        sequence += 1
+
+    for table in tables:
+        if not isinstance(table, dict):
+            continue
+        para_index = _parse_int_like(table.get("paraIndex"))
+        if para_index is None or para_index < 0:
+            unpositioned_tables.append(table)
+            continue
+        positioned.append((para_index, 0, {"tables": [table]}))
+
+    positioned.sort(key=lambda item: (item[0], item[1]))
+    ordered_blocks = [item[2] for item in positioned]
+    if unpositioned_tables:
+        logger.warning(
+            "[read_document] %s 个表格缺少有效 paraIndex，无法确定其段落位置，已附加到有序流末尾",
+            len(unpositioned_tables),
+        )
+        ordered_blocks.extend({"tables": [table]} for table in unpositioned_tables)
+
+    result = dict(doc_json)
+    result.pop("tables", None)
+    result["paragraphs"] = ordered_blocks
+    return result
+
+
 def _compact_doc_json(doc_json: dict) -> str:
-    """Compact document JSON to a size the LLM can handle."""
-    full = json.dumps(doc_json, ensure_ascii=False)
+    """Compact document JSON while preserving the ordered paragraph/table block stream."""
+    ordered_doc = _order_document_blocks(doc_json)
+    full = json.dumps(ordered_doc, ensure_ascii=False)
     if len(full) <= _MAX_DOC_JSON_CHARS:
         return full
 
     compact = {"paragraphs": [], "_compacted": True}
-    for p in doc_json.get("paragraphs", []):
-        if not isinstance(p, dict):
+    for block in ordered_doc.get("paragraphs", []):
+        if not isinstance(block, dict):
             continue
-        para_compact = {"paraIndex": p.get("paraIndex"), "paraID": p.get("paraID"), "runs": []}
-        if p.get("pageStart") is not None and p.get("pageEnd") is not None:
-            para_compact["pageStart"] = p["pageStart"]
-            para_compact["pageEnd"] = p["pageEnd"]
-        for r in p.get("runs", []):
+        if isinstance(block.get("tables"), list):
+            compact_tables = []
+            for table in block["tables"]:
+                if not isinstance(table, dict):
+                    continue
+                table_compact = {
+                    "paraIndex": table.get("paraIndex"),
+                    "endParaIndex": table.get("endParaIndex"),
+                }
+                rows = []
+                for row in table.get("cells", []):
+                    cells = []
+                    for cell in row:
+                        if isinstance(cell, dict):
+                            cell_text = cell.get("text", "")
+                            if not cell_text and cell.get("paragraphs"):
+                                cell_text = "".join(
+                                    "".join(
+                                        run.get("text", "") if isinstance(run, dict) else str(run)
+                                        for run in paragraph.get("runs", [])
+                                    )
+                                    for paragraph in cell.get("paragraphs", [])
+                                )
+                            cells.append(cell_text)
+                        else:
+                            cells.append(str(cell))
+                    rows.append(cells)
+                table_compact["cellTexts"] = rows
+                compact_tables.append(table_compact)
+            if compact_tables:
+                compact["paragraphs"].append({"tables": compact_tables})
+            continue
+
+        para_compact = {"paraIndex": block.get("paraIndex"), "paraID": block.get("paraID"), "runs": []}
+        if block.get("pageStart") is not None and block.get("pageEnd") is not None:
+            para_compact["pageStart"] = block["pageStart"]
+            para_compact["pageEnd"] = block["pageEnd"]
+        for r in block.get("runs", []):
             if isinstance(r, dict):
                 if r.get("text") is not None:
                     para_compact["runs"].append({"text": r.get("text", ""), "rStyle": r.get("rStyle")})
@@ -315,34 +472,9 @@ def _compact_doc_json(doc_json: dict) -> str:
                         para_compact["runs"].append(img_info)
         compact["paragraphs"].append(para_compact)
 
-    if doc_json.get("tables"):
-        compact["tables"] = []
-        for t in doc_json.get("tables", []):
-            if not isinstance(t, dict):
-                continue
-            table_compact = {
-                "paraIndex": t.get("paraIndex"),
-                "endParaIndex": t.get("endParaIndex"),
-            }
-            rows = []
-            for row in t.get("cells", []):
-                cells = []
-                for cell in row:
-                    if isinstance(cell, dict):
-                        cell_text = cell.get("text", "")
-                        if not cell_text and cell.get("paragraphs"):
-                            cell_text = "".join(
-                                "".join(
-                                    r.get("text", "") if isinstance(r, dict) else str(r) for r in cp.get("runs", [])
-                                )
-                                for cp in cell.get("paragraphs", [])
-                            )
-                        cells.append(cell_text)
-                    else:
-                        cells.append(str(cell))
-                rows.append(cells)
-            table_compact["cellTexts"] = rows
-            compact["tables"].append(table_compact)
+    for key in ("styles", "fields", "hasTOC", "tocFieldCode"):
+        if key in ordered_doc and key != "styles":
+            compact[key] = ordered_doc[key]
 
     result = json.dumps(compact, ensure_ascii=False)
     logger.info(f"[read_document] 📦 文档过大 ({len(full)} chars)，已精简为 {len(result)} chars（纯文本模式）")
@@ -489,39 +621,90 @@ def _generate_document_impl(document: DocumentOutput, docId: DocIdInput, insertP
     normalized_insert_para_id = _normalize_para_id(insertParaID)
     if normalized_insert_para_id is None:
         raise ValueError(
-            "generate_document requires insertParaID. Use 0 only for the first write into an empty document, otherwise use a real paraID from read_document/search_document."
+            "generate_document requires insertParaID. Use 0 to insert at the document start, or use a real paraID from read_document/search_document to insert after that paragraph."
         )
 
     doc_dict = document.model_dump()
     _ensure_image_payload_shape(doc_dict)
-    para_count = len(doc_dict.get("paragraphs", []))
+    ordered_blocks = doc_dict.get("paragraphs", [])
+    paragraph_blocks = [block for block in ordered_blocks if isinstance(block, dict) and "runs" in block]
+    table_blocks = [block for block in ordered_blocks if isinstance(block, dict) and "tables" in block]
+    para_count = len(paragraph_blocks)
+    table_count = sum(len(block.get("tables", [])) for block in table_blocks)
     image_count = 0
-    for p in doc_dict.get("paragraphs", []):
+    for p in paragraph_blocks:
         for r in p.get("runs", []):
             if isinstance(r, dict) and r.get("text") is None:
                 image_count += 1
+
+    generated_message = _format_generated_document_message(para_count, table_count, image_count)
 
     doc_dict["insertParaID"] = normalized_insert_para_id
     doc_dict["docId"] = resolved_doc_id
 
     writer = get_stream_writer()
+    request_id = str(uuid.uuid4())
+    frontend_result = None
     if writer:
         writer(
             {
                 "type": "json",
                 "content": doc_dict,
                 "docId": resolved_doc_id,
+                "requestId": request_id,
             }
         )
+        frontend_result = _wait_for_frontend_mutation(request_id)
+
+    stopped = bool(frontend_result) and (
+        frontend_result.get("type") == "stop" or frontend_result.get("error") == "stopped_by_user"
+    )
+    frontend_error = frontend_result.get("error") if isinstance(frontend_result, dict) else None
+    frontend_success = frontend_result.get("success") if isinstance(frontend_result, dict) else None
+    last_paragraph = _normalize_frontend_paragraph_location(
+        frontend_result.get("lastParagraph") if isinstance(frontend_result, dict) else None
+    )
+
+    result = {
+        "success": False
+        if stopped or frontend_success is False or frontend_error
+        else (True if frontend_success is True else None),
+        "docId": resolved_doc_id,
+        "insertParaID": normalized_insert_para_id,
+        "generated": {
+            "paragraphCount": para_count,
+            "tableCount": table_count,
+            "imageCount": image_count,
+        },
+        "lastParagraph": last_paragraph,
+        "requestId": request_id,
+    }
+    if stopped:
+        result["error"] = "stopped_by_user"
+    elif frontend_error:
+        result["error"] = str(frontend_error)
+    elif frontend_result is None:
+        result["warning"] = (
+            "Frontend response timed out or is unavailable. Do not repeat generate_document because the content may already be inserted; "
+            "use read_document to locate the actual ending paragraph."
+        )
+    elif last_paragraph:
+        result["meaning"] = (
+            "lastParagraph is the final physical paragraph created by this generate_document call. "
+            "Use lastParagraph.paraID as the next insertParaID when appending immediately after this generated block."
+        )
+
+    if writer:
         writer(
             {
                 "type": "generate_complete",
-                "content": f"📝 文档已生成，共 {para_count} 个段落{f'，{image_count} 张图片' if image_count else ''}",
+                "content": generated_message,
                 "docId": resolved_doc_id,
                 "insertParaID": normalized_insert_para_id,
+                "requestId": request_id,
             }
         )
-    return doc_dict
+    return result
 
 
 def _search_document_impl(query: DocumentQuery, docId: DocIdInput) -> str:
@@ -662,27 +845,92 @@ def _search_document_impl(query: DocumentQuery, docId: DocIdInput) -> str:
     return '{"matches": [], "matchCount": 0, "error": "non-websocket"}'
 
 
-def _delete_document_impl(paraIDs: list[int | str], docId: DocIdInput) -> str:
+def _delete_document_impl(paraIDs: list[int | str], docId: DocIdInput) -> dict:
     """delete_document 的核心逻辑。"""
     resolved_doc_id = _normalize_doc_id(docId)
     normalized_para_ids = [_normalize_para_id(pid) for pid in paraIDs]
     normalized_para_ids = [pid for pid in normalized_para_ids if pid is not None]
     deduped_para_ids = list(dict.fromkeys(normalized_para_ids))
     if not deduped_para_ids:
-        return "No valid paraIDs provided for deletion"
+        return {
+            "success": False,
+            "requestedCount": 0,
+            "deletedCount": 0,
+            "error": "No valid paraIDs provided for deletion",
+        }
 
     writer = get_stream_writer()
+    request_id = str(uuid.uuid4())
+    frontend_result = None
     if writer:
         writer(
             {
                 "type": "delete_document",
-                "content": f"🗑️ 准备删除 {len(deduped_para_ids)} 个段落",
+                "content": f"🗑️ 正在删除 {len(deduped_para_ids)} 个段落",
                 "paraIDs": deduped_para_ids,
                 "docId": resolved_doc_id,
+                "requestId": request_id,
             }
         )
+        frontend_result = _wait_for_frontend_mutation(request_id)
+
     logger.info(f"[delete_document] 请求前端删除文档段落 (paraIDs={deduped_para_ids}, docId={resolved_doc_id})")
-    return f"Frontend notified to delete paragraphs by paraIDs: {deduped_para_ids}"
+    stopped = bool(frontend_result) and (
+        frontend_result.get("type") == "stop" or frontend_result.get("error") == "stopped_by_user"
+    )
+    frontend_error = frontend_result.get("error") if isinstance(frontend_result, dict) else None
+    frontend_success = frontend_result.get("success") if isinstance(frontend_result, dict) else None
+    deleted_count = _parse_int_like(frontend_result.get("deletedCount") if isinstance(frontend_result, dict) else None)
+    missing_para_ids = frontend_result.get("missingParaIDs", []) if isinstance(frontend_result, dict) else []
+    if not isinstance(missing_para_ids, list):
+        missing_para_ids = []
+    failed_para_ids = frontend_result.get("failedParaIDs", []) if isinstance(frontend_result, dict) else []
+    if not isinstance(failed_para_ids, list):
+        failed_para_ids = []
+    replacement_insert_para_id = _normalize_para_id(
+        frontend_result.get("replacementInsertParaID") if isinstance(frontend_result, dict) else None
+    )
+
+    result = {
+        "success": False
+        if stopped or frontend_success is False or frontend_error
+        else (True if frontend_success is True else None),
+        "docId": resolved_doc_id,
+        "paraIDs": deduped_para_ids,
+        "requestedCount": len(deduped_para_ids),
+        "deletedCount": max(0, deleted_count or 0),
+        "missingParaIDs": missing_para_ids,
+        "failedParaIDs": failed_para_ids,
+        "replacementInsertParaID": replacement_insert_para_id,
+        "requestId": request_id,
+    }
+    if stopped:
+        result["error"] = "stopped_by_user"
+    elif frontend_error:
+        result["error"] = str(frontend_error)
+    elif frontend_result is None:
+        result["warning"] = (
+            "Frontend response timed out or is unavailable. Do not repeat the same delete blindly; "
+            "read the document and retry only paragraph IDs that still exist."
+        )
+
+    if writer:
+        if result["success"] is True:
+            content = f"🗑️ 已删除 {result['deletedCount']} 个段落"
+        elif result.get("error"):
+            content = f"⚠️ 删除段落失败: {result['error']}"
+        else:
+            content = "⚠️ 删除结果未确认，请重新读取文档核对"
+        writer(
+            {
+                "type": "delete_complete",
+                "content": content,
+                "docId": resolved_doc_id,
+                "requestId": request_id,
+                "deletedCount": result["deletedCount"],
+            }
+        )
+    return result
 
 
 _BREAK_TYPES = {
@@ -692,7 +940,7 @@ _BREAK_TYPES = {
 }
 
 
-def _insert_break_impl(paraID: RequiredParaIdInput, breakType: BreakType | str) -> str:
+def _insert_break_impl(paraID: RequiredParaIdInput, breakType: BreakType | str) -> dict:
     """在指定段落后插入换行、分页或下一页分节符。"""
     normalized_para_id = _normalize_para_id(paraID)
     if normalized_para_id is None:
@@ -704,6 +952,8 @@ def _insert_break_impl(paraID: RequiredParaIdInput, breakType: BreakType | str) 
         raise ValueError(f"insert_break breakType must be one of: {allowed}")
 
     writer = get_stream_writer()
+    request_id = str(uuid.uuid4())
+    frontend_result = None
     if writer:
         writer(
             {
@@ -711,14 +961,48 @@ def _insert_break_impl(paraID: RequiredParaIdInput, breakType: BreakType | str) 
                 "paraID": normalized_para_id,
                 "breakType": normalized_break_type,
                 "content": f"↩️ 已在段落 {normalized_para_id} 后插入{_BREAK_TYPES[normalized_break_type]}",
+                "requestId": request_id,
             }
         )
+        frontend_result = _wait_for_frontend_mutation(request_id)
     logger.info(
         "[insert_break] 请求前端插入断行 (paraID=%s, breakType=%s)",
         normalized_para_id,
         normalized_break_type,
     )
-    return f"Frontend notified to insert {normalized_break_type} break after paragraph {normalized_para_id}"
+    stopped = bool(frontend_result) and (
+        frontend_result.get("type") == "stop" or frontend_result.get("error") == "stopped_by_user"
+    )
+    frontend_error = frontend_result.get("error") if isinstance(frontend_result, dict) else None
+    frontend_success = frontend_result.get("success") if isinstance(frontend_result, dict) else None
+    paragraph_after_break = _normalize_frontend_paragraph_location(
+        frontend_result.get("paragraphAfterBreak") if isinstance(frontend_result, dict) else None
+    )
+    result = {
+        "success": False
+        if stopped or frontend_success is False or frontend_error
+        else (True if frontend_success is True else None),
+        "breakType": normalized_break_type,
+        "sourceParaID": normalized_para_id,
+        "paragraphAfterBreak": paragraph_after_break,
+        "requestId": request_id,
+    }
+    if stopped:
+        result["error"] = "stopped_by_user"
+    elif frontend_error:
+        result["error"] = str(frontend_error)
+    elif frontend_result is None:
+        result["warning"] = (
+            "Frontend response timed out or is unavailable. Do not repeat insert_break because the break may already exist; "
+            "use read_document to locate the paragraph after the break."
+        )
+    elif paragraph_after_break:
+        result["newPage"] = paragraph_after_break.get("pageStart")
+        result["meaning"] = (
+            "paragraphAfterBreak identifies the paragraph immediately after the inserted break. "
+            "Use paragraphAfterBreak.paraID as the insertion anchor for content that must continue after the break."
+        )
+    return result
 
 
 def _create_document_impl() -> str:
@@ -750,7 +1034,9 @@ def _create_document_impl() -> str:
                 if result.get("type") == "stop" or result.get("error") == "stopped_by_user":
                     return "Create document stopped by user"
                 if result.get("success") is False or result.get("error"):
-                    return f"Failed to create a new blank DOCX document: {result.get('error') or 'unknown frontend error'}"
+                    return (
+                        f"Failed to create a new blank DOCX document: {result.get('error') or 'unknown frontend error'}"
+                    )
                 document_id = result.get("documentId")
                 suffix = f" (documentId={document_id})" if document_id is not None else ""
                 return f"New blank DOCX document created and opened{suffix}"
@@ -809,8 +1095,8 @@ def build_generate_document(description: str):
 
         Args:
             document: The document content to generate.
-            insertParaID: Required insertion anchor. Use 0 for the first write into an empty document;
-                otherwise insert after the paragraph whose paraID equals this value.
+            insertParaID: Required insertion anchor. Use 0 to insert at the document start;
+                a nonzero value inserts after the paragraph whose paraID equals that value.
             docId: Document ID (int-like). Positive/negative are both allowed. 0 means current active document.
         """
         return _generate_document_impl(document, docId, insertParaID)
@@ -841,7 +1127,7 @@ def build_delete_document(description: str):
     """根据传入的 description 构造 delete_document 工具实例。"""
 
     @tool(description=description)
-    def delete_document(paraIDs: list[int | str], docId: DocIdInput = 0) -> str:
+    def delete_document(paraIDs: list[int | str], docId: DocIdInput = 0) -> dict:
         """Delete specified paragraphs from the document by paraID list.
 
         Args:
@@ -893,5 +1179,6 @@ __all__ = [
     "_insert_break_impl",
     "_create_document_impl",
     "_compact_doc_json",
+    "_order_document_blocks",
     "_ensure_image_payload_shape",
 ]

@@ -11,11 +11,16 @@ class CreateDocumentToolTests(unittest.TestCase):
             result = _create_document_impl()
 
         self.assertIn("new blank DOCX", result)
-        self.assertEqual(events, [{
-            "type": "create_document",
-            "format": "docx",
-            "content": "📄 正在创建新的空白 DOCX 文档",
-        }])
+        self.assertEqual(
+            events,
+            [
+                {
+                    "type": "create_document",
+                    "format": "docx",
+                    "content": "📄 正在创建新的空白 DOCX 文档",
+                }
+            ],
+        )
 
     def test_tool_takes_no_parameters(self):
         tool = build_create_document("Create a document")
@@ -25,4 +30,3 @@ class CreateDocumentToolTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

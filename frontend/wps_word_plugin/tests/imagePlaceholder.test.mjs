@@ -17,4 +17,3 @@ test('does not filter a normal slash outside the image range', () => {
     false
   );
 });
-

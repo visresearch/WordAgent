@@ -1,15 +1,15 @@
-Insert a document break immediately after the paragraph identified by `paraID`.
+Insert a native break immediately after a verified paragraph.
 
 ## Parameters
-- `paraID` (int): the existing paragraph ID returned by `read_document` or `search_document`.
-- `breakType` (string): exactly one of `wdLineBreak`, `wdPageBreak`, or `wdSectionBreakNextPage`.
 
-## Break types
-- `wdLineBreak`: line break, equivalent to Shift+Enter.
-- `wdPageBreak`: page break; continue on the next page without changing page settings.
-- `wdSectionBreakNextPage`: next-page section break; the new section can have different headers, footers, page numbers, or paper orientation.
+- `paraID`: real paragraph ID from document context, `read_document`, `search_document`, or a previous tool result.
+- `breakType`: exactly one of:
+  - `wdLineBreak`: Shift+Enter within the current flow.
+  - `wdPageBreak`: next page with unchanged page/section settings.
+  - `wdSectionBreakNextPage`: next-page section that may change headers, footers, numbering, margins, paper, columns, or orientation.
 
-## Use
-- Use the real `paraID` from the document. Do not use a paragraph index or invent an ID.
-- Use `wdLineBreak` within a paragraph, `wdPageBreak` for a new page, and `wdSectionBreakNextPage` when the following content needs independent section settings.
-- The operation is applied to the active Word/WPS document and is non-blocking. Continue the workflow after calling it.
+Use page/section breaks for true pagination; never substitute blank paragraphs or `\n`. Covers are first-page content; abstracts, tables of contents, references, appendices, and top-level chapters normally start on fresh pages unless a user/template specifies otherwise.
+
+Success returns `paragraphAfterBreak` (`paraID`, zero-based `paraIndex`, `pageStart`, `pageEnd`) and `newPage`. Use `paragraphAfterBreak.paraID` as the next generation anchor. WPS returns physical pages; Microsoft Word may return `null` page fields.
+
+On timeout/unknown result, do not repeat the break; read to recover its location.

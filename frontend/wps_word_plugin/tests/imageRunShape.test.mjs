@@ -20,4 +20,3 @@ test('inline image runs expose the complete cross-host shape', () => {
     url: '/tmp/logo.png'
   });
 });
-

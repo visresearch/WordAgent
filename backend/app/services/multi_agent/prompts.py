@@ -32,8 +32,6 @@ def update_skills_prompt(prompt: str) -> None:
 
 _COMMON_PROMPT_FILES = [
     "system-prompt-common-rules.md",
-    "system-prompt-output-format.md",
-    "system-prompt-output-efficiency.md",
 ]
 
 _AGENT_PROMPT_FILES = {
@@ -94,8 +92,8 @@ def _load_prompt_content(prompt_ref: str) -> str:
             return ""
 
 
-def get_agent_prompt(agent_name: str) -> str:
-    """Get the complete system prompt for a specific agent."""
+def get_agent_prompt_parts(agent_name: str) -> list[str]:
+    """Return the complete prompt parts for one role in final assembly order."""
     parts = []
 
     for f in _COMMON_PROMPT_FILES:
@@ -146,7 +144,7 @@ def get_agent_prompt(agent_name: str) -> str:
             _load_prompt_content(_TOOL_USAGE_FILES.get("delete_document", "")),
             _load_prompt_content(_TOOL_USAGE_FILES.get("insert_break", "")),
             _load_prompt_content(_TOOL_USAGE_FILES.get("create_document", "")),
-            _load_prompt_content("system-prompt-default-recommend-document-style.md"),
+            _load_prompt_content("system-prompt-default-document-style.md"),
         ]
         if _skills_prompt_cache:
             tool_prompts.append(_skills_prompt_cache)
@@ -161,18 +159,12 @@ def get_agent_prompt(agent_name: str) -> str:
         if p:
             parts.append(p)
 
-    return "\n\n".join(filter(None, parts))
+    return list(filter(None, parts))
 
 
-def get_agent_prompt_parts(agent_name: str) -> list[str]:
-    """Get prompt parts list for an agent (for inspection)."""
-    parts = []
-    for f in _COMMON_PROMPT_FILES:
-        try:
-            parts.append(_read_prompt_file(f))
-        except FileNotFoundError:
-            pass
-    return parts
+def get_agent_prompt(agent_name: str) -> str:
+    """Get the complete system prompt for a specific agent."""
+    return "\n\n".join(get_agent_prompt_parts(agent_name))
 
 
 __all__ = [

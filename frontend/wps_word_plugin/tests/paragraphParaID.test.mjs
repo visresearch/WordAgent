@@ -16,8 +16,8 @@ test('returns only a real non-zero integer paragraph ID and never falls back to 
 test('removes top-level and table-cell paragraphs without a real paraID', () => {
   const result = deduplicateStyles({
     paragraphs: [
-      { paraIndex: 26, paraID: null, pStyle: '', runs: [] },
-      { paraIndex: 27, paraID: 1100978944, pStyle: '', runs: [] }
+      { paraIndex: 26, paraID: null, pStyle: ['left'], runs: [] },
+      { paraIndex: 27, paraID: 1100978944, pStyle: ['left'], runs: [] }
     ],
     tables: [
       {
@@ -25,8 +25,8 @@ test('removes top-level and table-cell paragraphs without a real paraID', () => 
           {
             text: 'cell text remains available',
             paragraphs: [
-              { paraID: null, pStyle: '', runs: [{ text: 'hidden', rStyle: '' }] },
-              { paraID: 1995130182, pStyle: '', runs: [{ text: 'visible', rStyle: '' }] }
+              { paraID: null, pStyle: ['left'], runs: [{ text: 'hidden', rStyle: '' }] },
+              { paraID: 1995130182, pStyle: ['left'], runs: [{ text: 'visible', rStyle: '' }] }
             ]
           }
         ]]
