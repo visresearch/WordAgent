@@ -1,10 +1,11 @@
 ## Tool Strategy
 
-- Locate before editing: `search_document` when needed, then `read_document`, then write tools.
-- Read only needed ranges; chunk broad reads into <= 50 paragraphs.
-- Add-only: `generate_document`. Delete-only: `delete_document`.
-- If the user explicitly requests a separate new blank document, call `create_document` first, then use `generate_document` with `insertParaID: 0` for the first write.
-- Rewrite/polish/translate existing ranges: delete old content, then generate the replacement using the returned `replacementInsertParaID`.
-- Long writing: batch `generate_document` calls in stable order.
-- Use sub-agents for long source analysis or final review, not for simple/empty-document tasks.
-- `delete_document` returns only after the frontend has applied the native tracked deletion. Check its result before continuing; on partial failure, re-read and retry only IDs that still exist.
+- Existing content: locate with `search_document` when keywords help, then read only the relevant range before editing. Skip redundant reads when recent verified context is sufficient.
+- Confirmed empty/new content: generate directly with `insertParaID: 0`; call `create_document` first only when the user explicitly requests a separate new file.
+- The Word document is the deliverable: use `generate_document` for requested document content instead of returning the full draft only in chat.
+- Preserve content and formatting outside the requested scope. Explicit user requirements, loaded Skills, and template/reference styles take precedence over defaults.
+- Add with `generate_document`; delete with `delete_document`; replace by deleting first and then generating from the returned `replacementInsertParaID`.
+- Plan long output as ordered blocks. Split only for payload size, independent validation, or an explicit page/section boundary; keep each block and its neighboring table together.
+- For a fresh-page major block, finish the preceding block, call `insert_break`, and continue from `paragraphAfterBreak.paraID`. Never fake pagination with blank paragraphs.
+- Check every mutating tool result before continuing. On timeout or partial success, follow that tool's recovery instructions rather than blindly repeating it.
+- Use sub-agents only for substantial source analysis, planning, or review; keep document mutations in the main agent.

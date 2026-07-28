@@ -283,6 +283,9 @@ export default {
     },
     pendingSummary() {
       const parts = [];
+      if (this.pendingDocument) {
+        parts.push(this.pendingDocument.preview);
+      }
       if (this.deleteRevisions.length > 0) {
         const seenParaIds = new Set();
         let totalDeleteParas = 0;
@@ -306,10 +309,7 @@ export default {
         }
         parts.push(t('chat.deleteParagraphs', { count: totalDeleteParas }));
       }
-      if (this.pendingDocument) {
-        parts.push(this.pendingDocument.preview);
-      }
-      return t('chat.aiOperation', { actions: parts.join(', ') });
+      return t('chat.aiOperation', { actions: parts.join(t('chat.actionSeparator')) });
     },
     tokenRingOffset() {
       const max = this.tokenStats.max || 200000;

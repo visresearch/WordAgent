@@ -1429,7 +1429,7 @@ export default {
         summaryParts.push(t('chat.tableCount', { count: tableCount }));
       }
       return summaryParts.length > 0
-        ? t('chat.generatedPending', { summary: summaryParts.join(', ') })
+        ? t('chat.generatedPending', { summary: summaryParts.join(t('chat.summarySeparator')) })
         : t('chat.documentGenerated');
     },
 
