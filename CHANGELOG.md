@@ -3,12 +3,13 @@
 ## Unreleased
 
 ### Added
-- 添加CONTRIBUTING.md
+- 添加CONTRIBUTING.md和SECURITY.md
 - 添加调整过后的内置skill
 - 前端添加中英文切换
 - read_document工具full模式返回值添加page信息
 - 添加insert_break工具，插入分页符
 - 添加create_document工具，创建新文档
+- 添加generate_document和insert_break工具的前端返回值，方遍agent直接理解
 
 ### Changed
 - 更改temputure默认值和取值范围
@@ -26,6 +27,8 @@
 - 取消加载SKILL上下文最大限制截断
 - 修复空白段落的bug
 - 修复read_document工具没有读取到文档图片样式信息的问题
+- 修复insertParaID参数为0时的规则，不再只允许空文章
+- 修复换行换页导致的锚点定位错误的bug
 
 ## [v0.5.2]
 

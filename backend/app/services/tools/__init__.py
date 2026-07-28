@@ -24,6 +24,7 @@ from .callback import (
     register_loop,
     request_stop,
     submit_tool_response,
+    wait_for_tool_response,
 )
 from .document_tools import (
     _compact_doc_json,
@@ -80,6 +81,7 @@ __all__ = [
     "register_loop",
     "request_stop",
     "submit_tool_response",
+    "wait_for_tool_response",
     # schemas
     "Cell",
     "CellParagraph",

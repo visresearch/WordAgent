@@ -130,6 +130,10 @@ function normalizeParaID(value) {
   return id && PARA_ID_PATTERN.test(id) ? String(Number(id)) : null;
 }
 
+function isDocumentStartInsertParaID(value) {
+  return normalizeParaID(value) === "0";
+}
+
 function createSignedNineDigitParaID(existingIDs = new Set()) {
   for (let attempt = 0; attempt < 5000; attempt++) {
     const absValue = Math.floor(100000000 + Math.random() * 900000000);
@@ -3006,22 +3010,20 @@ async function generateDocxFromJSON(jsonData, _insertLocation = "selection", ins
       const normalizedInsertParaID = normalizeParaID(insertParaID);
       if (normalizedInsertParaID === null) {
         return {
-          error:
-            "generate_document 缺少必填 insertParaID；空文档首次写入请传 0，非空文档请传真实 paraID",
+          error: "generate_document 缺少必填 insertParaID；文档开头请传 0，其他位置请传真实 paraID",
         };
       }
 
-      if (normalizedInsertParaID === "0") {
+      if (isDocumentStartInsertParaID(insertParaID)) {
         const allParagraphs = context.document.body.paragraphs;
         allParagraphs.load("items/text");
         await context.sync();
         const isEmptyDocument =
           allParagraphs.items.length === 1 &&
           String(allParagraphs.items[0].text || "").trim() === "";
-        if (!isEmptyDocument) {
-          return { error: "insertParaID=0 仅允许空文档首次写入；非空文档必须使用真实 paraID" };
+        if (isEmptyDocument) {
+          emptyDocumentPlaceholder = allParagraphs.items[0];
         }
-        emptyDocumentPlaceholder = allParagraphs.items[0];
         startAnchorParagraph = context.document.body.insertParagraph("", Word.InsertLocation.start);
         targetRange = startAnchorParagraph;
       } else {
@@ -3365,6 +3367,10 @@ async function generateDocxFromJSON(jsonData, _insertLocation = "selection", ins
                           } catch (e) {}
                         }
                       }
+                    } else if (paraData.text && paraData.rStyle) {
+                      // CellParagraph compact form: {text, rStyle} without runs.
+                      const rStyle = resolveStyle(styles, paraData.rStyle, DEFAULT_RSTYLE);
+                      applyRunStyle(cellPara.font, rStyle);
                     }
                   }
                 } else {
@@ -3504,6 +3510,71 @@ function normalizeParaIDList(paraIDs) {
   ];
 }
 
+const WORD_INSERT_BREAK_TYPES = Object.freeze({
+  wdLineBreak: "line",
+  wdPageBreak: "page",
+  wdSectionBreakNextPage: "sectionNext",
+});
+
+async function insertBreakAfterParagraph(paraID, breakType) {
+  const normalizedParaID = normalizeParaID(paraID);
+  if (!normalizedParaID) {
+    return { success: false, error: "paraID 必须是有效整数" };
+  }
+  if (!Object.prototype.hasOwnProperty.call(WORD_INSERT_BREAK_TYPES, breakType)) {
+    return {
+      success: false,
+      error: "breakType 必须是 wdLineBreak、wdPageBreak 或 wdSectionBreakNextPage",
+    };
+  }
+
+  try {
+    return await Word.run(async (context) => {
+      const paragraphs = context.document.body.paragraphs;
+      paragraphs.load("items/uniqueLocalId");
+      await context.sync();
+      const paraIDs = await resolveParagraphParaIDs(context, paragraphs.items);
+      const targetIndex = paraIDs.findIndex((id) => id === normalizedParaID);
+      if (targetIndex < 0) {
+        return { success: false, error: `未找到 paraID=${normalizedParaID} 的段落` };
+      }
+
+      const enumName = WORD_INSERT_BREAK_TYPES[breakType];
+      const nativeBreakType = Word.BreakType?.[enumName] || enumName;
+      const endRange = paragraphs.items[targetIndex].getRange("End");
+      endRange.insertBreak(nativeBreakType, Word.InsertLocation.before);
+      await context.sync();
+
+      await ensureAllParagraphsHaveHiddenBookmarks(context);
+      const updatedParagraphs = context.document.body.paragraphs;
+      updatedParagraphs.load("items/uniqueLocalId");
+      await context.sync();
+      const updatedIDs = await resolveParagraphParaIDs(context, updatedParagraphs.items);
+      const paragraphAfterIndex = breakType === "wdLineBreak"
+        ? Math.min(targetIndex, Math.max(0, updatedParagraphs.items.length - 1))
+        : Math.min(targetIndex + 1, Math.max(0, updatedParagraphs.items.length - 1));
+      const paragraphAfterID = updatedIDs[paragraphAfterIndex] || null;
+
+      return {
+        success: Boolean(paragraphAfterID),
+        paraID: Number(normalizedParaID),
+        breakType,
+        paragraphAfterBreak: paragraphAfterID
+          ? {
+              paraID: Number(paragraphAfterID),
+              paraIndex: paragraphAfterIndex,
+              pageStart: null,
+              pageEnd: null,
+            }
+          : null,
+        error: paragraphAfterID ? undefined : "插入成功，但无法定位换行后的段落",
+      };
+    });
+  } catch (error) {
+    return { success: false, error: error?.message || String(error) };
+  }
+}
+
 /**
  * 根据段落ID列表删除文档中的段落（按出现位置逆序删除）
  * @param {Array<string|number>} paraIDs - 待删除段落 paraID 列表
@@ -3629,6 +3700,7 @@ export default {
   parseDocxToJSON,
   generateDocxFromJSON,
   deleteDocxPara,
+  insertBreakAfterParagraph,
   cleanText,
   deduplicateStyles,
   resolveStyle,
@@ -3653,12 +3725,14 @@ export default {
   appendParagraphInlinePictureRuns,
   loadImageAsBase64ForInsert,
   findParaIndexRangeByParaIDs,
+  isDocumentStartInsertParaID,
 };
 
 export {
   parseDocxToJSON,
   generateDocxFromJSON,
   deleteDocxPara,
+  insertBreakAfterParagraph,
   cleanText,
   deduplicateStyles,
   resolveStyle,
@@ -3683,5 +3757,6 @@ export {
   appendParagraphInlinePictureRuns,
   loadImageAsBase64ForInsert,
   findParaIndexRangeByParaIDs,
+  isDocumentStartInsertParaID,
   resolveParagraphParaIDs,
 };

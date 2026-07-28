@@ -62,6 +62,7 @@
 import {
   generateDocxFromJSON,
   deleteDocxPara,
+  insertBreakAfterParagraph,
   resolveParagraphParaIDs
 } from '../js/docxJsonConverter.js';
 import {
@@ -1060,6 +1061,51 @@ export default {
         return;
       }
 
+      if (data.type === 'insert_break') {
+        const requestId = data.requestId || null;
+        const paraID = this._toParaIdOrNull(data.paraID);
+        const breakType = data.breakType;
+        this._insertQueue = this._insertQueue
+          .then(async () => {
+            const result = await insertBreakAfterParagraph(paraID, breakType);
+            if (requestId) {
+              await api.wsManager.send({
+                type: 'insert_break_response',
+                requestId,
+                success: Boolean(result?.success),
+                breakType,
+                paragraphAfterBreak: result?.paragraphAfterBreak || null,
+                error: result?.success ? undefined : (result?.error || '插入断行失败')
+              });
+            }
+            msg.contentParts.push({
+              type: 'status',
+              content: result?.success
+                ? (data.content || t('chat.insertBreakSuccess'))
+                : t('chat.insertBreakFailed', { error: result?.error || t('common.unknownError') }),
+              loading: false
+            });
+            this.scrollToBottom();
+            return result;
+          })
+          .catch(async (error) => {
+            if (requestId) {
+              try {
+                await api.wsManager.send({
+                  type: 'insert_break_response',
+                  requestId,
+                  success: false,
+                  breakType,
+                  error: error?.message || String(error)
+                });
+              } catch (sendError) {
+                console.warn('[AIChatPane] 回传 Word 插入断行错误失败:', sendError);
+              }
+            }
+          });
+        return;
+      }
+
       // 后端请求创建并打开新的空白 DOCX 文档
       if (data.type === 'create_document') {
         const pendingPart = {
@@ -1208,7 +1254,8 @@ export default {
           documentJson: data.content,
           docId: this._toIntOrDefault(data.docId, this._toIntOrDefault(data.content.docId, 0)),
           insertParaID: this._toParaIdOrNull(data.content.insertParaID),
-          msg: msg
+          msg: msg,
+          requestId: data.requestId || null
         };
         this._insertQueue = this._insertQueue
           .then(() => this._applyImmediateInsertion(insItem))
@@ -1367,6 +1414,19 @@ export default {
       return n === null ? defaultValue : n;
     },
 
+    _buildGeneratedDocumentPreview(paragraphCount, tableCount) {
+      const summaryParts = [];
+      if (paragraphCount > 0) {
+        summaryParts.push(t('chat.paragraphCount', { count: paragraphCount }));
+      }
+      if (tableCount > 0) {
+        summaryParts.push(t('chat.tableCount', { count: tableCount }));
+      }
+      return summaryParts.length > 0
+        ? t('chat.generatedPending', { summary: summaryParts.join(', ') })
+        : t('chat.documentGenerated');
+    },
+
     _refreshPendingDocumentSummary() {
       if (this.pendingInsertions.length === 0) {
         this.pendingDocument = null;
@@ -1383,11 +1443,9 @@ export default {
         0
       );
 
-      let summary = t('chat.paragraphCount', { count: totalParaCount });
-      if (totalTableCount > 0) {
-        summary += `, ${t('chat.tableCount', { count: totalTableCount })}`;
-      }
-      this.pendingDocument = { preview: t('chat.generatedPending', { summary }) };
+      this.pendingDocument = {
+        preview: this._buildGeneratedDocumentPreview(totalParaCount, totalTableCount)
+      };
       this.pendingDocumentMsg = this.pendingInsertions[this.pendingInsertions.length - 1]?.msg || null;
     },
 
@@ -1410,10 +1468,25 @@ export default {
     },
 
     async _applyImmediateInsertion(insItem) {
+      const sendResult = async (payload) => {
+        if (!insItem?.requestId) {
+          return;
+        }
+        try {
+          await api.wsManager.send({
+            type: 'generate_document_response',
+            requestId: insItem.requestId,
+            ...payload
+          });
+        } catch (error) {
+          console.warn('[AIChatPane] 回传 Word 文档生成结果失败:', error);
+        }
+      };
       const normalizedDocId = this._toIntOrDefault(insItem.docId, 0);
       const requestedInsertParaID = this._toParaIdOrNull(insItem.insertParaID);
       if (requestedInsertParaID === null) {
         console.error('[AIChatPane] generate_document 缺少必填 insertParaID:', insItem);
+        await sendResult({ success: false, error: 'generate_document 缺少必填 insertParaID' });
         return false;
       }
       const docPayload = { ...(insItem.documentJson || {}) };
@@ -1425,11 +1498,13 @@ export default {
         if (!result || !result.success) {
           await abortTrackedEdit(trackedEdit);
           console.error('[AIChatPane] 即时插入失败:', result?.error || '(unknown)');
+          await sendResult({ success: false, error: result?.error || '文档插入失败' });
           return false;
         }
       } catch (error) {
         await abortTrackedEdit(trackedEdit);
         console.error('[AIChatPane] 创建 Microsoft Word 原生新增修订失败:', error);
+        await sendResult({ success: false, error: error?.message || String(error) });
         return false;
       }
       if (result.warning && insItem.msg && Array.isArray(insItem.msg.contentParts)) {
@@ -1478,6 +1553,7 @@ export default {
         if (!revisionBatch.batchId) {
           console.warn('[AIChatPane] Word 未返回本次插入产生的原生修订，正在撤销插入');
           await undoLastDocumentAction();
+          await sendResult({ success: false, error: 'Word 未返回本次插入产生的原生修订' });
           return false;
         }
       } catch (error) {
@@ -1488,6 +1564,7 @@ export default {
         } catch (undoError) {
           console.error('[AIChatPane] 撤销无修订插入失败:', undoError);
         }
+        await sendResult({ success: false, error: error?.message || String(error) });
         return false;
       }
 
@@ -1512,12 +1589,33 @@ export default {
       this.pendingInsertions.push(pendingItem);
       this._refreshPendingDocumentSummary();
 
+      let lastParagraph = null;
+      const lastParaID = insertedParaIDs.length > 0
+        ? insertedParaIDs[insertedParaIDs.length - 1]
+        : null;
+      if (lastParaID !== null) {
+        const lastIndices = await this._resolveParaIDsToIndices([lastParaID]);
+        if (lastIndices.length > 0) {
+          lastParagraph = {
+            paraID: Number(lastParaID),
+            paraIndex: lastIndices[0],
+            pageStart: null,
+            pageEnd: null
+          };
+        }
+      }
+
       console.log(
         '[AIChatPane] 文档已即时插入:',
         `docId=${normalizedDocId}`,
         `insertParaID=${requestedInsertParaID}`,
         `range=${insertStartParaIndex}-${insertEndParaIndex}`
       );
+      await sendResult({
+        success: true,
+        docId: normalizedDocId,
+        lastParagraph
+      });
       return true;
     },
 

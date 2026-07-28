@@ -35,7 +35,7 @@ Use only WordAgent tools: `load_skill_context`, `read_document`, `search_documen
 For Word editing skills, encode these rules explicitly:
 
 - read existing content and obtain real paragraph IDs
-- use `insertParaID=0` only for the first write to an empty document
+- use `insertParaID=0` to insert at the document start, including in a non-empty document
 - replace content with one `delete_document` call followed by `generate_document`
 - do not repeat a deletion while Word UI confirmation is pending
 - preserve unaffected content and styles

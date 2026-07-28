@@ -243,7 +243,7 @@ export default {
             ? Number(jsonData.insertParaID)
             : null;
         if (insertParaID === null) {
-          this.showStatus('转换失败: 缺少必填 insertParaID（空文档首次写入使用 0）', 'error');
+          this.showStatus('转换失败: 缺少必填 insertParaID（文档开头使用 0）', 'error');
           return;
         }
         const result = await generateDocxFromJSON(jsonData, 'selection', insertParaID);

@@ -83,6 +83,13 @@ class CellParagraph(BaseModel):
         default="",
     )
     pStyle: str = Field(description='Paragraph style reference ID, e.g. "pS_1"', default="")
+    rStyle: str | None = Field(
+        default=None,
+        description=(
+            "Compact-form character style reference used when runs is empty, e.g. 'rS_1'. "
+            "For mixed formatting, use runs instead."
+        ),
+    )
     runs: list[Run] = Field(
         description="Array of runs. A cell paragraph can contain multiple runs with different formatting.",
         default_factory=list,

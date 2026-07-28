@@ -2,7 +2,7 @@ Generate formatted content and insert it into the Word document.
 
 ## Parameters
 - `document` (object): raw `DocumentOutput` object. Do not pass escaped JSON, a string, or `{"document": {...}}` inside this value.
-- `insertParaID` (int, required): insertion anchor. Use an existing paragraph ID to insert after that paragraph. Use `0` only for the first write into an empty/new document, which inserts at the document start.
+- `insertParaID` (int, required): insertion anchor. Use `0` to insert at the document start in either an empty or non-empty document. Use an existing nonzero paragraph ID to insert after that paragraph.
 - `docId` (int, optional): target document ID; use `0` for the active document.
 
 ## Required payload shape
@@ -19,13 +19,19 @@ Generate formatted content and insert it into the Word document.
 - In `run.text`, `cell.text`, and table paragraph text, never use raw ASCII double quote characters (`"`). For quoted phrases, use Chinese quotation marks such as `“三夏”` or `「三夏」`. Raw `"` in text often breaks tool-call JSON.
 - Blank line: `{ "pStyle": "", "runs": [] }`.
 - `insertParaID` is mandatory. Never omit it and never pass `null`/`None`.
-- For non-empty documents, `insertParaID` must be an existing paragraph ID from selected context, `read_document`, or `search_document`; do not guess IDs.
+- For non-empty documents, use `0` for the document start or an existing paragraph ID from selected context, `read_document`, or `search_document`; do not guess nonzero IDs.
 - If document metadata says `isEmpty=true` or `read_document` returns only one empty placeholder paragraph such as `runs: []`, treat the document as blank and use `"insertParaID": 0`.
 
 ## Use
 - New writing, append/insert content, or replacement content after `delete_document`.
 - Long output: split into ordered batches (roughly 5-15 paragraphs each).
 - Delete-only tasks: do not call this tool.
+
+## Return value
+- On successful frontend insertion, `lastParagraph` contains the final physical paragraph created by this call: `paraID`, zero-based `paraIndex`, `pageStart`, and `pageEnd`.
+- `lastParagraph.paraID` is the authoritative continuation anchor. Use it as the next `insertParaID` when appending immediately after this generated block; do not guess another trailing blank paragraph.
+- WPS returns physical page numbers. Microsoft Word returns `pageStart/pageEnd` as `null` when its API cannot determine them reliably.
+- If the return contains a timeout warning, do not repeat the call because the content may already exist. Use `read_document` to recover the actual ending location.
 
 ## Runs and images
 - Text run: `{ "text": "...", "rStyle": "rS_2" }`.

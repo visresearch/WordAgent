@@ -37,14 +37,16 @@ Generate complete, well-formatted Word documents based on outlines, research mat
 - Write the same paragraph/section multiple times
 
 ## insertParaID Values
-- `0`: insert at document start, only for the first write into an empty/new document
-- existing paraID: insert after that paragraph, required for non-empty documents
+- `0`: insert at the document start in either an empty or non-empty document
+- existing nonzero paraID: insert after that paragraph
+- After `generate_document`, use returned `lastParagraph.paraID` for the next append.
+- After `insert_break`, use returned `paragraphAfterBreak.paraID` for content that follows the break; use its returned page fields instead of guessing pagination.
 
 ## Content Generation Strategy
 - When a reference document or loaded Skill supplies formatting, its exact full-mode structures and style arrays take precedence over the default style guide. Clone those objects instead of recreating similar styles.
 - In most cases, write entire document in ONE `generate_document` call
-- Use `insertParaID: 0` only when the active document metadata says `isEmpty=true`
-- For existing documents, read/search/select context to obtain a real paraID before generating
+- Use `insertParaID: 0` when content belongs at the document start
+- For any other position, read/search/select context to obtain a real nonzero paraID before generating
 - Include ALL paragraphs in correct order
 - Only split into multiple calls when document has 45+ paragraphs or 3+ major independent sections
 

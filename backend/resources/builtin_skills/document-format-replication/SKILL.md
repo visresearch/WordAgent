@@ -115,7 +115,7 @@ Do not repeatedly delete content while deletion is awaiting user confirmation. D
 
 ### Blank or independent target
 
-Use `insertParaID=0` only for the first write into a truly empty document. For later writes, use real paragraph IDs. Generate in stable component order: cover/front matter, main body, then references/back matter. Include complete cloned style definitions in every payload and preserve style-reference closure for paragraphs, runs, tables, cells, and cell paragraphs.
+Use `insertParaID=0` whenever content must begin at the document start, including in a non-empty document. Use a real nonzero paragraph ID to insert after that paragraph. Generate in stable component order: cover/front matter, main body, then references/back matter. Include complete cloned style definitions in every payload and preserve style-reference closure for paragraphs, runs, tables, cells, and cell paragraphs.
 
 Use the content source only for the new thesis subject matter. Fixed text from the format reference is allowed and required; unrelated prose from the format reference must not leak into the new body.
 

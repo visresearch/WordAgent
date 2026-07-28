@@ -84,26 +84,100 @@ def _normalize_document_range(document_range: list | None) -> list | None:
 @router.websocket("/ws")
 async def chat_websocket(websocket: WebSocket):
     """
-    WebSocket 聊天接口
-    支持双向通信：后端可以请求前端执行操作（如获取文档），前端可以回传结果
+    WordAgent 双向 WebSocket 聊天接口。
 
-    使用单一接收者模式避免 concurrent recv 冲突。
+    同一连接既传输 Agent 流式输出，也承载文档工具的前端执行请求与结果回传。
+    服务端只有 `_receiver` 调用 ``websocket.receive_text()``，再通过内部队列分发，
+    避免多个协程并发接收导致 ``concurrent recv`` 冲突。所有消息均为 JSON 对象，
+    由 ``type`` 字段区分。
 
-    消息协议（JSON）：
-    前端 → 后端:
-            - {"type": "chat", "message": "...", "mode": "agent|ask|plan", "model": "auto", "sessionId": 1, "documentRange": [...], "documentMeta": {...}}
-      - {"type": "document_response", "documentJson": {...}}
-      - {"type": "delete_response", "deletedCount": 3} 或 {"type": "delete_response", "cancelled": true}
-      - {"type": "stop"}
+    前端 → 后端
+    ------------
+    1. 发起聊天：
+       ``{"type":"chat","message":"...","mode":"agent|ask|plan",``
+       ``"model":"auto","provider":"...","sessionId":1,``
+       ``"documentRange":[...],"documentMeta":{...},``
+       ``"selectionContext":{...},"files":[...],"enableThinking":true}``
 
-    后端 → 前端:
-      - {"type": "text", "content": "..."}
-      - {"type": "json", "content": {...}}
-      - {"type": "status", "content": "..."}
-      - {"type": "read_document", "content": "...", "startParaIndex": 0, "endParaIndex": -1}
-      - {"type": "delete_document", "content": "...", "startParaIndex": 0, "endParaIndex": -1}
-      - {"type": "done"}
-      - {"type": "error", "content": "..."}
+       - ``message``：用户输入。
+       - ``mode``：``agent``、``ask`` 或 ``plan``，非法值回退为 ``agent``。
+       - ``documentRange``：可选文档范围；每项的 ``docId`` 必须可转换为整数。
+       - ``documentMeta``：可为单文档对象或多文档数组。
+       - ``selectionContext``：可选的当前选区上下文。
+       - ``files``：附件元数据列表。
+
+    2. 读取文档回包：
+       ``{"type":"document_response","documentJson":{...},"error":null}``
+
+    3. 查询文档回包：
+       ``{"type":"query_response","matches":[...],"matchCount":1,``
+       ``"matchedParaIndices":[4],"matchedParaIDs":[123],"error":null}``
+
+    4. 创建文档回包：
+       ``{"type":"create_document_response","success":true,"documentId":123}``
+       失败时使用 ``success:false`` 并提供 ``error``。
+
+    5. 生成文档回包：
+       ``{"type":"generate_document_response","requestId":"...",``
+       ``"success":true,"docId":123,"lastParagraph":``
+       ``{"paraID":456,"paraIndex":10,"pageStart":2,"pageEnd":2}}``
+
+       ``requestId`` 必须原样回传。Microsoft Word 无法可靠取得物理页码时，
+       ``pageStart/pageEnd`` 为 ``null``。
+
+    6. 插入换行/分页/分节符回包：
+       ``{"type":"insert_break_response","requestId":"...",``
+       ``"success":true,"breakType":"wdPageBreak","paragraphAfterBreak":``
+       ``{"paraID":789,"paraIndex":11,"pageStart":3,"pageEnd":3}}``
+
+       ``requestId`` 必须原样回传；失败时提供 ``error``。
+
+    7. 删除结果（当前仅记录日志，不阻塞工具）：
+       ``{"type":"delete_response","deletedCount":3}``，或
+       ``{"type":"delete_response","cancelled":true}``。
+
+    8. 停止当前请求：``{"type":"stop"}``。
+
+    后端 → 前端
+    ------------
+    1. 对话流：
+       - ``{"type":"text","content":"..."}``：回答正文增量。
+       - ``{"type":"thinking","content":"..."}``：思考内容增量。
+       - ``{"type":"token_stats","current_tokens":12000,"max_tokens":128000}``：
+         当前上下文 token 统计。
+       - ``{"type":"status","content":"...","loading":false}``：状态提示。
+       - ``{"type":"tool_compress","content":"...","detail":{...}}``：工具输出压缩信息。
+       - ``{"type":"mcp_tool_call","toolName":"...","args":{...}}``。
+       - ``{"type":"mcp_tool_result","toolName":"...",``
+         ``"outputPreview":"...","isError":false}``。
+
+    2. 文档读取与查询：
+       - ``{"type":"read_document","content":"...","docId":0,``
+         ``"startParaIndex":0,"endParaIndex":-1,"startParaID":null,``
+         ``"endParaID":null,"mode":"full|lightweight"}``。
+       - ``{"type":"read_complete","content":"...","docId":0}``。
+       - ``{"type":"search_document","content":"...","query":{...},"docId":0}``。
+       - ``{"type":"query_complete","content":"...","docId":0,...}``。
+
+    3. 文档变更：
+       - ``{"type":"json","content":{...},"docId":0,"requestId":"..."}``：
+         请求前端执行 ``generate_document``；执行后须回传同一 ``requestId``。
+       - ``{"type":"generate_complete","content":"...","docId":0,``
+         ``"insertParaID":123,"requestId":"..."}``。
+       - ``{"type":"delete_document","content":"...","paraIDs":[...],"docId":0}``。
+       - ``{"type":"insert_break","content":"...","paraID":123,``
+         ``"breakType":"wdLineBreak|wdPageBreak|wdSectionBreakNextPage",``
+         ``"requestId":"..."}``。
+       - ``{"type":"create_document","format":"docx","content":"..."}``。
+
+    4. 连接控制：
+       - ``{"type":"ping"}``：应用层保活，前端直接忽略。
+       - ``{"type":"done"}``：本轮流结束；服务端保证最多发送一次正常结束事件。
+       - ``{"type":"error","content":"..."}``：终止性错误，通常随后发送 ``done``。
+
+    ``generate_document_response`` 与 ``insert_break_response`` 使用 ``requestId``
+    进行关联，允许回包乱序且不会被其他并发工具调用消费。读取、查询和创建文档
+    仍使用会话级回调队列。
     """
     await websocket.accept()
     chat_id = str(uuid.uuid4())
@@ -257,8 +331,12 @@ async def chat_websocket(websocket: WebSocket):
                         elif incoming_type == "delete_response":
                             # delete_document 为非阻塞工具，不再等待前端回传，仅记录日志
                             logger.info(f"[WebSocket] 收到前端删除结果（仅记录）: {incoming}")
-                        elif incoming_type == "create_document_response":
-                            logger.info(f"[WebSocket] 收到前端创建文档结果: {incoming}")
+                        elif incoming_type in {
+                            "create_document_response",
+                            "generate_document_response",
+                            "insert_break_response",
+                        }:
+                            logger.info(f"[WebSocket] 收到前端工具执行结果: {incoming}")
                             if active_mode == "plan":
                                 await ma_submit_tool_response(chat_id, incoming)
                             else:
@@ -298,8 +376,12 @@ async def chat_websocket(websocket: WebSocket):
                 else:
                     await submit_tool_response(chat_id, data)
 
-            elif msg_type == "create_document_response":
-                # create_document 在前端异步完成后回传结果，供工具继续执行后续调用。
+            elif msg_type in {
+                "create_document_response",
+                "generate_document_response",
+                "insert_break_response",
+            }:
+                # 前端可变更工具执行完成后回传结果，供工具继续执行后续调用。
                 if active_mode == "plan":
                     await ma_submit_tool_response(chat_id, data)
                 else:

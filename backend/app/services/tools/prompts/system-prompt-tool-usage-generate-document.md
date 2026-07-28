@@ -13,8 +13,10 @@
 - English text in body paragraphs must use a character style whose font is `Times New Roman`; split mixed Chinese-English paragraphs into separate runs when necessary, while preserving the template's Chinese font for Chinese text.
 - JSON safety: inside generated document text fields (`run.text`, table `cell.text`, table paragraph text), do not use raw ASCII double quote characters (`"`). Use Chinese quotation marks such as `“...”` or `「...」` for quoted phrases.
 - `insertParaID` is required. Never omit it and never pass `null`/`None`.
-- For non-empty documents, `insertParaID` must come from selected context or a real paragraph ID returned by `read_document`/`search_document`; do not invent IDs.
-- Use `insertParaID: 0` only for the first write into an empty/new document; it means insert at the document start.
+- Use `insertParaID: 0` to insert at the document start in either an empty or non-empty document.
+- Use a real nonzero paragraph ID from selected context or `read_document`/`search_document` to insert after that paragraph; do not invent IDs.
+- After a successful call, treat returned `lastParagraph` as authoritative frontend state. For the next append, use `lastParagraph.paraID`; its `paraIndex` and `pageStart/pageEnd` describe the actual inserted ending paragraph.
+- Do not call `read_document` merely to rediscover the ending anchor when `lastParagraph` is present.
 - Images must be inline runs with a single `url`; keep URLs unchanged and preserve aspect ratio.
 - If paragraph location is uncertain, re-read/search and use paragraph IDs for follow-up delete operations.
 - If deletes are confirmed later by the frontend, continue the full planned workflow; do not wait for per-delete confirmation.

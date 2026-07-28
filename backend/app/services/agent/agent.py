@@ -644,8 +644,8 @@ def build_graph(llm_with_tools, all_tools: list):
                         "5) Do not put raw ASCII double quote characters inside generated text fields "
                         "(run.text, cell.text, or table paragraph text). Use Chinese quotation marks "
                         "such as “...” or 「...」 for quoted phrases. "
-                        "6) insertParaID is required. For non-empty documents, use a real paraID. "
-                        "For the first write into an empty document, use insertParaID=0."
+                        "6) insertParaID is required. Use insertParaID=0 to insert at the document start, "
+                        "or use a real nonzero paraID to insert after that paragraph."
                     )
                 ),
             ]

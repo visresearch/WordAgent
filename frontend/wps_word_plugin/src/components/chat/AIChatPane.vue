@@ -236,6 +236,39 @@ export default {
       return Number.isInteger(parsed) ? parsed : fallback;
     },
 
+    _buildGeneratedDocumentPreview(paragraphCount, tableCount) {
+      const summaryParts = [];
+      if (paragraphCount > 0) {
+        summaryParts.push(t('chat.paragraphCount', { count: paragraphCount }));
+      }
+      if (tableCount > 0) {
+        summaryParts.push(t('chat.tableCount', { count: tableCount }));
+      }
+      return summaryParts.length > 0
+        ? t('chat.generatedPending', { summary: summaryParts.join(', ') })
+        : t('chat.documentGenerated');
+    },
+
+    _syncPendingDocumentPreview() {
+      if (this.pendingInsertions.length === 0) {
+        this.pendingDocument = null;
+        this.pendingDocumentMsg = null;
+        return;
+      }
+      const paragraphCount = this.pendingInsertions.reduce(
+        (sum, item) => sum + ((item.documentJson?.paragraphs || []).length),
+        0
+      );
+      const tableCount = this.pendingInsertions.reduce(
+        (sum, item) => sum + ((item.documentJson?.tables || []).length),
+        0
+      );
+      this.pendingDocument = {
+        preview: this._buildGeneratedDocumentPreview(paragraphCount, tableCount)
+      };
+      this.pendingDocumentMsg = this.pendingInsertions[this.pendingInsertions.length - 1]?.msg || null;
+    },
+
     _formatMcpText(value) {
       if (value === null || value === undefined) {
         return '';
@@ -1374,6 +1407,7 @@ export default {
       if (data.type === 'insert_break') {
         const paraID = this._toIntOrNull(data.paraID);
         const breakType = data.breakType;
+        const requestId = data.requestId || null;
         console.log('[AIChatPane] 后端请求插入断行:', { paraID, breakType });
         const result = insertBreakAfterParagraph(paraID, breakType);
         if (result.success) {
@@ -1384,6 +1418,15 @@ export default {
             content: data.content || t('chat.insertBreakSuccess'),
             loading: false
           });
+          if (requestId) {
+            api.wsManager.send({
+              type: 'insert_break_response',
+              requestId,
+              success: true,
+              breakType,
+              paragraphAfterBreak: result.paragraphAfterBreak || null
+            }).catch((error) => console.warn('[AIChatPane] 回传插入断行结果失败:', error));
+          }
         } else {
           msg.contentParts.push({
             type: 'status',
@@ -1391,6 +1434,15 @@ export default {
             loading: false
           });
           console.warn('[AIChatPane] 插入断行失败:', result.error);
+          if (requestId) {
+            api.wsManager.send({
+              type: 'insert_break_response',
+              requestId,
+              success: false,
+              breakType,
+              error: result.error || '插入断行失败'
+            }).catch((error) => console.warn('[AIChatPane] 回传插入断行错误失败:', error));
+          }
         }
         this.scrollToBottom();
         return;
@@ -1568,7 +1620,8 @@ export default {
           insertParaID: this._toIntOrNull(data.content.insertParaID ?? documentJson.insertParaID),
           msg: msg,
           insertStartPos: null,
-          insertEndPos: null
+          insertEndPos: null,
+          requestId: data.requestId || null
         };
         const inserted = this._applyImmediateInsertion(insItem);
         if (!inserted) {
@@ -1616,11 +1669,22 @@ export default {
     },
 
     _applyImmediateInsertion(insItem) {
+      const sendResult = (payload) => {
+        if (!insItem?.requestId) {
+          return;
+        }
+        api.wsManager.send({
+          type: 'generate_document_response',
+          requestId: insItem.requestId,
+          ...payload
+        }).catch((error) => console.warn('[AIChatPane] 回传文档生成结果失败:', error));
+      };
       insItem.docId = this._toIntOrDefault(insItem.docId, 0);
       insItem.insertParaID = this._toIntOrNull(insItem.insertParaID);
       const doc = this._resolveTargetDoc(insItem.docId);
       if (!doc) {
         console.warn('[AIChatPane] _applyImmediateInsertion: 无法获取文档对象 docId=', insItem.docId);
+        sendResult({ success: false, error: `无法获取文档 docId=${insItem.docId}` });
         return false;
       }
 
@@ -1631,6 +1695,7 @@ export default {
         if (!result || !result.success) {
           abortTrackedEdit(trackedEdit);
           console.error('[AIChatPane] 即时插入失败:', result?.error || '(unknown)');
+          sendResult({ success: false, error: result?.error || '文档插入失败' });
           return false;
         }
         if (result.warning) {
@@ -1688,21 +1753,25 @@ export default {
           (sum, item) => sum + ((item.documentJson?.tables || []).length),
           0
         );
-        let summary = t('chat.paragraphCount', { count: totalParaCount });
-        if (totalTableCount > 0) {
-          summary += `, ${t('chat.tableCount', { count: totalTableCount })}`;
-        }
-        this.pendingDocument = { preview: t('chat.generatedPending', { summary }) };
+        this.pendingDocument = {
+          preview: this._buildGeneratedDocumentPreview(totalParaCount, totalTableCount)
+        };
         console.log(
           '[AIChatPane] 文档已即时插入:',
           `docId=${this._toIntOrDefault(insItem.docId, 0)}`,
           `insertParaID=${insItem.insertParaID}`,
           `range=${result.startPos}-${result.endPos}`
         );
+        sendResult({
+          success: true,
+          docId: insItem.docId,
+          lastParagraph: result.lastParagraph || null
+        });
         return true;
       } catch (e) {
         abortTrackedEdit(trackedEdit);
         console.error('[AIChatPane] 即时插入异常:', e);
+        sendResult({ success: false, error: e?.message || String(e) });
         return false;
       }
     },
@@ -1714,15 +1783,21 @@ export default {
       // 流异常结束或用户提前确认时，确保尚未创建的删除修订先被创建。
       this._createDeleteRevisions();
       // 先接受新增修订，再接受删除修订。
+      const remainingInsertions = [];
       for (const ins of this.pendingInsertions) {
         const doc = this._resolveTargetDoc(ins.docId);
         if (!doc) {
+          remainingInsertions.push(ins);
           continue;
         }
         try {
           if (ins._markingMode === 'revision' && hasRevisionBatch(ins._revisionBatchId)) {
             const settled = settleRevisionBatch(ins._revisionBatchId, 'accept');
             console.log('[AIChatPane] 已接受新增内容修订:', settled);
+            if (!settled.success) {
+              remainingInsertions.push(ins);
+              continue;
+            }
             if (ins.msg) {
               ins.msg._revisionBatchId = null;
             }
@@ -1730,20 +1805,27 @@ export default {
           }
         } catch (e) {
           console.warn('[AIChatPane] 接受新增修订失败:', e);
+          remainingInsertions.push(ins);
         }
       }
 
+      const remainingDeletes = [];
       const deletes = [...this.pendingDeletes];
       for (const d of deletes) {
         const doc = this._resolveTargetDoc(d.docId);
         if (!doc) {
+          remainingDeletes.push(d);
           continue;
         }
         try {
           if (d._markingMode === 'revision' && hasRevisionBatch(d._revisionBatchId)) {
             const settled = settleRevisionBatch(d._revisionBatchId, 'accept');
             console.log('[AIChatPane] 已接受删除内容修订:', settled);
-            d._revisionBatchId = null;
+            if (settled.success) {
+              d._revisionBatchId = null;
+            } else {
+              remainingDeletes.push(d);
+            }
             continue;
           }
 
@@ -1753,15 +1835,18 @@ export default {
           }
           const result = deleteDocxPara(d.paraIDs, doc);
           console.log('[AIChatPane] confirmPending 删除结果:', result?.message || result?.error || '(unknown)');
+          if (!result?.success) {
+            remainingDeletes.push(d);
+          }
         } catch (e) {
           console.warn('[AIChatPane] confirmPending 删除失败:', e);
+          remainingDeletes.push(d);
         }
       }
 
-      this.pendingDeletes = [];
-      this.pendingInsertions = [];
-      this.pendingDocument = null;
-      this.pendingDocumentMsg = null;
+      this.pendingDeletes = remainingDeletes;
+      this.pendingInsertions = remainingInsertions;
+      this._syncPendingDocumentPreview();
       this._streamInsertions = [];
     },
 
@@ -2108,11 +2193,9 @@ export default {
             this.pendingDocumentMsg = msg;
             const paragraphCount = (jsonData.paragraphs || []).length;
             const tableCount = (jsonData.tables || []).length;
-            let summary = t('chat.paragraphCount', { count: paragraphCount });
-            if (tableCount > 0) {
-              summary += `, ${t('chat.tableCount', { count: tableCount })}`;
-            }
-            this.pendingDocument = { preview: t('chat.generatedPending', { summary }) };
+            this.pendingDocument = {
+              preview: this._buildGeneratedDocumentPreview(paragraphCount, tableCount)
+            };
           } else {
             abortTrackedEdit(trackedEdit);
             console.error('生成文档失败:', result.error);

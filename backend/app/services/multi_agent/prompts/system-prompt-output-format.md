@@ -17,7 +17,7 @@ Use `generate_document` tool with proper JSON structure:
 }
 ```
 
-`insertParaID` is required. Use a real paraID for non-empty documents. Use `0` only for the first write into an empty document.
+`insertParaID` is required. Use `0` to insert at the document start in either an empty or non-empty document. Use a real nonzero paraID to insert after that paragraph.
 
 The tool arguments must be exactly one balanced JSON object; do not add any extra closing brace or bracket after the final field.
 

@@ -6,6 +6,7 @@ import concurrent.futures
 import importlib
 import json
 import re
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
@@ -23,6 +24,7 @@ from .callback import (
     _pending_loops,
     _pending_tool_requests,
     is_stop_requested,
+    wait_for_tool_response,
 )
 from .schemas import DocumentOutput, DocumentQuery
 
@@ -66,6 +68,65 @@ def _normalize_doc_id(doc_id: DocIdInput) -> int:
 def _normalize_para_id(para_id: ParaIdInput) -> int | None:
     """Normalize paraID to integer; invalid values return None."""
     return _parse_int_like(para_id)
+
+
+def _format_generated_document_message(
+    para_count: int,
+    table_count: int,
+    image_count: int,
+) -> str:
+    """Build a generation summary without displaying zero-value item types."""
+    generated_counts = []
+    if para_count > 0:
+        generated_counts.append(f"{para_count} 个段落")
+    if table_count > 0:
+        generated_counts.append(f"{table_count} 个表格")
+    if image_count > 0:
+        generated_counts.append(f"{image_count} 张图片")
+
+    message = "📝 文档已生成"
+    if generated_counts:
+        message += f"，共 {'，'.join(generated_counts)}"
+    return message
+
+
+def _wait_for_frontend_mutation(request_id: str, timeout: float = 60) -> dict | None:
+    """Wait synchronously for a requestId-correlated frontend mutation result."""
+    chat_id = _current_chat_id.get(None)
+    if not chat_id or is_stop_requested(chat_id):
+        return None
+    loop = _pending_loops.get(chat_id)
+    if not loop:
+        return None
+    future = asyncio.run_coroutine_threadsafe(
+        wait_for_tool_response(chat_id, request_id, timeout=timeout),
+        loop,
+    )
+    try:
+        return future.result(timeout=timeout + 5)
+    except (TimeoutError, concurrent.futures.TimeoutError):
+        logger.warning("[DocumentTool] ⏰ 等待前端操作结果超时 requestId=%s", request_id)
+        return None
+    except Exception as exc:
+        logger.error("[DocumentTool] ❌ 等待前端操作结果失败 requestId=%s: %s", request_id, exc)
+        return None
+
+
+def _normalize_frontend_paragraph_location(value: object) -> dict | None:
+    if not isinstance(value, dict):
+        return None
+    para_id = _parse_int_like(value.get("paraID"))
+    para_index = _parse_int_like(value.get("paraIndex"))
+    if para_id is None or para_index is None:
+        return None
+    page_start = _parse_int_like(value.get("pageStart"))
+    page_end = _parse_int_like(value.get("pageEnd"))
+    return {
+        "paraID": para_id,
+        "paraIndex": para_index,
+        "pageStart": page_start,
+        "pageEnd": page_end,
+    }
 
 
 # region 图片 / 文档辅助
@@ -489,39 +550,85 @@ def _generate_document_impl(document: DocumentOutput, docId: DocIdInput, insertP
     normalized_insert_para_id = _normalize_para_id(insertParaID)
     if normalized_insert_para_id is None:
         raise ValueError(
-            "generate_document requires insertParaID. Use 0 only for the first write into an empty document, otherwise use a real paraID from read_document/search_document."
+            "generate_document requires insertParaID. Use 0 to insert at the document start, or use a real paraID from read_document/search_document to insert after that paragraph."
         )
 
     doc_dict = document.model_dump()
     _ensure_image_payload_shape(doc_dict)
     para_count = len(doc_dict.get("paragraphs", []))
+    table_count = len(doc_dict.get("tables", []))
     image_count = 0
     for p in doc_dict.get("paragraphs", []):
         for r in p.get("runs", []):
             if isinstance(r, dict) and r.get("text") is None:
                 image_count += 1
 
+    generated_message = _format_generated_document_message(para_count, table_count, image_count)
+
     doc_dict["insertParaID"] = normalized_insert_para_id
     doc_dict["docId"] = resolved_doc_id
 
     writer = get_stream_writer()
+    request_id = str(uuid.uuid4())
+    frontend_result = None
     if writer:
         writer(
             {
                 "type": "json",
                 "content": doc_dict,
                 "docId": resolved_doc_id,
+                "requestId": request_id,
             }
         )
+        frontend_result = _wait_for_frontend_mutation(request_id)
+
+    stopped = bool(frontend_result) and (
+        frontend_result.get("type") == "stop" or frontend_result.get("error") == "stopped_by_user"
+    )
+    frontend_error = frontend_result.get("error") if isinstance(frontend_result, dict) else None
+    frontend_success = frontend_result.get("success") if isinstance(frontend_result, dict) else None
+    last_paragraph = _normalize_frontend_paragraph_location(
+        frontend_result.get("lastParagraph") if isinstance(frontend_result, dict) else None
+    )
+
+    result = {
+        "success": False if stopped or frontend_success is False or frontend_error else (True if frontend_success is True else None),
+        "docId": resolved_doc_id,
+        "insertParaID": normalized_insert_para_id,
+        "generated": {
+            "paragraphCount": para_count,
+            "tableCount": table_count,
+            "imageCount": image_count,
+        },
+        "lastParagraph": last_paragraph,
+        "requestId": request_id,
+    }
+    if stopped:
+        result["error"] = "stopped_by_user"
+    elif frontend_error:
+        result["error"] = str(frontend_error)
+    elif frontend_result is None:
+        result["warning"] = (
+            "Frontend response timed out or is unavailable. Do not repeat generate_document because the content may already be inserted; "
+            "use read_document to locate the actual ending paragraph."
+        )
+    elif last_paragraph:
+        result["meaning"] = (
+            "lastParagraph is the final physical paragraph created by this generate_document call. "
+            "Use lastParagraph.paraID as the next insertParaID when appending immediately after this generated block."
+        )
+
+    if writer:
         writer(
             {
                 "type": "generate_complete",
-                "content": f"📝 文档已生成，共 {para_count} 个段落{f'，{image_count} 张图片' if image_count else ''}",
+                "content": generated_message,
                 "docId": resolved_doc_id,
                 "insertParaID": normalized_insert_para_id,
+                "requestId": request_id,
             }
         )
-    return doc_dict
+    return result
 
 
 def _search_document_impl(query: DocumentQuery, docId: DocIdInput) -> str:
@@ -692,7 +799,7 @@ _BREAK_TYPES = {
 }
 
 
-def _insert_break_impl(paraID: RequiredParaIdInput, breakType: BreakType | str) -> str:
+def _insert_break_impl(paraID: RequiredParaIdInput, breakType: BreakType | str) -> dict:
     """在指定段落后插入换行、分页或下一页分节符。"""
     normalized_para_id = _normalize_para_id(paraID)
     if normalized_para_id is None:
@@ -704,6 +811,8 @@ def _insert_break_impl(paraID: RequiredParaIdInput, breakType: BreakType | str) 
         raise ValueError(f"insert_break breakType must be one of: {allowed}")
 
     writer = get_stream_writer()
+    request_id = str(uuid.uuid4())
+    frontend_result = None
     if writer:
         writer(
             {
@@ -711,14 +820,46 @@ def _insert_break_impl(paraID: RequiredParaIdInput, breakType: BreakType | str) 
                 "paraID": normalized_para_id,
                 "breakType": normalized_break_type,
                 "content": f"↩️ 已在段落 {normalized_para_id} 后插入{_BREAK_TYPES[normalized_break_type]}",
+                "requestId": request_id,
             }
         )
+        frontend_result = _wait_for_frontend_mutation(request_id)
     logger.info(
         "[insert_break] 请求前端插入断行 (paraID=%s, breakType=%s)",
         normalized_para_id,
         normalized_break_type,
     )
-    return f"Frontend notified to insert {normalized_break_type} break after paragraph {normalized_para_id}"
+    stopped = bool(frontend_result) and (
+        frontend_result.get("type") == "stop" or frontend_result.get("error") == "stopped_by_user"
+    )
+    frontend_error = frontend_result.get("error") if isinstance(frontend_result, dict) else None
+    frontend_success = frontend_result.get("success") if isinstance(frontend_result, dict) else None
+    paragraph_after_break = _normalize_frontend_paragraph_location(
+        frontend_result.get("paragraphAfterBreak") if isinstance(frontend_result, dict) else None
+    )
+    result = {
+        "success": False if stopped or frontend_success is False or frontend_error else (True if frontend_success is True else None),
+        "breakType": normalized_break_type,
+        "sourceParaID": normalized_para_id,
+        "paragraphAfterBreak": paragraph_after_break,
+        "requestId": request_id,
+    }
+    if stopped:
+        result["error"] = "stopped_by_user"
+    elif frontend_error:
+        result["error"] = str(frontend_error)
+    elif frontend_result is None:
+        result["warning"] = (
+            "Frontend response timed out or is unavailable. Do not repeat insert_break because the break may already exist; "
+            "use read_document to locate the paragraph after the break."
+        )
+    elif paragraph_after_break:
+        result["newPage"] = paragraph_after_break.get("pageStart")
+        result["meaning"] = (
+            "paragraphAfterBreak identifies the paragraph immediately after the inserted break. "
+            "Use paragraphAfterBreak.paraID as the insertion anchor for content that must continue after the break."
+        )
+    return result
 
 
 def _create_document_impl() -> str:
@@ -809,8 +950,8 @@ def build_generate_document(description: str):
 
         Args:
             document: The document content to generate.
-            insertParaID: Required insertion anchor. Use 0 for the first write into an empty document;
-                otherwise insert after the paragraph whose paraID equals this value.
+            insertParaID: Required insertion anchor. Use 0 to insert at the document start;
+                a nonzero value inserts after the paragraph whose paraID equals that value.
             docId: Document ID (int-like). Positive/negative are both allowed. 0 means current active document.
         """
         return _generate_document_impl(document, docId, insertParaID)

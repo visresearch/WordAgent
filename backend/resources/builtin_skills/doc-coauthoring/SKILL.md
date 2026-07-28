@@ -21,8 +21,8 @@ Agree on a short outline before a substantial draft. Start with the core decisio
 
 Use the active Word document as the primary deliverable:
 
-- For an empty document, make the first `generate_document` call with `insertParaID=0`.
-- For a non-empty document, use real paragraph IDs returned by `read_document` or `search_document`.
+- Use `insertParaID=0` to insert at the document start, including in a non-empty document.
+- For any other position, use real paragraph IDs returned by `read_document` or `search_document`.
 - Insert long drafts in ordered batches.
 - Preserve existing styles unless the user requests a redesign.
 - For a replacement, read the target, call `delete_document` once for its paragraph IDs, then insert the replacement with `generate_document`. Deletion is pending in the Word UI, so do not repeat it when the old text remains visible.

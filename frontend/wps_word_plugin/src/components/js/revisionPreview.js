@@ -4,6 +4,7 @@ let nextBatchId = 1;
 
 const INSERT_REVISION_TYPES = new Set([1, 9, 15, 16, 18, 19, 20]);
 const DELETE_REVISION_TYPES = new Set([2, 9, 14, 17, 21]);
+const FORMAT_REVISION_TYPES = new Set([3, 4, 5, 8, 10, 11, 12, 13]);
 
 function safeRead(read, fallback = null) {
   try {
@@ -44,8 +45,6 @@ function revisionSignature(item) {
     item.type,
     item.author,
     item.date,
-    item.start,
-    item.end,
     item.text,
     item.formatDescription
   ].join('\u0001');
@@ -93,12 +92,66 @@ function expectedType(item, kind) {
   return true;
 }
 
+// WdRevisionsView.wdRevisionsViewFinal. WPS may keep a document in the
+// original-revisions view, where newly inserted text is hidden until Accept().
+const WPS_REVISIONS_VIEW_FINAL = 0;
+
+function showFinalRevisionPreview(view) {
+  if (!view) {
+    return;
+  }
+  try {
+    view.RevisionsView = WPS_REVISIONS_VIEW_FINAL;
+  } catch (error) {
+    void error;
+  }
+  try {
+    view.ShowInsertionsAndDeletions = true;
+  } catch (error) {
+    void error;
+  }
+  try {
+    view.ShowFormatChanges = false;
+  } catch (error) {
+    void error;
+  }
+}
+
+function restoreRevisionView(state) {
+  if (!state?.view) {
+    return;
+  }
+  if (state.previousRevisionsView !== null) {
+    try {
+      state.view.RevisionsView = state.previousRevisionsView;
+    } catch (error) {
+      void error;
+    }
+  }
+  if (state.previousShowInsertionsAndDeletions !== null) {
+    try {
+      state.view.ShowInsertionsAndDeletions = state.previousShowInsertionsAndDeletions;
+    } catch (error) {
+      void error;
+    }
+  }
+  if (state.previousShowFormatChanges !== null) {
+    try {
+      state.view.ShowFormatChanges = state.previousShowFormatChanges;
+    } catch (error) {
+      void error;
+    }
+  }
+}
+
 function acquireDocumentPreviewState(doc, editState) {
   let state = documentPreviewStates.get(doc);
   if (!state) {
     state = {
       previousShowRevisions: Boolean(editState.previousShowRevisions),
       view: editState.view,
+      previousRevisionsView: editState.previousRevisionsView,
+      previousShowInsertionsAndDeletions: editState.previousShowInsertionsAndDeletions,
       previousShowFormatChanges: editState.previousShowFormatChanges,
       batches: 0
     };
@@ -106,6 +159,7 @@ function acquireDocumentPreviewState(doc, editState) {
   }
   state.batches += 1;
   doc.ShowRevisions = true;
+  showFinalRevisionPreview(state.view);
 }
 
 function releaseDocumentPreviewState(doc) {
@@ -119,9 +173,7 @@ function releaseDocumentPreviewState(doc) {
   }
   try {
     doc.ShowRevisions = state.previousShowRevisions;
-    if (state.view && state.previousShowFormatChanges !== null) {
-      state.view.ShowFormatChanges = state.previousShowFormatChanges;
-    }
+    restoreRevisionView(state);
   } catch (error) {
     console.warn('[revisionPreview] 恢复 ShowRevisions 失败:', error);
   }
@@ -139,6 +191,10 @@ export function beginTrackedEdit(doc) {
     previousTrackFormatting: safeRead(() => doc.TrackFormatting, null),
     previousShowRevisions: Boolean(safeRead(() => doc.ShowRevisions, false)),
     view,
+    previousRevisionsView: view ? safeRead(() => view.RevisionsView, null) : null,
+    previousShowInsertionsAndDeletions: view
+      ? safeRead(() => view.ShowInsertionsAndDeletions, null)
+      : null,
     previousShowFormatChanges: view ? Boolean(safeRead(() => view.ShowFormatChanges, true)) : null,
     before: listRevisions(doc.Revisions),
     finished: false
@@ -149,9 +205,7 @@ export function beginTrackedEdit(doc) {
     }
     doc.TrackRevisions = true;
     doc.ShowRevisions = true;
-    if (view) {
-      view.ShowFormatChanges = false;
-    }
+    showFinalRevisionPreview(view);
   } catch (error) {
     try {
       doc.TrackRevisions = state.previousTrackRevisions;
@@ -159,9 +213,7 @@ export function beginTrackedEdit(doc) {
         doc.TrackFormatting = state.previousTrackFormatting;
       }
       doc.ShowRevisions = state.previousShowRevisions;
-      if (view && state.previousShowFormatChanges !== null) {
-        view.ShowFormatChanges = state.previousShowFormatChanges;
-      }
+      restoreRevisionView(state);
     } catch (restoreError) {
       console.warn('[revisionPreview] 开启原生修订失败后恢复文档状态失败:', restoreError);
     }
@@ -182,9 +234,7 @@ export function abortTrackedEdit(state) {
     }
   } finally {
     state.doc.ShowRevisions = state.previousShowRevisions;
-    if (state.view && state.previousShowFormatChanges !== null) {
-      state.view.ShowFormatChanges = state.previousShowFormatChanges;
-    }
+    restoreRevisionView(state);
   }
 }
 
@@ -204,25 +254,23 @@ export function finishTrackedEdit(state, target, kind) {
   } catch (error) {
     try {
       doc.ShowRevisions = state.previousShowRevisions;
-      if (state.view && state.previousShowFormatChanges !== null) {
-        state.view.ShowFormatChanges = state.previousShowFormatChanges;
-      }
+      restoreRevisionView(state);
     } catch (restoreError) {
       console.warn('[revisionPreview] 读取修订失败后恢复 ShowRevisions 失败:', restoreError);
     }
     throw error;
   }
-  let created = subtractExistingRevisions(state.before, after).filter(
-    (item) => overlapsTarget(item, target) && expectedType(item, kind)
-  );
+  // Capture every revision produced by this edit, including table/property
+  // and formatting revisions. Confirming a batch must not leave those behind.
+  let created = subtractExistingRevisions(state.before, after);
 
   // Some WPS builds update the positions of existing revisions after an edit.
   // If the signature diff is inconclusive, restrict the fallback to the target
   // range and the revision types produced by this operation.
   if (created.length === 0 && after.length > state.before.length) {
-    created = after
-      .filter((item) => overlapsTarget(item, target) && expectedType(item, kind))
-      .slice(0, after.length - state.before.length);
+    const addedCount = after.length - state.before.length;
+    const targetCandidates = after.filter((item) => overlapsTarget(item, target));
+    created = targetCandidates.slice(Math.max(0, targetCandidates.length - addedCount));
   }
 
   if ((kind === 'insert' || kind === 'delete') && !created.some((item) => expectedType(item, kind))) {
@@ -231,9 +279,7 @@ export function finishTrackedEdit(state, target, kind) {
 
   if (created.length === 0) {
     doc.ShowRevisions = state.previousShowRevisions;
-    if (state.view && state.previousShowFormatChanges !== null) {
-      state.view.ShowFormatChanges = state.previousShowFormatChanges;
-    }
+    restoreRevisionView(state);
     return { batchId: null, revisionCount: 0 };
   }
 
@@ -267,13 +313,10 @@ export function settleRevisionBatch(batchId, action) {
   });
   let handled = 0;
   let failed = 0;
+  const failedRevisions = [];
 
   for (const item of revisions) {
-    if (
-      action === 'reject' &&
-      ((batch.kind === 'insert' && !INSERT_REVISION_TYPES.has(item.type)) ||
-        (batch.kind === 'delete' && !DELETE_REVISION_TYPES.has(item.type)))
-    ) {
+    if (action === 'reject' && FORMAT_REVISION_TYPES.has(item.type)) {
       // WPS 明确不支持 Reject() 格式修订；拒绝对应的文本/结构修订后，
       // 插入内容上的格式修订会随内容一起消失。
       continue;
@@ -287,13 +330,19 @@ export function settleRevisionBatch(batchId, action) {
       handled += 1;
     } catch (error) {
       failed += 1;
+      failedRevisions.push(item);
       console.warn(`[revisionPreview] Revision.${action === 'accept' ? 'Accept' : 'Reject'}() 失败:`, error);
     }
   }
 
+  if (failedRevisions.length > 0) {
+    batch.revisions = failedRevisions;
+    return { success: false, handled, failed };
+  }
+
   revisionBatches.delete(batchId);
   releaseDocumentPreviewState(batch.doc);
-  return { success: handled > 0 || revisions.length === 0, handled, failed };
+  return { success: true, handled, failed };
 }
 
 export function hasRevisionBatch(batchId) {
