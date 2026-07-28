@@ -16,6 +16,7 @@ dist-ssr
 wps-addon-publish
 wps-addon-build
 *.local
+.temp/
 
 # Editor directories and files
 .vscode/*
