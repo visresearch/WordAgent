@@ -45,6 +45,21 @@ class CompactDocumentPageRangeTests(unittest.TestCase):
         self.assertNotIn("tables", compact)
         self.assertEqual(compact["paragraphs"][1]["tables"][0]["cellTexts"], [["cell"]])
 
+    def test_preserves_new_client_ordered_table_blocks(self) -> None:
+        document = {
+            "paragraphs": [
+                {"paraIndex": 1, "paraID": 1, "runs": [{"text": "before"}]},
+                {"tables": [{"paraIndex": 2, "endParaIndex": 2, "cells": [[{"text": "cell"}]]}]},
+                {"paraIndex": 3, "paraID": 2, "runs": [{"text": "after"}]},
+            ],
+            "styles": {"rS_1": ["Arial", 12, False, False, 0, "#000000", "#000000", 0, False, False, False]},
+        }
+
+        ordered = document_tools._order_document_blocks(document)
+
+        self.assertNotIn("tables", ordered)
+        self.assertEqual(ordered["paragraphs"], document["paragraphs"])
+
     def test_compaction_preserves_complete_page_range(self) -> None:
         document = {
             "paragraphs": [

@@ -8,4 +8,4 @@
 - Plan long output as ordered blocks. Split only for payload size, independent validation, or an explicit page/section boundary; keep each block and its neighboring table together.
 - For a fresh-page major block, finish the preceding block, call `insert_break`, and continue from `paragraphAfterBreak.paraID`. Never fake pagination with blank paragraphs.
 - Check every mutating tool result before continuing. On timeout or partial success, follow that tool's recovery instructions rather than blindly repeating it.
-- Use sub-agents only for substantial source analysis, planning, or review; keep document mutations in the main agent.
+- Work deliberately: finish and verify the current block before moving to the next one. Do not declare completion immediately after the last write; perform the required reviewer pass first.

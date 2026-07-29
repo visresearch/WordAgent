@@ -4,6 +4,7 @@ from pathlib import Path
 from app.services.agent import prompts as single_prompts
 from app.services.agent.subAgents import SUB_AGENTS
 from app.services.agent.subAgents.runner import SUB_AGENT_PROMPT_FILES, SUB_AGENT_TOOLS, build_sub_agent_system_prompt
+from app.services.agent.tools import AGENT_BASE_TOOLS
 from app.services.multi_agent import prompts as multi_prompts
 
 
@@ -21,13 +22,26 @@ class PromptAssemblyTests(unittest.TestCase):
             "generate_document Usage Policy",
             "delete_document Usage Policy",
             "insert_break Usage Policy",
-            "run_sub_agent Usage Policy",
+            "Built-in Document Reviewer",
         )
         for section in agent_only_sections:
             self.assertIn(section, agent_prompt)
             self.assertNotIn(section, ask_prompt)
 
         self.assertNotIn("Use `generate_document` for document content", ask_prompt)
+        self.assertNotIn("run_sub_agent Usage Policy", agent_prompt)
+
+    def test_single_agent_has_mandatory_document_reviewer_pass(self) -> None:
+        agent_prompt = single_prompts.get_agent_prompt("agent")
+
+        self.assertIn("Mandatory final reviewer pass", agent_prompt)
+        self.assertIn('read_document(mode="full")', agent_prompt)
+        self.assertIn("pageStart", agent_prompt)
+        self.assertIn("pageEnd", agent_prompt)
+        self.assertIn("Re-read each corrected range", agent_prompt)
+
+    def test_single_agent_does_not_register_sub_agent_tool(self) -> None:
+        self.assertNotIn("run_sub_agent", {tool.name for tool in AGENT_BASE_TOOLS})
 
     def test_multi_agent_writer_rules_do_not_leak_to_other_roles(self) -> None:
         writer_prompt = multi_prompts.get_agent_prompt("writer")

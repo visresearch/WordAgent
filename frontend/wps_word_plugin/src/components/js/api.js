@@ -13,7 +13,11 @@
  * const result = await api.chat(message)
  */
 
-import { cleanText, getParagraphParaID, parseDocxToJSON } from './docxJsonConverter.js';
+import {
+  cleanText,
+  getParagraphParaID,
+  parseDocxToJSON
+} from './docxJsonConverter.js';
 import { executeStyleQuery } from './docxQuery.js';
 
 // ============== 配置 ==============
@@ -504,7 +508,8 @@ const wsManager = {
         throw new Error(docData.error);
       }
 
-      // 如果是读取全文（0 到末尾），更新缓存
+      // 如果是读取全文（0 到末尾），更新缓存。parseDocumentRange 已返回
+      // 与 generate_document 相同的有序 paragraphs 内容流。
       if (startParaIndex === 0 && endParaIndex === -1 && (startParaID === null || startParaID === undefined)) {
         this.setCachedDocument(docData);
       }
@@ -515,7 +520,16 @@ const wsManager = {
         documentJson: docData
       });
 
-      console.log('[WebSocket] 已回传文档，段落数:', docData.paragraphs?.length || 0);
+      const tableCount = (docData.paragraphs || []).reduce(
+        (count, block) => count + (Array.isArray(block?.tables) ? block.tables.length : 0),
+        0
+      );
+      console.log(
+        '[WebSocket] 已回传文档，内容块数:',
+        docData.paragraphs?.length || 0,
+        '表格数:',
+        tableCount
+      );
 
     } catch (err) {
       console.error('[WebSocket] 解析/回传文档失败:', err);
@@ -881,7 +895,7 @@ function waitForNextTick() {
 }
 
 async function parseDocumentRangeLightweight(doc, startParaIndex, endParaIndex) {
-  const result = { paragraphs: [], tables: [], fields: [], _lightweight: true };
+  const result = { paragraphs: [], fields: [], _lightweight: true };
   const total = endParaIndex - startParaIndex + 1;
   const startedAt = Date.now();
 

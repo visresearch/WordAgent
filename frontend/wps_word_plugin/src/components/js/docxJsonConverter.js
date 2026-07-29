@@ -7,7 +7,8 @@
  *
  * JSON schema 数据结构（精简版）：
  * {
- *   paragraphs: [{             // 段落数组
+ *   paragraphs: [              // 唯一的有序内容流
+ *   {                          // 普通段落
  *     paraID: number,          // 段落唯一标识（int范围内）
  *     paraIndex: number,       // 段落索引（0-based）
  *     pageStart: number,       // 段落起始位置所在页（full 模式）
@@ -44,22 +45,18 @@
  *       // left/top/wrapType: 浮动图片属性
  *       // altText: 替代文本
  *     }]
- *   }],
- *   tables: [{                 // 表格数组
- *     rows: number, *   fields: [],               // 域代码数组
- *   hasTOC: boolean,          // 是否包含目录
- *     columns: number,
- *     tStyle: [tableAlignment],// 表格样式数组
- *     cells: [[{               // 单元格二维数组
- *       text: string,
- *       cStyle: [              // 单元格样式数组
- *         rowSpan,             // [0] 跨行数
- *         colSpan,             // [1] 跨列数
- *         alignment,           // [2] 水平对齐
- *         verticalAlignment    // [3] 垂直对齐
- *       ]
- *     }]]
- *   }],
+ *   },
+ *   { tables: [{               // 位于相邻段落之间的表格块
+ *       rows: number,
+ *       columns: number,
+ *       tStyle: [tableAlignment],
+ *       cells: [[{
+ *         text: string,
+ *         cStyle: [rowSpan, colSpan, alignment, verticalAlignment]
+ *       }]]
+ *   }] }],
+ *   fields: [],                // 域代码数组
+ *   hasTOC: boolean,           // 是否包含目录
  *   styles: {                 // 样式字典（去重）
  *     pS_1: [...],            // 段落样式，键名 pS_N
  *     rS_1: [...],            // 字符样式，键名 rS_N
@@ -394,6 +391,94 @@ function expandOrderedDocumentBlocks(blocks) {
     }
   }
   return elements;
+}
+
+/**
+ * 将 read_document 解析阶段的旧版 paragraphs/tables 并列结构转换为
+ * generate_document 使用的单一有序 paragraphs 内容流。
+ *
+ * 普通项仍是段落，表格项为 { tables: [...] }。表格内的物理段落由表格块
+ * 完整表示，因此不会在顶层 paragraphs 中重复返回。
+ */
+function orderReadDocumentBlocks(documentJson) {
+  if (!documentJson || typeof documentJson !== 'object') {
+    return documentJson;
+  }
+
+  const paragraphs = Array.isArray(documentJson.paragraphs) ? documentJson.paragraphs : [];
+  const tables = Array.isArray(documentJson.tables) ? documentJson.tables : [];
+  if (tables.length === 0) {
+    const result = { ...documentJson, paragraphs };
+    delete result.tables;
+    return result;
+  }
+
+  const tableRanges = tables
+    .map((table) => {
+      const start = Number.isInteger(table?.paraIndex) ? table.paraIndex : null;
+      const end = Number.isInteger(table?.endParaIndex) && table.endParaIndex >= start
+        ? table.endParaIndex
+        : start;
+      return start === null ? null : { start, end };
+    })
+    .filter(Boolean);
+
+  const positioned = [];
+  const unpositioned = [];
+  let sequence = 0;
+
+  for (const paragraph of paragraphs) {
+    if (!paragraph || typeof paragraph !== 'object' || Array.isArray(paragraph.tables)) {
+      if (paragraph && typeof paragraph === 'object') {
+        unpositioned.push({ sequence: sequence++, block: paragraph });
+      }
+      continue;
+    }
+
+    const paraIndex = Number.isInteger(paragraph.paraIndex) ? paragraph.paraIndex : null;
+    const isTableParagraph = paragraph.inTable === true || (
+      paraIndex !== null && tableRanges.some(({ start, end }) => paraIndex >= start && paraIndex <= end)
+    );
+    if (isTableParagraph) {
+      continue;
+    }
+
+    if (paraIndex === null || paraIndex < 0) {
+      unpositioned.push({ sequence: sequence++, block: paragraph });
+    } else {
+      positioned.push({ paraIndex, kindOrder: 1, sequence: sequence++, block: paragraph });
+    }
+  }
+
+  for (const table of tables) {
+    if (!table || typeof table !== 'object') {
+      continue;
+    }
+    const paraIndex = Number.isInteger(table.paraIndex) ? table.paraIndex : null;
+    const block = { tables: [table] };
+    if (paraIndex === null || paraIndex < 0) {
+      unpositioned.push({ sequence: sequence++, block });
+    } else {
+      positioned.push({ paraIndex, kindOrder: 0, sequence: sequence++, block });
+    }
+  }
+
+  positioned.sort((left, right) => (
+    left.paraIndex - right.paraIndex ||
+    left.kindOrder - right.kindOrder ||
+    left.sequence - right.sequence
+  ));
+  unpositioned.sort((left, right) => left.sequence - right.sequence);
+
+  const result = {
+    ...documentJson,
+    paragraphs: [
+      ...positioned.map((item) => item.block),
+      ...unpositioned.map((item) => item.block)
+    ]
+  };
+  delete result.tables;
+  return result;
 }
 
 function revealInsertedRange(doc, startPos, endPos) {
@@ -2143,7 +2228,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride, start
         });
       }
 
-      return deduplicateStyles(result);
+      return orderReadDocumentBlocks(deduplicateStyles(result));
     }
 
     // ========== 常规路径：解析 Range 或选区 ==========
@@ -2572,7 +2657,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride, start
       });
     }
 
-    return deduplicateStyles(result);
+    return orderReadDocumentBlocks(deduplicateStyles(result));
   } catch (error) {
     return { error: '解析失败: ' + error.message };
   }
@@ -3467,6 +3552,7 @@ export default {
   getParagraphLocationAtPosition,
   isDocumentStartInsertParaID,
   expandOrderedDocumentBlocks,
+  orderReadDocumentBlocks,
   isCharacterInsideInlineImage,
 
   // 样式数组常量
@@ -3515,6 +3601,7 @@ export {
   getParagraphLocationAtPosition,
   isDocumentStartInsertParaID,
   expandOrderedDocumentBlocks,
+  orderReadDocumentBlocks,
   isCharacterInsideInlineImage,
   PSTYLE,
   RSTYLE,

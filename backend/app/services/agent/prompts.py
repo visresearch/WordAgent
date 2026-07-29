@@ -29,20 +29,25 @@ _AGENT_DOCUMENT_FOUNDATION_FILES = [
     "system-prompt-tool-usage-strategy.md",
 ]
 
-_AGENT_MUTATION_PROMPT_FILES = [
+_AGENT_MUTATION_TOOL_PROMPT_FILES = [
     "system-prompt-tool-usage-create-document.md",
     "system-prompt-tool-usage-generate-document.md",
     "system-prompt-tool-usage-delete-document.md",
     "system-prompt-tool-usage-insert-break.md",
-    "system-prompt-tool-usage-subagent-guidance.md",
+    # 单智能体模式暂时停用子智能体提示词；保留文件，后续恢复功能时再启用。
+    # "system-prompt-tool-usage-subagent-guidance.md",
     "system-prompt-tool-usage-python-repl.md",
+]
+
+_AGENT_REVIEW_PROMPT_FILES = [
+    "system-prompt-document-reviewer.md",
 ]
 
 _SHARED_PROMPT_NAMES = frozenset(
     _READ_ONLY_TOOL_PROMPT_FILES
     + _FILE_TOOL_PROMPT_FILES
     + _AGENT_DOCUMENT_FOUNDATION_FILES
-    + _AGENT_MUTATION_PROMPT_FILES
+    + _AGENT_MUTATION_TOOL_PROMPT_FILES
 )
 
 _MODE_PROMPT_FILES = {
@@ -52,7 +57,8 @@ _MODE_PROMPT_FILES = {
         + _READ_ONLY_TOOL_PROMPT_FILES
         + ["system-prompt-project-directory-guide.md"]
         + _FILE_TOOL_PROMPT_FILES
-        + _AGENT_MUTATION_PROMPT_FILES
+        + _AGENT_MUTATION_TOOL_PROMPT_FILES
+        + _AGENT_REVIEW_PROMPT_FILES
     ),
     "ask": (
         _LOCAL_BASE_PROMPT_FILES

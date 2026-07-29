@@ -9,7 +9,7 @@
 - read_document工具full模式返回值添加page信息
 - 添加insert_break工具，插入分页符
 - 添加create_document工具，创建新文档
-- 添加generate_document和insert_break工具的前端返回值，方遍agent直接理解
+- 添加generate_document和insert_break工具的前端返回值，方便agent直接理解
 
 ### Changed
 - 更改temputure默认值和取值范围
@@ -18,8 +18,9 @@
 - 更新官网web文档
 - 将WPS红蓝批注改为原生的修订模式
 - 将Microsoft Word红蓝高亮修改为原生的修订模式
-- 修改generate_document工具schema中table字段，把table放到了paragraphs的中间，用来表示表格是段落的一部分，表示表格在段落中的位置(read_document工具的json schema未修改)
+- 修改generate_document工具schema中table字段，把table放到了paragraphs的中间，用来表示表格是段落的一部分，表示表格在段落中的位置(read_document工具的json schema也已同步修改)
 - 规定空段落也必须要有pStyle
+- 注释掉运行subagent的相关代码，修改提示词增加主智能体的review功能
 
 ### Fixed
 - 修复上下文溢出重试的bug

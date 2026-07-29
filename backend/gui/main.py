@@ -155,13 +155,15 @@ def start_gui(base_path=None):
         tray_icon.setToolTip("文策AI")
         tray_icon.setContextMenu(tray_menu)
         tray_icon.activated.connect(
-            lambda reason: window.show_from_tray()
-            if reason
-            in (
-                QSystemTrayIcon.ActivationReason.Trigger,
-                QSystemTrayIcon.ActivationReason.DoubleClick,
+            lambda reason: (
+                window.show_from_tray()
+                if reason
+                in (
+                    QSystemTrayIcon.ActivationReason.Trigger,
+                    QSystemTrayIcon.ActivationReason.DoubleClick,
+                )
+                else None
             )
-            else None
         )
         tray_icon.show()
     else:

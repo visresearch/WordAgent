@@ -10,8 +10,10 @@
 
 from __future__ import annotations
 
-from app.services.tools.prompts import get_tool_description
 from app.services.tools import (
+    # schemas
+    DocumentOutput,
+    DocumentQuery,
     # callback
     _current_chat_id,
     _current_model_name,
@@ -19,34 +21,31 @@ from app.services.tools import (
     _pending_loops,
     _pending_tool_requests,
     _stop_requested_sessions,
-    build_delete_document,
     build_create_document,
-    build_insert_break,
+    build_delete_document,
     build_edit_file,
     build_generate_document,
+    build_insert_break,
     build_list_file,
     build_load_skill_context,
     build_mcp_tools_prompt,
     build_python_repl,
-    build_read_file,
     build_read_document,
-    build_run_sub_agent,
+    build_read_file,
+    # build_run_sub_agent,  # 单智能体模式暂时停用子智能体工具。
     build_search_document,
     cleanup_tool_request,
     clear_stop,
     create_tool_request,
+    is_stop_requested,
     # MCP
     load_mcp_tools,
-    # schemas
-    DocumentOutput,
-    DocumentQuery,
-    is_stop_requested,
     register_loop,
     request_stop,
     submit_tool_response,
     wait_for_tool_response,
 )
-
+from app.services.tools.prompts import get_tool_description
 
 # ---------------------------------------------------------------------------
 # 用本模式的 prompt 装配出工具实例
@@ -59,7 +58,8 @@ delete_document = build_delete_document(get_tool_description("delete_document"))
 create_document = build_create_document(get_tool_description("create_document"))
 insert_break = build_insert_break(get_tool_description("insert_break"))
 load_skill_context = build_load_skill_context(get_tool_description("load_skill_context"))
-run_sub_agent = build_run_sub_agent(get_tool_description("run_sub_agent"))
+# 单智能体模式暂时停用子智能体工具注册；保留实现，后续可直接恢复。
+# run_sub_agent = build_run_sub_agent(get_tool_description("run_sub_agent"))
 python_repl = build_python_repl(get_tool_description("python_repl"))
 list_file = build_list_file(get_tool_description("list_file"))
 read_file = build_read_file(get_tool_description("read_file"))
@@ -83,7 +83,7 @@ AGENT_BASE_TOOLS = [
     list_file,
     read_file,
     edit_file,
-    run_sub_agent,
+    # run_sub_agent,  # 单智能体模式暂时停用。
 ]
 ASK_BASE_TOOLS = [
     load_skill_context,
@@ -123,7 +123,7 @@ __all__ = [
     "python_repl",
     "read_file",
     "read_document",
-    "run_sub_agent",
+    # "run_sub_agent",  # 单智能体模式暂时停用。
     "search_document",
     # tool sets
     "AGENT_BASE_TOOLS",

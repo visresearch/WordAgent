@@ -1,49 +1,49 @@
 # Contributing to WordAgent
 
-感谢你关注并参与 WordAgent！
+Thank you for your interest in contributing to WordAgent!
 
-WordAgent 是一个面向 WPS Office 和 Microsoft Word 的开源 AI 写作智能体项目。我们欢迎 Bug 修复、新功能、文档改进、内置 Skill、模型适配、界面优化和测试用例等各种形式的贡献。
+WordAgent is an open-source AI writing agent for WPS Office and Microsoft Word. We welcome all kinds of contributions, including bug fixes, new features, documentation improvements, built-in Skills, model integrations, UI enhancements, and test cases.
 
-在提交 Issue 或 Pull Request 前，请阅读本指南。
+Please read this guide before submitting an Issue or Pull Request.
 
-## 贡献方式
+## Ways to Contribute
 
-你可以通过以下方式参与项目：
+You can contribute to the project in the following ways:
 
-* 报告 Bug
-* 提出功能建议
-* 改进中英文文档
-* 修复后端或前端问题
-* 增加模型服务商适配
-* 改进 Single Agent 或 Multi Agent 工作流
-* 提交新的内置 Skill
-* 补充测试用例
-* 改进 WPS 或 Microsoft Word 加载项
-* 改进 Windows、Linux 或 macOS 打包流程
+* Report bugs
+* Suggest new features
+* Improve the English or Chinese documentation
+* Fix backend or frontend issues
+* Add integrations for model providers
+* Improve Single Agent or Multi Agent workflows
+* Submit new built-in Skills
+* Add test cases
+* Improve the WPS or Microsoft Word add-ins
+* Improve the packaging process for Windows, Linux, or macOS
 
-## 开发环境
+## Development Environment
 
-推荐使用以下环境：
+We recommend the following environment:
 
-* Python 3.11 或更高版本
-* Node.js 22 或更高版本
+* Python 3.11 or later
+* Node.js 22 or later
 * uv
 * pnpm 10
 * Git
-* WPS Office 或 Microsoft Word，用于加载项功能测试
+* WPS Office or Microsoft Word for testing add-in functionality
 
-克隆仓库：
+Clone the repository:
 
 ```bash
 git clone https://github.com/visresearch/WordAgent.git
 cd WordAgent
 ```
 
-建议先从仓库创建 Fork，再从自己的 Fork 创建开发分支。
+We recommend forking the repository first and creating a development branch from your fork.
 
-## 分支命名
+## Branch Naming
 
-请从最新的 `master` 分支创建功能分支：
+Create a feature branch from the latest `master` branch:
 
 ```bash
 git checkout master
@@ -51,77 +51,77 @@ git pull origin master
 git checkout -b feat/your-feature
 ```
 
-推荐使用以下分支前缀：
+We recommend the following branch prefixes:
 
-| 类型       | 示例                               |
-| -------- | -------------------------------- |
-| 新功能      | `feat/add-model-provider`        |
-| Bug 修复   | `fix/skill-loading-error`        |
-| 文档       | `docs/update-installation-guide` |
-| 重构       | `refactor/agent-runtime`         |
-| 测试       | `test/add-skill-tests`           |
-| 内置 Skill | `skill/academic-writing`         |
-| 构建和 CI   | `build/update-pyinstaller`       |
+| Type | Example |
+| --- | --- |
+| Feature | `feat/add-model-provider` |
+| Bug fix | `fix/skill-loading-error` |
+| Documentation | `docs/update-installation-guide` |
+| Refactoring | `refactor/agent-runtime` |
+| Tests | `test/add-skill-tests` |
+| Built-in Skill | `skill/academic-writing` |
+| Build and CI | `build/update-pyinstaller` |
 
-请避免在 `master` 分支上直接开发。
+Avoid developing directly on the `master` branch.
 
-## 后端开发
+## Backend Development
 
-进入后端目录：
+Go to the backend directory:
 
 ```bash
 cd backend
 ```
 
-安装正式依赖和开发依赖：
+Install production and development dependencies:
 
 ```bash
 uv sync --extra dev
 ```
 
-启动后端：
+Start the backend:
 
 ```bash
 uv run python main.py
 ```
 
-运行测试：
+Run tests:
 
 ```bash
 uv run pytest
 ```
 
-运行 Ruff：
+Run Ruff:
 
 ```bash
 uv run ruff check .
 ```
 
-自动修复 Ruff 可以处理的问题：
+Automatically fix issues that Ruff can handle:
 
 ```bash
 uv run ruff check . --fix
 ```
 
-检查代码格式：
+Check code formatting:
 
 ```bash
 uv run black --check .
 ```
 
-自动格式化代码：
+Automatically format the code:
 
 ```bash
 uv run black .
 ```
 
-运行类型检查：
+Run type checks:
 
 ```bash
 uv run mypy app
 ```
 
-提交后端代码前，至少应运行：
+Before submitting backend changes, run at least:
 
 ```bash
 uv run ruff check .
@@ -129,138 +129,138 @@ uv run black --check .
 uv run pytest
 ```
 
-### Python 代码要求
+### Python Code Requirements
 
-* 新增公共函数和方法应尽量添加类型注解。
-* 避免无必要的全局可变状态。
-* 异步接口应保持异步调用链，避免在事件循环中执行长时间阻塞操作。
-* 工具输入和输出优先使用明确的数据模型。
-* 不要在代码中硬编码 API Key、访问令牌、密码或用户路径。
-* 新功能应包含必要的异常处理和日志。
-* 不要随意修改前后端通信字段；必须修改时，应同步更新两个前端。
-* 新增依赖应说明用途，避免引入体积过大的依赖。
+* Add type annotations to new public functions and methods whenever practical.
+* Avoid unnecessary mutable global state.
+* Keep asynchronous call chains asynchronous, and avoid long-running blocking operations in the event loop.
+* Prefer explicit data models for tool inputs and outputs.
+* Do not hard-code API keys, access tokens, passwords, or user-specific paths.
+* New features should include appropriate error handling and logging.
+* Do not change frontend-backend communication fields casually. If a change is necessary, update both frontends accordingly.
+* Explain the purpose of new dependencies and avoid introducing unnecessarily large packages.
 
-## WPS 加载项开发
+## WPS Add-in Development
 
-进入 WPS 加载项目录：
+Go to the WPS add-in directory:
 
 ```bash
 cd frontend/wps_word_plugin
 ```
 
-安装依赖：
+Install dependencies:
 
 ```bash
 pnpm install
 ```
 
-启动开发服务器：
+Start the development server:
 
 ```bash
 pnpm dev
 ```
 
-构建：
+Build the add-in:
 
 ```bash
 pnpm build
 ```
 
-运行代码检查：
+Run lint checks:
 
 ```bash
 pnpm lint
 ```
 
-格式化代码：
+Format the code:
 
 ```bash
 pnpm format
 ```
 
-请不要手动修改 `dist/` 目录中的构建产物。
+Do not manually modify build artifacts in the `dist/` directory.
 
-## Microsoft Word 加载项开发
+## Microsoft Word Add-in Development
 
-进入 Microsoft Word 加载项目录：
+Go to the Microsoft Word add-in directory:
 
 ```bash
 cd frontend/microsoft_word_plugin
 ```
 
-安装依赖：
+Install dependencies:
 
 ```bash
 pnpm install
 ```
 
-启动开发服务器：
+Start the development server:
 
 ```bash
 pnpm dev-server
 ```
 
-构建开发版本：
+Create a development build:
 
 ```bash
 pnpm build:dev
 ```
 
-构建生产版本：
+Create a production build:
 
 ```bash
 pnpm build
 ```
 
-运行代码检查：
+Run lint checks:
 
 ```bash
 pnpm lint
 ```
 
-检查加载项清单：
+Validate the add-in manifest:
 
 ```bash
 pnpm validate
 ```
 
-格式化代码：
+Format the code:
 
 ```bash
 pnpm prettier
 ```
 
-启动 Microsoft Word 调试：
+Start Microsoft Word debugging:
 
 ```bash
 pnpm start
 ```
 
-结束调试：
+Stop debugging:
 
 ```bash
 pnpm stop
 ```
 
-## 前端贡献要求
+## Frontend Contribution Requirements
 
-* WPS 和 Microsoft Word 中共有的功能，应尽量保持行为一致。
-* 修改前后端 API 时，需要检查两个加载项是否都需要同步修改。
-* 界面改动应附带截图或录屏。
-* 不要提交无关的格式化修改。
-* 不要手动编辑生成后的 `dist/` 文件。
-* 应尽量保持现有界面设计和交互风格。
-* 修改加载项清单后，应运行对应的清单验证命令。
+* Features shared by WPS and Microsoft Word should behave consistently whenever practical.
+* When changing the frontend-backend API, check whether both add-ins need corresponding updates.
+* Include screenshots or screen recordings for UI changes.
+* Do not include unrelated formatting changes.
+* Do not manually edit generated files in `dist/`.
+* Preserve the existing UI design and interaction style whenever practical.
+* After changing an add-in manifest, run its corresponding validation command.
 
-## 提交内置 Skill
+## Contributing a Built-in Skill
 
-内置 Skill 应保存在：
+Built-in Skills should be stored in:
 
 ```text
 backend/app/resources/builtin_skills/
 ```
 
-推荐结构：
+Recommended structure:
 
 ```text
 builtin_skills/
@@ -271,23 +271,23 @@ builtin_skills/
     └── terminology.md
 ```
 
-运行时，内置 Skill 会被同步到统一的用户 Skill 目录：
+At runtime, built-in Skills are synchronized to the shared user Skill directory:
 
 ```text
 wence_data/project/skills/
 ```
 
-### Skill 文件夹命名
+### Skill Directory Naming
 
-Skill 文件夹名应满足以下要求：
+Skill directory names must meet the following requirements:
 
-* 使用小写英文。
-* 使用 `kebab-case`。
-* 发布后保持稳定。
-* 不使用空格和特殊字符。
-* 名称应能清楚表达 Skill 的用途。
+* Use lowercase English letters.
+* Use `kebab-case`.
+* Keep the name stable after release.
+* Do not use spaces or special characters.
+* Choose a name that clearly describes the Skill's purpose.
 
-推荐：
+Recommended:
 
 ```text
 academic-writing
@@ -296,91 +296,91 @@ technical-report
 meeting-summary
 ```
 
-不推荐：
+Not recommended:
 
 ```text
 Skill 1
 new_skill
 test
-我的技能
+My Skill
 ```
 
-### SKILL.md 格式
+### SKILL.md Format
 
-每个 Skill 必须包含一个 `SKILL.md`：
+Every Skill must contain a `SKILL.md` file:
 
 ```markdown
 ---
 name: Academic Writing
-description: 用于撰写、扩展和润色学术论文、研究报告及相关内容。
+description: Write, expand, and refine academic papers, research reports, and related content.
 ---
 
 # Academic Writing
 
-## 使用场景
+## Use Cases
 
-当用户需要撰写学术论文、研究报告、实验分析或相关正式内容时使用本 Skill。
+Use this Skill when the user needs to write academic papers, research reports, experimental analyses, or related formal content.
 
-## 工作流程
+## Workflow
 
-1. 理解用户的研究主题和写作要求。
-2. 分析当前文档结构。
-3. 缺少资料时先进行研究。
-4. 生成结构清晰、论证完整的内容。
-5. 检查术语、逻辑和格式一致性。
+1. Understand the user's research topic and writing requirements.
+2. Analyze the current document structure.
+3. Conduct research first when information is missing.
+4. Generate well-structured content with complete reasoning.
+5. Check terminology, logic, and formatting for consistency.
 
-## 约束
+## Constraints
 
-- 不得虚构实验数据和参考文献。
-- 不确定的信息应明确说明。
-- 保持学术表达准确、客观。
+- Do not fabricate experimental data or references.
+- Clearly identify uncertain information.
+- Maintain accurate and objective academic language.
 ```
 
-### Skill 贡献要求
+### Skill Contribution Requirements
 
-* 一个 Pull Request 尽量只新增或修改一个 Skill。
-* `description` 应明确说明触发场景，而不是只写宽泛介绍。
-* Skill 应提供可执行的工作流程和明确约束。
-* 较长的示例、术语表和参考内容应拆分到其他 Markdown 文件。
-* 不得包含 API Key、用户数据或私有资料。
-* 默认不接受包含可执行 Python、Shell、JavaScript 脚本的 Skill。
-* 引用第三方内容时，应确认许可证允许再分发，并保留必要声明。
-* 修改内置 Skill 时，应同步更新 `manifest.json` 中的版本号。
-* 不得覆盖或删除用户创建的本地 Skill。
-* 应测试 Skill 的发现、启用、停用和上下文加载行为。
+* A Pull Request should generally add or modify only one Skill.
+* The `description` should clearly identify the triggering scenarios instead of providing only a broad overview.
+* A Skill should provide an actionable workflow and explicit constraints.
+* Move lengthy examples, glossaries, and reference material into separate Markdown files.
+* Do not include API keys, user data, or private information.
+* Skills containing executable Python, Shell, or JavaScript scripts are not accepted by default.
+* Before including third-party content, ensure that its license permits redistribution and retain any required notices.
+* When modifying a built-in Skill, update its version number in `manifest.json` accordingly.
+* Do not overwrite or delete locally created user Skills.
+* Test Skill discovery, activation, deactivation, and context-loading behavior.
 
-提交 Skill 时，请在 Pull Request 中说明：
+When submitting a Skill, include the following information in the Pull Request:
 
-1. Skill 的用途。
-2. 适用场景。
-3. 触发示例。
-4. 测试方式。
-5. 内容来源和许可证。
-6. 是否会覆盖现有 Skill。
+1. The purpose of the Skill.
+2. Applicable scenarios.
+3. Triggering examples.
+4. How it was tested.
+5. Content sources and licenses.
+6. Whether it will overwrite an existing Skill.
 
-## Commit 规范
+## Commit Guidelines
 
-推荐使用 Conventional Commits 格式：
+We recommend using the Conventional Commits format:
 
 ```text
 <type>(<scope>): <description>
 ```
 
-常用类型：
+Common types:
 
-| 类型         | 用途         |
-| ---------- | ---------- |
-| `feat`     | 新功能        |
-| `fix`      | Bug 修复     |
-| `docs`     | 文档修改       |
-| `refactor` | 不改变行为的代码重构 |
-| `test`     | 测试相关       |
-| `style`    | 纯格式修改      |
-| `build`    | 构建系统或依赖修改  |
-| `ci`       | CI 工作流修改   |
-| `chore`    | 其他维护工作     |
+| Type | Purpose |
+| --- | --- |
+| `feat` | New feature |
+| `fix` | Bug fix |
+| `docs` | Documentation change |
+| `refactor` | Code refactoring that does not change behavior |
+| `test` | Test-related change |
+| `style` | Formatting-only change |
+| `build` | Build system or dependency change |
+| `ci` | CI workflow change |
+| `chore` | Other maintenance work |
 
-示例：
+Examples:
 
 ```text
 feat(skill): add built-in academic writing skill
@@ -390,123 +390,125 @@ refactor(frontend): unify skill settings components
 test(skill): add built-in skill synchronization tests
 ```
 
-Commit 信息应简洁、明确，并描述实际修改。
+Commit messages should be concise, specific, and describe the actual change.
 
-## 提交 Pull Request
+## Submitting a Pull Request
 
-提交前，请确保自己的分支基于最新的 `master`：
+Before submitting, ensure that your branch is based on the latest `master`:
 
 ```bash
 git fetch upstream
 git rebase upstream/master
 ```
 
-推送分支：
+Push your branch:
 
 ```bash
 git push origin feat/your-feature
 ```
 
-然后向 WordAgent 的 `master` 分支创建 Pull Request。
+Then create a Pull Request targeting WordAgent's `master` branch.
 
-### Pull Request 应包含
+### Pull Request Contents
 
-* 修改目的和背景。
-* 主要实现方式。
-* 测试方法和测试结果。
-* 影响的平台，例如 Windows、Linux、macOS、WPS 或 Microsoft Word。
-* 界面修改的截图或录屏。
-* 关联的 Issue，例如 `Closes #123`。
-* 新增依赖的原因。
-* 可能存在的兼容性影响。
+Include the following in your Pull Request:
 
-推荐的 Pull Request 描述：
+* The purpose and background of the change.
+* The main implementation approach.
+* Test methods and results.
+* Affected platforms, such as Windows, Linux, macOS, WPS, or Microsoft Word.
+* Screenshots or screen recordings for UI changes.
+* Related Issues, such as `Closes #123`.
+* The reason for any new dependencies.
+* Any potential compatibility impact.
+
+Recommended Pull Request description:
 
 ```markdown
-## 修改内容
+## Changes
 
-简要说明本次修改解决了什么问题。
+Briefly describe the problem addressed by this change.
 
-## 实现方式
+## Implementation
 
-说明主要实现思路和关键修改。
+Describe the main approach and key changes.
 
-## 测试
+## Testing
 
-- [ ] 后端测试通过
-- [ ] Ruff 检查通过
-- [ ] Black 格式检查通过
-- [ ] WPS 加载项构建通过
-- [ ] Microsoft Word 加载项构建通过
-- [ ] 已进行实际办公软件测试
+- [ ] Backend tests pass
+- [ ] Ruff checks pass
+- [ ] Black formatting checks pass
+- [ ] WPS add-in builds successfully
+- [ ] Microsoft Word add-in builds successfully
+- [ ] Tested in the actual office application
 
-## 影响范围
+## Scope
 
-说明会影响哪些模块和平台。
+Describe the affected modules and platforms.
 
-## 截图
+## Screenshots
 
-如涉及界面修改，请提供截图或录屏。
+If the change affects the UI, include screenshots or a screen recording.
 
-## 关联 Issue
+## Related Issue
 
 Closes #123
 ```
 
-### Pull Request 检查清单
+### Pull Request Checklist
 
-提交前请确认：
+Before submitting, confirm that:
 
-* [ ] 修改内容与 Pull Request 主题一致。
-* [ ] 没有包含 API Key、密码或其他敏感信息。
-* [ ] 没有提交无关的生成文件。
-* [ ] 已更新相关文档。
-* [ ] 已运行适用的测试和检查命令。
-* [ ] 新增代码包含必要的异常处理。
-* [ ] 前后端接口修改已同步处理。
-* [ ] WPS 和 Microsoft Word 共用功能已检查一致性。
-* [ ] 新增第三方内容符合许可证要求。
-* [ ] Commit 信息清晰明确。
+* [ ] The changes are consistent with the Pull Request's stated purpose.
+* [ ] No API keys, passwords, or other sensitive information are included.
+* [ ] No unrelated generated files are included.
+* [ ] Relevant documentation has been updated.
+* [ ] Applicable tests and checks have been run.
+* [ ] New code includes appropriate error handling.
+* [ ] Frontend-backend API changes have been synchronized.
+* [ ] Shared WPS and Microsoft Word functionality has been checked for consistency.
+* [ ] New third-party content complies with its license.
+* [ ] Commit messages are clear and specific.
 
-## 提交 Issue
+## Submitting an Issue
 
-### Bug 报告
+### Bug Reports
 
-Bug Issue 应尽量包含：
+A bug report should include as much of the following information as possible:
 
-* WordAgent 版本。
-* 操作系统及版本。
-* WPS Office 或 Microsoft Word 版本。
-* Python 和 Node.js 版本。
-* 使用的模型和 API 服务商。
-* 完整复现步骤。
-* 预期行为。
-* 实际行为。
-* 相关日志和错误信息。
-* 必要的截图或录屏。
+* WordAgent version.
+* Operating system and version.
+* WPS Office or Microsoft Word version.
+* Python and Node.js versions.
+* Model and API provider used.
+* Complete reproduction steps.
+* Expected behavior.
+* Actual behavior.
+* Relevant logs and error messages.
+* Screenshots or screen recordings, when needed.
 
-提交日志前，请删除：
+Before submitting logs, remove:
 
-* API Key
-* Access Token
-* Cookie
-* 用户文档内容
-* 个人信息
-* 本地敏感路径
+* API keys
+* Access tokens
+* Cookies
+* User document content
+* Personal information
+* Sensitive local paths
 
-### 功能建议
+### Feature Requests
 
-功能建议应说明：
+A feature request should explain:
 
-* 当前存在的问题。
-* 期望的使用场景。
-* 建议的交互方式。
-* 可能影响的模块。
-* 是否愿意参与实现。
+* The current problem.
+* The intended use case.
+* The proposed interaction.
+* Modules that may be affected.
+* Whether you are willing to help implement it.
 
-## 依赖修改
+## Dependency Changes
 
-新增或升级 Python 依赖时：
+When adding or upgrading Python dependencies:
 
 ```bash
 cd backend
@@ -515,27 +517,27 @@ uv lock
 uv sync --extra dev
 ```
 
-提交以下文件的相关变更：
+Commit the relevant changes to:
 
 ```text
 backend/pyproject.toml
 backend/uv.lock
 ```
 
-更新前端依赖时，应使用 `pnpm`，并提交对应的：
+When updating frontend dependencies, use `pnpm` and commit the corresponding:
 
 ```text
 package.json
 pnpm-lock.yaml
 ```
 
-请不要混用 npm、Yarn 和 pnpm，也不要在没有必要的情况下整体刷新锁文件。
+Do not mix npm, Yarn, and pnpm, and do not refresh the entire lockfile unless necessary.
 
-## 文档修改
+## Documentation Changes
 
-项目包含中英文 README 和独立文档站。
+The project includes English and Chinese README files as well as a separate documentation site.
 
-修改用户可见功能时，请检查是否需要同步更新：
+When modifying user-visible functionality, check whether the following also need to be updated:
 
 ```text
 README.md
@@ -543,38 +545,38 @@ README.zh-CN.md
 web/docs/
 ```
 
-涉及命令、路径和配置时，请确保文档与实际代码一致。
+When documenting commands, paths, or configuration, ensure that the documentation matches the actual code.
 
-## 安全问题
+## Security Issues
 
-请不要在公开 Issue 中发布：
+Do not publish the following in a public Issue:
 
-* 可用的 API Key
-* 身份凭据
-* 未公开的安全漏洞利用方法
-* 包含个人数据的用户文档
-* 其他敏感信息
+* Working API keys
+* Credentials
+* Exploit details for undisclosed vulnerabilities
+* User documents containing personal data
+* Other sensitive information
 
-发现安全问题时，请优先使用 GitHub 的私有安全报告功能，或联系项目维护者。
+If you discover a security issue, use GitHub's private vulnerability reporting feature or contact the project maintainers.
 
-## 行为准则
+## Code of Conduct
 
-请保持友善、专业和尊重。
+Be friendly, professional, and respectful.
 
-我们不接受以下行为：
+We do not tolerate the following behavior:
 
-* 人身攻击或歧视性言论。
-* 恶意骚扰其他参与者。
-* 故意提交破坏性代码。
-* 未经授权发布他人的隐私信息。
-* 大量提交无关 Issue 或 Pull Request。
+* Personal attacks or discriminatory language.
+* Malicious harassment of other participants.
+* Deliberately submitting destructive code.
+* Publishing another person's private information without authorization.
+* Submitting large numbers of irrelevant Issues or Pull Requests.
 
-维护者有权关闭不符合项目目标、质量要求或行为准则的 Issue 和 Pull Request。
+Maintainers reserve the right to close Issues and Pull Requests that do not meet the project's goals, quality standards, or code of conduct.
 
-## 许可证
+## License
 
-WordAgent 使用 Apache License 2.0。
+WordAgent is licensed under the Apache License 2.0.
 
-向本项目提交代码、文档或其他内容，即表示你同意将自己的贡献按照项目使用的 Apache License 2.0 进行授权。
+By submitting code, documentation, or other content to this project, you agree to license your contribution under the Apache License 2.0 used by the project.
 
-感谢你为 WordAgent 做出的贡献！
+Thank you for contributing to WordAgent!

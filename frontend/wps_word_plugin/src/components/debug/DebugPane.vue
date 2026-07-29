@@ -88,8 +88,8 @@
     <div v-if="parsedData" class="divItem">
       <h4>{{ $t('debug.result') }}</h4>
       <div class="stats">
-        <span>{{ $t('debug.paragraphs', { count: parsedData.paragraphs?.length || 0 }) }}</span>
-        <span>{{ $t('debug.tables', { count: parsedData.tables?.length || 0 }) }}</span>
+        <span>{{ $t('debug.paragraphs', { count: parsedParagraphCount }) }}</span>
+        <span>{{ $t('debug.tables', { count: parsedTableCount }) }}</span>
         <span>{{ $t('debug.images', { count: parsedData.images?.length || 0 }) }}</span>
         <span>{{ $t('debug.chars', { count: parsedData.text?.length || 0 }) }}</span>
       </div>
@@ -125,6 +125,15 @@ export default {
   computed: {
     formattedJSON() {
       return this.parsedData ? JSON.stringify(this.parsedData, null, 2) : '';
+    },
+    parsedParagraphCount() {
+      return (this.parsedData?.paragraphs || []).filter(block => !Array.isArray(block?.tables)).length;
+    },
+    parsedTableCount() {
+      return (this.parsedData?.paragraphs || []).reduce(
+        (count, block) => count + (Array.isArray(block?.tables) ? block.tables.length : 0),
+        0
+      );
     }
   },
   methods: {
@@ -207,7 +216,12 @@ export default {
         }
 
         this.parsedData = result;
-        this.showStatus(`解析成功！共 ${result.paragraphs?.length || 0} 个段落`, 'success');
+        const paraCount = result.paragraphs.filter(block => !Array.isArray(block?.tables)).length;
+        const tableCount = result.paragraphs.reduce(
+          (count, block) => count + (Array.isArray(block?.tables) ? block.tables.length : 0),
+          0
+        );
+        this.showStatus(`解析成功！共 ${paraCount} 个段落 / ${tableCount} 个表格`, 'success');
       } catch (e) {
         console.error('解析选中内容出错:', e);
         this.showStatus('解析出错: ' + e.message, 'error');

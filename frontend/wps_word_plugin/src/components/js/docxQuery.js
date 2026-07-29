@@ -24,7 +24,7 @@ import { PSTYLE, RSTYLE } from './docxJsonConverter.js';
  * @returns {Object} 查询结果
  */
 export function executeQuery(docJson, queryDSL) {
-  const paragraphs = docJson.paragraphs || [];
+  const paragraphs = (docJson.paragraphs || []).filter(block => !Array.isArray(block?.tables));
   const { query, context = 1, highlight = true, size = 50 } = queryDSL;
   
   if (!paragraphs.length) {
@@ -318,8 +318,12 @@ function extractParagraphs(paragraphs, expandedIndices, matchedIndices, query, h
  * @returns {Object} 文档摘要
  */
 export function generateSummary(docJson) {
-  const paragraphs = docJson.paragraphs || [];
-  const tables = docJson.tables || [];
+  const blocks = docJson.paragraphs || [];
+  const paragraphs = blocks.filter(block => !Array.isArray(block?.tables));
+  const tables = [
+    ...(docJson.tables || []),
+    ...blocks.flatMap(block => Array.isArray(block?.tables) ? block.tables : [])
+  ];
   
   // 提取所有标题
   const headings = [];
@@ -650,7 +654,7 @@ function getParagraphPosition(para) {
  * @returns {Object} { matches: [...], matchCount: number }
  */
 export function executeStyleQuery(docJson, queryDSL) {
-  const paragraphs = docJson.paragraphs || [];
+  const paragraphs = (docJson.paragraphs || []).filter(block => !Array.isArray(block?.tables));
   const { type = 'run', filters = {} } = queryDSL;
   
   if (!paragraphs.length || !Object.keys(filters).length) {

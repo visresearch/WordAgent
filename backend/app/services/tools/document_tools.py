@@ -339,7 +339,12 @@ def _save_generated_document_json(doc_dict: dict) -> str | None:
 
 
 def _order_document_blocks(doc_json: dict) -> dict:
-    """Convert read_document's parallel paragraphs/tables into one verified ordered block stream."""
+    """Normalize read_document output to one verified ordered paragraph/table block stream.
+
+    New clients already return ordered table blocks inside ``paragraphs``. The
+    legacy top-level ``tables`` conversion remains here for compatibility with
+    older clients and in-flight sessions.
+    """
     paragraphs = doc_json.get("paragraphs", [])
     tables = doc_json.get("tables", [])
     if not isinstance(paragraphs, list) or not isinstance(tables, list) or not tables:
@@ -577,8 +582,17 @@ def _read_document_impl(
                     image_count = count_inline_images(doc_json)
                     has_content = doc_json and (doc_json.get("paragraphs") or doc_json.get("tables"))
                     if has_content:
-                        para_count = len(doc_json.get("paragraphs", []))
-                        table_count = len(doc_json.get("tables", []))
+                        content_blocks = doc_json.get("paragraphs", [])
+                        para_count = sum(
+                            1
+                            for block in content_blocks
+                            if isinstance(block, dict) and not isinstance(block.get("tables"), list)
+                        )
+                        table_count = len(doc_json.get("tables", [])) + sum(
+                            len(block.get("tables", []))
+                            for block in content_blocks
+                            if isinstance(block, dict) and isinstance(block.get("tables"), list)
+                        )
                         logger.info(
                             f"[read_document] ✅ 收到文档，段落数: {para_count}，表格数: {table_count}，图片数: {image_count}"
                         )
