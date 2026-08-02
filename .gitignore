@@ -8,6 +8,7 @@ pnpm-debug.log*
 lerna-debug.log*
 cache/
 outputs/
+wence_data/
 
 # dist
 node_modules
