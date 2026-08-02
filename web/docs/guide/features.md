@@ -28,16 +28,24 @@
 | **read_document** | 读取文档中指定范围的内容 | ✅ | ✅ | ✅ |
 | **search_document** | 查询某种格式或文字信息的段落位置 | ✅ | ✅ | ✅ |
 | **generate_document** | 生成带格式的文档内容并插入到 Word 中 | ✅ | ❌ | ✅ |
-| **delete_document** | 删除 Word 中指定范围的内容 | ✅ | ❌ | ✅ |
-| **run_sub_agent** | 调用子智能体完成特定任务 | ✅ | ❌ | ❌ |
+| **edit_document** | 按 `paraID` 替换单个段落正文并保留原 `pStyle` | ✅ | ❌ | ❌ |
+| **delete_document** | 删除 Word 中指定的段落 | ✅ | ❌ | ✅ |
+| **create_document** | 创建并打开新的空白 DOCX 文档 | ✅ | ❌ | ✅ |
+| **insert_break** | 在指定段落后插入换行、分页或分节符 | ✅ | ❌ | ✅ |
 | **mcp_tools** | 调用已启用的 MCP 服务器工具 | ✅ | 视配置而定 | ✅ |
 | **load_skill_context** | 加载已启用 Skill 的完整规则 | ✅ | ✅ | ✅ |
 | **list_file** | 列出任务文件 | ✅ | ✅ | ✅ |
 | **read_file** | 读取任务文件 | ✅ | ✅ | ✅ |
 | **edit_file** | 编辑任务文件（不修改 Word 正文） | ✅ | ✅ | ✅ |
 | **python_repl** | 运行 Python 代码 | ✅ | ❌ | ❌ |
+| **review_document** | 对文档进行审阅并返回问题与修改建议 | ❌ | ❌ | ✅ |
+| **create_workflow** | 编排 Plan 模式的多智能体工作流 | ❌ | ❌ | ✅ |
 
 
 ::: info 说明
 这些工具由智能体自动调用，你无需手动操作。智能体会根据你的提问自动判断需要使用哪些工具。
+:::
+
+::: warning 当前版本说明
+单智能体 Agent 模式暂时不注册 `run_sub_agent`，因此不会调用子智能体。`edit_document` 当前用于 Agent 模式的单段落原位改写；Plan 模式仍使用多智能体 Writer 的现有文档工具集合。
 :::

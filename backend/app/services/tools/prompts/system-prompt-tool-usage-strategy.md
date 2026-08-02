@@ -4,7 +4,7 @@
 - Confirmed empty/new content: generate directly with `insertParaID: 0`; call `create_document` first only when the user explicitly requests a separate new file.
 - The Word document is the deliverable: use `generate_document` for requested document content instead of returning the full draft only in chat.
 - Preserve content and formatting outside the requested scope. Explicit user requirements, loaded Skills, and template/reference styles take precedence over defaults.
-- Add with `generate_document`; delete with `delete_document`; replace by deleting first and then generating from the returned `replacementInsertParaID`.
+- Add with `generate_document`; delete with `delete_document`; rewrite one existing paragraph with `edit_document` when its paragraph/style boundary must remain; use delete+generate only when a new paragraph is intentionally required.
 - Plan long output as ordered blocks. Split only for payload size, independent validation, or an explicit page/section boundary; keep each block and its neighboring table together.
 - For a fresh-page major block, finish the preceding block, call `insert_break`, and continue from `paragraphAfterBreak.paraID`. Never fake pagination with blank paragraphs.
 - Check every mutating tool result before continuing. On timeout or partial success, follow that tool's recovery instructions rather than blindly repeating it.

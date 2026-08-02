@@ -1519,12 +1519,8 @@ function parseCellParagraphs(cellRange, doc) {
         const para = cellParas.Item(p);
         const paraRange = para.Range;
         const paraText = cleanText(paraRange.Text);
-
-        if (!paraText || paraText.match(/^[\r\n]*$/)) {
-          continue;
-        }
-
         const paraID = getParagraphParaID(para);
+
         if (paraID === null) {
           continue;
         }
@@ -1544,6 +1540,14 @@ function parseCellParagraphs(cellRange, doc) {
           ],
           runs: []
         };
+
+        // 空单元格仍然有真实的段落对象和 paraID。保留这个空段落，
+        // 这样 agent 可以通过 edit_document(paraID, runs) 写入内容，
+        // 也不会因为缺少 runs 而把单元格误判为不存在。
+        if (!paraText || paraText.match(/^[\r\n]*$/)) {
+          paragraphs.push(paraData);
+          continue;
+        }
 
         // 解析 runs
         try {
@@ -3359,6 +3363,131 @@ function generateDocxFromJSON(jsonData, doc, insertParaID) {
   }
 }
 
+// ============== 段落编辑 ==============
+
+/**
+ * Replace the text content of one paragraph, leaving its paragraph mark and
+ * paragraph formatting untouched. The caller can wrap this operation in
+ * beginTrackedEdit/finishTrackedEdit so WPS records a native replacement.
+ *
+ * @param {number|string} paraID
+ * @param {Array<Object>} runs - text runs; image runs are rejected
+ * @param {Object} [docOverride]
+ * @returns {{success:boolean, paraID?:number, startPos?:number, endPos?:number, replacedTextLength?:number, error?:string}}
+ */
+function editDocxParagraph(paraID, runs, docOverride) {
+  const normalizedParaID = Number(paraID);
+  if (!Number.isInteger(normalizedParaID)) {
+    return { success: false, error: 'paraID 必须是整数' };
+  }
+  if (!Array.isArray(runs)) {
+    return { success: false, error: 'runs 必须是数组' };
+  }
+
+  const doc = docOverride || (typeof window !== 'undefined' ? window.Application?.ActiveDocument : null);
+  if (!doc) {
+    return { success: false, error: '没有打开的文档' };
+  }
+
+  let paragraph = null;
+  const totalParas = Number(doc.Paragraphs?.Count || 0);
+  for (let index = 1; index <= totalParas; index++) {
+    try {
+      const candidate = doc.Paragraphs.Item(index);
+      if (Number(getParagraphParaID(candidate)) === normalizedParaID) {
+        paragraph = candidate;
+        break;
+      }
+    } catch (error) {
+      void error;
+    }
+  }
+  if (!paragraph) {
+    return { success: false, paraID: normalizedParaID, error: `未找到 paraID=${normalizedParaID} 的段落` };
+  }
+
+  const textRuns = [];
+  for (const run of runs) {
+    if (!run || typeof run !== 'object') {
+      continue;
+    }
+    if (run.url && run.text === undefined) {
+      return { success: false, paraID: normalizedParaID, error: 'edit_document 暂不支持图片 run' };
+    }
+    if (run.text !== undefined && run.text !== null && String(run.text).length > 0) {
+      const text = String(run.text);
+      if (/[\r\n]/.test(text)) {
+        return { success: false, paraID: normalizedParaID, error: 'runs.text 不能包含换行符' };
+      }
+      textRuns.push({ text, rStyle: run.rStyle });
+    }
+  }
+
+  try {
+    const paraRange = paragraph.Range;
+    const startPos = Number(paraRange.Start);
+    const rawEndPos = Number(paraRange.End);
+    if (!Number.isFinite(startPos) || !Number.isFinite(rawEndPos)) {
+      return { success: false, paraID: normalizedParaID, error: '目标段落没有有效的 Range' };
+    }
+
+    // Paragraph.Range.End includes the paragraph mark. Never delete that mark:
+    // deleting it would merge paragraphs and lose the original pStyle boundary.
+    const contentEnd = Math.max(startPos, rawEndPos - 1);
+    const replacedTextLength = Math.max(0, contentEnd - startPos);
+    const originalText = String(paraRange.Text || '').replace(/[\r\n\u0007]+$/, '');
+    if (contentEnd > startPos) {
+      doc.Range(startPos, contentEnd).Delete();
+    }
+
+    let currentPos = startPos;
+    for (const run of textRuns) {
+      const range = doc.Range(currentPos, currentPos);
+      range.Text = run.text;
+      const insertedRange = doc.Range(currentPos, currentPos + run.text.length);
+      // A read_document rStyle is a reference ID and edit_document has no
+      // separate style dictionary. Apply only inline style arrays when callers
+      // provide them; otherwise WPS inherits the existing paragraph character
+      // formatting instead of resetting it to a default style.
+      if (Array.isArray(run.rStyle)) {
+        const rStyle = resolveStyle({}, run.rStyle, DEFAULT_RSTYLE);
+        const font = insertedRange.Font;
+        if (rStyle[RSTYLE.FONT_NAME]) font.Name = rStyle[RSTYLE.FONT_NAME];
+        if (rStyle[RSTYLE.FONT_SIZE]) font.Size = rStyle[RSTYLE.FONT_SIZE];
+        font.Bold = rStyle[RSTYLE.BOLD] ? -1 : 0;
+        font.Italic = rStyle[RSTYLE.ITALIC] ? -1 : 0;
+        font.StrikeThrough = rStyle[RSTYLE.STRIKETHROUGH] ? -1 : 0;
+        font.Superscript = rStyle[RSTYLE.SUPERSCRIPT] ? -1 : 0;
+        font.Subscript = rStyle[RSTYLE.SUBSCRIPT] ? -1 : 0;
+        font.Underline = rStyle[RSTYLE.UNDERLINE] || 0;
+        if (rStyle[RSTYLE.UNDERLINE_COLOR] && rStyle[RSTYLE.UNDERLINE_COLOR] !== '#000000') {
+          font.UnderlineColor = parseRGBColor(rStyle[RSTYLE.UNDERLINE_COLOR]);
+        }
+        if (rStyle[RSTYLE.COLOR] && rStyle[RSTYLE.COLOR] !== '#000000') {
+          font.Color = parseRGBColor(rStyle[RSTYLE.COLOR]);
+        }
+        if (rStyle[RSTYLE.HIGHLIGHT]) {
+          try { insertedRange.HighlightColorIndex = rStyle[RSTYLE.HIGHLIGHT]; } catch (error) { void error; }
+        }
+      }
+      currentPos += run.text.length;
+    }
+
+    revealInsertedRange(doc, startPos, Math.max(startPos, currentPos));
+    return {
+      success: true,
+      paraID: normalizedParaID,
+      startPos,
+      endPos: currentPos,
+      replacedTextLength,
+      originalText,
+      paragraph: getParagraphLocationAtPosition(doc, startPos)
+    };
+  } catch (error) {
+    return { success: false, paraID: normalizedParaID, error: error?.message || String(error) };
+  }
+}
+
 // ============== 段落删除 ==============
 
 /**
@@ -3563,6 +3692,7 @@ export default {
   // 主要函数
   parseDocxToJSON,
   generateDocxFromJSON,
+  editDocxParagraph,
   deleteDocxPara,
   insertBreakAfterParagraph,
 
@@ -3570,6 +3700,7 @@ export default {
   cleanText,
   cleanCellText,
   getCellParagraphRuns,
+  parseCellParagraphs,
   makeInlineImageRun,
   exportImageToTemp,
   deduplicateStyles,
@@ -3614,11 +3745,13 @@ export default {
 export {
   parseDocxToJSON,
   generateDocxFromJSON,
+  editDocxParagraph,
   deleteDocxPara,
   insertBreakAfterParagraph,
   cleanText,
   cleanCellText,
   getCellParagraphRuns,
+  parseCellParagraphs,
   makeInlineImageRun,
   exportImageToTemp,
   deduplicateStyles,

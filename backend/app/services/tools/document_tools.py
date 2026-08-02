@@ -26,7 +26,7 @@ from .callback import (
     is_stop_requested,
     wait_for_tool_response,
 )
-from .schemas import DocumentOutput, DocumentQuery
+from .schemas import DocumentOutput, DocumentQuery, Run
 
 logger = get_logger(__name__)
 
@@ -947,6 +947,116 @@ def _delete_document_impl(paraIDs: list[int | str], docId: DocIdInput) -> dict:
     return result
 
 
+def _edit_document_impl(paraID: RequiredParaIdInput, runs: list[Run], docId: DocIdInput) -> dict:
+    """edit_document 的核心逻辑：替换一个段落的内容，保留段落本身及其 pStyle。"""
+    resolved_doc_id = _normalize_doc_id(docId)
+    normalized_para_id = _normalize_para_id(paraID)
+    if normalized_para_id is None:
+        return {
+            "success": False,
+            "docId": resolved_doc_id,
+            "paraID": None,
+            "error": "edit_document requires a valid integer paraID",
+        }
+    if not isinstance(runs, list):
+        return {
+            "success": False,
+            "docId": resolved_doc_id,
+            "paraID": normalized_para_id,
+            "error": "edit_document requires runs to be a list",
+        }
+
+    normalized_runs = []
+    unsupported_runs = []
+    for run in runs:
+        if isinstance(run, Run):
+            run_dict = run.model_dump(exclude_none=True)
+        elif isinstance(run, dict):
+            run_dict = {k: v for k, v in run.items() if v is not None}
+        else:
+            continue
+        # edit_document only replaces paragraph text. Image runs are not silently
+        # inserted because they need a document-local image path and a different
+        # insertion workflow.
+        if run_dict.get("text") is None:
+            if run_dict.get("url"):
+                unsupported_runs.append(run_dict.get("url"))
+            continue
+        if "\n" in str(run_dict.get("text", "")) or "\r" in str(run_dict.get("text", "")):
+            return {
+                "success": False,
+                "docId": resolved_doc_id,
+                "paraID": normalized_para_id,
+                "error": "edit_document runs.text must not contain newline characters; use separate paragraphs instead",
+            }
+        normalized_runs.append(run_dict)
+
+    if unsupported_runs:
+        return {
+            "success": False,
+            "docId": resolved_doc_id,
+            "paraID": normalized_para_id,
+            "error": "edit_document 目前只支持文本 runs，不支持图片 runs",
+        }
+
+    writer = get_stream_writer()
+    request_id = str(uuid.uuid4())
+    frontend_result = None
+    if writer:
+        writer(
+            {
+                "type": "edit_document",
+                "content": f"✏️ 正在替换段落 {normalized_para_id} 的内容",
+                "paraID": normalized_para_id,
+                "runs": normalized_runs,
+                "docId": resolved_doc_id,
+                "requestId": request_id,
+            }
+        )
+        frontend_result = _wait_for_frontend_mutation(request_id)
+
+    stopped = bool(frontend_result) and (
+        frontend_result.get("type") == "stop" or frontend_result.get("error") == "stopped_by_user"
+    )
+    frontend_error = frontend_result.get("error") if isinstance(frontend_result, dict) else None
+    frontend_success = frontend_result.get("success") if isinstance(frontend_result, dict) else None
+    result = {
+        "success": False
+        if stopped or frontend_success is False or frontend_error
+        else (True if frontend_success is True else None),
+        "docId": resolved_doc_id,
+        "paraID": normalized_para_id,
+        "runCount": len(normalized_runs),
+        "requestId": request_id,
+    }
+    if stopped:
+        result["error"] = "stopped_by_user"
+    elif frontend_error:
+        result["error"] = str(frontend_error)
+    elif frontend_result is None:
+        result["warning"] = (
+            "Frontend response timed out or is unavailable. Do not repeat edit_document blindly; "
+            "use read_document to verify the paragraph content."
+        )
+
+    if writer:
+        content = (
+            f"✏️ 文档已修改（段落 {normalized_para_id}）"
+            if result["success"] is True
+            else f"⚠️ 段落 {normalized_para_id} 更新失败"
+        )
+        writer(
+            {
+                "type": "edit_complete",
+                "content": content,
+                "docId": resolved_doc_id,
+                "paraID": normalized_para_id,
+                "requestId": request_id,
+            }
+        )
+    return result
+
+
 _BREAK_TYPES = {
     "wdLineBreak": "仅换行（Shift+Enter）",
     "wdPageBreak": "分页，下一页继续且保持页面设置",
@@ -1153,6 +1263,27 @@ def build_delete_document(description: str):
     return delete_document
 
 
+def build_edit_document(description: str):
+    """根据传入的 description 构造 edit_document 工具实例。"""
+
+    @tool(description=description)
+    def edit_document(
+        paraID: RequiredParaIdInput,
+        runs: list[Run],
+        docId: DocIdInput = 0,
+    ) -> dict:
+        """Replace the text runs of one existing paragraph while preserving its paragraph style.
+
+        Args:
+            paraID: Existing paragraph ID from read_document/search_document.
+            runs: New text runs. Use an empty list to clear the paragraph content.
+            docId: Document ID (int-like). 0 means the active document.
+        """
+        return _edit_document_impl(paraID, runs, docId)
+
+    return edit_document
+
+
 def build_insert_break(description: str):
     """根据传入的 description 构造 insert_break 工具实例。"""
 
@@ -1183,6 +1314,7 @@ __all__ = [
     "build_generate_document",
     "build_search_document",
     "build_delete_document",
+    "build_edit_document",
     "build_insert_break",
     "build_create_document",
     # 内部实现也导出，便于子智能体或测试直接复用
@@ -1190,6 +1322,7 @@ __all__ = [
     "_generate_document_impl",
     "_search_document_impl",
     "_delete_document_impl",
+    "_edit_document_impl",
     "_insert_break_impl",
     "_create_document_impl",
     "_compact_doc_json",

@@ -12,9 +12,9 @@ _pending_tool_requests: dict[str, asyncio.Queue] = {}
 # 存储每个会话的事件循环引用（供 tool 在同步线程中回到异步）
 _pending_loops: dict[str, asyncio.AbstractEventLoop] = {}
 # Correlated frontend responses for mutating tools. Read/search retain the
-# legacy per-session queue, while generate/insert_break use requestId so
+# legacy per-session queue, while document mutation tools use requestId so
 # concurrent tool calls cannot consume each other's responses. This includes
-# generate_document, delete_document, and insert_break.
+# generate_document, delete_document, edit_document, and insert_break.
 _pending_tool_response_waiters: dict[str, dict[str, asyncio.Future]] = {}
 _pending_tool_response_backlog: dict[str, dict[str, dict]] = {}
 # 存储每个会话的停止状态（用户点击停止后置为 True）

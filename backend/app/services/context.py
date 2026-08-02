@@ -10,7 +10,6 @@
 核心函数：
 - _light_compact_tool_results: 轻量压缩，清除旧工具结果
 - _heavy_compact_with_summary: 重量压缩，LLM 生成结构化摘要
-- _compress_with_llm_chain_extractor: LLMChainExtractor 语义压缩
 - compact_conversation: 统一压缩入口
 - compress_conversation_history_if_needed: ReAct 循环调用入口
 - _fit_memory_messages_to_budget: Token 预算适配
@@ -19,10 +18,7 @@
 from __future__ import annotations
 
 import os
-import warnings
 from typing import TYPE_CHECKING, Any
-
-warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"langchain_classic")
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
@@ -48,18 +44,8 @@ def _get_env_int(name: str, default: int) -> int:
         return default
 
 
-# 上下文预算控制（可通过环境变量覆盖，默认200k）
+# 上下文预算控制（可通过环境变量覆盖，默认258k）
 MAX_CONTEXT_TOKENS = _get_env_int("WORDAGENT_MAX_CONTEXT_TOKENS", 258000)
-
-# ============ LLMChainExtractor 语义压缩配置（默认禁用） ============
-ENABLE_LLM_CHAIN_EXTRACTOR = os.environ.get("WORDAGENT_ENABLE_LLM_CHAIN_EXTRACTOR", "false").strip().lower() in {
-    "1",
-    "true",
-    "yes",
-    "on",
-}
-EXTRACTOR_KEEP_RECENT_MESSAGES = _get_env_int("WORDAGENT_EXTRACTOR_KEEP_RECENT_MESSAGES", 4)
-EXTRACTOR_MAX_SOURCE_MESSAGES = _get_env_int("WORDAGENT_EXTRACTOR_MAX_SOURCE_MESSAGES", 16)
 
 # ============ Claude Code 风格的两级压缩配置 ============
 # 轻量压缩 (Microcompact) - 无 LLM 调用
@@ -157,15 +143,6 @@ def _truncate_message(msg: SystemMessage | HumanMessage | AIMessage | ToolMessag
     if isinstance(msg, AIMessage):
         return AIMessage(content=new_text)
     return SystemMessage(content=new_text)
-
-
-def _message_role(msg: SystemMessage | HumanMessage | AIMessage) -> str:
-    """Return normalized role name for a message object."""
-    if isinstance(msg, HumanMessage):
-        return "user"
-    if isinstance(msg, AIMessage):
-        return "assistant"
-    return "system"
 
 
 # ============ Claude Code 风格的轻量压缩 (Light Compact / Microcompact) ============
@@ -430,7 +407,7 @@ def compact_conversation(
         if llm is None:
             logger.warning("[Context] ⚠️ 重量压缩需要 LLM，但未提供，回退到 token 裁剪")
             current_messages, hard_meta = _fit_memory_messages_to_budget(
-                current_messages, llm=None, query=current_task, max_context_tokens=max_context_tokens
+                current_messages, max_context_tokens=max_context_tokens
             )
             meta["hard_truncate"] = hard_meta
         else:
@@ -446,7 +423,7 @@ def compact_conversation(
     final_tokens = _estimate_messages_tokens(current_messages)
     if final_tokens > max_context_tokens:
         current_messages, hard_meta = _fit_memory_messages_to_budget(
-            current_messages, llm=None, query=current_task, max_context_tokens=max_context_tokens
+            current_messages, max_context_tokens=max_context_tokens
         )
         meta["hard_truncate"] = hard_meta
 
@@ -454,79 +431,8 @@ def compact_conversation(
     return current_messages, meta
 
 
-def _compress_with_llm_chain_extractor(
-    messages: list[SystemMessage | HumanMessage | AIMessage | ToolMessage],
-    llm: "ChatOpenAI | None",
-    query: str,
-) -> list[SystemMessage | HumanMessage | AIMessage]:
-    """Use LLMChainExtractor to keep only query-relevant parts of older dialogue."""
-    if not ENABLE_LLM_CHAIN_EXTRACTOR or llm is None:
-        return messages
-
-    convo_msgs = [m for m in messages if not isinstance(m, SystemMessage)]
-    if len(convo_msgs) <= EXTRACTOR_KEEP_RECENT_MESSAGES:
-        return messages
-
-    try:
-        from langchain_core.documents import Document
-        from langchain_classic.retrievers.document_compressors import LLMChainExtractor
-    except Exception as e:
-        logger.warning(f"[Context] ⚠️ LLMChainExtractor 不可用，跳过抽取压缩: {e}")
-        return messages
-
-    system_msgs = [m for m in messages if isinstance(m, SystemMessage)]
-    keep_recent = max(1, EXTRACTOR_KEEP_RECENT_MESSAGES)
-    tail_msgs = convo_msgs[-keep_recent:]
-    old_msgs = convo_msgs[:-keep_recent]
-
-    if EXTRACTOR_MAX_SOURCE_MESSAGES > 0 and len(old_msgs) > EXTRACTOR_MAX_SOURCE_MESSAGES:
-        old_msgs = old_msgs[-EXTRACTOR_MAX_SOURCE_MESSAGES:]
-
-    docs = []
-    for i, msg in enumerate(old_msgs):
-        text = _extract_message_text(getattr(msg, "content", "")).strip()
-        if not text:
-            continue
-        role = _message_role(msg)
-        docs.append(Document(page_content=f"[{role}] {text}", metadata={"role": role, "idx": i}))
-
-    if not docs:
-        return messages
-
-    question = (query or "").strip() or "请提取与当前任务最相关的上下文信息。"
-
-    try:
-        extractor = LLMChainExtractor.from_llm(llm)
-        compressed_docs = extractor.compress_documents(docs, query=question)
-    except Exception as e:
-        logger.error(f"[Context] ⚠️ LLMChainExtractor 压缩失败，回退常规裁剪: {e}")
-        return messages
-
-    if not compressed_docs:
-        return system_msgs + tail_msgs
-
-    parts: list[str] = []
-    for d in compressed_docs:
-        content = (d.page_content or "").strip()
-        if not content:
-            continue
-        role = str(d.metadata.get("role", "context"))
-        parts.append(f"[{role}] {content}")
-
-    if not parts:
-        return system_msgs + tail_msgs
-
-    compressed_context = (
-        "以下为经 LLMChainExtractor 压缩后的较早历史上下文（仅保留与当前请求相关的信息）：\n" + "\n---\n".join(parts)
-    )
-
-    return system_msgs + [SystemMessage(content=compressed_context)] + tail_msgs
-
-
 def _fit_memory_messages_to_budget(
     messages: list[SystemMessage | HumanMessage | AIMessage | ToolMessage],
-    llm: "ChatOpenAI | None" = None,
-    query: str = "",
     max_context_tokens: int = MAX_CONTEXT_TOKENS,
 ) -> tuple[list[SystemMessage | HumanMessage | AIMessage], dict[str, Any]]:
     """Compress memory messages when token estimate exceeds configured budget."""
@@ -553,14 +459,7 @@ def _fit_memory_messages_to_budget(
 
     meta["triggered"] = True
 
-    extracted = _compress_with_llm_chain_extractor(messages, llm=llm, query=query)
-    extracted_tokens = _estimate_messages_tokens(extracted)
-    if extracted_tokens <= hard_budget:
-        meta["strategy"] = "llm_chain_extractor"
-        meta["after_tokens_est"] = extracted_tokens
-        return extracted, meta
-
-    clipped = extracted
+    clipped = messages
     system_msgs = [m for m in clipped if isinstance(m, SystemMessage)]
     convo_msgs = [m for m in clipped if not isinstance(m, SystemMessage)]
 

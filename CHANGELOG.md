@@ -10,6 +10,7 @@
 - 添加insert_break工具，插入分页符
 - 添加create_document工具，创建新文档
 - 添加generate_document和insert_break工具的前端返回值，方便agent直接理解
+- 添加edit_document工具，修改段落内容，保持pStyle和paraID不变
 
 ### Changed
 - 更改temputure默认值和取值范围

@@ -33,6 +33,7 @@ _AGENT_MUTATION_TOOL_PROMPT_FILES = [
     "system-prompt-tool-usage-create-document.md",
     "system-prompt-tool-usage-generate-document.md",
     "system-prompt-tool-usage-delete-document.md",
+    "system-prompt-tool-usage-edit-document.md",
     "system-prompt-tool-usage-insert-break.md",
     # 单智能体模式暂时停用子智能体提示词；保留文件，后续恢复功能时再启用。
     # "system-prompt-tool-usage-subagent-guidance.md",

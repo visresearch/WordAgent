@@ -140,7 +140,13 @@ async def chat_websocket(websocket: WebSocket):
        ``requestId`` 必须原样回传。删除会立即在原生修订模式下执行；失败时使用
        ``success:false`` 并提供 ``error``。
 
-    8. 停止当前请求：``{"type":"stop"}``。
+    8. 编辑段落结果：
+       ``{"type":"edit_document_response","requestId":"...",``
+       ``"success":true,"docId":123,"paraID":456}``。
+
+       ``requestId`` 必须原样回传；编辑只替换段落内容并保留原段落样式。
+
+    9. 停止当前请求：``{"type":"stop"}``。
 
     后端 → 前端
     ------------
@@ -173,6 +179,8 @@ async def chat_websocket(websocket: WebSocket):
        - ``{"type":"insert_break","content":"...","paraID":123,``
          ``"breakType":"wdLineBreak|wdPageBreak|wdSectionBreakNextPage",``
          ``"requestId":"..."}``。
+       - ``{"type":"edit_document","content":"...","paraID":123,``
+         ``"runs":[{"text":"..."}],"docId":0,"requestId":"..."}``。
        - ``{"type":"create_document","format":"docx","content":"..."}``。
 
     4. 连接控制：
@@ -180,7 +188,7 @@ async def chat_websocket(websocket: WebSocket):
        - ``{"type":"done"}``：本轮流结束；服务端保证最多发送一次正常结束事件。
        - ``{"type":"error","content":"..."}``：终止性错误，通常随后发送 ``done``。
 
-    ``generate_document_response``、``delete_response`` 与
+    ``generate_document_response``、``delete_response``、``edit_document_response`` 与
     ``insert_break_response`` 使用 ``requestId`` 进行关联，允许回包乱序且不会被
     其他并发工具调用消费。读取、查询和创建文档仍使用会话级回调队列。
     """
@@ -339,6 +347,12 @@ async def chat_websocket(websocket: WebSocket):
                                 await ma_submit_tool_response(chat_id, incoming)
                             else:
                                 await submit_tool_response(chat_id, incoming)
+                        elif incoming_type == "edit_document_response":
+                            logger.info(f"[WebSocket] 收到前端段落编辑结果: {incoming}")
+                            if active_mode == "plan":
+                                await ma_submit_tool_response(chat_id, incoming)
+                            else:
+                                await submit_tool_response(chat_id, incoming)
                         elif incoming_type in {
                             "create_document_response",
                             "generate_document_response",
@@ -387,6 +401,7 @@ async def chat_websocket(websocket: WebSocket):
             elif msg_type in {
                 "create_document_response",
                 "generate_document_response",
+                "edit_document_response",
                 "insert_break_response",
             }:
                 # 前端可变更工具执行完成后回传结果，供工具继续执行后续调用。
@@ -628,8 +643,12 @@ async def _run_ws_stream(
             "read_complete",
             "search_document",
             "query_complete",
+            "create_document",
             "delete_document",
             "delete_complete",
+            "edit_document",
+            "edit_complete",
+            "insert_break",
             "generate_complete",
         }:
             _append_status_part(str(payload.get("content") or ""))

@@ -25,6 +25,7 @@ _TOOL_DESCRIPTION_FILES: dict[str, str] = {
     "read_document": "tool-description-read-document.md",
     "generate_document": "tool-description-generate-document.md",
     "delete_document": "tool-description-delete-document.md",
+    "edit_document": "tool-description-edit-document.md",
     "insert_break": "tool-description-insert-break.md",
     "create_document": "tool-description-create-document.md",
     "search_document": "tool-description-search-document.md",

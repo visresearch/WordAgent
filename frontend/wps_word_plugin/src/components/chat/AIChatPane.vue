@@ -27,6 +27,7 @@
         :selections="selections"
         :uploaded-files="uploadedFiles"
         :pending-document="pendingDocument"
+        :pending-edits="pendingEdits"
         :delete-revisions="deleteRevisions"
         :token-stats="tokenStats"
         :enable-thinking="enableThinking"
@@ -58,7 +59,7 @@
 </template>
 
 <script>
-import { generateDocxFromJSON, deleteDocxPara, insertBreakAfterParagraph, getParagraphParaID } from '../js/docxJsonConverter.js';
+import { generateDocxFromJSON, editDocxParagraph, deleteDocxPara, insertBreakAfterParagraph, getParagraphParaID } from '../js/docxJsonConverter.js';
 import {
   abortTrackedEdit,
   beginTrackedEdit,
@@ -99,6 +100,7 @@ export default {
       pendingDocument: null,
       pendingDocumentMsg: null,
       deleteRevisions: [],  // 已立即执行、等待统一接受/拒绝的原生删除修订
+      pendingEdits: [],  // 已立即执行、等待统一接受/拒绝的原生段落编辑修订
       pendingInsertions: [],  // [{documentJson, docId, insertParaID, msg}] 待确认的文档插入列表
       _streamInsertions: [], // [{insertParaID, count, docId}] 当前流式中已执行的插入操作
       historyLoading: false,
@@ -107,7 +109,7 @@ export default {
       _streamingSessionId: null,   // 正在流式生成的 session ID
       _streamingCache: {},         // {sessionId: messages[]} 流式生成期间切走时缓存消息
       isWide: false,
-      tokenStats: { current: 0, max: 200000, percentage: 0 },
+      tokenStats: { current: 0, max: 258000, percentage: 0 },
       enableThinking: true,  // 是否启用深度思考
       _initializing: false   // 是否正在初始化，防止 ensureSession 创建重复会话
     };
@@ -1415,6 +1417,52 @@ export default {
         return;
       }
 
+      // 后端请求替换单个段落的文本内容；保留原段落标记和 pStyle。
+      if (data.type === 'edit_document') {
+        const paraID = this._toIntOrNull(data.paraID);
+        const runs = Array.isArray(data.runs) ? data.runs : [];
+        console.log('[AIChatPane] 后端请求编辑段落:', { paraID, docId: data.docId, runCount: runs.length });
+        msg.contentParts.push({
+          type: 'status',
+          content: data.content || `✏️ 正在更新段落 ${paraID ?? ''}`,
+          loading: true
+        });
+        this.scrollToBottom();
+        this._applyImmediateEdit({
+          paraID,
+          runs,
+          docId: this._toIntOrDefault(data.docId, 0),
+          requestId: data.requestId || null,
+          msg
+        });
+        return;
+      }
+
+      if (data.type === 'edit_complete') {
+        const parts = msg.contentParts;
+        let found = false;
+        for (let i = parts.length - 1; i >= 0; i--) {
+          if (parts[i].type === 'status' && parts[i].loading) {
+            parts.splice(i, 1, {
+              type: 'status',
+              content: data.content || `✏️ 段落 ${data.paraID ?? ''} 已更新`,
+              loading: false
+            });
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          parts.push({
+            type: 'status',
+            content: data.content || `✏️ 段落 ${data.paraID ?? ''} 已更新`,
+            loading: false
+          });
+        }
+        this.scrollToBottom();
+        return;
+      }
+
       // 后端请求在活动文档中插入原生换行/分页/下一页分节符
       if (data.type === 'insert_break') {
         const paraID = this._toIntOrNull(data.paraID);
@@ -1807,6 +1855,90 @@ export default {
       }
     },
 
+    _applyImmediateEdit(payload) {
+      const sendResult = (result) => {
+        if (!payload?.requestId) {
+          return;
+        }
+        api.wsManager.send({
+          type: 'edit_document_response',
+          requestId: payload.requestId,
+          ...result
+        }).catch((error) => console.warn('[AIChatPane] 回传段落编辑结果失败:', error));
+      };
+
+      const paraID = this._toIntOrNull(payload?.paraID);
+      const docId = this._toIntOrDefault(payload?.docId, 0);
+      const runs = Array.isArray(payload?.runs) ? payload.runs : [];
+      const doc = this._resolveTargetDoc(docId);
+      if (!doc) {
+        sendResult({ success: false, paraID, docId, error: `无法获取文档 docId=${docId}` });
+        return false;
+      }
+      if (paraID === null) {
+        sendResult({ success: false, paraID: null, docId, error: 'edit_document 缺少有效 paraID' });
+        return false;
+      }
+      const conflictingDelete = this.deleteRevisions.find(
+        (item) => this._toIntOrDefault(item.docId, 0) === docId
+          && Array.isArray(item.paraIDs)
+          && item.paraIDs.some((id) => Number(id) === paraID)
+      );
+      if (conflictingDelete) {
+        const error = `paraID ${paraID} 正处于待删除修订中，请先重新读取文档并使用仍然存在的段落 ID`;
+        sendResult({ success: false, paraID, docId, error });
+        return false;
+      }
+
+      let trackedEdit = null;
+      let result = null;
+      try {
+        trackedEdit = beginTrackedEdit(doc);
+        result = editDocxParagraph(paraID, runs, doc);
+        if (!result || !result.success) {
+          abortTrackedEdit(trackedEdit);
+          sendResult({ success: false, paraID, docId, error: result?.error || '段落编辑失败' });
+          return false;
+        }
+
+        const revisionBatch = finishTrackedEdit(
+          trackedEdit,
+          { start: result.startPos, end: result.endPos },
+          'edit'
+        );
+        const editItem = {
+          docId,
+          paraID,
+          startPos: result.startPos,
+          endPos: result.endPos,
+          replacedTextLength: result.replacedTextLength || 0,
+          originalText: result.originalText || '',
+          _revisionBatchId: revisionBatch.batchId,
+          _markingMode: revisionBatch.batchId ? 'revision' : 'revision-unavailable',
+          msg: payload.msg || null
+        };
+        this.pendingEdits.push(editItem);
+        if (payload.msg) {
+          payload.msg._docId = docId;
+          payload.msg._editedParaID = paraID;
+          payload.msg._revisionBatchId = revisionBatch.batchId || null;
+        }
+        api.wsManager.clearDocumentCache();
+        sendResult({
+          success: true,
+          docId,
+          paraID,
+          revisionCount: revisionBatch.revisionCount,
+          paragraph: result.paragraph || null
+        });
+        return true;
+      } catch (error) {
+        abortTrackedEdit(trackedEdit);
+        sendResult({ success: false, paraID, docId, error: error?.message || String(error) });
+        return false;
+      }
+    },
+
     _applyImmediateInsertion(insItem) {
       const sendResult = (payload) => {
         if (!insItem?.requestId) {
@@ -1935,7 +2067,7 @@ export default {
       // 不再逐条处理缓存的 Revision 对象，因为每次 Accept() 都可能使
       // WPS 重排/合并集合，导致后续对象引用错位并误删新增内容。
       const documentResults = new Map();
-      const pendingItems = [...this.pendingInsertions, ...this.deleteRevisions];
+      const pendingItems = [...this.pendingInsertions, ...this.pendingEdits, ...this.deleteRevisions];
       for (const item of pendingItems) {
         const documentKey = this._toIntOrDefault(item.docId, 0);
         const doc = this._resolveTargetDoc(item.docId);
@@ -1956,7 +2088,13 @@ export default {
           ins.msg._revisionBatchId = null;
         }
       }
+      for (const edit of this.pendingEdits) {
+        if (operationSettled(edit) && edit.msg) {
+          edit.msg._revisionBatchId = null;
+        }
+      }
       this.pendingInsertions = this.pendingInsertions.filter((item) => !operationSettled(item));
+      this.pendingEdits = this.pendingEdits.filter((item) => !operationSettled(item));
       this.deleteRevisions = this.deleteRevisions.filter((item) => !operationSettled(item));
       this._syncPendingDocumentPreview();
       this._streamInsertions = [];
@@ -1980,6 +2118,30 @@ export default {
           }
         } catch (e) {
           console.warn('[AIChatPane] cancelPending 清理删除标记失败:', e);
+        }
+      }
+
+      // 再拒绝段落编辑修订，恢复被替换的原文。
+      for (const edit of this.pendingEdits) {
+        const doc = this._resolveTargetDoc(edit.docId);
+        if (!doc) {
+          continue;
+        }
+        try {
+          if (edit._markingMode === 'revision' && hasRevisionBatch(edit._revisionBatchId)) {
+            const settled = settleRevisionBatch(edit._revisionBatchId, 'reject');
+            console.log('[AIChatPane] 已拒绝段落编辑修订:', settled);
+            edit._revisionBatchId = null;
+            if (edit.msg) {
+              edit.msg._revisionBatchId = null;
+            }
+          } else if (edit._markingMode === 'revision-unavailable') {
+            // 极少数 WPS 版本不产生 Revision 时，用当前替换范围写回原文。
+            // 段落标记仍未被触碰，因此 pStyle 和段落边界保持不变。
+            doc.Range(edit.startPos, edit.endPos).Text = edit.originalText || '';
+          }
+        } catch (e) {
+          console.warn('[AIChatPane] cancelPending 清理段落编辑失败:', e);
         }
       }
 
@@ -2011,6 +2173,7 @@ export default {
       }
 
       this.deleteRevisions = [];
+      this.pendingEdits = [];
       this.pendingInsertions = [];
       this.pendingDocument = null;
       this.pendingDocumentMsg = null;

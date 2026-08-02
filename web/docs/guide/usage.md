@@ -10,9 +10,9 @@
 
 | 模式 | 能力 | 适用场景 |
 |---|---|---|
-| **Agent** | 读取、搜索并修改文档，可调用子 Agent、Skill、文件和 MCP 工具 | 写作、润色、翻译、复杂编辑 |
+| **Agent** | 单个智能体读取、搜索并修改文档，可调用 Skill、文件和 MCP 工具 | 写作、润色、翻译、复杂编辑 |
 | **Ask** | 只读取和分析，不生成或删除 Word 内容 | 文档问答、总结、资料查询 |
-| **Plan** | 多个专家 Agent 规划、研究、写作和审阅 | 长文、研究报告、复杂工作流 |
+| **Plan**(实验功能，不推荐使用) | 多个专家 Agent 规划、研究、写作和审阅 | 长文、研究报告、复杂工作流 |
 
 简单任务优先使用 Agent；只想提问且不希望修改文档时使用 Ask；需要多阶段协作时使用 Plan。
 
@@ -53,13 +53,20 @@ Agent 或 Plan 模式准备修改文档时，加载项会展示待确认的生�
 | `read_document` | 读取 Word 内容 | ✅ | ✅ | ✅ |
 | `search_document` | 按文本或格式定位段落 | ✅ | ✅ | ✅ |
 | `generate_document` | 生成并插入结构化内容 | ✅ | ❌ | ✅ |
+| `edit_document` | 按 `paraID` 原位替换段落正文并保留 `pStyle` | ✅ | ❌ | ❌ |
 | `delete_document` | 删除指定段落 | ✅ | ❌ | ✅ |
+| `create_document` | 创建并打开新的空白 DOCX 文档 | ✅ | ❌ | ✅ |
+| `insert_break` | 插入换行、分页或下一页分节符 | ✅ | ❌ | ✅ |
 | `load_skill_context` | 加载已启用 Skill | ✅ | ✅ | ✅ |
 | 文件工具 | 读取和编辑任务文件 | ✅ | ✅ | ✅ |
 | `python_repl` | 执行数据处理代码 | ✅ | ❌ | ❌ |
+| `review_document` | 审阅文档并返回问题与建议 | ❌ | ❌ | ✅ |
+| `create_workflow` | 编排 Plan 模式的工作流 | ❌ | ❌ | ✅ |
 | MCP 工具 | 调用已启用的外部服务 | ✅ | 视配置而定 | ✅ |
 
 具体工具分配会随 Agent 角色和版本调整，界面不需要用户手动选择工具。
+
+当前单智能体模式暂时停用 `run_sub_agent` 工具。需要改写单个既有段落时，优先使用 `edit_document`；它只替换正文，不会删除段落标记或原有 `pStyle`。需要新增结构化内容时使用 `generate_document`，需要删除段落时使用 `delete_document`。
 
 ## 设置建议
 

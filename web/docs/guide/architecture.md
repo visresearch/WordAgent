@@ -29,11 +29,15 @@ Agent 与 Ask 使用 ReAct 循环。Agent 可以读取并修改文档；Ask 只�
 工具列表：
 
 - **read_document / search_document**：读取文档并定位内容
-- **generate_document / delete_document**：生成或删除 Word 内容（Ask 不可用）
+- **generate_document / edit_document / delete_document**：新增内容、原位改写段落或删除段落（Ask 不可用；`edit_document` 保留目标段落的 `pStyle`）
+- **create_document / insert_break**：创建空白文档，或插入换行、分页和分节符
 - **load_skill_context**：按任务加载已启用 Skill
 - **list_file / read_file / edit_file**：处理任务文件
-- **python_repl / run_sub_agent**：执行数据处理或委派子任务（Agent 模式）
+- **python_repl**：执行数据处理（Agent 模式）
+- **review_document / create_workflow**：Plan 模式中的审阅和工作流编排工具
 - **MCP 工具**：调用用户配置的搜索、图表和其他外部服务
+
+单智能体 Agent 模式当前暂时停用 `run_sub_agent` 工具，不会自动委派子任务；需要改写单个段落时，使用 `edit_document(paraID, runs)` 直接替换正文并保留原段落样式。
 
 ## Plan（Multi-Agent）架构
 

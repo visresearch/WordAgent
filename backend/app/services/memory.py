@@ -13,11 +13,8 @@ from __future__ import annotations
 
 import json
 import os
-import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-
-warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"langchain_classic")
 
 from langchain_core.messages import AIMessage, HumanMessage
 
