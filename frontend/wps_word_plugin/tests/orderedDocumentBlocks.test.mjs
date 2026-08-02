@@ -62,3 +62,35 @@ test('read_document 即使没有表格也不返回顶层 tables', () => {
   assert.equal(Object.hasOwn(result, 'tables'), false);
   assert.deepEqual(result.paragraphs, [paragraph, tableBlock]);
 });
+
+test('read_document 表格文本只保留在 runs 中', () => {
+  const result = orderReadDocumentBlocks({
+    paragraphs: [
+      {
+        tables: [
+          {
+            cells: [[{
+              text: '重复的单元格文本',
+              rStyle: 'rS_1',
+              paragraphs: [{
+                text: '重复的段落文本',
+                paraID: 101,
+                pStyle: 'pS_1',
+                rStyle: 'rS_1',
+                runs: [{ text: '唯一保留的文本', rStyle: 'rS_1' }]
+              }],
+              cStyle: 'cS_1'
+            }]]
+          }
+        ]
+      }
+    ]
+  });
+
+  const cell = result.paragraphs[0].tables[0].cells[0][0];
+  assert.equal(Object.hasOwn(cell, 'text'), false);
+  assert.equal(Object.hasOwn(cell, 'rStyle'), false);
+  assert.equal(Object.hasOwn(cell.paragraphs[0], 'text'), false);
+  assert.equal(Object.hasOwn(cell.paragraphs[0], 'rStyle'), false);
+  assert.deepEqual(cell.paragraphs[0].runs, [{ text: '唯一保留的文本', rStyle: 'rS_1' }]);
+});

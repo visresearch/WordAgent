@@ -393,6 +393,48 @@ function expandOrderedDocumentBlocks(blocks) {
   return elements;
 }
 
+function stripRedundantReadTableTextFields(documentJson) {
+  for (const block of Array.isArray(documentJson?.paragraphs) ? documentJson.paragraphs : []) {
+    if (!Array.isArray(block?.tables)) {
+      continue;
+    }
+    for (const table of block.tables) {
+      for (const row of Array.isArray(table?.cells) ? table.cells : []) {
+        for (const cell of Array.isArray(row) ? row : []) {
+          if (!cell || typeof cell !== 'object') {
+            continue;
+          }
+          if ((!Array.isArray(cell.paragraphs) || cell.paragraphs.length === 0) && cell.text) {
+            cell.paragraphs = [{
+              runs: [{ text: cleanCellText(String(cell.text)), rStyle: cell.rStyle || null }]
+            }];
+          }
+          if (!Array.isArray(cell.paragraphs) || cell.paragraphs.length === 0) {
+            continue;
+          }
+          for (const paragraph of cell.paragraphs) {
+            if (!paragraph || typeof paragraph !== 'object') {
+              continue;
+            }
+            const fallbackText = cleanCellText(String(paragraph.text || ''));
+            if (
+              fallbackText &&
+              (!Array.isArray(paragraph.runs) || !paragraph.runs.some((run) => run?.text))
+            ) {
+              paragraph.runs = [{ text: fallbackText, rStyle: paragraph.rStyle || cell.rStyle || null }];
+            }
+            delete paragraph.text;
+            delete paragraph.rStyle;
+          }
+          delete cell.text;
+          delete cell.rStyle;
+        }
+      }
+    }
+  }
+  return documentJson;
+}
+
 /**
  * 将 read_document 解析阶段的旧版 paragraphs/tables 并列结构转换为
  * generate_document 使用的单一有序 paragraphs 内容流。
@@ -410,7 +452,7 @@ function orderReadDocumentBlocks(documentJson) {
   if (tables.length === 0) {
     const result = { ...documentJson, paragraphs };
     delete result.tables;
-    return result;
+    return stripRedundantReadTableTextFields(result);
   }
 
   const tableRanges = tables
@@ -478,7 +520,7 @@ function orderReadDocumentBlocks(documentJson) {
     ]
   };
   delete result.tables;
-  return result;
+  return stripRedundantReadTableTextFields(result);
 }
 
 function revealInsertedRange(doc, startPos, endPos) {
@@ -1488,7 +1530,6 @@ function parseCellParagraphs(cellRange, doc) {
         }
 
         const paraData = {
-          text: paraText,
           paraID,
           pStyle: [
             getAlignmentName(para.Format.Alignment),
@@ -1674,21 +1715,9 @@ function parseTable(table) {
         const cell = table.Cell(row, col);
         const cellRange = cell.Range;
         const paragraphs = parseCellParagraphs(cellRange, null);
-        // Only expose text belonging to paragraphs with a real ParaID/ID.
-        // If none can be identified, treat the cell content as blank as well.
-        const cellText = paragraphs.map((paragraph) => paragraph.text || '').filter(Boolean).join('\n');
-        const cellFont = cellRange.Font;
 
         rowData.push({
-          text: cellText,
           paragraphs: paragraphs.length > 0 ? paragraphs : undefined,
-          rStyle: makeRStyle(
-            cellFont.Name || '',
-            cellFont.Size || 12,
-            cellFont.Bold === -1 || cellFont.Bold === true,
-            cellFont.Italic === -1 || cellFont.Italic === true,
-            0, '#000000', '#000000', 0, false, false, false
-          ),
           cStyle: makeCStyle(
             1, 1,
             getAlignmentName(cellRange.ParagraphFormat.Alignment),
@@ -1710,7 +1739,7 @@ function parseTable(table) {
       const rawCell = rawCells[row][col];
 
       if (!rawCell.exists) {
-        rowData.push({ text: '', rowSpan: 0, colSpan: 0 });
+        rowData.push({ rowSpan: 0, colSpan: 0 });
         continue;
       }
 
@@ -1743,9 +1772,7 @@ function parseTable(table) {
 
       const cStyle = rawCell.cStyle || DEFAULT_CSTYLE;
       rowData.push({
-        text: rawCell.text,
         paragraphs: rawCell.paragraphs,
-        rStyle: rawCell.rStyle,
         cStyle: makeCStyle(
           rowSpan,
           colSpan,
