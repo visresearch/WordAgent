@@ -16,7 +16,11 @@
 
 /* global Word */
 
-import { parseDocxToJSON, findParaIndexRangeByParaIDs } from "./docxJsonConverter.js";
+import {
+  parseDocxToJSON,
+  parseDocxToJSONLightweight,
+  findParaIndexRangeByParaIDs,
+} from "./docxJsonConverter.js";
 import { executeStyleQuery } from "./docxQuery.js";
 
 // ============== 配置 ==============
@@ -277,7 +281,7 @@ const wsManager = {
       documentJson: docJson,
       timestamp: Date.now(),
     };
-    console.log("[WebSocket] 文档已缓存，段落数:", docJson?.paragraphs?.length || 0);
+    console.log("[WebSocket] 文档已缓存，内容块数:", docJson?.paragraphs?.length || 0);
   },
 
   /**
@@ -431,6 +435,7 @@ const wsManager = {
       let startParaID = null;
       let endParaID = null;
       let docId = 0;
+      let mode = "full";
 
       if (
         typeof startParaIndexOrParams === "object" &&
@@ -455,6 +460,7 @@ const wsManager = {
           startParaIndexOrParams.docId === undefined || startParaIndexOrParams.docId === null
             ? 0
             : startParaIndexOrParams.docId;
+        mode = startParaIndexOrParams.mode === "lightweight" ? "lightweight" : "full";
       } else {
         startParaIndex =
           startParaIndexOrParams === undefined || startParaIndexOrParams === null
@@ -469,7 +475,8 @@ const wsManager = {
         endParaIndex,
         docId,
         startParaID,
-        endParaID
+        endParaID,
+        mode
       );
 
       if (docData.error) {
@@ -490,7 +497,16 @@ const wsManager = {
         documentJson: docData,
       });
 
-      console.log("[WebSocket] 已回传文档，段落数:", docData.paragraphs?.length || 0);
+      const tableCount = (docData.paragraphs || []).reduce(
+        (count, block) => count + (Array.isArray(block?.tables) ? block.tables.length : 0),
+        0
+      );
+      console.log(
+        "[WebSocket] 已回传文档，内容块数:",
+        docData.paragraphs?.length || 0,
+        "表格数:",
+        tableCount
+      );
     } catch (err) {
       console.error("[WebSocket] 解析/回传文档失败:", err);
       await this.send({
@@ -680,6 +696,7 @@ function chatStream(message, options = {}) {
  * @param {number|null} [docId=0] - 文档 ID，Microsoft Word 当前固定为 0
  * @param {string|number|null} [startParaID=null] - 起始段落 paraID（优先于索引）
  * @param {string|number|null} [endParaID=null] - 结束段落 paraID
+ * @param {"full"|"lightweight"} [mode="full"] - 完整样式读取或轻量文本读取
  * @returns {Promise<Object>} - 解析结果
  */
 async function parseDocumentRange(
@@ -687,7 +704,8 @@ async function parseDocumentRange(
   endParaIndex = -1,
   docId = 0,
   startParaID = null,
-  endParaID = null
+  endParaID = null,
+  mode = "full"
 ) {
   try {
     void docId;
@@ -706,7 +724,10 @@ async function parseDocumentRange(
 
     // read_document / search_document 回包仅返回文档内容，不携带全局 meta。
     // 全局 meta 在 chatStream 中通过 documentMeta 单独发送。
-    const result = await parseDocxToJSON("body", resolvedStartIndex, resolvedEndIndex);
+    const result =
+      mode === "lightweight"
+        ? await parseDocxToJSONLightweight(resolvedStartIndex, resolvedEndIndex)
+        : await parseDocxToJSON("body", resolvedStartIndex, resolvedEndIndex);
     return result;
   } catch (error) {
     return { error: "解析文档失败: " + error.message };

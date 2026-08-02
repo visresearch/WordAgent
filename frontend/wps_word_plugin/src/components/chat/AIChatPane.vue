@@ -1167,7 +1167,7 @@ export default {
     _sendStreamRequest(userMessage, documentRange, files = [], selectionContext = null) {
       this.tokenStats = {
         current: 0,
-        max: this.tokenStats?.max || 200000
+        max: this.tokenStats?.max || 258000
       };
       this.isLoading = true;
       const streamSessionId = this.currentSessionId;
@@ -1262,7 +1262,7 @@ export default {
       if (data.type === 'token_stats') {
         this.tokenStats = {
           current: data.current_tokens || 0,
-          max: data.max_tokens || 200000
+          max: data.max_tokens || 258000
         };
         return;
       }

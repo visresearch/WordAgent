@@ -47,15 +47,17 @@ export function subtractExistingChanges(before, after) {
 }
 
 export function selectBatchChanges(changes, kind) {
-  const expectedType = kind === 'delete' ? DELETED_TYPE : ADDED_TYPE;
-  const expected = (changes || []).filter((item) => normalizeType(item.type) === expectedType);
+  const expectedTypes = kind === 'edit'
+    ? new Set([ADDED_TYPE, DELETED_TYPE])
+    : new Set([kind === 'delete' ? DELETED_TYPE : ADDED_TYPE]);
+  const expected = (changes || []).filter((item) => expectedTypes.has(normalizeType(item.type)));
   if (expected.length === 0) {
     return [];
   }
   // 格式修订不展示，但仍归入本轮批次，确认后不能遗留在文档中。
   return (changes || []).filter((item) => {
     const type = normalizeType(item.type);
-    return type === expectedType || type === FORMATTED_TYPE;
+    return expectedTypes.has(type) || type === FORMATTED_TYPE;
   });
 }
 
@@ -97,7 +99,7 @@ function configureNativeRevisionView(view, filter) {
   view.areFormatChangesDisplayed = false;
   view.areInsertionsAndDeletionsDisplayed = true;
   if (filter) {
-    filter.markup = 'All';
+    filter.markup = 'Simple';
     filter.view = 'Final';
   }
 }
@@ -244,6 +246,7 @@ export async function finishTrackedEdit(state, kind) {
         return { batchId: null, revisionCount: 0 };
       }
 
+      changes.track();
       for (const change of selected) {
         change.track();
       }
@@ -253,6 +256,7 @@ export async function finishTrackedEdit(state, kind) {
       const batchId = `word-revision-${Date.now()}-${nextBatchId++}`;
       revisionBatches.set(batchId, {
         kind,
+        collection: changes,
         changes: selected.map((change) => ({
           change,
           type: normalizeType(change.type)
@@ -281,13 +285,13 @@ export async function finishTrackedEdit(state, kind) {
   }
 }
 
-export async function settleRevisionBatch(batchId, action) {
+async function settleTrackedRevisionBatch(batchId, action) {
+  if (action !== 'accept' && action !== 'reject') {
+    return { success: false, handled: 0, settledBatchIds: [], error: 'action 必须是 accept 或 reject' };
+  }
   const batch = revisionBatches.get(batchId);
   if (!batch) {
-    return { success: false, handled: 0, error: '修订批次不存在或已处理' };
-  }
-  if (action !== 'accept' && action !== 'reject') {
-    return { success: false, handled: 0, error: 'action 必须是 accept 或 reject' };
+    return { success: false, handled: 0, settledBatchIds: [], error: '修订批次不存在或已处理' };
   }
 
   // 先处理格式修订，再处理文字增删。取消插入时，文字被拒绝后其格式
@@ -297,7 +301,12 @@ export async function settleRevisionBatch(batchId, action) {
     const bFormat = b.type === FORMATTED_TYPE ? 0 : 1;
     return aFormat - bFormat;
   });
-  const proxies = ordered.map((item) => item.change);
+  const proxies = [
+    ...new Set([
+      batch.collection,
+      ...ordered.map((item) => item.change),
+    ].filter(Boolean)),
+  ];
   let handled = 0;
 
   try {
@@ -311,15 +320,56 @@ export async function settleRevisionBatch(batchId, action) {
         item.change.untrack();
         handled += 1;
       }
+      batch.collection?.untrack();
       await context.sync();
     });
     revisionBatches.delete(batchId);
     await releasePreviewDisplay();
-    return { success: true, handled };
+    return {
+      success: true,
+      handled,
+      settledBatchIds: [batchId],
+    };
   } catch (error) {
     console.warn(`[revisionPreview] ${action === 'accept' ? '接受' : '拒绝'}修订失败:`, error);
-    return { success: false, handled: 0, error: error?.message || String(error) };
+    return {
+      success: false,
+      handled: 0,
+      settledBatchIds: [],
+      error: error?.message || String(error),
+    };
   }
+}
+
+export async function settleRevisionBatches(batchIds, action) {
+  if (action !== 'accept' && action !== 'reject') {
+    return { success: false, handled: 0, settledBatchIds: [], error: 'action 必须是 accept 或 reject' };
+  }
+  const ids = [...new Set(Array.isArray(batchIds) ? batchIds.filter(Boolean) : [])];
+  if (ids.length === 0) {
+    return { success: false, handled: 0, settledBatchIds: [], error: '修订批次不存在或已处理' };
+  }
+
+  let handled = 0;
+  const settledBatchIds = [];
+  for (const batchId of ids) {
+    const result = await settleTrackedRevisionBatch(batchId, action);
+    if (!result.success) {
+      return {
+        success: false,
+        handled,
+        settledBatchIds,
+        error: result.error,
+      };
+    }
+    handled += result.handled;
+    settledBatchIds.push(batchId);
+  }
+  return { success: true, handled, settledBatchIds };
+}
+
+export async function settleRevisionBatch(batchId, action) {
+  return settleTrackedRevisionBatch(batchId, action);
 }
 
 export async function undoLastDocumentAction(times = 1) {

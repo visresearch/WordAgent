@@ -29,6 +29,62 @@ function normalizeParaIdValue(value) {
   return null;
 }
 
+function collectSearchableParagraphs(docJson) {
+  const collected = [];
+  let sourceOrder = 0;
+  let hasOrderedTableBlocks = false;
+
+  const addParagraph = (paragraph) => {
+    if (paragraph && typeof paragraph === "object") {
+      collected.push({ paragraph, sourceOrder: sourceOrder++ });
+    }
+  };
+
+  const addTable = (table) => {
+    for (const row of table?.cells || []) {
+      for (const cell of row || []) {
+        if (Array.isArray(cell?.paragraphs) && cell.paragraphs.length > 0) {
+          cell.paragraphs.forEach(addParagraph);
+        }
+        for (const nestedTable of cell?.tables || []) {
+          addTable(nestedTable);
+        }
+      }
+    }
+  };
+
+  for (const block of docJson?.paragraphs || []) {
+    if (Array.isArray(block?.tables)) {
+      hasOrderedTableBlocks = true;
+      block.tables.forEach(addTable);
+    } else {
+      addParagraph(block);
+    }
+  }
+
+  if (!hasOrderedTableBlocks) {
+    (docJson?.tables || []).forEach(addTable);
+  }
+
+  if (collected.every(({ paragraph }) => Number.isInteger(paragraph?.paraIndex))) {
+    collected.sort(
+      (left, right) =>
+        left.paragraph.paraIndex - right.paragraph.paraIndex || left.sourceOrder - right.sourceOrder
+    );
+  }
+
+  return collected.map(({ paragraph }) => paragraph);
+}
+
+function isPlainTextSearch(filters) {
+  const keys = Object.keys(filters || {});
+  return (
+    keys.length > 0 &&
+    keys.every((key) => ["text", "regex", "regexFlags"].includes(key)) &&
+    Boolean(filters.text || filters.regex)
+  );
+}
+
 // ============== Query 执行器 ==============
 
 /**
@@ -38,7 +94,7 @@ function normalizeParaIdValue(value) {
  * @returns {Object} 查询结果
  */
 export function executeQuery(docJson, queryDSL) {
-  const paragraphs = docJson.paragraphs || [];
+  const paragraphs = collectSearchableParagraphs(docJson);
   const { query, context = 1, highlight = true, size = 50 } = queryDSL;
 
   if (!paragraphs.length) {
@@ -338,8 +394,12 @@ function extractParagraphs(paragraphs, expandedIndices, matchedIndices, query, h
  * @returns {Object} 文档摘要
  */
 export function generateSummary(docJson) {
-  const paragraphs = docJson.paragraphs || [];
-  const tables = docJson.tables || [];
+  const blocks = docJson.paragraphs || [];
+  const paragraphs = blocks.filter((block) => !Array.isArray(block?.tables));
+  const tables = [
+    ...(docJson.tables || []),
+    ...blocks.flatMap((block) => (Array.isArray(block?.tables) ? block.tables : [])),
+  ];
 
   // 提取所有标题
   const headings = [];
@@ -670,7 +730,7 @@ function getParagraphPosition(para) {
  * @returns {Object} { matches: [...], matchCount: number }
  */
 export function executeStyleQuery(docJson, queryDSL) {
-  const paragraphs = docJson.paragraphs || [];
+  const paragraphs = collectSearchableParagraphs(docJson);
   const { type = "run", filters = {} } = queryDSL;
 
   if (!paragraphs.length || !Object.keys(filters).length) {
@@ -680,7 +740,7 @@ export function executeStyleQuery(docJson, queryDSL) {
   const matches = [];
   const MAX_MATCHES = 100; // 限制最大返回数量
 
-  if (type === "run") {
+  if (type === "run" && !isPlainTextSearch(filters)) {
     // Run 级别搜索：遍历每个段落的每个 run
     for (let pi = 0; pi < paragraphs.length && matches.length < MAX_MATCHES; pi++) {
       const para = paragraphs[pi];
@@ -708,7 +768,7 @@ export function executeStyleQuery(docJson, queryDSL) {
         }
       }
     }
-  } else if (type === "paragraph") {
+  } else if (type === "paragraph" || isPlainTextSearch(filters)) {
     // Paragraph 级别搜索
     for (let pi = 0; pi < paragraphs.length && matches.length < MAX_MATCHES; pi++) {
       const para = paragraphs[pi];

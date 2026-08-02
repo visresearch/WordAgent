@@ -20,26 +20,26 @@
       >
         <img :src="sessionIcon" width="16" height="16" alt="" />
       </button>
-      <a
-        href="#"
+      <button
+        type="button"
         class="nav-btn"
-        :class="{ active: $route.path === '/setting', 'nav-btn-disabled': chatState.aiBusy }"
+        :class="{ 'nav-btn-disabled': chatState.aiBusy }"
         :aria-disabled="chatState.aiBusy ? 'true' : 'false'"
         :title="$t('nav.settings')"
-        @click.prevent="go('/setting')"
+        @click="openDialog('setting')"
       >
         <img :src="settingIcon" width="16" height="16" alt="" />
-      </a>
-      <a
-        href="#"
+      </button>
+      <button
+        type="button"
         class="nav-btn"
-        :class="{ active: $route.path === '/about', 'nav-btn-disabled': chatState.aiBusy }"
+        :class="{ 'nav-btn-disabled': chatState.aiBusy }"
         :aria-disabled="chatState.aiBusy ? 'true' : 'false'"
         :title="$t('nav.about')"
-        @click.prevent="go('/about')"
+        @click="openDialog('about')"
       >
         <img :src="aboutIcon" width="16" height="16" alt="" />
-      </a>
+      </button>
       <a
         href="#"
         class="nav-btn"
@@ -65,6 +65,7 @@ import aboutIcon from '../assets/about.svg';
 import debugIcon from '../assets/debug.svg';
 import { sessionState } from './sessionState.js';
 import { chatState } from './chatState.js';
+import { openOfficeDialog } from './officeDialog.mjs';
 
 export default {
   name: 'App',
@@ -90,6 +91,12 @@ export default {
       if (this.$route.path !== path) {
         this.$router.push(path);
       }
+    },
+    openDialog(view) {
+      if (this._navBlocked()) {
+        return;
+      }
+      openOfficeDialog(view);
     },
     onNavAichat() {
       if (this._navBlocked()) {

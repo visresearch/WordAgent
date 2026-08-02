@@ -7,7 +7,7 @@
  *
  * JSON schema 数据结构（精简版）：
  * {
- *   paragraphs: [{             // 段落数组
+ *   paragraphs: [{             // 唯一的有序内容流：段落或 { tables: [...] } 表格块
  *     pStyle: [                // 段落样式数组（按顺序）
  *       alignment,             // [0] 对齐: left/center/right/justify
  *       lineSpacing,           // [1] 行间距
@@ -35,7 +35,7 @@
  *       ]
  *     }]
  *   }],
- *   tables: [{                 // 表格数组
+ *   { tables: [{               // 位于相邻段落之间的表格块
  *     rows: number,
  *     columns: number,
  *     tStyle: [tableAlignment],// 表格样式数组
@@ -48,7 +48,7 @@
  *         verticalAlignment    // [3] 垂直对齐
  *       ]
  *     }]]
- *   }],
+ *   }] },
  *   fields: [],               // 域代码数组
  *   hasTOC: boolean,          // 是否包含目录
  *   styles: {                 // 样式字典（去重）
@@ -64,7 +64,7 @@
  * 插入时用 insertInlinePictureFromBase64。本地/相对路径的解析规则与 WPS 相同（相对路径相对 wence_data/project）。
  */
 
-/* global Word */
+/* global Office, Word */
 
 import { parseParaIDFromContentControlMetadata } from "./contentControlMetadata.mjs";
 
@@ -110,6 +110,37 @@ const DEFAULT_CSTYLE = [1, 1, "left", "center"];
 const DEFAULT_IMAGE_PSTYLE = ["center", 0, 0, 0, 0, 0, 0, "", 0];
 const DEFAULT_FALLBACK_FONT_NAME = "Calibri";
 const PARA_ID_PATTERN = /^[+-]?(0|[1-9]\d*)$/;
+
+const BASE_FONT_READ_PROPERTIES =
+  "name,size,bold,italic,underline,color,highlightColor,strikeThrough,superscript,subscript";
+
+function supportsRequirementSet(name, version) {
+  try {
+    return Boolean(
+      typeof Office !== "undefined" &&
+        Office.context?.requirements?.isSetSupported(name, version)
+    );
+  } catch (error) {
+    return false;
+  }
+}
+
+function getFontReadProperties(includeUnderlineColor) {
+  return includeUnderlineColor
+    ? BASE_FONT_READ_PROPERTIES.replace("underline,color", "underline,underlineColor,color")
+    : BASE_FONT_READ_PROPERTIES;
+}
+
+function getLoadedUnderlineColor(font, includeUnderlineColor) {
+  if (!includeUnderlineColor) {
+    return "#000000";
+  }
+  try {
+    return font.underlineColor || "#000000";
+  } catch (error) {
+    return "#000000";
+  }
+}
 
 function normalizeParaIdValue(value) {
   if (value === null || value === undefined) {
@@ -1956,6 +1987,8 @@ function parseRunsFromOoxml(ooxmlString) {
  * @returns {Promise<Object>} - JSON 数据或错误对象
  */
 async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex) {
+  const includeUnderlineColor = supportsRequirementSet("WordApiDesktop", "1.3");
+  const fontReadProperties = getFontReadProperties(includeUnderlineColor);
   try {
     return await Word.run(async (context) => {
       await ensureAllParagraphsHaveHiddenBookmarks(context);
@@ -2146,6 +2179,7 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
             await context.sync();
 
             // 解析单元格
+            let tableParaCursor = tpr.start;
             for (const row of tableRows.items) {
               const rowData = [];
               if (row.cells.items.length > tableData.columns) {
@@ -2153,117 +2187,93 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
               }
 
               for (const cell of row.cells.items) {
-                const cellText = cleanText(cell.body.text || "");
                 const cellParas = cell.body.paragraphs;
 
                 const paragraphsData = [];
                 for (const para of cellParas.items) {
                   const paraText = cleanText(para.text || "");
-                  if (!paraText) continue;
-
-                  const inlineRanges = para.getTextRanges(["\t", "\n"], true);
-                  inlineRanges.load("items");
-                  await context.sync();
-
-                  for (const ir of inlineRanges.items) {
-                    ir.load("text");
-                    ir.font.load(
-                      "name,size,bold,italic,underline,color,highlightColor,strikeThrough,superscript,subscript"
-                    );
-                  }
-                  await context.sync();
+                  const cellParaIndex = tableParaCursor++;
+                  const cellParaID = cellParaIndex <= tpr.end
+                    ? getRangeParaIDByDocIndex(cellParaIndex)
+                    : null;
 
                   const cellRuns = [];
-                  let lastFmtKey = null;
-                  let curRun = null;
-                  for (const ir of inlineRanges.items) {
-                    const t = ir.text || "";
-                    if (!t || t.match(/^[\r\n\u0007]$/)) continue;
-                    const font = ir.font;
-                    const fmtKey = `${font.name}_${font.size}_${font.bold}_${font.italic}_${font.color}_${font.highlightColor}`;
-                    if (fmtKey === lastFmtKey && curRun) {
-                      curRun.text += t;
-                    } else {
-                      if (curRun && curRun.text) {
-                        const normalizedRun = normalizeParsedRun(curRun);
-                        if (normalizedRun && normalizedRun.text) {
-                          cellRuns.push(normalizedRun);
-                        }
-                      }
-                      curRun = {
-                        text: t,
-                        rStyle: makeRStyle(
-                          font.name || "",
-                          font.size || 12,
-                          font.bold === true,
-                          font.italic === true,
-                          getUnderlineValue(font.underline),
-                          "#000000",
-                          font.color || "#000000",
-                          getHighlightValue(font.highlightColor),
-                          font.strikeThrough === true,
-                          font.superscript === true,
-                          font.subscript === true
-                        ),
-                      };
-                      lastFmtKey = fmtKey;
+                  if (paraText) {
+                    const inlineRanges = para.getTextRanges(["\t", "\n"], true);
+                    inlineRanges.load("items");
+                    await context.sync();
+
+                    for (const ir of inlineRanges.items) {
+                      ir.load("text");
+                      ir.font.load(
+                        "name,size,bold,italic,underline,color,highlightColor,strikeThrough,superscript,subscript"
+                      );
                     }
-                  }
-                  if (curRun && curRun.text) {
-                    const normalizedRun = normalizeParsedRun(curRun);
-                    if (normalizedRun && normalizedRun.text) {
-                      cellRuns.push(normalizedRun);
+                    await context.sync();
+
+                    let lastFmtKey = null;
+                    let curRun = null;
+                    for (const ir of inlineRanges.items) {
+                      const t = ir.text || "";
+                      if (!t || t.match(/^[\r\n\u0007]$/)) continue;
+                      const font = ir.font;
+                      const fmtKey = `${font.name}_${font.size}_${font.bold}_${font.italic}_${font.color}_${font.highlightColor}`;
+                      if (fmtKey === lastFmtKey && curRun) {
+                        curRun.text += t;
+                      } else {
+                        if (curRun && curRun.text) {
+                          const normalizedRun = normalizeParsedRun(curRun);
+                          if (normalizedRun && normalizedRun.text) {
+                            cellRuns.push(normalizedRun);
+                          }
+                        }
+                        curRun = {
+                          text: t,
+                          rStyle: makeRStyle(
+                            font.name || "",
+                            font.size || 12,
+                            font.bold === true,
+                            font.italic === true,
+                            getUnderlineValue(font.underline),
+                            "#000000",
+                            font.color || "#000000",
+                            getHighlightValue(font.highlightColor),
+                            font.strikeThrough === true,
+                            font.superscript === true,
+                            font.subscript === true
+                          ),
+                        };
+                        lastFmtKey = fmtKey;
+                      }
+                    }
+                    if (curRun && curRun.text) {
+                      const normalizedRun = normalizeParsedRun(curRun);
+                      if (normalizedRun && normalizedRun.text) {
+                        cellRuns.push(normalizedRun);
+                      }
                     }
                   }
 
                   ensureRunsHaveFontName(cellRuns, documentFallbackFontName);
-                  if (cellRuns.length > 0) {
-                    paragraphsData.push({
-                      text: paraText,
-                      pStyle: makePStyle(
-                        getAlignmentName(para.alignment),
-                        para.lineSpacing || 0,
-                        para.leftIndent || 0,
-                        para.rightIndent || 0,
-                        para.firstLineIndent || 0,
-                        para.spaceBefore || 0,
-                        para.spaceAfter || 0,
-                        ""
-                      ),
-                      runs: cellRuns,
-                    });
-                  }
+                  paragraphsData.push({
+                    pStyle: makePStyle(
+                      getAlignmentName(para.alignment),
+                      para.lineSpacing || 0,
+                      para.leftIndent || 0,
+                      para.rightIndent || 0,
+                      para.firstLineIndent || 0,
+                      para.spaceBefore || 0,
+                      para.spaceAfter || 0,
+                      ""
+                    ),
+                    runs: cellRuns,
+                    paraIndex: cellParaIndex,
+                    paraID: cellParaID,
+                  });
                 }
 
-                // 获取 cell rStyle
-                let cellRStyle = undefined;
-                try {
-                  if (cellParas.items.length > 0) {
-                    const pFont = cellParas.items[0].font;
-                    pFont.load(
-                      "name,size,bold,italic,underline,color,highlightColor,strikeThrough,superscript,subscript"
-                    );
-                    await context.sync();
-                    cellRStyle = makeRStyle(
-                      pFont.name || "",
-                      pFont.size || 12,
-                      pFont.bold === true,
-                      pFont.italic === true,
-                      getUnderlineValue(pFont.underline),
-                      "#000000",
-                      pFont.color || "#000000",
-                      getHighlightValue(pFont.highlightColor),
-                      pFont.strikeThrough === true,
-                      pFont.superscript === true,
-                      pFont.subscript === true
-                    );
-                  }
-                } catch (e) {}
-
                 rowData.push({
-                  text: cellText,
                   paragraphs: paragraphsData.length > 0 ? paragraphsData : undefined,
-                  rStyle: cellRStyle,
                   cStyle: makeCStyle(
                     1,
                     1,
@@ -2341,9 +2351,7 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
             await context.sync();
             for (const ir of inlineRanges.items) {
               ir.load("text");
-              ir.font.load(
-                "name,size,bold,italic,underline,underlineColor,color,highlightColor,strikeThrough,superscript,subscript"
-              );
+              ir.font.load(fontReadProperties);
             }
             await context.sync();
             let lastFormatKey = null;
@@ -2381,7 +2389,7 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
                     font.bold === true,
                     font.italic === true,
                     getUnderlineValue(font.underline),
-                    font.underlineColor || "#000000",
+                    getLoadedUnderlineColor(font, includeUnderlineColor),
                     font.color || "#000000",
                     getHighlightValue(font.highlightColor),
                     font.strikeThrough === true,
@@ -2415,7 +2423,7 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
           });
         }
 
-        return deduplicateStyles(rangeResult);
+        return orderReadDocumentBlocks(deduplicateStyles(rangeResult));
       }
 
       // ========== 常规路径：解析选区或全文 ==========
@@ -2556,7 +2564,22 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
               const paragraphsData = [];
               for (const para of cellParas.items) {
                 const paraText = cleanText(para.text || "");
-                if (!paraText) continue;
+                if (!paraText) {
+                  paragraphsData.push({
+                    pStyle: makePStyle(
+                      getAlignmentName(para.alignment),
+                      para.lineSpacing || 0,
+                      para.leftIndent || 0,
+                      para.rightIndent || 0,
+                      para.firstLineIndent || 0,
+                      para.spaceBefore || 0,
+                      para.spaceAfter || 0,
+                      ""
+                    ),
+                    runs: [],
+                  });
+                  continue;
+                }
 
                 // 加载 runs
                 const inlineRanges = para.getTextRanges(["\t", "\n"], true);
@@ -2761,6 +2784,7 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
             result.tables[ti].paraID = bodyParaIDs[tableStart];
             result.tables[ti].endParaIndex = tableEnd;
             result.tables[ti].endParaID = bodyParaIDs[tableEnd];
+            annotateTableCellParagraphs(result.tables[ti], bodyParaIDs);
           }
         }
 
@@ -2873,9 +2897,7 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
 
             for (const ir of inlineRanges.items) {
               ir.load("text");
-              ir.font.load(
-                "name,size,bold,italic,underline,underlineColor,color,highlightColor,strikeThrough,superscript,subscript"
-              );
+              ir.font.load(fontReadProperties);
             }
             await context.sync();
 
@@ -2917,7 +2939,7 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
                     font.bold === true,
                     font.italic === true,
                     getUnderlineValue(font.underline),
-                    font.underlineColor || "#000000",
+                    getLoadedUnderlineColor(font, includeUnderlineColor),
                     font.color || "#000000",
                     getHighlightValue(font.highlightColor),
                     font.strikeThrough === true,
@@ -2938,9 +2960,7 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
             // 最终降级：整段作为一个 run
             if (runs.length === 0 && paraText) {
               const font = para.getRange().font;
-              font.load(
-                "name,size,bold,italic,underline,underlineColor,color,highlightColor,strikeThrough,superscript,subscript"
-              );
+              font.load(fontReadProperties);
               await context.sync();
 
               const fallbackRun = normalizeParsedRun({
@@ -2951,7 +2971,7 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
                   font.bold === true,
                   font.italic === true,
                   getUnderlineValue(font.underline),
-                  font.underlineColor || "#000000",
+                  getLoadedUnderlineColor(font, includeUnderlineColor),
                   font.color || "#000000",
                   getHighlightValue(font.highlightColor),
                   font.strikeThrough === true,
@@ -2984,10 +3004,49 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
         }
       }
 
-      return deduplicateStyles(result);
+      return orderReadDocumentBlocks(deduplicateStyles(result));
     });
   } catch (error) {
     return { error: "解析失败: " + error.message };
+  }
+}
+
+/**
+ * Read only paragraph text and stable paraIDs. This is used for large-document
+ * discovery where character, paragraph, and table style details are unnecessary.
+ */
+async function parseDocxToJSONLightweight(startParaIndex = 0, endParaIndex = -1) {
+  try {
+    return await Word.run(async (context) => {
+      const paragraphs = context.document.body.paragraphs;
+      paragraphs.load("items/text");
+      await context.sync();
+
+      const total = paragraphs.items.length;
+      const start = Number.isInteger(startParaIndex) ? startParaIndex : 0;
+      const end = endParaIndex === -1
+        ? total - 1
+        : (Number.isInteger(endParaIndex) ? endParaIndex : start);
+      if (start < 0 || end < start || end >= total) {
+        return {
+          error: `轻量读取范围无效：startParaIndex=${startParaIndex}, endParaIndex=${endParaIndex}`,
+        };
+      }
+
+      const paraIDs = await resolveParagraphParaIDs(context, paragraphs.items);
+      const result = { paragraphs: [], fields: [], _lightweight: true };
+      for (let index = start; index <= end; index++) {
+        const text = cleanText(paragraphs.items[index]?.text || "");
+        result.paragraphs.push({
+          runs: text ? [{ text, rStyle: "" }] : [],
+          paraIndex: index,
+          paraID: paraIDs[index] ?? null,
+        });
+      }
+      return result;
+    });
+  } catch (error) {
+    return { error: "轻量解析失败: " + (error?.message || String(error)) };
   }
 }
 
@@ -3005,6 +3064,150 @@ function expandOrderedDocumentBlocks(blocks) {
     }
   }
   return elements;
+}
+
+function annotateTableCellParagraphs(table, paraIDs) {
+  let paraIndex = Number.isInteger(table?.paraIndex) ? table.paraIndex : null;
+  const endParaIndex = Number.isInteger(table?.endParaIndex) ? table.endParaIndex : null;
+  if (paraIndex === null) {
+    return table;
+  }
+
+  for (const row of Array.isArray(table.cells) ? table.cells : []) {
+    for (const cell of Array.isArray(row) ? row : []) {
+      for (const paragraph of Array.isArray(cell?.paragraphs) ? cell.paragraphs : []) {
+        if (endParaIndex !== null && paraIndex > endParaIndex) {
+          return table;
+        }
+        paragraph.paraIndex = paraIndex;
+        paragraph.paraID = paraIDs?.[paraIndex] ?? null;
+        paraIndex += 1;
+      }
+    }
+  }
+  return table;
+}
+
+function stripRedundantReadTableTextFields(documentJson) {
+  for (const block of Array.isArray(documentJson?.paragraphs) ? documentJson.paragraphs : []) {
+    if (!Array.isArray(block?.tables)) {
+      continue;
+    }
+    for (const table of block.tables) {
+      for (const row of Array.isArray(table?.cells) ? table.cells : []) {
+        for (const cell of Array.isArray(row) ? row : []) {
+          if (!cell || !Array.isArray(cell.paragraphs) || cell.paragraphs.length === 0) {
+            continue;
+          }
+          for (const paragraph of cell.paragraphs) {
+            if (!paragraph || typeof paragraph !== "object") {
+              continue;
+            }
+            const fallbackText = cleanCellText(String(paragraph.text || ""));
+            if (
+              fallbackText &&
+              (!Array.isArray(paragraph.runs) || !paragraph.runs.some((run) => run?.text))
+            ) {
+              paragraph.runs = [{
+                text: fallbackText,
+                rStyle: paragraph.rStyle || cell.rStyle || null,
+              }];
+            }
+            delete paragraph.text;
+            delete paragraph.rStyle;
+          }
+          delete cell.text;
+          delete cell.rStyle;
+        }
+      }
+    }
+  }
+  return documentJson;
+}
+
+/**
+ * Convert read_document's legacy paragraphs/tables shape into the single
+ * ordered paragraphs stream used by generate_document.
+ */
+function orderReadDocumentBlocks(documentJson) {
+  if (!documentJson || typeof documentJson !== "object") {
+    return documentJson;
+  }
+
+  const paragraphs = Array.isArray(documentJson.paragraphs) ? documentJson.paragraphs : [];
+  const tables = Array.isArray(documentJson.tables) ? documentJson.tables : [];
+  if (tables.length === 0) {
+    const result = { ...documentJson, paragraphs };
+    delete result.tables;
+    return stripRedundantReadTableTextFields(result);
+  }
+
+  const tableRanges = tables
+    .map((table) => {
+      const start = Number.isInteger(table?.paraIndex) ? table.paraIndex : null;
+      const end = start !== null && Number.isInteger(table?.endParaIndex)
+        && table.endParaIndex >= start
+        ? table.endParaIndex
+        : start;
+      return start === null ? null : { start, end };
+    })
+    .filter(Boolean);
+
+  const positioned = [];
+  const unpositioned = [];
+  let sequence = 0;
+
+  for (const paragraph of paragraphs) {
+    if (!paragraph || typeof paragraph !== "object" || Array.isArray(paragraph.tables)) {
+      if (paragraph && typeof paragraph === "object") {
+        unpositioned.push({ sequence: sequence++, block: paragraph });
+      }
+      continue;
+    }
+    const paraIndex = Number.isInteger(paragraph.paraIndex) ? paragraph.paraIndex : null;
+    const belongsToTable = paragraph.inTable === true || (
+      paraIndex !== null
+      && tableRanges.some(({ start, end }) => paraIndex >= start && paraIndex <= end)
+    );
+    if (belongsToTable) {
+      continue;
+    }
+    if (paraIndex === null || paraIndex < 0) {
+      unpositioned.push({ sequence: sequence++, block: paragraph });
+    } else {
+      positioned.push({ paraIndex, kindOrder: 1, sequence: sequence++, block: paragraph });
+    }
+  }
+
+  for (const table of tables) {
+    if (!table || typeof table !== "object") {
+      continue;
+    }
+    const paraIndex = Number.isInteger(table.paraIndex) ? table.paraIndex : null;
+    const block = { tables: [table] };
+    if (paraIndex === null || paraIndex < 0) {
+      unpositioned.push({ sequence: sequence++, block });
+    } else {
+      positioned.push({ paraIndex, kindOrder: 0, sequence: sequence++, block });
+    }
+  }
+
+  positioned.sort((left, right) => (
+    left.paraIndex - right.paraIndex
+    || left.kindOrder - right.kindOrder
+    || left.sequence - right.sequence
+  ));
+  unpositioned.sort((left, right) => left.sequence - right.sequence);
+
+  const result = {
+    ...documentJson,
+    paragraphs: [
+      ...positioned.map((item) => item.block),
+      ...unpositioned.map((item) => item.block),
+    ],
+  };
+  delete result.tables;
+  return stripRedundantReadTableTextFields(result);
 }
 
 function applyGeneratedParagraphStyle(paragraph, pStyle) {
@@ -3499,6 +3702,103 @@ function applyRunStyle(font, rStyle) {
   }
 }
 
+/**
+ * Replace one paragraph's content while preserving its paragraph mark and
+ * paragraph formatting. The caller enables Word change tracking around this
+ * operation so the replacement is exposed as native revisions.
+ */
+async function editDocxParagraph(paraID, runs) {
+  const normalizedParaID = normalizeParaID(paraID);
+  if (!normalizedParaID) {
+    return { success: false, error: "paraID 必须是有效整数" };
+  }
+  if (!Array.isArray(runs)) {
+    return { success: false, error: "runs 必须是数组" };
+  }
+
+  const textRuns = [];
+  for (const run of runs) {
+    if (!run || typeof run !== "object") {
+      continue;
+    }
+    if (run.url && run.text === undefined) {
+      return { success: false, paraID: normalizedParaID, error: "edit_document 暂不支持图片 run" };
+    }
+    if (run.text === undefined || run.text === null || String(run.text).length === 0) {
+      continue;
+    }
+    const text = String(run.text);
+    if (/[\r\n]/.test(text)) {
+      return { success: false, paraID: normalizedParaID, error: "runs.text 不能包含换行符" };
+    }
+    textRuns.push({ text, rStyle: run.rStyle });
+  }
+
+  try {
+    return await Word.run(async (context) => {
+      const paragraphs = context.document.body.paragraphs;
+      paragraphs.load("items");
+      await context.sync();
+      const paraIDs = await resolveParagraphParaIDs(context, paragraphs.items);
+      const targetIndex = paraIDs.findIndex((id) => id === normalizedParaID);
+      if (targetIndex < 0) {
+        return {
+          success: false,
+          paraID: normalizedParaID,
+          error: `未找到 paraID=${normalizedParaID} 的段落`,
+        };
+      }
+
+      const paragraph = paragraphs.items[targetIndex];
+      const contentRange = paragraph.getRange("Content");
+      contentRange.load("text");
+      await context.sync();
+      const originalText = String(contentRange.text || "");
+
+      if (textRuns.length === 0) {
+        contentRange.insertText("", Word.InsertLocation.replace);
+      } else {
+        let insertedRange = null;
+        for (const run of textRuns) {
+          insertedRange = insertedRange
+            ? insertedRange.insertText(run.text, Word.InsertLocation.end)
+            : contentRange.insertText(run.text, Word.InsertLocation.replace);
+          if (Array.isArray(run.rStyle)) {
+            applyRunStyle(insertedRange.font, resolveStyle({}, run.rStyle, DEFAULT_RSTYLE));
+          }
+        }
+      }
+      await context.sync();
+
+      try {
+        paragraph.getRange("Content").select();
+        await context.sync();
+      } catch (error) {
+        void error;
+      }
+
+      return {
+        success: true,
+        paraID: normalizedParaID,
+        originalText,
+        replacedTextLength: originalText.length,
+        paragraph: {
+          paraID: normalizedParaID,
+          paraIndex: targetIndex,
+          pageStart: null,
+          pageEnd: null,
+        },
+      };
+    });
+  } catch (error) {
+    return {
+      success: false,
+      paraID: normalizedParaID,
+      error: error?.message || String(error),
+    };
+  }
+}
+
 function findClosestMatch(items, offset) {
   if (!Array.isArray(items) || items.length <= 1) {
     return 0;
@@ -3564,9 +3864,10 @@ async function insertBreakAfterParagraph(paraID, breakType) {
       updatedParagraphs.load("items/uniqueLocalId");
       await context.sync();
       const updatedIDs = await resolveParagraphParaIDs(context, updatedParagraphs.items);
-      const paragraphAfterIndex = breakType === "wdLineBreak"
-        ? Math.min(targetIndex, Math.max(0, updatedParagraphs.items.length - 1))
-        : Math.min(targetIndex + 1, Math.max(0, updatedParagraphs.items.length - 1));
+      const paragraphAfterIndex =
+        breakType === "wdLineBreak"
+          ? Math.min(targetIndex, Math.max(0, updatedParagraphs.items.length - 1))
+          : Math.min(targetIndex + 1, Math.max(0, updatedParagraphs.items.length - 1));
       const paragraphAfterID = updatedIDs[paragraphAfterIndex] || null;
 
       return {
@@ -3733,7 +4034,9 @@ async function findParaIndexRangeByParaIDs(startParaID, endParaID = null) {
 
 export default {
   parseDocxToJSON,
+  parseDocxToJSONLightweight,
   generateDocxFromJSON,
+  editDocxParagraph,
   deleteDocxPara,
   insertBreakAfterParagraph,
   cleanText,
@@ -3751,6 +4054,8 @@ export default {
   getVerticalAlignmentValue,
   getUnderlineValue,
   getUnderlineType,
+  getFontReadProperties,
+  getLoadedUnderlineColor,
   getHighlightValue,
   getHighlightColor,
   getImageExportTempDir,
@@ -3762,12 +4067,15 @@ export default {
   findParaIndexRangeByParaIDs,
   isDocumentStartInsertParaID,
   expandOrderedDocumentBlocks,
+  orderReadDocumentBlocks,
   applyGeneratedParagraphStyle,
 };
 
 export {
   parseDocxToJSON,
+  parseDocxToJSONLightweight,
   generateDocxFromJSON,
+  editDocxParagraph,
   deleteDocxPara,
   insertBreakAfterParagraph,
   cleanText,
@@ -3785,6 +4093,8 @@ export {
   getVerticalAlignmentValue,
   getUnderlineValue,
   getUnderlineType,
+  getFontReadProperties,
+  getLoadedUnderlineColor,
   getHighlightValue,
   getHighlightColor,
   getImageExportTempDir,
@@ -3796,6 +4106,7 @@ export {
   findParaIndexRangeByParaIDs,
   isDocumentStartInsertParaID,
   expandOrderedDocumentBlocks,
+  orderReadDocumentBlocks,
   applyGeneratedParagraphStyle,
   resolveParagraphParaIDs,
 };

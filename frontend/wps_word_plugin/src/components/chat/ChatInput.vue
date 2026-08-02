@@ -367,7 +367,7 @@ export default {
     },
     tokenStats: {
       type: Object,
-      default: () => ({ current: 0, max: 200000 })
+      default: () => ({ current: 0, max: 258000 })
     },
     enableThinking: {
       type: Boolean,
@@ -462,13 +462,13 @@ export default {
       return t('chat.aiOperation', { actions: parts.join(t('chat.actionSeparator')) });
     },
     tokenRingOffset() {
-      const max = this.tokenStats.max || 200000;
+      const max = this.tokenStats.max || 258000;
       const percentage = max > 0 ? Math.min(100, (this.tokenStats.current || 0) / max * 100) : 0;
       const circumference = 25.13; // 2 * PI * 4
       return circumference * (1 - percentage / 100);
     },
     tokenRingColor() {
-      const max = this.tokenStats.max || 200000;
+      const max = this.tokenStats.max || 258000;
       const percentage = max > 0 ? Math.min(100, (this.tokenStats.current || 0) / max * 100) : 0;
       if (percentage >= 90) {
         return '#e74c3c';
@@ -480,7 +480,7 @@ export default {
     },
     tokenRingTitle() {
       const current = this.tokenStats.current || 0;
-      const max = this.tokenStats.max || 200000;
+      const max = this.tokenStats.max || 258000;
       const currentK = (current / 1000).toFixed(1);
       const maxK = (max / 1000).toFixed(0);
       const percentage = max > 0 ? Math.min(100, Math.round(current / max * 100)) : 0;

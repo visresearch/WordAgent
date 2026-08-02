@@ -66,8 +66,7 @@
 
 - [x] 支持单智能体模式
 - [x] 支持多智能体模式
-- [x] 支持远程MCP服务器工具接入
-- [x] 支持本地MCP服务器和Skill工具接入
+- [x] 支持MCP服务器和Skill工具接入
 - [x] 支持上下文压缩
 - [x] 支持长短期记忆
 - [x] 支持表格、插图、公式等复杂样式编辑(公式可读但是不能生成)
@@ -75,8 +74,8 @@
 
 #### 本项目支持的办公软件
 
-- WPS Office（Windows、Linux）版本 12.1.2.24722及以上
-- Microsoft Word（Windows、Web）版本 2019/2021及以上(可能不稳定)
+- WPS Office Linux 版本 12.1.2.24722及以上、Windows 版本 12.1.0.28043 以下 
+- Microsoft Word（Windows、Web）版本 2024及以上(wordAPI 1.6及以上)
 
 ## 四、系统架构
 

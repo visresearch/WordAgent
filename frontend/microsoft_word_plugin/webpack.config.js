@@ -21,6 +21,7 @@ module.exports = async (env, options) => {
     entry: {
       polyfill: ["core-js/stable", "regenerator-runtime/runtime"],
       taskpane: ["./src/taskpane/taskpane.js", "./src/taskpane/taskpane.html"],
+      dialog: ["./src/dialog/dialog.js", "./src/dialog/dialog.html"],
       commands: "./src/commands/commands.js",
     },
     output: {
@@ -76,6 +77,11 @@ module.exports = async (env, options) => {
         filename: "taskpane.html",
         template: "./src/taskpane/taskpane.html",
         chunks: ["polyfill", "taskpane"],
+      }),
+      new HtmlWebpackPlugin({
+        filename: "dialog.html",
+        template: "./src/dialog/dialog.html",
+        chunks: ["polyfill", "dialog"],
       }),
       new CopyWebpackPlugin({
         patterns: [

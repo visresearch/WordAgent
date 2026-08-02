@@ -5,7 +5,8 @@ import {
   beginTrackedEdit,
   finishTrackedEdit,
   hasRevisionBatch,
-  settleRevisionBatch
+  settleRevisionBatch,
+  settleRevisionBatches
 } from '../src/components/js/revisionPreview.mjs';
 
 function trackedChange({ type, text, author = 'Word User', date = '2026-07-28T00:00:00.000Z' }) {
@@ -56,7 +57,9 @@ function createWordMock(initialChanges = [], initialMode = 'Off', desktopViewSup
           get items() {
             return document.changes;
           },
-          load() {}
+          load() {},
+          track() {},
+          untrack() {}
         };
       }
     }
@@ -148,7 +151,7 @@ test('待确认期间隐藏格式修订，结算最后一个批次后恢复用�
   const state = await beginTrackedEdit();
   assert.equal(view.areFormatChangesDisplayed, false);
   assert.equal(view.areInsertionsAndDeletionsDisplayed, true);
-  assert.equal(revisionsFilter.markup, 'All');
+  assert.equal(revisionsFilter.markup, 'Simple');
   assert.equal(revisionsFilter.view, 'Final');
 
   doc.changes.push(trackedChange({ type: 'Added', text: 'visible insertion' }));
@@ -159,4 +162,55 @@ test('待确认期间隐藏格式修订，结算最后一个批次后恢复用�
   assert.equal(view.areInsertionsAndDeletionsDisplayed, false);
   assert.equal(revisionsFilter.markup, 'Simple');
   assert.equal(revisionsFilter.view, 'Original');
+});
+
+test('编辑批次同时拒绝本轮删除、插入和格式修订', async () => {
+  const existing = trackedChange({
+    type: 'Deleted',
+    text: 'existing',
+    date: '2026-07-27T00:00:00.000Z'
+  });
+  const { document: doc } = createWordMock([existing]);
+  const state = await beginTrackedEdit();
+  const deleted = trackedChange({ type: 'Deleted', text: 'old text' });
+  const added = trackedChange({ type: 'Added', text: 'new text' });
+  const formatted = trackedChange({ type: 'Formatted', text: 'new text' });
+  doc.changes.push(deleted, added, formatted);
+
+  const batch = await finishTrackedEdit(state, 'edit');
+  assert.equal(batch.revisionCount, 3);
+
+  const result = await settleRevisionBatch(batch.batchId, 'reject');
+  assert.equal(result.success, true);
+  assert.equal(deleted.rejected, 1);
+  assert.equal(added.rejected, 1);
+  assert.equal(formatted.rejected, 1);
+  assert.equal(existing.rejected, 0);
+});
+
+test('一次确认可稳定接受多个原生修订批次', async () => {
+  const { document: doc } = createWordMock();
+
+  const firstState = await beginTrackedEdit();
+  const firstAdded = trackedChange({ type: 'Added', text: 'first' });
+  doc.changes.push(firstAdded);
+  const firstBatch = await finishTrackedEdit(firstState, 'insert');
+
+  const secondState = await beginTrackedEdit();
+  const secondDeleted = trackedChange({ type: 'Deleted', text: 'second' });
+  doc.changes.push(secondDeleted);
+  const secondBatch = await finishTrackedEdit(secondState, 'delete');
+
+  const result = await settleRevisionBatches(
+    [firstBatch.batchId, secondBatch.batchId],
+    'accept'
+  );
+
+  assert.equal(result.success, true);
+  assert.equal(result.handled, 2);
+  assert.deepEqual(result.settledBatchIds, [firstBatch.batchId, secondBatch.batchId]);
+  assert.equal(firstAdded.accepted, 1);
+  assert.equal(secondDeleted.accepted, 1);
+  assert.equal(hasRevisionBatch(firstBatch.batchId), false);
+  assert.equal(hasRevisionBatch(secondBatch.batchId), false);
 });

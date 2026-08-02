@@ -27,6 +27,7 @@
         :selections="selections"
         :uploaded-files="uploadedFiles"
         :pending-document="pendingDocument"
+        :pending-edits="pendingEdits"
         :delete-revisions="deleteRevisions"
         :token-stats="tokenStats"
         :enable-thinking="enableThinking"
@@ -61,6 +62,7 @@
 /* global Word */
 import {
   generateDocxFromJSON,
+  editDocxParagraph,
   deleteDocxPara,
   insertBreakAfterParagraph,
   resolveParagraphParaIDs
@@ -71,6 +73,7 @@ import {
   finishTrackedEdit,
   hasRevisionBatch,
   settleRevisionBatch,
+  settleRevisionBatches,
   undoLastDocumentAction
 } from '../js/revisionPreview.mjs';
 import api from '../js/api.js';
@@ -78,7 +81,6 @@ import ChatMessages from './ChatMessages.vue';
 import ChatInput from './ChatInput.vue';
 import SessionPane from './SessionPane.vue';
 import { sessionState } from '../../sessionState.js';
-import { settingsState } from '../../settingsState.js';
 import { chatState } from '../../chatState.js';
 import { t } from '../../i18n/index.js';
 
@@ -107,6 +109,7 @@ export default {
       pendingDocument: null,
       pendingDocumentMsg: null,
       deleteRevisions: [],  // 已立即执行、等待统一接受/拒绝的原生删除修订
+      pendingEdits: [],  // 已立即执行、等待统一接受/拒绝的原生段落编辑修订
       pendingInsertions: [], // [{documentJson, docId, insertParaID, msg}] 待确认的文档插入列表
       _streamInsertions: [], // [{insertParaID, count, docId}] 当前流式中已执行的插入操作
       hasHistory: false,
@@ -115,7 +118,7 @@ export default {
       _streamingSessionId: null,
       _streamingCache: {},
       isWide: false,
-      tokenStats: { current: 0, max: 200000, percentage: 0 },
+      tokenStats: { current: 0, max: 258000, percentage: 0 },
       enableThinking: true,  // 是否启用深度思考
       _insertQueue: Promise.resolve(),
       _initializing: false   // 是否正在初始化，防止 ensureSession 创建重复会话
@@ -143,7 +146,6 @@ export default {
   mounted() {
     this.loadModels();
     this.initSessionAndLoadHistory();
-    this._loadProofreadMode();
     this._loadWenceTempDir();
 
     this._onResize = () => {
@@ -294,6 +296,28 @@ export default {
 
     scrollToBottom() {
       this.$refs.chatMessages?.scrollToBottom();
+    },
+
+    _showPendingActionError(action, error) {
+      const pendingItems = [
+        ...this.pendingInsertions,
+        ...this.pendingEdits,
+        ...this.deleteRevisions
+      ];
+      const targetMessage = pendingItems.find((item) => item?.msg?.contentParts)?.msg
+        || [...this.messages].reverse().find((message) => message?.role === 'assistant');
+      if (!targetMessage) {
+        return;
+      }
+      if (!Array.isArray(targetMessage.contentParts)) {
+        targetMessage.contentParts = [];
+      }
+      targetMessage.contentParts.push({
+        type: 'status',
+        content: `${action === 'accept' ? '确认' : '取消'}修订失败：${error || 'Word 未返回具体错误'}`,
+        loading: false
+      });
+      this.scrollToBottom();
     },
 
     async copyToClipboard(content) {
@@ -927,7 +951,7 @@ export default {
       if (data.type === 'token_stats') {
         this.tokenStats = {
           current: data.current_tokens || 0,
-          max: data.max_tokens || 200000,
+          max: data.max_tokens || 258000,
           percentage: data.percentage || 0
         };
         return;
@@ -952,7 +976,8 @@ export default {
           endParaIndex: this._toIntOrNull(data.endParaIndex),
           startParaID: this._toParaIdOrNull(data.startParaID),
           endParaID: this._toParaIdOrNull(data.endParaID),
-          docId: this._toIntOrDefault(data.docId, 0)
+          docId: this._toIntOrDefault(data.docId, 0),
+          mode: data.mode === 'lightweight' ? 'lightweight' : 'full'
         });
         return;
       }
@@ -1062,6 +1087,64 @@ export default {
         }
         if (!found) {
           parts.push({ type: 'status', content: data.content || t('chat.deleteComplete'), loading: false });
+        }
+        this.scrollToBottom();
+        return;
+      }
+
+      // 替换单个段落正文；Word 原生修订会同时记录旧文字删除和新文字插入。
+      if (data.type === 'edit_document') {
+        const paraID = this._toParaIdOrNull(data.paraID);
+        const runs = Array.isArray(data.runs) ? data.runs : [];
+        msg.contentParts.push({
+          type: 'status',
+          content: data.content || `正在更新段落 ${paraID ?? ''}`,
+          loading: true
+        });
+        this.scrollToBottom();
+        this._insertQueue = this._insertQueue
+          .then(() => this._applyImmediateEdit({
+            paraID,
+            runs,
+            docId: this._toIntOrDefault(data.docId, 0),
+            requestId: data.requestId || null,
+            msg
+          }))
+          .catch((error) => {
+            console.warn('[AIChatPane] apply immediate edit failed:', error);
+            if (data.requestId) {
+              api.wsManager.send({
+                type: 'edit_document_response',
+                requestId: data.requestId,
+                success: false,
+                paraID,
+                error: error?.message || String(error)
+              }).catch((sendError) => console.warn('[AIChatPane] 回传编辑异常失败:', sendError));
+            }
+          });
+        return;
+      }
+
+      if (data.type === 'edit_complete') {
+        const parts = msg.contentParts;
+        let found = false;
+        for (let i = parts.length - 1; i >= 0; i--) {
+          if (parts[i].type === 'status' && parts[i].loading) {
+            parts.splice(i, 1, {
+              type: 'status',
+              content: data.content || `段落 ${data.paraID ?? ''} 已更新`,
+              loading: false
+            });
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          parts.push({
+            type: 'status',
+            content: data.content || `段落 ${data.paraID ?? ''} 已更新`,
+            loading: false
+          });
         }
         this.scrollToBottom();
         return;
@@ -1562,6 +1645,102 @@ export default {
       }
     },
 
+    async _applyImmediateEdit(payload) {
+      const sendResult = async (result) => {
+        if (!payload?.requestId) {
+          return;
+        }
+        try {
+          await api.wsManager.send({
+            type: 'edit_document_response',
+            requestId: payload.requestId,
+            ...result
+          });
+        } catch (error) {
+          console.warn('[AIChatPane] 回传 Word 段落编辑结果失败:', error);
+        }
+      };
+
+      const paraID = this._toParaIdOrNull(payload?.paraID);
+      const docId = this._toIntOrDefault(payload?.docId, 0);
+      const runs = Array.isArray(payload?.runs) ? payload.runs : [];
+      if (paraID === null) {
+        await sendResult({ success: false, paraID: null, docId, error: 'edit_document 缺少有效 paraID' });
+        return false;
+      }
+
+      const conflictingDelete = this.deleteRevisions.find(
+        (item) => this._toIntOrDefault(item.docId, 0) === docId
+          && Array.isArray(item.paraIDs)
+          && item.paraIDs.some((id) => String(id) === String(paraID))
+      );
+      if (conflictingDelete) {
+        const error = `paraID ${paraID} 正处于待删除修订中，请重新读取文档后使用仍存在的段落 ID`;
+        await sendResult({ success: false, paraID, docId, error });
+        return false;
+      }
+
+      let trackedEdit = null;
+      let editResult = null;
+      try {
+        trackedEdit = await beginTrackedEdit();
+        editResult = await editDocxParagraph(paraID, runs);
+        if (!editResult?.success) {
+          await abortTrackedEdit(trackedEdit);
+          await sendResult({
+            success: false,
+            paraID,
+            docId,
+            error: editResult?.error || '段落编辑失败'
+          });
+          return false;
+        }
+
+        const revisionBatch = await finishTrackedEdit(trackedEdit, 'edit');
+        if (!revisionBatch.batchId) {
+          await undoLastDocumentAction();
+          const error = 'Microsoft Word 未创建原生编辑修订，已撤销本次编辑';
+          await sendResult({ success: false, paraID, docId, error });
+          return false;
+        }
+
+        const editItem = {
+          docId,
+          paraID,
+          originalText: editResult.originalText || '',
+          _revisionBatchId: revisionBatch.batchId,
+          _markingMode: 'revision',
+          msg: payload.msg || null
+        };
+        this.pendingEdits.push(editItem);
+        if (payload.msg) {
+          payload.msg._docId = docId;
+          payload.msg._editedParaID = paraID;
+          payload.msg._revisionBatchId = revisionBatch.batchId;
+        }
+        api.wsManager.clearDocumentCache();
+        await sendResult({
+          success: true,
+          docId,
+          paraID,
+          revisionCount: revisionBatch.revisionCount,
+          paragraph: editResult.paragraph || null
+        });
+        return true;
+      } catch (error) {
+        await abortTrackedEdit(trackedEdit);
+        if (editResult?.success) {
+          try {
+            await undoLastDocumentAction();
+          } catch (undoError) {
+            console.error('[AIChatPane] Word 编辑异常后撤销失败:', undoError);
+          }
+        }
+        await sendResult({ success: false, paraID, docId, error: error?.message || String(error) });
+        return false;
+      }
+    },
+
     async _applyImmediateInsertion(insItem) {
       const sendResult = async (payload) => {
         if (!insItem?.requestId) {
@@ -1734,34 +1913,40 @@ export default {
       } catch (e) {
         console.warn("[AIChatPane] pending operation queue failed before confirm:", e);
       }
-      for (const ins of this.pendingInsertions) {
-        if (ins._markingMode === 'revision' && hasRevisionBatch(ins._revisionBatchId)) {
-          const settled = await settleRevisionBatch(ins._revisionBatchId, 'accept');
-          console.log('[AIChatPane] 已接受新增内容修订:', settled);
-          if (settled.success) {
-            ins._revisionBatchId = null;
-            if (ins.msg) {
-              ins.msg._revisionBatchId = null;
-            }
+      const pendingItems = [
+        ...this.pendingInsertions,
+        ...this.pendingEdits,
+        ...this.deleteRevisions
+      ];
+      const batchIds = pendingItems
+        .map((item) => item?._revisionBatchId)
+        .filter((batchId) => hasRevisionBatch(batchId));
+      if (batchIds.length === 0) {
+        this._showPendingActionError('accept', '没有可结算的原生修订批次');
+        return;
+      }
+
+      const settled = await settleRevisionBatches(batchIds, 'accept');
+      console.log('[AIChatPane] 已统一接受待确认修订:', settled);
+      const settledIds = new Set(settled.settledBatchIds || []);
+      for (const item of pendingItems) {
+        if (settledIds.has(item._revisionBatchId)) {
+          item._revisionBatchId = null;
+          if (item.msg) {
+            item.msg._revisionBatchId = null;
           }
         }
       }
-
-      for (const pd of this.deleteRevisions) {
-        if (pd._markingMode === 'revision' && hasRevisionBatch(pd._revisionBatchId)) {
-          const settled = await settleRevisionBatch(pd._revisionBatchId, 'accept');
-          console.log('[AIChatPane] 已接受删除内容修订:', settled);
-          if (settled.success) {
-            pd._revisionBatchId = null;
-          }
-        }
+      this.pendingInsertions = this.pendingInsertions.filter((item) => item._revisionBatchId);
+      this.pendingEdits = this.pendingEdits.filter((item) => item._revisionBatchId);
+      this.deleteRevisions = this.deleteRevisions.filter((item) => item._revisionBatchId);
+      this._refreshPendingDocumentSummary();
+      if (this.pendingInsertions.length === 0) {
+        this._streamInsertions = [];
       }
-
-      this.deleteRevisions = [];
-      this.pendingInsertions = [];
-      this.pendingDocument = null;
-      this.pendingDocumentMsg = null;
-      this._streamInsertions = [];
+      if (!settled.success) {
+        this._showPendingActionError('accept', settled.error);
+      }
     },
 
     /**
@@ -1774,35 +1959,40 @@ export default {
         console.warn("[AIChatPane] pending operation queue failed before cancel:", e);
       }
 
-      for (const pd of this.deleteRevisions) {
-        if (pd._markingMode === 'revision' && hasRevisionBatch(pd._revisionBatchId)) {
-          const settled = await settleRevisionBatch(pd._revisionBatchId, 'reject');
-          console.log('[AIChatPane] 已拒绝删除内容修订:', settled);
-          if (settled.success) {
-            pd._revisionBatchId = null;
+      const pendingItems = [
+        ...this.deleteRevisions,
+        ...this.pendingEdits,
+        ...[...this.pendingInsertions].reverse()
+      ];
+      const batchIds = pendingItems
+        .map((item) => item?._revisionBatchId)
+        .filter((batchId) => hasRevisionBatch(batchId));
+      if (batchIds.length === 0) {
+        this._showPendingActionError('reject', '没有可结算的原生修订批次');
+        return;
+      }
+
+      const settled = await settleRevisionBatches(batchIds, 'reject');
+      console.log('[AIChatPane] 已统一拒绝待确认修订:', settled);
+      const settledIds = new Set(settled.settledBatchIds || []);
+      for (const item of pendingItems) {
+        if (settledIds.has(item._revisionBatchId)) {
+          item._revisionBatchId = null;
+          if (item.msg) {
+            item.msg._revisionBatchId = null;
           }
         }
       }
-
-      const inserts = [...this.pendingInsertions].reverse();
-      for (const ins of inserts) {
-        if (ins._markingMode === 'revision' && hasRevisionBatch(ins._revisionBatchId)) {
-          const settled = await settleRevisionBatch(ins._revisionBatchId, 'reject');
-          console.log('[AIChatPane] 已拒绝新增内容修订:', settled);
-          if (settled.success) {
-            ins._revisionBatchId = null;
-            if (ins.msg) {
-              ins.msg._revisionBatchId = null;
-            }
-          }
-        }
+      this.pendingInsertions = this.pendingInsertions.filter((item) => item._revisionBatchId);
+      this.pendingEdits = this.pendingEdits.filter((item) => item._revisionBatchId);
+      this.deleteRevisions = this.deleteRevisions.filter((item) => item._revisionBatchId);
+      this._refreshPendingDocumentSummary();
+      if (this.pendingInsertions.length === 0) {
+        this._streamInsertions = [];
       }
-
-      this.deleteRevisions = [];
-      this.pendingInsertions = [];
-      this.pendingDocument = null;
-      this.pendingDocumentMsg = null;
-      this._streamInsertions = [];
+      if (!settled.success) {
+        this._showPendingActionError('reject', settled.error);
+      }
     },
 
     /**
@@ -1912,17 +2102,6 @@ export default {
         }
       } catch (error) {
         console.error('插入文档失败:', error);
-      }
-    },
-
-    async _loadProofreadMode() {
-      try {
-        const data = await api.getSettings();
-        if (data && data.proofreadMode) {
-          settingsState.proofreadMode = data.proofreadMode;
-        }
-      } catch (e) {
-        console.warn('加载 proofreadMode 失败，使用默认值:', e);
       }
     },
 
