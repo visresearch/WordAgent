@@ -15,7 +15,8 @@ DEB_VERSION="${APP_VERSION#v}"
 # Debian uses '~' for pre-release versions so they sort before the final
 # release; convert tags such as 0.6.0-beta.1 to 0.6.0~beta.1.
 if [[ "${DEB_VERSION}" == *-* ]]; then
-  DEB_VERSION="${DEB_VERSION/-/~}"
+  # Escape '~' in parameter expansion; otherwise Bash expands it to $HOME.
+  DEB_VERSION="${DEB_VERSION/-/\~}"
 fi
 
 if [[ -z "${DEB_VERSION}" ]]; then
