@@ -4,10 +4,12 @@ on:
   push:
     tags:
       - 'v*.*.*'
+      - 'v*.*.*-*'
   workflow_dispatch:
 
 env:
   APP_VERSION: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+  IS_PRERELEASE: ${{ startsWith(github.ref, 'refs/tags/') && contains(github.ref_name, '-') }}
 
 jobs:
   build-linux:
@@ -135,13 +137,58 @@ jobs:
             backend/package/wence_ai-linux-x86_64-full.zip
           body_path: release_notes.md
           draft: false
-          prerelease: false
+          prerelease: ${{ env.IS_PRERELEASE == 'true' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  cleanup_prereleases:
+    name: Remove matching pre-releases
+    runs-on: ubuntu-22.04
+    needs: [build-linux, build-macos, build-windows]
+    if: ${{ always() && startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-') && needs.build-linux.result == 'success' && needs.build-macos.result == 'success' && needs.build-windows.result == 'success' }}
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Delete pre-release tags and releases for stable version
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          echo "Removing pre-release tags and releases matching ${RELEASE_TAG}-*"
+
+          while IFS= read -r prerelease_tag; do
+            [ -z "${prerelease_tag}" ] && continue
+            case "${prerelease_tag}" in
+              "${RELEASE_TAG}"-*)
+                release_id="$(gh api "repos/${REPOSITORY}/releases/tags/${prerelease_tag}" --jq '.id' 2>/dev/null || true)"
+                if [ -n "${release_id}" ]; then
+                  echo "Deleting release ${prerelease_tag} (${release_id})"
+                  gh api --method DELETE "repos/${REPOSITORY}/releases/${release_id}"
+                fi
+                ;;
+            esac
+          done < <(gh api --paginate "repos/${REPOSITORY}/releases?per_page=100" --jq '.[].tag_name')
+
+          while IFS= read -r ref; do
+            [ -z "${ref}" ] && continue
+            prerelease_tag="${ref#refs/tags/}"
+            case "${prerelease_tag}" in
+              "${RELEASE_TAG}"-*)
+                echo "Deleting git tag ${prerelease_tag}"
+                gh api --method DELETE "repos/${REPOSITORY}/git/refs/tags/${prerelease_tag}"
+                ;;
+            esac
+          done < <(gh api --paginate "repos/${REPOSITORY}/git/matching-refs/tags/${RELEASE_TAG}-" --jq '.[].ref' 2>/dev/null || true)
 
   build-macos:
     name: Build macOS packages
     runs-on: macos-15
+    if: ${{ !startsWith(github.ref, 'refs/tags/') || !contains(github.ref_name, '-') }}
 
     permissions:
       contents: write
@@ -248,7 +295,7 @@ jobs:
             backend/package/wence_ai-macos-arm64-app.zip
           body_path: release_notes.md
           draft: false
-          prerelease: false
+          prerelease: ${{ env.IS_PRERELEASE == 'true' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -371,6 +418,6 @@ jobs:
             backend/package/wence_ai-windows-x86_64-full.zip
           body_path: release_notes.md
           draft: false
-          prerelease: false
+          prerelease: ${{ env.IS_PRERELEASE == 'true' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

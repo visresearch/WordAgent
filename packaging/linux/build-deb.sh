@@ -12,6 +12,11 @@ APP_DISPLAY_NAME="WenCe AI"
 APP_EXECUTABLE="wence_ai"
 APP_VERSION="${APP_VERSION:-0.0.0}"
 DEB_VERSION="${APP_VERSION#v}"
+# Debian uses '~' for pre-release versions so they sort before the final
+# release; convert tags such as 0.6.0-beta.1 to 0.6.0~beta.1.
+if [[ "${DEB_VERSION}" == *-* ]]; then
+  DEB_VERSION="${DEB_VERSION/-/~}"
+fi
 
 if [[ -z "${DEB_VERSION}" ]]; then
   DEB_VERSION="0.0.0"

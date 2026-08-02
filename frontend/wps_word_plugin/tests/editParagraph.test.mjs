@@ -15,7 +15,9 @@ function mockDocument() {
     Range(start, end) {
       const range = { Start: start, End: end, Font: {} };
       Object.defineProperty(range, 'Text', {
-        set(value) { operations.push({ type: 'text', start, end, value }); }
+        set(value) {
+          operations.push({ type: 'text', start, end, value }); 
+        }
       });
       range.Delete = () => operations.push({ type: 'delete', start, end });
       return range;

@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## [v0.6.0-beta.1]
+
+(注意：此版本为beta测试版本，只支持WPS Word加载项，正式版将支持Microsoft Word加载项)
 
 ### Added
 - 添加CONTRIBUTING.md和SECURITY.md

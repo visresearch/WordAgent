@@ -3452,8 +3452,12 @@ function editDocxParagraph(paraID, runs, docOverride) {
       if (Array.isArray(run.rStyle)) {
         const rStyle = resolveStyle({}, run.rStyle, DEFAULT_RSTYLE);
         const font = insertedRange.Font;
-        if (rStyle[RSTYLE.FONT_NAME]) font.Name = rStyle[RSTYLE.FONT_NAME];
-        if (rStyle[RSTYLE.FONT_SIZE]) font.Size = rStyle[RSTYLE.FONT_SIZE];
+        if (rStyle[RSTYLE.FONT_NAME]) {
+          font.Name = rStyle[RSTYLE.FONT_NAME];
+        }
+        if (rStyle[RSTYLE.FONT_SIZE]) {
+          font.Size = rStyle[RSTYLE.FONT_SIZE];
+        }
         font.Bold = rStyle[RSTYLE.BOLD] ? -1 : 0;
         font.Italic = rStyle[RSTYLE.ITALIC] ? -1 : 0;
         font.StrikeThrough = rStyle[RSTYLE.STRIKETHROUGH] ? -1 : 0;
@@ -3467,7 +3471,11 @@ function editDocxParagraph(paraID, runs, docOverride) {
           font.Color = parseRGBColor(rStyle[RSTYLE.COLOR]);
         }
         if (rStyle[RSTYLE.HIGHLIGHT]) {
-          try { insertedRange.HighlightColorIndex = rStyle[RSTYLE.HIGHLIGHT]; } catch (error) { void error; }
+          try {
+            insertedRange.HighlightColorIndex = rStyle[RSTYLE.HIGHLIGHT]; 
+          } catch (error) {
+            void error; 
+          }
         }
       }
       currentPos += run.text.length;
