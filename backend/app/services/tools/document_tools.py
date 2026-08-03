@@ -121,12 +121,14 @@ def _normalize_frontend_paragraph_location(value: object) -> dict | None:
         return None
     page_start = _parse_int_like(value.get("pageStart"))
     page_end = _parse_int_like(value.get("pageEnd"))
-    return {
+    location = {
         "paraID": para_id,
         "paraIndex": para_index,
-        "pageStart": page_start,
-        "pageEnd": page_end,
     }
+    if page_start is not None and page_end is not None:
+        location["pageStart"] = page_start
+        location["pageEnd"] = page_end
+    return location
 
 
 # region 图片 / 文档辅助
@@ -1121,7 +1123,8 @@ def _insert_break_impl(paraID: RequiredParaIdInput, breakType: BreakType | str) 
             "use read_document to locate the paragraph after the break."
         )
     elif paragraph_after_break:
-        result["newPage"] = paragraph_after_break.get("pageStart")
+        if paragraph_after_break.get("pageStart") is not None:
+            result["newPage"] = paragraph_after_break["pageStart"]
         result["meaning"] = (
             "paragraphAfterBreak identifies the paragraph immediately after the inserted break. "
             "Use paragraphAfterBreak.paraID as the insertion anchor for content that must continue after the break."

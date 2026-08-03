@@ -57,6 +57,26 @@ class GenerateDocumentSummaryTests(unittest.TestCase):
         self.assertEqual(events[0]["requestId"], events[1]["requestId"])
         self.assertEqual(events[1]["content"], "📝 文档已生成")
 
+    def test_omits_unavailable_page_fields_from_agent_result(self):
+        frontend_response = {
+            "type": "generate_document_response",
+            "success": True,
+            "lastParagraph": {
+                "paraID": 2468,
+                "paraIndex": 7,
+                "pageStart": None,
+                "pageEnd": None,
+            },
+        }
+        document = DocumentOutput(paragraphs=[], styles={})
+        with (
+            patch("app.services.tools.document_tools.get_stream_writer", return_value=lambda _: None),
+            patch("app.services.tools.document_tools._wait_for_frontend_mutation", return_value=frontend_response),
+        ):
+            result = _generate_document_impl(document, 9, 0)
+
+        self.assertEqual(result["lastParagraph"], {"paraID": 2468, "paraIndex": 7})
+
 
 if __name__ == "__main__":
     unittest.main()

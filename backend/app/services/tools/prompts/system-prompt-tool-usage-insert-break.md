@@ -4,7 +4,7 @@
 - Covers, Chinese/English abstracts, tables of contents, references, appendices, and top-level chapters normally start on fresh pages. Do not place a major heading in leftover space at the bottom of the previous page.
 - The first cover starts at document position `0` without a leading break. Template/reference breaks take precedence; never add a duplicate break.
 - Never simulate pagination with repeated blank paragraphs, newlines, or spaces.
-- After success, continue from `paragraphAfterBreak.paraID`; trust its returned index/page fields and do not re-read only to rediscover the anchor.
+- After success, continue from `paragraphAfterBreak.paraID`; trust its returned index and any present native page fields, and do not re-read only to rediscover the anchor.
 - On timeout/unknown result, do not repeat the break. Re-read to recover its location.
 
 ### Required fresh-page sequence

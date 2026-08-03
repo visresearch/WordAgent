@@ -10,6 +10,6 @@ Insert a native break immediately after a verified paragraph.
 
 Use page/section breaks for true pagination; never substitute blank paragraphs or `\n`. Covers are first-page content; abstracts, tables of contents, references, appendices, and top-level chapters normally start on fresh pages unless a user/template specifies otherwise.
 
-Success returns `paragraphAfterBreak` (`paraID`, zero-based `paraIndex`, `pageStart`, `pageEnd`) and `newPage`. Use `paragraphAfterBreak.paraID` as the next generation anchor. WPS returns physical pages; Microsoft Word may return `null` page fields.
+Success returns `paragraphAfterBreak` with `paraID` and zero-based `paraIndex`. When the client native API exposes physical pages, it also includes `pageStart`, `pageEnd`, and `newPage`; otherwise those fields are omitted. Use `paragraphAfterBreak.paraID` as the next generation anchor.
 
 On timeout/unknown result, do not repeat the break; read to recover its location.

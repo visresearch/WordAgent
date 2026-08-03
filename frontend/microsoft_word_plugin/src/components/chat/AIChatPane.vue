@@ -65,7 +65,8 @@ import {
   editDocxParagraph,
   deleteDocxPara,
   insertBreakAfterParagraph,
-  resolveParagraphParaIDs
+  resolveParagraphParaIDs,
+  getParagraphLocationByParaID
 } from '../js/docxJsonConverter.js';
 import {
   abortTrackedEdit,
@@ -1881,12 +1882,11 @@ export default {
       if (lastParaID !== null) {
         const lastIndices = await this._resolveParaIDsToIndices([lastParaID]);
         if (lastIndices.length > 0) {
-          lastParagraph = {
-            paraID: Number(lastParaID),
-            paraIndex: lastIndices[0],
-            pageStart: null,
-            pageEnd: null
-          };
+          lastParagraph =
+            (await getParagraphLocationByParaID(lastParaID)) || {
+              paraID: Number(lastParaID),
+              paraIndex: lastIndices[0]
+            };
         }
       }
 

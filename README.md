@@ -66,8 +66,7 @@ In addition, this project supports two types of pluggable extensions for custom 
 
 - [x] Single Agent mode
 - [x] Multi Agent mode
-- [x] Remote MCP server tool integration
-- [x] Local MCP server and Skill tool integration
+- [x] MCP server and Skill tool integration
 - [x] Context compression
 - [x] Short-term and long-term memory
 - [x] Complex style editing for tables, illustrations, equations, etc. (equations are readable but cannot be generated)
@@ -76,7 +75,7 @@ In addition, this project supports two types of pluggable extensions for custom 
 #### Supported Office Software
 
 - WPS Office (Windows, Linux), version 12.1.2.24722 and above
-- Microsoft Word (Windows, Web), version 2019/2021 and above (may be unstable)
+- Microsoft Word (Windows, Web), LTSC 2024 or later (WordApi 1.6 or later)
 
 ## 4. System Architecture
 

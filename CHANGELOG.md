@@ -1,8 +1,18 @@
 # Changelog
 
+## [v0.6.0-beta.2]
+
+(注意：此版本为beta测试版本)
+
+### Added
+- 适配Microsoft word加载项，WordAPI需要1.6版本及以上
+
+### Fixed
+- 修复search_document工具搜不到表格内部段落的bug
+
 ## [v0.6.0-beta.1]
 
-(注意：此版本为beta测试版本，只支持WPS Word加载项，Microsoft Word加载项将在正式版中支持)
+(注意：此版本为beta测试版本，只支持WPS Word加载项，Microsoft Word加载项将后续版本中支持)
 
 ### Added
 - 添加CONTRIBUTING.md和SECURITY.md

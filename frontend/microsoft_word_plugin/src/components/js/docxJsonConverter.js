@@ -8,6 +8,8 @@
  * JSON schema 数据结构（精简版）：
  * {
  *   paragraphs: [{             // 唯一的有序内容流：段落或 { tables: [...] } 表格块
+ *     pageStart?: number,      // 原生 API 可用时的段落起始页（full 模式）
+ *     pageEnd?: number,        // 原生 API 可用时的段落结束页（full 模式）
  *     pStyle: [                // 段落样式数组（按顺序）
  *       alignment,             // [0] 对齐: left/center/right/justify
  *       lineSpacing,           // [1] 行间距
@@ -122,6 +124,83 @@ function supportsRequirementSet(name, version) {
     );
   } catch (error) {
     return false;
+  }
+}
+
+function getLoadedParagraphPageRange(pageCollection) {
+  const pageIndexes = (pageCollection?.items || [])
+    .map((page) => Number(page?.index))
+    .filter((index) => Number.isInteger(index) && index >= 1);
+  if (pageIndexes.length === 0) {
+    return {};
+  }
+  return {
+    pageStart: Math.min(...pageIndexes),
+    pageEnd: Math.max(...pageIndexes),
+  };
+}
+
+async function loadParagraphPageRanges(context, paragraphs) {
+  const result = new Map();
+  if (!supportsRequirementSet("WordApiDesktop", "1.2")) {
+    return result;
+  }
+
+  try {
+    const pending = [];
+    for (const paragraph of paragraphs || []) {
+      const pages = paragraph.getRange("Content").pages;
+      pages.load("items/index");
+      pending.push({ paragraph, pages });
+    }
+    await context.sync();
+    for (const { paragraph, pages } of pending) {
+      const pageRange = getLoadedParagraphPageRange(pages);
+      if (pageRange.pageStart && pageRange.pageEnd) {
+        result.set(paragraph, pageRange);
+      }
+    }
+  } catch (error) {
+    console.warn(
+      "[docxJsonConverter] 无法读取 Microsoft Word 物理页码:",
+      error?.message || error
+    );
+  }
+  return result;
+}
+
+async function getParagraphLocationByParaID(paraID) {
+  const normalizedParaID = normalizeParaID(paraID);
+  if (!normalizedParaID) {
+    return null;
+  }
+
+  try {
+    return await Word.run(async (context) => {
+      const paragraphs = context.document.body.paragraphs;
+      paragraphs.load("items/uniqueLocalId");
+      await context.sync();
+
+      const paraIDs = await resolveParagraphParaIDs(context, paragraphs.items);
+      const paraIndex = paraIDs.findIndex((id) => id === normalizedParaID);
+      if (paraIndex < 0) {
+        return null;
+      }
+
+      const paragraph = paragraphs.items[paraIndex];
+      const pageRanges = await loadParagraphPageRanges(context, [paragraph]);
+      return {
+        paraID: Number(normalizedParaID),
+        paraIndex,
+        ...(pageRanges.get(paragraph) || {}),
+      };
+    });
+  } catch (error) {
+    console.warn(
+      "[docxJsonConverter] 无法读取段落位置:",
+      error?.message || error
+    );
+    return null;
   }
 }
 
@@ -2051,6 +2130,10 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
         const rangeResult = { paragraphs: [], tables: [], fields: [] };
         // 强制为全文段落补齐隐藏书签，确保每段都具备 paraID
         const allParaIDs = await resolveParagraphParaIDs(context, allParas.items);
+        const paragraphPageRanges = await loadParagraphPageRanges(
+          context,
+          allParas.items.slice(startParaIndex, endParaIndex + 1)
+        );
         const getRangeParaIDByDocIndex = (docIndex) => {
           if (docIndex < 0 || docIndex >= allParaIDs.length) {
             throw new Error(`段落索引 ${docIndex} 超出已解析 paraID 范围`);
@@ -2319,6 +2402,7 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
                 runs: [],
                 paraIndex: idx,
                 paraID: paraID,
+                ...(paragraphPageRanges.get(para) || {}),
               });
             } else {
               rangeResult.paragraphs.push({
@@ -2326,6 +2410,7 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
                 runs: picRuns,
                 paraIndex: idx,
                 paraID: paraID,
+                ...(paragraphPageRanges.get(para) || {}),
               });
             }
             continue;
@@ -2420,6 +2505,7 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
             runs: runs,
             paraIndex: idx,
             paraID: paraID,
+            ...(paragraphPageRanges.get(para) || {}),
           });
         }
 
@@ -2754,6 +2840,7 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
           await context.sync();
         } catch (e) {}
 
+        const paragraphPageRanges = await loadParagraphPageRanges(context, bodyParas.items);
         const bodyParaIDs = await resolveParagraphParaIDs(context, bodyParas.items);
 
         // === 计算表格 paraIndex / endParaIndex ===
@@ -2810,6 +2897,7 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
                 runs: [],
                 paraIndex: _paraIdx,
                 paraID: paraID,
+                ...(paragraphPageRanges.get(para) || {}),
               });
             } else {
               result.paragraphs.push({
@@ -2817,6 +2905,7 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
                 runs: picRuns,
                 paraIndex: _paraIdx,
                 paraID: paraID,
+                ...(paragraphPageRanges.get(para) || {}),
               });
             }
             continue;
@@ -2996,6 +3085,7 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
             runs: runs,
             paraIndex: _paraIdx,
             paraID: paraID,
+            ...(paragraphPageRanges.get(para) || {}),
           };
 
           if (paragraphData.runs.length > 0) {
@@ -3777,6 +3867,8 @@ async function editDocxParagraph(paraID, runs) {
         void error;
       }
 
+      const pageRanges = await loadParagraphPageRanges(context, [paragraph]);
+
       return {
         success: true,
         paraID: normalizedParaID,
@@ -3785,8 +3877,7 @@ async function editDocxParagraph(paraID, runs) {
         paragraph: {
           paraID: normalizedParaID,
           paraIndex: targetIndex,
-          pageStart: null,
-          pageEnd: null,
+          ...(pageRanges.get(paragraph) || {}),
         },
       };
     });
@@ -3869,6 +3960,12 @@ async function insertBreakAfterParagraph(paraID, breakType) {
           ? Math.min(targetIndex, Math.max(0, updatedParagraphs.items.length - 1))
           : Math.min(targetIndex + 1, Math.max(0, updatedParagraphs.items.length - 1));
       const paragraphAfterID = updatedIDs[paragraphAfterIndex] || null;
+      const paragraphAfter = paragraphAfterID
+        ? updatedParagraphs.items[paragraphAfterIndex]
+        : null;
+      const pageRanges = paragraphAfter
+        ? await loadParagraphPageRanges(context, [paragraphAfter])
+        : new Map();
 
       return {
         success: Boolean(paragraphAfterID),
@@ -3878,8 +3975,7 @@ async function insertBreakAfterParagraph(paraID, breakType) {
           ? {
               paraID: Number(paragraphAfterID),
               paraIndex: paragraphAfterIndex,
-              pageStart: null,
-              pageEnd: null,
+              ...(pageRanges.get(paragraphAfter) || {}),
             }
           : null,
         error: paragraphAfterID ? undefined : "插入成功，但无法定位换行后的段落",
@@ -4056,6 +4152,8 @@ export default {
   getUnderlineType,
   getFontReadProperties,
   getLoadedUnderlineColor,
+  getLoadedParagraphPageRange,
+  getParagraphLocationByParaID,
   getHighlightValue,
   getHighlightColor,
   getImageExportTempDir,
@@ -4095,6 +4193,8 @@ export {
   getUnderlineType,
   getFontReadProperties,
   getLoadedUnderlineColor,
+  getLoadedParagraphPageRange,
+  getParagraphLocationByParaID,
   getHighlightValue,
   getHighlightColor,
   getImageExportTempDir,

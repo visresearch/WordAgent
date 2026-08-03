@@ -7,6 +7,6 @@
 - Use `insertParaID: 0` only for the document start. Otherwise use a verified nonzero paraID; never invent one.
 - For replacement, wait for `delete_document` success and use its `replacementInsertParaID`.
 - Split output only for payload size, independent validation, or page/section boundaries. Preserve deterministic order and never separate a table from its neighboring content.
-- After success, use `lastParagraph.paraID` as the next append anchor. Its returned index/page fields are authoritative; do not re-read merely to rediscover it.
+- After success, use `lastParagraph.paraID` as the next append anchor. Its returned index and any present native page fields are authoritative; do not re-read merely to rediscover it.
 - Images must be inline runs with a single `url`; keep URLs unchanged and preserve aspect ratio.
 - On a timeout/unknown result, do not repeat generation because content may already exist. Re-read the affected location to recover state.

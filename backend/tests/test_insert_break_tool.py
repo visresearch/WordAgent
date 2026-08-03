@@ -47,6 +47,26 @@ class InsertBreakToolTests(unittest.TestCase):
         self.assertEqual(result["newPage"], 5)
         self.assertEqual(result["paragraphAfterBreak"]["paraID"], 99)
 
+    def test_omits_unavailable_page_fields_from_agent_result(self):
+        frontend_response = {
+            "type": "insert_break_response",
+            "success": True,
+            "paragraphAfterBreak": {
+                "paraID": 99,
+                "paraIndex": 4,
+                "pageStart": None,
+                "pageEnd": None,
+            },
+        }
+        with (
+            patch("app.services.tools.document_tools.get_stream_writer", return_value=lambda _: None),
+            patch("app.services.tools.document_tools._wait_for_frontend_mutation", return_value=frontend_response),
+        ):
+            result = _insert_break_impl(42, "wdPageBreak")
+
+        self.assertEqual(result["paragraphAfterBreak"], {"paraID": 99, "paraIndex": 4})
+        self.assertNotIn("newPage", result)
+
     def test_tool_schema_exposes_only_two_parameters(self):
         tool = build_insert_break("Insert a break")
         schema = tool.args_schema.model_json_schema()

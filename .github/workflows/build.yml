@@ -188,7 +188,6 @@ jobs:
   build-macos:
     name: Build macOS packages
     runs-on: macos-15
-    if: ${{ !startsWith(github.ref, 'refs/tags/') || !contains(github.ref_name, '-') }}
 
     permissions:
       contents: write

@@ -42,5 +42,5 @@ Example ordered stream:
 
 - A confirmed empty document's first write uses `insertParaID: 0`; do not read merely to obtain its placeholder paragraph ID.
 - Use real paraIDs from document context/read/search. For replacement, use `delete_document.replacementInsertParaID`.
-- Success returns `lastParagraph` (`paraID`, zero-based `paraIndex`, `pageStart`, `pageEnd`). Use its paraID for the next immediate append.
+- Success returns `lastParagraph` with `paraID` and zero-based `paraIndex`. When the client native API exposes physical pages, it also includes `pageStart` and `pageEnd`; otherwise those fields are omitted. Use its paraID for the next immediate append.
 - On timeout/unknown result, do not repeat generation because content may already exist; read the affected location to recover state.

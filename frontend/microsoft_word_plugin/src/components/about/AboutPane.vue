@@ -105,6 +105,7 @@ import helpIcon from '../../assets/icons/help.svg';
 import issueIcon from '../../assets/icons/issue.svg';
 import sponsorIcon from '../../assets/icons/sponsor.svg';
 import api from '../js/api.js';
+import { openExternalLinkFromDialog } from '../../officeDialog.mjs';
 
 export default {
   name: 'AboutPane',
@@ -131,9 +132,8 @@ export default {
     },
     openExternalLink(url) {
       try {
-        const opened = window.open(url, '_blank', 'noopener,noreferrer');
-        if (!opened) {
-          window.location.href = url;
+        if (!openExternalLinkFromDialog(url)) {
+          console.warn('浏览器阻止了外部链接窗口:', url);
         }
       } catch (e) {
         console.error('打开外部链接失败:', e);

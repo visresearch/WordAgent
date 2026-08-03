@@ -3,6 +3,8 @@ const DIALOG_CONFIG = Object.freeze({
   about: Object.freeze({ height: 70, width: 48 }),
 });
 
+const OPEN_EXTERNAL_LINK_MESSAGE = "open-external-link";
+
 let activeDialog = null;
 let dialogOpening = false;
 
@@ -20,6 +22,67 @@ function clearDialog(dialog) {
   if (activeDialog === dialog) {
     activeDialog = null;
   }
+}
+
+function normalizeExternalUrl(url) {
+  const normalized = new URL(url).toString();
+  const protocol = new URL(normalized).protocol;
+  if (protocol !== "http:" && protocol !== "https:") {
+    throw new Error(`Unsupported external URL protocol: ${protocol}`);
+  }
+  return normalized;
+}
+
+export function createExternalLinkMessage(url) {
+  return JSON.stringify({
+    type: OPEN_EXTERNAL_LINK_MESSAGE,
+    url: normalizeExternalUrl(url),
+  });
+}
+
+export function openExternalLinkFromDialog(
+  url,
+  {
+    office = globalThis.Office,
+    openWindow = globalThis.open,
+  } = {}
+) {
+  const normalizedUrl = normalizeExternalUrl(url);
+  const messageParent = office?.context?.ui?.messageParent;
+  if (typeof messageParent === "function") {
+    messageParent.call(office.context.ui, createExternalLinkMessage(normalizedUrl));
+    return true;
+  }
+
+  return Boolean(openWindow?.(normalizedUrl, "_blank", "noopener,noreferrer"));
+}
+
+export function handleDialogMessage(
+  event,
+  {
+    office = globalThis.Office,
+    openWindow = globalThis.open,
+  } = {}
+) {
+  let message;
+  try {
+    message = JSON.parse(event?.message || "");
+  } catch (error) {
+    return false;
+  }
+
+  if (message?.type !== OPEN_EXTERNAL_LINK_MESSAGE) {
+    return false;
+  }
+
+  const normalizedUrl = normalizeExternalUrl(message.url);
+  const openBrowserWindow = office?.context?.ui?.openBrowserWindow;
+  if (typeof openBrowserWindow === "function") {
+    openBrowserWindow.call(office.context.ui, normalizedUrl);
+    return true;
+  }
+
+  return Boolean(openWindow?.(normalizedUrl, "_blank", "noopener,noreferrer"));
 }
 
 export function openOfficeDialog(
@@ -67,6 +130,9 @@ export function openOfficeDialog(
       const dialog = result.value;
       activeDialog = dialog;
       dialog.addEventHandler(office.EventType.DialogEventReceived, () => clearDialog(dialog));
+      dialog.addEventHandler(office.EventType.DialogMessageReceived, (event) =>
+        handleDialogMessage(event, { office, openWindow })
+      );
     }
   );
 

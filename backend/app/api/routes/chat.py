@@ -122,8 +122,8 @@ async def chat_websocket(websocket: WebSocket):
        ``"success":true,"docId":123,"lastParagraph":``
        ``{"paraID":456,"paraIndex":10,"pageStart":2,"pageEnd":2}}``
 
-       ``requestId`` 必须原样回传。Microsoft Word 无法可靠取得物理页码时，
-       ``pageStart/pageEnd`` 为 ``null``。
+       ``requestId`` 必须原样回传。仅在客户端原生 API 成功取得物理页码时返回
+       ``pageStart/pageEnd``；否则省略这两个字段。
 
     6. 插入换行/分页/分节符回包：
        ``{"type":"insert_break_response","requestId":"...",``

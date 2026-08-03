@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  createExternalLinkMessage,
   createDialogUrl,
+  handleDialogMessage,
+  openExternalLinkFromDialog,
   openOfficeDialog,
   resetDialogStateForTests,
 } from "../src/officeDialog.mjs";
@@ -17,15 +20,18 @@ test("creates a same-origin URL for the requested dialog view", () => {
 test("opens settings through the Office dialog API", () => {
   resetDialogStateForTests();
   let received;
+  const handlers = new Map();
   const dialog = {
     addEventHandler(type, handler) {
-      received.eventType = type;
-      received.handler = handler;
+      handlers.set(type, handler);
     },
   };
   const office = {
     AsyncResultStatus: { Succeeded: "succeeded" },
-    EventType: { DialogEventReceived: "dialog-event" },
+    EventType: {
+      DialogEventReceived: "dialog-event",
+      DialogMessageReceived: "dialog-message",
+    },
     context: {
       ui: {
         displayDialogAsync(url, options, callback) {
@@ -50,7 +56,62 @@ test("opens settings through the Office dialog API", () => {
     displayInIframe: true,
     promptBeforeOpen: false,
   });
-  assert.equal(received.eventType, "dialog-event");
+  assert.equal(typeof handlers.get("dialog-event"), "function");
+  assert.equal(typeof handlers.get("dialog-message"), "function");
+});
+
+test("asks the parent task pane to open external links from an Office dialog", () => {
+  let message;
+  const office = {
+    context: {
+      ui: {
+        messageParent(value) {
+          message = value;
+        },
+      },
+    },
+  };
+
+  assert.equal(
+    openExternalLinkFromDialog("https://example.com/docs", { office }),
+    true
+  );
+  assert.deepEqual(JSON.parse(message), {
+    type: "open-external-link",
+    url: "https://example.com/docs",
+  });
+});
+
+test("opens dialog external-link messages in the system browser API", () => {
+  let openedUrl;
+  const office = {
+    context: {
+      ui: {
+        openBrowserWindow(url) {
+          openedUrl = url;
+        },
+      },
+    },
+  };
+
+  assert.equal(
+    handleDialogMessage(
+      { message: createExternalLinkMessage("https://example.com/help") },
+      { office }
+    ),
+    true
+  );
+  assert.equal(openedUrl, "https://example.com/help");
+});
+
+test("never navigates the dialog when a browser popup is blocked", () => {
+  assert.equal(
+    openExternalLinkFromDialog("https://example.com", {
+      office: undefined,
+      openWindow: () => null,
+    }),
+    false
+  );
 });
 
 test("uses a browser popup when the Office dialog API is unavailable", () => {
