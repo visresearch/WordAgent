@@ -101,6 +101,8 @@ def _normalized_request(request: ToolCallRequest) -> ToolCallRequest:
     tool_call = request.tool_call
     normalized_args = normalize_tool_args(tool_call["name"], tool_call.get("args", {}))
     return request.override(tool_call={**tool_call, "args": normalized_args})
+
+
 def _record_result(
     request: ToolCallRequest,
     result: ToolMessage | Command[Any],
@@ -131,7 +133,9 @@ def _record_result(
 class InvalidToolCallError(RuntimeError):
     """模型多次生成无法解析的工具调用参数。"""
 
+
 # region Middleware Classes
+
 
 class InvalidToolCallMiddleware(AgentMiddleware):
     """校正模型生成的 ``invalid_tool_calls``，避免直接结束 agent loop。
@@ -241,7 +245,6 @@ class InvalidToolCallMiddleware(AgentMiddleware):
             self._notify_retry(names, attempt + 1)
             current_request = self._repair_request(current_request, invalid_calls)
         raise InvalidToolCallError("模型工具调用校正失败")
-
 
 
 class NotifyingSummarizationMiddleware(SummarizationMiddleware):
