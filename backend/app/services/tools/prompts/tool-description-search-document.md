@@ -2,7 +2,7 @@ Search Word document content by text and/or style criteria.
 
 ## Parameters
 - `query` (object): `DocumentQuery` with `type` (`run` or `paragraph`) and `filters`.
-- `docId` (int, optional): target document ID; use `0` for the active document.
+- `docId` (int, required): target document ID; use `0` only when the active document is explicitly intended.
 
 ## Use
 - Locate paragraphs by keywords, section names, regex, or style clues.
@@ -13,6 +13,7 @@ Search Word document content by text and/or style criteria.
 ## Example
 ```json
 {
+	"docId": 123,
 	"query": {
 		"type": "run",
 		"filters": { "regex": "风险评估", "regexFlags": "i" }

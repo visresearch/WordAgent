@@ -5,7 +5,7 @@ Read a paragraph range from the Word document.
 - `endParaIndex` (int, optional): 0-based inclusive end index; `-1` means end of document (index mode).
 - `startParaID` (int, optional): start paragraph ID (paraID mode).
 - `endParaID` (int, optional): end paragraph ID (paraID mode). If omitted, equals `startParaID`.
-- `docId` (int, optional): target document ID; use `0` for the active document.
+- `docId` (int, required): target document ID; use `0` only when the active document is explicitly intended.
 - `mode` (string, optional): `"lightweight"` or `"full"`; default `"full"`.
 
 ## Use

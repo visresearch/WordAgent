@@ -1,11 +1,61 @@
 """服务层通用工具函数。"""
 
 import json
+import os
+import sys
+from pathlib import Path
 from typing import Any
 
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def try_init_langsmith() -> bool:
+    """尝试加载项目环境变量并初始化 LangSmith tracing。"""
+    try:
+        from dotenv import load_dotenv
+
+        candidates: list[Path] = []
+        if getattr(sys, "frozen", False):
+            candidates.append(Path(sys.executable).parent / ".env")
+            meipass = getattr(sys, "_MEIPASS", None)
+            if meipass:
+                candidates.append(Path(meipass) / ".env")
+
+        backend_dir = Path(__file__).resolve().parent.parent.parent
+        candidates.append(backend_dir / ".env")
+        candidates.append(Path.cwd() / ".env")
+
+        seen: set[Path] = set()
+        for env_path in candidates:
+            try:
+                resolved = env_path.resolve()
+            except Exception:
+                resolved = env_path
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            if resolved.exists():
+                logger.info(f"[LangSmith] 加载 .env: {resolved}")
+                load_dotenv(resolved, override=False)
+
+        api_key = os.environ.get("LANGSMITH_API_KEY") or ""
+        endpoint = os.environ.get("LANGSMITH_ENDPOINT") or "https://api.smith.langchain.com"
+        project = os.environ.get("LANGSMITH_PROJECT") or "WordAgent"
+
+        if api_key and project:
+            os.environ["LANGCHAIN_API_KEY"] = api_key
+            os.environ["LANGCHAIN_ENDPOINT"] = endpoint
+            os.environ["LANGCHAIN_PROJECT"] = project
+            os.environ["LANGCHAIN_TRACING_V2"] = "true"
+            logger.info(f"[LangSmith] ✅ 已启用 tracing，project = {project}")
+            return True
+
+        logger.warning(f"[LangSmith] ⚠️ 未启用 - API_KEY: {'已设置' if api_key else '未设置'}, PROJECT: {project}")
+    except Exception as exc:
+        logger.error(f"[LangSmith] ⚠️ 初始化失败: {exc}")
+    return False
 
 
 def _strip_code_fence(text: str) -> str:

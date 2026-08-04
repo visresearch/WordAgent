@@ -17,7 +17,8 @@ from app.services.agent.tools import (
     _current_model_name,
     is_stop_requested,
 )
-from app.services.llm_client import resolve_model, init_chat_model_with_reasoning
+from app.services.llm_client import init_chat_model_with_reasoning, resolve_model
+from app.services.middleware import DEFAULT_AGENT_MIDDLEWARE
 
 logger = get_logger(__name__)
 
@@ -145,7 +146,13 @@ def run_sub_agent_task(
     system_prompt = build_sub_agent_system_prompt(agent_type)
 
     # 创建 agent
-    app = create_agent(model=llm, tools=tools, system_prompt=system_prompt, checkpointer=InMemorySaver())
+    app = create_agent(
+        model=llm,
+        tools=tools,
+        system_prompt=system_prompt,
+        middleware=DEFAULT_AGENT_MIDDLEWARE,
+        checkpointer=InMemorySaver(),
+    )
 
     # 输入消息
     messages = [HumanMessage(content=prompt)]

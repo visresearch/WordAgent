@@ -36,6 +36,7 @@ _MAX_DOC_JSON_CHARS = 100_000
 
 
 DocIdInput = int | str | None
+RequiredDocIdInput = int | str
 ParaIdInput = int | str | None
 RequiredParaIdInput = int | str
 BreakType = Literal["wdLineBreak", "wdPageBreak", "wdSectionBreakNextPage"]
@@ -63,6 +64,14 @@ def _normalize_doc_id(doc_id: DocIdInput) -> int:
     """Normalize docId to integer, fallback to 0 (active document)."""
     parsed = _parse_int_like(doc_id)
     return parsed if parsed is not None else 0
+
+
+def _normalize_required_doc_id(doc_id: RequiredDocIdInput) -> int:
+    """Normalize a required docId and reject invalid values."""
+    parsed = _parse_int_like(doc_id)
+    if parsed is None:
+        raise ValueError("docId is required and must be an integer or numeric string")
+    return parsed
 
 
 def _normalize_para_id(para_id: ParaIdInput) -> int | None:
@@ -499,11 +508,11 @@ def _read_document_impl(
     endParaIndex: int | None,
     startParaID: ParaIdInput,
     endParaID: ParaIdInput,
-    docId: DocIdInput,
+    docId: RequiredDocIdInput,
     mode: str = "full",
 ) -> str:
     """read_document 的核心逻辑，被工厂函数包裹后变成 LangChain @tool。"""
-    resolved_doc_id = _normalize_doc_id(docId)
+    resolved_doc_id = _normalize_required_doc_id(docId)
     read_mode = "lightweight" if mode == "lightweight" else "full"
     startParaID = _normalize_para_id(startParaID)
     endParaID = _normalize_para_id(endParaID)
@@ -723,9 +732,9 @@ def _generate_document_impl(document: DocumentOutput, docId: DocIdInput, insertP
     return result
 
 
-def _search_document_impl(query: DocumentQuery, docId: DocIdInput) -> str:
+def _search_document_impl(query: DocumentQuery, docId: RequiredDocIdInput) -> str:
     """search_document 的核心逻辑。"""
-    resolved_doc_id = _normalize_doc_id(docId)
+    resolved_doc_id = _normalize_required_doc_id(docId)
 
     query_dict = query.model_dump(exclude_none=True)
     query_type = query_dict.get("type", "run")
@@ -1187,11 +1196,11 @@ def build_read_document(description: str):
 
     @tool(description=description)
     def read_document(
+        docId: RequiredDocIdInput,
         startParaIndex: int | None = None,
         endParaIndex: int | None = None,
         startParaID: ParaIdInput = None,
         endParaID: ParaIdInput = None,
-        docId: DocIdInput = 0,
         mode: str = "full",
     ) -> str:
         """Read document content. Requests the frontend to parse and return the specified paragraph range via WebSocket.
@@ -1201,7 +1210,7 @@ def build_read_document(description: str):
             endParaIndex: Ending paragraph index (inclusive), used in index mode.
             startParaID: Starting paragraph ID (int-like, supports signed numeric strings), used in paraID mode.
             endParaID: Ending paragraph ID (int-like), used in paraID mode. Defaults to startParaID.
-            docId: Document ID (int-like). Positive/negative are both allowed. 0 means current active document.
+            docId: Required document ID (int-like). Positive/negative are both allowed. 0 means current active document.
             mode: Read mode. "lightweight" reads paragraph text and IDs only. "full" reads text, styles, tables, images, and client-provided paragraph page ranges.
         """
         return _read_document_impl(startParaIndex, endParaIndex, startParaID, endParaID, docId, mode)
@@ -1238,12 +1247,12 @@ def build_search_document(description: str):
     """
 
     @tool(description=description)
-    def search_document(query: DocumentQuery, docId: DocIdInput = 0) -> str:
+    def search_document(query: DocumentQuery, docId: RequiredDocIdInput) -> str:
         """Search document content. Requests the frontend to search for matching content by text or style criteria.
 
         Args:
             query: The search query with filters.
-            docId: Document ID (int-like). Positive/negative are both allowed. 0 means current active document.
+            docId: Required document ID (int-like). Positive/negative are both allowed. 0 means current active document.
         """
         return _search_document_impl(query, docId)
 

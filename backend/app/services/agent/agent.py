@@ -1,40 +1,27 @@
-"""
-文档处理 Agent - 使用 LangGraph ReAct 单一智能体 + 流式输出
-重构后使用 build_graph + bind_tools，可直接访问 invalid_tool_calls 进行修复
-"""
+"""文档处理 Agent - 使用 LangChain create_agent + 中间件 + 流式输出。"""
 
 import asyncio
 import concurrent.futures
 import json
-import os
 import re
-import sys
 import time
 import traceback
 from collections.abc import AsyncGenerator
 from typing import Any
 
+from langchain.agents import create_agent
 from langchain_core.messages import (
     AIMessage,
     AIMessageChunk,
     HumanMessage,
-    RemoveMessage,
     SystemMessage,
     ToolMessage,
 )
-from langgraph.graph import END, START, MessagesState, StateGraph
 
 from app.core.logging import get_logger
-from app.services.document import (
-    build_document_name_by_id,
-    format_document_range_line,
-    normalize_document_meta,
-)
-from app.services.llm_client import resolve_model, supports_thinking, init_chat_model_with_reasoning
 from app.services.agent.prompts import get_core_prompts
-from app.services.utils import normalize_tool_args, parse_tool_args_with_repair
+from app.services.agent.skills import build_skills_prompt
 from app.services.agent.tools import (
-    TOOL_MAP,
     _current_chat_id,
     _current_model_name,
     _current_request_context,
@@ -44,37 +31,17 @@ from app.services.agent.tools import (
     load_mcp_tools,
     register_loop,
 )
-from app.services.agent.skills import build_skills_prompt
-from app.services.tools.tool_log import append_tool_call, build_tool_json, set_current_tool_log
+from app.services.document import (
+    build_document_name_by_id,
+    format_document_range_line,
+    normalize_document_meta,
+)
+from app.services.llm_client import init_chat_model_with_reasoning, resolve_model, supports_thinking
+from app.services.middleware import DEFAULT_AGENT_MIDDLEWARE
+from app.services.tools.tool_log import build_tool_json, set_current_tool_log
+from app.services.utils import try_init_langsmith
 
 logger = get_logger(__name__)
-
-
-def _get_env_int(name: str, default: int) -> int:
-    """Read positive int env var with fallback."""
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    try:
-        value = int(str(raw).strip())
-        return value if value > 0 else default
-    except Exception:
-        return default
-
-
-_AGENT_RECURSION_LIMIT = _get_env_int("WORDAGENT_AGENT_RECURSION_LIMIT", 100)
-
-
-def _bind_tools_for_agent(llm, tools: list):
-    """Bind tools with stricter argument generation when the model adapter supports it."""
-    try:
-        return llm.bind_tools(tools, strict=True, parallel_tool_calls=False)
-    except TypeError:
-        logger.warning("[Agent] 当前模型适配器不支持 strict/parallel_tool_calls，使用默认工具绑定")
-        return llm.bind_tools(tools)
-    except Exception as exc:
-        logger.warning(f"[Agent] strict 工具绑定失败，使用默认工具绑定: {exc}")
-        return llm.bind_tools(tools)
 
 
 def _summarize_custom_event(chunk: Any) -> str:
@@ -149,7 +116,7 @@ def _summarize_custom_event(chunk: Any) -> str:
             if key in chunk and chunk.get(key) is not None:
                 parts.append(f"{key}={chunk.get(key)}")
     else:
-        keys = sorted(str(k) for k in chunk.keys())
+        keys = sorted(str(k) for k in chunk)
         parts.append(f"keys={keys}")
 
     return " ".join(parts)
@@ -166,60 +133,7 @@ class ContextOverflowError(Exception):
         self.compressed_history = compressed_history
 
 
-# region LangSmith（可选，不影响正常运行）
-
-
-def _try_init_langsmith():
-    """尝试加载 .env 并初始化 LangSmith 环境变量，失败时静默跳过。"""
-    try:
-        from pathlib import Path
-        from dotenv import load_dotenv
-
-        candidates: list[Path] = []
-        if getattr(sys, "frozen", False):
-            candidates.append(Path(sys.executable).parent / ".env")
-            meipass = getattr(sys, "_MEIPASS", None)
-            if meipass:
-                candidates.append(Path(meipass) / ".env")
-
-        candidates.append(Path(__file__).resolve().parent.parent.parent.parent / ".env")
-        candidates.append(Path.cwd() / ".env")
-
-        seen: set[Path] = set()
-        for env_path in candidates:
-            try:
-                resolved = env_path.resolve()
-            except Exception:
-                resolved = env_path
-            if resolved in seen:
-                continue
-            seen.add(resolved)
-            if resolved.exists():
-                logger.info(f"[LangSmith] 加载 .env: {resolved}")
-                load_dotenv(resolved, override=False)
-
-        api_key = os.environ.get("LANGSMITH_API_KEY") or ""
-        endpoint = os.environ.get("LANGSMITH_ENDPOINT") or "https://api.smith.langchain.com"
-        project = os.environ.get("LANGSMITH_PROJECT") or "WordAgent"
-
-        if api_key and project:
-            os.environ["LANGCHAIN_API_KEY"] = api_key
-            os.environ["LANGCHAIN_ENDPOINT"] = endpoint
-            os.environ["LANGCHAIN_PROJECT"] = project
-            os.environ["LANGCHAIN_TRACING_V2"] = "true"
-            logger.info(f"[LangSmith] ✅ 已启用 tracing，project = {project}")
-            return True
-        else:
-            logger.warning(f"[LangSmith] ⚠️ 未启用 - API_KEY: {'已设置' if api_key else '未设置'}, PROJECT: {project}")
-    except Exception as e:
-        logger.error(f"[LangSmith] ⚠️ 初始化失败: {e}")
-    return False
-
-
-_langsmith_enabled = _try_init_langsmith()
-
-
-# endregion
+_langsmith_enabled = try_init_langsmith()
 
 
 _THINK_TAG_RE = re.compile(r"<think(?:ing)?\b[^>]*>(.*?)</think(?:ing)?>", re.IGNORECASE | re.DOTALL)
@@ -410,310 +324,6 @@ def _is_image_input_unsupported_error(exc: Exception) -> bool:
     return any(sig in text for sig in image_signals)
 
 
-# region LangGraph Agent（ReAct）
-
-
-def build_graph(llm_with_tools, all_tools: list):
-    """
-    构建 LangGraph ReAct 工作流（单一智能体）
-
-    流程：
-    START -> agent -> (有 tool_calls) -> tools -> agent -> ... -> END
-                   -> (有 invalid_tool_calls) -> repair -> agent -> ...
-                   -> (无 tool_calls 且无 invalid_tool_calls) -> END
-
-    Args:
-        llm_with_tools: 绑定了工具的 LLM
-        all_tools: 所有可用工具（包括 BASE_TOOLS + MCP_tools）
-
-    关键改进：
-    - repair 节点从 invalid_tool_calls 中提取原始 JSON 字符串进行修复并执行
-    - 无需 LangChain 的 create_agent，避免 invalid_tool_calls 被吞掉
-    """
-    # 构建完整的工具查找表（BASE_TOOLS + MCP_tools）
-    tool_map: dict[str, Any] = {t.name: t for t in all_tools}
-
-    graph = StateGraph(MessagesState)
-
-    # ---- 节点 ----
-
-    def agent_node(state: MessagesState) -> dict:
-        """单一 Agent 节点 - 决定下一步行动或直接回复"""
-        chat_id = _current_chat_id.get(None)
-        if is_stop_requested(chat_id):
-            logger.info(f"[Agent] ⛔ 收到停止信号，终止 Agent 节点 (session={chat_id})")
-            return {"messages": []}
-        logger.debug("[Agent] 开始处理")
-        invoke_messages = state["messages"]
-        try:
-            from app.services.context import _light_compact_tool_results
-
-            compacted_messages, light_meta = _light_compact_tool_results(invoke_messages)
-            if light_meta.get("light_compact_triggered"):
-                logger.info(f"[Agent] 轻量压缩生效: 清除 {light_meta.get('cleared_tool_results', 0)} 个旧工具结果")
-                invoke_messages = compacted_messages
-        except Exception as compact_err:
-            logger.info(f"[Agent] 轻量压缩跳过: {compact_err}")
-        response = llm_with_tools.invoke(invoke_messages)
-        return {"messages": [response]}
-
-    def tools_node(state: MessagesState) -> dict:
-        """工具执行节点 - 执行 Agent 请求的所有工具"""
-        last_message = state["messages"][-1]
-        results = []
-        chat_id = _current_chat_id.get(None)
-
-        for tool_call in last_message.tool_calls:
-            if is_stop_requested(chat_id):
-                logger.info(f"[Tools] ⛔ 收到停止信号，终止后续工具执行 (session={chat_id})")
-                break
-            tool_name = tool_call["name"]
-            logger.info(f"[Tools] 执行工具: {tool_name}")
-
-            tool_fn = tool_map.get(tool_name)
-            if tool_fn:
-                try:
-                    logger.debug(
-                        f"[Tools] 调用 normalize_tool_args 前，args 类型={type(tool_call['args'])}, keys={list(tool_call['args'].keys()) if isinstance(tool_call['args'], dict) else 'N/A'}"
-                    )
-                    # 用 normalize_tool_args 预处理参数，修复 JSON 字符串转义等问题
-                    normalized_args = normalize_tool_args(tool_name, tool_call["args"])
-                    logger.debug(
-                        f"[Tools] normalize_tool_args 返回，类型={type(normalized_args)}, keys={list(normalized_args.keys()) if isinstance(normalized_args, dict) else 'N/A'}"
-                    )
-                    result = tool_fn.invoke(normalized_args)
-                    if isinstance(result, dict):
-                        content = json.dumps(result, ensure_ascii=False)
-                    elif isinstance(result, str):
-                        content = result
-                    else:
-                        content = str(result)
-                    results.append(ToolMessage(content=content, tool_call_id=tool_call["id"], name=tool_name))
-                    append_tool_call(
-                        tool=tool_name,
-                        input=normalized_args,
-                        output=result,
-                        is_mcp=tool_name.startswith("mcp_") or tool_name not in tool_map,
-                    )
-                except Exception as e:
-                    # 为不同工具生成友好的错误消息
-                    is_mcp_tool = tool_name.startswith("mcp_") or tool_name not in (
-                        "search_document",
-                        "read_document",
-                        "generate_document",
-                        "delete_document",
-                        "edit_document",
-                        "insert_break",
-                        "create_document",
-                        "list_file",
-                        "read_file",
-                        "edit_file",
-                        "load_skill_context",
-                        "create_workflow",
-                        "review_document",
-                        "ask",
-                        "run_sub_agent",
-                    )
-                    if is_mcp_tool:
-                        err = f"MCP tool '{tool_name}' execution failed: {e}. The error has been returned as tool result. Please analyze the error and decide how to proceed - you may retry with corrected parameters, use an alternative tool, or report the failure in your response."
-                    elif tool_name == "generate_document":
-                        err = f"Tool {tool_name} failed: {e}. Use correct schema format. For generate_document, document must be an object, not a JSON string."
-                    else:
-                        err = f"Tool {tool_name} failed: {e}. Please check the parameters and try again."
-                    logger.error(f"[Tools] ❌ {err}")
-                    results.append(ToolMessage(content=err, tool_call_id=tool_call["id"], name=tool_name))
-                    append_tool_call(
-                        tool=tool_name,
-                        input=tool_call.get("args", {}),
-                        output=err,
-                        error=True,
-                        is_mcp=is_mcp_tool,
-                    )
-            else:
-                logger.warning(f"[Tools] ⚠️ 未知工具: {tool_name}")
-                unknown_err = f"Error: unknown tool {tool_name}"
-                results.append(ToolMessage(content=unknown_err, tool_call_id=tool_call["id"], name=tool_name))
-                append_tool_call(tool=tool_name, input=tool_call.get("args", {}), output=unknown_err, error=True)
-
-        return {"messages": results}
-
-    def repair_invalid_tool_call_node(state: MessagesState) -> dict:
-        """
-        修复 invalid_tool_calls 并直接执行。
-
-        处理 escaped JSON 字符串问题：
-        - 模型生成的 document 参数可能是转义字符串
-        - LangChain 的 parse_tool_call 会将这些放入 invalid_tool_calls
-        - 这里尝试修复并执行
-        """
-        last_message = state["messages"][-1]
-        invalid_calls = getattr(last_message, "invalid_tool_calls", []) or []
-        chat_id = _current_chat_id.get(None)
-        repaired_tool_calls = []
-        repaired_results = []
-
-        for tc in invalid_calls:
-            if is_stop_requested(chat_id):
-                logger.info(f"[Repair] ⛔ 收到停止信号，终止修复执行 (session={chat_id})")
-                break
-
-            tool_name = tc.get("name", "")
-            tool_fn = tool_map.get(tool_name)
-            if not tool_fn:
-                logger.warning(f"[Repair] ⚠️ 未知工具跳过: {tool_name}")
-                continue
-
-            raw_args = tc.get("args", "")
-            error_msg = tc.get("error", "")
-            logger.info(f"[Repair] 尝试修复工具: {tool_name}")
-            if error_msg:
-                logger.error(f"[Repair] 原始错误: {error_msg}")
-            else:
-                logger.debug("[Repair] 原始错误: None")
-            logger.debug(f"[Repair] 原始 args: {str(raw_args)[:500]}...")
-
-            parsed_args = parse_tool_args_with_repair(raw_args)
-            if parsed_args is not None:
-                logger.info("[Repair] ✅ 工具参数解析/修复成功")
-
-            if parsed_args is None:
-                logger.error(f"[Repair] ❌ 无法解析工具参数: {tool_name}")
-                continue
-
-            try:
-                normalized_args = normalize_tool_args(tool_name, parsed_args)
-            except Exception as norm_err:
-                logger.error(f"[Repair] ⚠️ normalize_tool_args 失败: {norm_err}，使用原始参数")
-                normalized_args = parsed_args
-
-            try:
-                result = tool_fn.invoke(normalized_args)
-                if isinstance(result, dict):
-                    content = json.dumps(result, ensure_ascii=False)
-                elif isinstance(result, str):
-                    content = result
-                else:
-                    content = str(result)
-
-                repaired_tool_calls.append(
-                    {
-                        "name": tool_name,
-                        "args": normalized_args,
-                        "id": tc.get("id", "repaired"),
-                        "type": "tool_call",
-                    }
-                )
-                repaired_results.append(
-                    ToolMessage(content=content, tool_call_id=tc.get("id", "repaired"), name=tool_name)
-                )
-                append_tool_call(
-                    tool=tool_name,
-                    input=normalized_args,
-                    output=result,
-                    repaired=True,
-                    is_mcp=tool_name.startswith("mcp_") or tool_name not in tool_map,
-                )
-                logger.info(f"[Repair] ✅ 已修复并执行工具: {tool_name}")
-            except Exception as e:
-                err_text = f"Repaired tool '{tool_name}' execution failed: {e}"
-                logger.error(f"[Repair] ❌ {err_text}")
-                repaired_results.append(
-                    ToolMessage(content=err_text, tool_call_id=tc.get("id", "repaired"), name=tool_name)
-                )
-                append_tool_call(
-                    tool=tool_name,
-                    input=normalized_args,
-                    output=err_text,
-                    error=True,
-                    repaired=True,
-                    is_mcp=tool_name.startswith("mcp_") or tool_name not in tool_map,
-                )
-
-        if repaired_tool_calls:
-            logger.info(f"[Repair] ✅ 成功修复 {len(repaired_tool_calls)} 个工具调用")
-            return {
-                "messages": [
-                    RemoveMessage(id=last_message.id),
-                    AIMessage(content="", tool_calls=repaired_tool_calls),
-                    *repaired_results,
-                ]
-            }
-
-        logger.warning("[Repair] ⚠️ 无法自动修复，提示模型重试")
-        return {
-            "messages": [
-                RemoveMessage(id=last_message.id),
-                SystemMessage(
-                    content=(
-                        "[RETRY_GENERATE] Your previous tool call arguments were invalid. "
-                        "Retry generate_document and follow these rules exactly: "
-                        "1) The document argument must be a JSON object, not a string. "
-                        "2) Do not use json.dumps(), escaped JSON strings, or markdown code fences. "
-                        "The tool call must be exactly one balanced top-level JSON object; do not add extra closing braces or brackets after it. "
-                        "3) Use paragraph style IDs such as pS_1 and run style IDs such as rS_2. "
-                        "4) Every referenced style must be defined: pS_* arrays have 9 items, "
-                        "rS_* arrays have 11 items, cS_* arrays have 4 items, and tS_* arrays have 1 item. "
-                        "5) Do not put raw ASCII double quote characters inside generated text fields "
-                        "(run.text, cell.text, or table paragraph text). Use Chinese quotation marks "
-                        "such as “...” or 「...」 for quoted phrases. "
-                        "6) insertParaID is required. Use insertParaID=0 to insert at the document start, "
-                        "or use a real nonzero paraID to insert after that paragraph."
-                    )
-                ),
-            ]
-        }
-
-    # ---- 路由 ----
-
-    def should_continue(state: MessagesState) -> str:
-        """判断 Agent 是否还需要调用工具"""
-        chat_id = _current_chat_id.get(None)
-        if is_stop_requested(chat_id):
-            logger.info("[Router] -> END (用户停止)")
-            return END
-
-        last_message = state["messages"][-1]
-
-        if hasattr(last_message, "tool_calls") and last_message.tool_calls:
-            logger.info(f"[Router] -> tools (有 {len(last_message.tool_calls)} 个有效工具调用)")
-            return "tools"
-
-        invalid_calls = getattr(last_message, "invalid_tool_calls", []) or []
-        if invalid_calls:
-            tool_names = [tc.get("name", "?") for tc in invalid_calls]
-            logger.warning(f"[Router] ⚠️ 检测到无效工具调用: {tool_names}")
-            for idx, tc in enumerate(invalid_calls, 1):
-                logger.error(
-                    f"[Router] invalid_tool_call[{idx}] name={tc.get('name', '?')} "
-                    f"error={tc.get('error', '?')} args={str(tc.get('args', ''))[:100]}"
-                )
-            logger.info("[Router] -> repair")
-            return "repair"
-
-        logger.info("[Router] -> END")
-        return END
-
-    # ---- 构建图 ----
-
-    graph.add_node("agent", agent_node)
-    graph.add_node("tools", tools_node)
-    graph.add_node("repair", repair_invalid_tool_call_node)
-
-    graph.add_edge(START, "agent")
-    graph.add_conditional_edges(
-        "agent",
-        should_continue,
-        {"tools": "tools", "repair": "repair", END: END},
-    )
-    graph.add_edge("tools", "agent")
-    graph.add_edge("repair", "agent")
-
-    return graph.compile()
-
-
-# endregion
-
-
 # region 主处理函数
 
 
@@ -730,31 +340,19 @@ async def process_writing_request_stream(
     enable_thinking: bool = True,
 ) -> AsyncGenerator[str, None]:
     """
-    使用 LangGraph ReAct Agent 处理写作请求（流式输出）
+    使用 LangChain create_agent 处理写作请求并流式输出。
 
     重构要点：
-    - 使用 build_graph + llm.bind_tools 替代 create_agent
-    - 保留 repair 节点处理 invalid_tool_calls
-    - 保留所有原有功能（记忆、压缩、MCP、thinking）
+    - Todo、工具参数规范化、日志、结果压缩和失败重试均由中间件处理
+    - 保留记忆、上下文压缩、MCP 自定义事件和 thinking 流式输出
     """
     mode = (mode or "agent").strip().lower()
-    if mode == "plan":
-        mode = "agent"
-    elif mode not in {"agent", "ask"}:
+    if mode == "plan" or mode not in {"agent", "ask"}:
         mode = "agent"
 
     logger.info("[Agent] 开始处理请求")
     logger.info(f"[Agent] 模式: {mode}")
     logger.info(f"[Agent] 深度思考: {enable_thinking}")
-    logger.info(
-        " ".join(
-            str(value)
-            for value in (
-                "[Agent] 配置: recursion_limit =",
-                _AGENT_RECURSION_LIMIT,
-            )
-        )
-    )
 
     model_name = resolve_model(model or "auto", provider or "")
     _thinking_enabled = enable_thinking and supports_thinking(model_name)
@@ -775,7 +373,7 @@ async def process_writing_request_stream(
         mcp_failed_servers = []
     mcp_tool_names = {t.name for t in mcp_tools}
     tools = get_base_tools_for_mode(mode) + mcp_tools
-    logger.info(f"[Agent] 已绑定 {len(tools)} 个工具")
+    logger.info(f"[Agent] 已注册 {len(tools)} 个业务工具，中间件将追加 write_todos")
     logger.debug(f"[Agent] 工具列表: {[t.name for t in tools]}")
 
     # 构建系统提示
@@ -810,20 +408,21 @@ async def process_writing_request_stream(
     system_parts.append(f"Current time: {current_time}")
     system_prompt = "\n\n".join(system_parts)
 
-    # 使用 bind_tools + build_graph（替代 create_agent）
-    llm_with_tools = _bind_tools_for_agent(llm, tools)
-    app = build_graph(llm_with_tools, tools)
+    app = create_agent(
+        model=llm,
+        tools=tools,
+        system_prompt=system_prompt,
+        middleware=DEFAULT_AGENT_MIDDLEWARE,
+    )
     tool_log: list[dict] = []
     meta_list = normalize_document_meta(document_meta)
     document_name_by_id = build_document_name_by_id(meta_list)
     document_meta_for_context = meta_list[0] if len(meta_list) == 1 else meta_list
+    executor: concurrent.futures.ThreadPoolExecutor | None = None
 
     try:
         # 构建初始消息列表
         messages = []
-
-        # 注入系统提示（单一 SystemMessage）
-        messages.append(SystemMessage(content=system_prompt))
 
         # 注入短期记忆（仅保留最近 k 轮对话原文）
         from app.services.memory import build_short_term_messages
@@ -985,7 +584,6 @@ async def process_writing_request_stream(
                 _thread_id = str(_uuid.uuid4())
                 _config = {
                     "configurable": {"thread_id": _thread_id},
-                    "recursion_limit": _AGENT_RECURSION_LIMIT,
                 }
                 if langsmith_config:
                     _config.update(langsmith_config)
@@ -1047,8 +645,8 @@ async def process_writing_request_stream(
 
             # 上下文超限被动重压缩
             if isinstance(stream_item, tuple) and stream_item[0] == "context_overflow":
-                logger.warning(f"[Agent] ⚠️ 收到上下文超限信号，触发被动重量重压缩")
-                from app.services.context import compress_conversation_history_if_needed, _estimate_messages_tokens
+                logger.warning("[Agent] ⚠️ 收到上下文超限信号，触发被动重量重压缩")
+                from app.services.context import _estimate_messages_tokens, compress_conversation_history_if_needed
 
                 current_tokens = _estimate_messages_tokens(_conversation_history)
                 compressed, meta = compress_conversation_history_if_needed(
@@ -1110,7 +708,6 @@ async def process_writing_request_stream(
                         from app.services.context import MAX_CONTEXT_TOKENS
 
                         tokens_k = _last_input_tokens / 1000
-                        max_tokens_k = MAX_CONTEXT_TOKENS / 1000
                         logger.info(f"[Agent] 当前上下文: {tokens_k:.1f}k tokens")
                         yield f"data: {json.dumps({'type': 'token_stats', 'current_tokens': _last_input_tokens, 'max_tokens': MAX_CONTEXT_TOKENS}, ensure_ascii=False)}\n\n"
 
@@ -1139,7 +736,7 @@ async def process_writing_request_stream(
                     has_tool_result = True
 
                     if tool_name == "run_sub_agent":
-                        logger.info(f"[Agent] ⏭️ 跳过 run_sub_agent 工具返回值")
+                        logger.info("[Agent] ⏭️ 跳过 run_sub_agent 工具返回值")
                         if isinstance(content, str) and content.startswith("Sub-agent execution failed"):
                             yield f"data: {json.dumps({'type': 'status', 'content': content}, ensure_ascii=False)}\n\n"
                         elif isinstance(content, str) and content:
@@ -1251,3 +848,6 @@ async def process_writing_request_stream(
         traceback.print_exc()
         yield f"data: {json.dumps({'type': 'text', 'content': f'Error: {str(e)}'}, ensure_ascii=False)}\n\n"
         yield "data: [DONE]\n\n"
+    finally:
+        if executor is not None:
+            executor.shutdown(wait=False, cancel_futures=True)
