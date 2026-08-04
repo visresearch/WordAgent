@@ -1073,7 +1073,7 @@ async function getLatestSession() {
 /**
  * 获取会话详情（含消息）
  *
- * @param {number} sessionId - 会话 ID
+ * @param {string} sessionId - UUID 会话 ID
  * @returns {Promise<Object>} - 会话详情及消息列表
  */
 async function getSession(sessionId) {
@@ -1083,7 +1083,7 @@ async function getSession(sessionId) {
 /**
  * 重命名会话
  *
- * @param {number} sessionId - 会话 ID
+ * @param {string} sessionId - UUID 会话 ID
  * @param {string} title - 新标题
  * @returns {Promise<Object>} - 更新后的会话
  */
@@ -1097,7 +1097,7 @@ async function renameSessionApi(sessionId, title) {
 /**
  * 删除会话
  *
- * @param {number} sessionId - 会话 ID
+ * @param {string} sessionId - UUID 会话 ID
  * @returns {Promise<Object>} - 操作结果
  */
 async function deleteSessionApi(sessionId) {
@@ -1107,7 +1107,7 @@ async function deleteSessionApi(sessionId) {
 /**
  * 获取会话消息列表
  *
- * @param {number} sessionId - 会话 ID
+ * @param {string} sessionId - UUID 会话 ID
  * @param {Object} options - 选项
  * @param {number} options.limit - 返回数量限制
  * @param {number} options.offset - 偏移量
@@ -1122,7 +1122,7 @@ async function getSessionMessages(sessionId, options = {}) {
 /**
  * 向会话添加消息
  *
- * @param {number} sessionId - 会话 ID
+ * @param {string} sessionId - UUID 会话 ID
  * @param {Object} messageData - 消息数据
  * @param {string} messageData.role - 消息角色（user/assistant）
  * @param {string} messageData.content - 消息内容

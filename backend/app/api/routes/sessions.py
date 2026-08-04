@@ -10,14 +10,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.logging import get_logger
-from app.services.memory import delete_thread
+from app.services.memory import delete_thread, get_thread_token_stats
+from app.services.middleware import MAX_CONTEXT_TOKENS
 from app.services.session_service import SessionService
 
 router = APIRouter()
 logger = get_logger(__name__)
 
 
-async def _delete_checkpoint(request: Request, session_id: int) -> None:
+async def _delete_checkpoint(request: Request, session_id: str) -> None:
     """删除 Session 对应的 Agent 状态，失败时记录并向调用方抛出。"""
     try:
         checkpointer = request.app.state.checkpointer
@@ -82,6 +83,7 @@ class SessionDetailResponse(BaseModel):
     lastUsedModel: str | None = None
     lastUsedProvider: str | None = None
     lastUsedMode: str | None = None
+    tokenStats: dict | None = None
     error: str | None = None
 
 
@@ -102,6 +104,16 @@ class CommonResponse(BaseModel):
     success: bool
     message: str | None = None
     error: str | None = None
+
+
+async def _get_session_token_stats(request: Request, session_id: str) -> dict:
+    """读取历史会话最后一次主模型调用的上下文用量。"""
+    try:
+        checkpointer = request.app.state.checkpointer
+        return await get_thread_token_stats(checkpointer, session_id, MAX_CONTEXT_TOKENS)
+    except Exception:
+        logger.exception("读取会话上下文 token 失败: session_id=%s", session_id)
+        return {"current": 0, "max": MAX_CONTEXT_TOKENS, "percentage": 0.0}
 
 
 # ============== 会话 CRUD 路由 ==============
@@ -167,6 +179,7 @@ async def clear_all_sessions(
 
 @router.get("/sessions/latest", response_model=SessionDetailResponse)
 async def get_latest_session(
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -189,6 +202,7 @@ async def get_latest_session(
             lastUsedModel=last_settings.get("model"),
             lastUsedProvider=last_settings.get("provider"),
             lastUsedMode=last_settings.get("mode"),
+            tokenStats=await _get_session_token_stats(request, session.id),
         )
     except Exception as e:
         return SessionDetailResponse(success=False, error=str(e))
@@ -196,7 +210,8 @@ async def get_latest_session(
 
 @router.get("/sessions/{session_id}", response_model=SessionDetailResponse)
 async def get_session(
-    session_id: int,
+    session_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -217,6 +232,7 @@ async def get_session(
             lastUsedModel=last_settings.get("model"),
             lastUsedProvider=last_settings.get("provider"),
             lastUsedMode=last_settings.get("mode"),
+            tokenStats=await _get_session_token_stats(request, session_id),
         )
     except Exception as e:
         return SessionDetailResponse(success=False, error=str(e))
@@ -224,7 +240,7 @@ async def get_session(
 
 @router.patch("/sessions/{session_id}", response_model=SessionResponse)
 async def rename_session(
-    session_id: int,
+    session_id: str,
     request: RenameSessionRequest,
     db: AsyncSession = Depends(get_db),
 ):
@@ -243,7 +259,7 @@ async def rename_session(
 
 @router.delete("/sessions/{session_id}", response_model=CommonResponse)
 async def delete_session(
-    session_id: int,
+    session_id: str,
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
@@ -268,7 +284,7 @@ async def delete_session(
 
 @router.get("/sessions/{session_id}/messages", response_model=MessagesResponse)
 async def get_session_messages(
-    session_id: int,
+    session_id: str,
     limit: int = Query(default=200, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
@@ -293,7 +309,7 @@ async def get_session_messages(
 
 @router.post("/sessions/{session_id}/messages", response_model=CommonResponse)
 async def add_message(
-    session_id: int,
+    session_id: str,
     request: AddMessageRequest,
     db: AsyncSession = Depends(get_db),
 ):
@@ -326,7 +342,7 @@ async def add_message(
 
 @router.delete("/sessions/{session_id}/messages", response_model=CommonResponse)
 async def clear_session_messages(
-    session_id: int,
+    session_id: str,
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):

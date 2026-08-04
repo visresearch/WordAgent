@@ -75,3 +75,32 @@ def test_clear_all_sessions_deletes_every_checkpoint_first(monkeypatch) -> None:
 
     assert response.success is True
     assert checkpointer.deleted == ["session:81", "session:82"]
+
+
+def test_get_session_returns_checkpoint_token_stats(monkeypatch) -> None:
+    checkpointer = _Checkpointer()
+
+    class Service:
+        def __init__(self, _db):
+            pass
+
+        async def get_session(self, session_id):
+            return SimpleNamespace(id=session_id, to_dict=lambda: {"id": session_id})
+
+        async def get_messages(self, _session_id):
+            return []
+
+        async def get_last_used_settings(self, _session_id):
+            return {"model": None, "provider": None, "mode": None}
+
+    async def fake_token_stats(received_checkpointer, session_id, max_tokens):
+        assert received_checkpointer is checkpointer
+        assert session_id == 91
+        return {"current": 41848, "max": max_tokens, "percentage": 83.7}
+
+    monkeypatch.setattr(sessions, "SessionService", Service)
+    monkeypatch.setattr(sessions, "get_thread_token_stats", fake_token_stats)
+    response = asyncio.run(sessions.get_session(91, _request(checkpointer), object()))
+
+    assert response.success is True
+    assert response.tokenStats["current"] == 41848

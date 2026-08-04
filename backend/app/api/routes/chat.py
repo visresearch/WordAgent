@@ -24,6 +24,7 @@ from app.services.agent.tools import (
 )
 from app.services.memory import single_agent_thread_lock
 from app.services.session_service import SessionService
+from app.services.utils import _get_env_int, normalize_uuid
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -31,8 +32,11 @@ router = APIRouter()
 # Idle watchdog 阈值（秒）：超过 IDLE_WARN_SECONDS 没有 chunk 时，
 # 给前端一条"正在思考下一步"提示；超过 IDLE_ABORT_SECONDS 仍无 chunk 时，
 # 强制停止 LLM 调用并断开 WebSocket。
-IDLE_WARN_SECONDS = 100
-IDLE_ABORT_SECONDS = 300
+IDLE_WARN_SECONDS = _get_env_int("WORDAGENT_IDLE_WARN_SECONDS", 100)
+IDLE_ABORT_SECONDS = max(
+    IDLE_WARN_SECONDS + 1,
+    _get_env_int("WORDAGENT_IDLE_ABORT_SECONDS", 300),
+)
 # 应用层 keepalive：长 LLM 思考期间，每隔 KEEPALIVE_INTERVAL 秒推一条 ping
 # 防止 WPS WebView / 中间代理因连接长时间空闲而强制关闭 WebSocket。
 KEEPALIVE_INTERVAL = 20
@@ -86,7 +90,7 @@ async def chat_websocket(websocket: WebSocket):
     ------------
     1. 发起聊天：
        ``{"type":"chat","message":"...","mode":"agent|ask",``
-       ``"model":"auto","provider":"...","sessionId":1,``
+       ``"model":"auto","provider":"...","sessionId":"019f...",``
        ``"documentRange":[...],"documentMeta":{...},``
        ``"selectionContext":{...},"files":[...],"enableThinking":true}``
 
@@ -233,10 +237,7 @@ async def chat_websocket(websocket: WebSocket):
                 model = data.get("model", "")
                 provider = data.get("provider", "")
                 raw_session_id = data.get("sessionId")
-                try:
-                    session_id = int(raw_session_id) if raw_session_id is not None else None
-                except (TypeError, ValueError):
-                    session_id = None
+                session_id = normalize_uuid(raw_session_id)
                 document_meta = data.get("documentMeta") or {}
                 raw_selection_context = data.get("selectionContext")
                 selection_context = raw_selection_context if isinstance(raw_selection_context, (list, dict)) else None
@@ -456,7 +457,7 @@ async def _iterate_with_idle_watchdog(aiter, on_warn, on_abort):
 async def _single_agent_stream_with_state(
     *,
     checkpointer,
-    session_id: int | None,
+    session_id: str | None,
     chat_id: str,
     message: str,
     document_range: list | None,
@@ -487,7 +488,7 @@ async def _single_agent_stream_with_state(
 
 async def _persist_chat_turn(
     *,
-    session_id: int | None,
+    session_id: str | None,
     user_content: str,
     assistant_content: str,
     selection_context: list | dict | None,
@@ -563,7 +564,7 @@ async def _run_ws_stream(
     selection_context: list | dict | None = None,
     attached_files: list | None = None,
     enable_thinking: bool = True,
-    session_id: int | None = None,
+    session_id: str | None = None,
 ):
     """在 WebSocket 上运行单智能体流式处理。"""
     mode = _normalize_mode(mode)

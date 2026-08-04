@@ -8,6 +8,11 @@ from app.api.routes import chat
 from app.services.agent import agent as single_agent
 
 
+def test_idle_watchdog_thresholds_are_valid() -> None:
+    assert chat.IDLE_WARN_SECONDS > 0
+    assert chat.IDLE_ABORT_SECONDS > chat.IDLE_WARN_SECONDS
+
+
 class _WebSocket:
     def __init__(self, checkpointer=None, *, expose_state: bool = True):
         self.sent: list[str] = []

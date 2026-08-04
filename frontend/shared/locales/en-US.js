@@ -112,7 +112,7 @@ export default {
     paragraphRange: 'Paragraphs {start} - {end}', showHistory: 'Show chat history', whatCanIDo: 'What can I do?',
     documentation: 'Documentation', selectionRef: 'Referenced selections ({count})', fileRef: 'Referenced files ({count})',
     unknownFile: 'Unknown file', preparing: 'AI is preparing', thinking: 'Deep thinking', thinkingDone: 'Deep thinking (complete)',
-    contextCompactionStarted: 'Summarizing earlier conversation context', contextCompactionCompleted: 'Conversation context summarized',
+    contextCompactionStarted: '🗜️ Automatically compacting context', contextCompactionCompleted: '✅ Context compaction complete',
     collapseMcp: 'Collapse MCP details', expandMcp: 'Expand MCP details', callMcp: 'Calling MCP tool: {name}',
     arguments: 'Arguments:', noArguments: 'No arguments', toolOutput: 'Tool output:', noOutput: '(No output)',
     outputDocument: 'Insert into document', copyImage: 'Copy image', saveImage: 'Save image', selection: 'Selection',

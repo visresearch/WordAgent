@@ -38,14 +38,13 @@ from app.services.document import (
 )
 from app.services.llm_client import init_chat_model_with_reasoning, resolve_model, supports_thinking
 from app.services.memory import build_runtime_thread_id
-from app.services.middleware import build_agent_middleware
+from app.services.middleware import MAX_CONTEXT_TOKENS, build_agent_middleware
 from app.services.tools.tool_log import build_tool_json, set_current_tool_log
-from app.services.utils import _get_env_int, try_init_langsmith
+from app.services.utils import try_init_langsmith
 
 logger = get_logger(__name__)
 
 MAX_CHECKPOINT_IMAGE_BYTES = 512 * 1024
-MAX_CONTEXT_TOKENS = _get_env_int("WORDAGENT_MAX_CONTEXT_TOKENS", 258000)
 
 
 def _attachment_size_bytes(attachment: dict, file_id: str) -> int | None:
@@ -324,6 +323,17 @@ def _is_context_overflow_error(exc: Exception) -> bool:
     return any(sig in text for sig in overflow_signals)
 
 
+def _friendly_agent_error_message(exc: Exception) -> str:
+    """把常见上游模型错误转换为可操作的用户提示。"""
+    text = str(exc)
+    lowered = text.lower()
+    if "无效工具调用参数" in text or "invalid tool call" in lowered:
+        return "模型生成的工具参数格式无效，已自动重新生成；仍失败时请拆分文档内容后重试"
+    if "insufficient balance" in lowered or ("402" in lowered and "balance" in lowered):
+        return "模型服务余额不足，请充值当前模型供应商账户，或切换到其他可用模型后重试"
+    return f"模型调用失败：{text}"
+
+
 def _is_image_input_unsupported_error(exc: Exception) -> bool:
     """判断是否是模型端点不支持图像输入错误。"""
     text = str(exc).lower()
@@ -353,7 +363,7 @@ async def process_writing_request_stream(
     chat_id: str | None = None,
     attached_files: list[dict] | None = None,
     enable_thinking: bool = True,
-    session_id: int | None = None,
+    session_id: str | None = None,
     checkpointer=None,
 ) -> AsyncGenerator[str, None]:
     """
@@ -430,7 +440,11 @@ async def process_writing_request_stream(
         model=llm,
         tools=tools,
         system_prompt=system_prompt,
-        middleware=build_agent_middleware(summary_model=llm),
+        middleware=build_agent_middleware(
+            summary_model=llm,
+            system_prompt=system_prompt,
+            tools=tools,
+        ),
         checkpointer=checkpointer,
     )
     tool_log: list[dict] = []
@@ -836,7 +850,7 @@ async def process_writing_request_stream(
     except Exception as e:
         logger.error(f"[Agent Error] {e}")
         traceback.print_exc()
-        yield f"data: {json.dumps({'type': 'text', 'content': f'Error: {str(e)}'}, ensure_ascii=False)}\n\n"
+        yield f"data: {json.dumps({'type': 'error', 'content': _friendly_agent_error_message(e)}, ensure_ascii=False)}\n\n"
         yield "data: [DONE]\n\n"
     finally:
         if executor is not None:

@@ -2,13 +2,33 @@
 
 import json
 import os
+import secrets
 import sys
+import time
+import uuid
 from pathlib import Path
 from typing import Any
 
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def generate_uuid7() -> str:
+    """生成按时间排序的 UUIDv7 字符串，不引入额外运行时依赖。"""
+    timestamp_ms = (time.time_ns() // 1_000_000) & ((1 << 48) - 1)
+    value = (timestamp_ms << 80) | (0x7 << 76) | (secrets.randbits(12) << 64) | (0b10 << 62) | secrets.randbits(62)
+    return str(uuid.UUID(int=value))
+
+
+def normalize_uuid(value: Any) -> str | None:
+    """把 UUID 输入规范化为小写连字符格式；非法值返回 None。"""
+    if value is None:
+        return None
+    try:
+        return str(uuid.UUID(str(value).strip()))
+    except (AttributeError, TypeError, ValueError):
+        return None
 
 
 def _get_env_int(name: str, default: int) -> int:

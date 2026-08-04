@@ -39,7 +39,7 @@ class SessionService:
         await self.db.flush()
         return session
 
-    async def get_session(self, session_id: int) -> Session | None:
+    async def get_session(self, session_id: str) -> Session | None:
         """获取单个会话"""
         result = await self.db.execute(select(Session).where(Session.id == session_id))
         return result.scalar_one_or_none()
@@ -61,7 +61,7 @@ class SessionService:
         result = await self.db.execute(query)
         return list(result.scalars().all())
 
-    async def get_all_session_ids(self) -> list[int]:
+    async def get_all_session_ids(self) -> list[str]:
         """获取全部 Session ID，供关联状态清理使用。"""
         result = await self.db.execute(select(Session.id))
         return list(result.scalars().all())
@@ -77,7 +77,7 @@ class SessionService:
         result = await self.db.execute(query)
         return result.scalar_one_or_none()
 
-    async def rename_session(self, session_id: int, title: str) -> Session | None:
+    async def rename_session(self, session_id: str, title: str) -> Session | None:
         """
         重命名会话
 
@@ -96,7 +96,7 @@ class SessionService:
         await self.db.flush()
         return session
 
-    async def delete_session(self, session_id: int) -> bool:
+    async def delete_session(self, session_id: str) -> bool:
         """
         删除会话及其所有消息
 
@@ -117,7 +117,7 @@ class SessionService:
 
     async def get_messages(
         self,
-        session_id: int,
+        session_id: str,
         limit: int = 200,
         offset: int = 0,
     ) -> list[ChatMessage]:
@@ -132,9 +132,12 @@ class SessionService:
         Returns:
             消息列表，按时间正序
         """
+        session = await self.get_session(session_id)
+        if not session:
+            return []
         result = await self.db.execute(
             select(ChatMessage)
-            .where(ChatMessage.session_id == session_id)
+            .where(ChatMessage.session_id == session.db_id)
             .order_by(ChatMessage.created_at.asc())
             .offset(offset)
             .limit(limit)
@@ -143,13 +146,16 @@ class SessionService:
 
     async def get_recent_messages(
         self,
-        session_id: int,
+        session_id: str,
         limit: int = 200,
     ) -> list[ChatMessage]:
         """获取会话最近的消息，并按时间正序返回。"""
+        session = await self.get_session(session_id)
+        if not session:
+            return []
         result = await self.db.execute(
             select(ChatMessage)
-            .where(ChatMessage.session_id == session_id)
+            .where(ChatMessage.session_id == session.db_id)
             .order_by(desc(ChatMessage.created_at))
             .limit(limit)
         )
@@ -159,7 +165,7 @@ class SessionService:
 
     async def add_message(
         self,
-        session_id: int,
+        session_id: str,
         role: str,
         content: str,
         tool_json: dict | None = None,
@@ -188,7 +194,7 @@ class SessionService:
             return None
 
         message = ChatMessage(
-            session_id=session_id,
+            session_id=session.db_id,
             role=role,
             content=content,
             tool_json=tool_json,
@@ -213,7 +219,7 @@ class SessionService:
         await self.db.flush()
         return message
 
-    async def get_last_used_settings(self, session_id: int) -> dict:
+    async def get_last_used_settings(self, session_id: str) -> dict:
         """
         获取会话最后使用的 model 和 mode
 
@@ -223,9 +229,12 @@ class SessionService:
         Returns:
             包含 model 和 mode 的字典
         """
+        session = await self.get_session(session_id)
+        if not session:
+            return {"model": None, "provider": None, "mode": None}
         result = await self.db.execute(
             select(ChatMessage)
-            .where(ChatMessage.session_id == session_id)
+            .where(ChatMessage.session_id == session.db_id)
             .order_by(desc(ChatMessage.created_at))
             .limit(1)
         )
@@ -240,7 +249,7 @@ class SessionService:
             "mode": last_message.mode,
         }
 
-    async def clear_session_messages(self, session_id: int) -> bool:
+    async def clear_session_messages(self, session_id: str) -> bool:
         """
         清空会话的所有消息（保留会话本身）
 
@@ -254,7 +263,7 @@ class SessionService:
         if not session:
             return False
 
-        await self.db.execute(delete(ChatMessage).where(ChatMessage.session_id == session_id))
+        await self.db.execute(delete(ChatMessage).where(ChatMessage.session_id == session.db_id))
         session.preview = None
         session.updated_at = datetime.utcnow()
         await self.db.flush()

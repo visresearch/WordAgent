@@ -51,49 +51,68 @@ async def get_db():
             await session.close()
 
 
+def _initialize_schema(connection) -> None:
+    """创建当前表结构，并为旧业务会话补充对外 UUID。"""
+    from sqlalchemy import inspect as sa_inspect
+
+    inspector = sa_inspect(connection)
+    tables = inspector.get_table_names()
+
+    Base.metadata.create_all(connection)
+
+    if "sessions" in tables:
+        from app.services.utils import generate_uuid7
+
+        session_columns = {col["name"] for col in sa_inspect(connection).get_columns("sessions")}
+        if "session_uuid" not in session_columns:
+            connection.exec_driver_sql("ALTER TABLE sessions ADD COLUMN session_uuid VARCHAR(36)")
+            logger.info("已添加字段: sessions.session_uuid")
+
+        missing_ids = connection.exec_driver_sql(
+            "SELECT id FROM sessions WHERE session_uuid IS NULL OR session_uuid = ''"
+        ).fetchall()
+        for row in missing_ids:
+            connection.exec_driver_sql(
+                "UPDATE sessions SET session_uuid = ? WHERE id = ?",
+                (generate_uuid7(), row[0]),
+            )
+        connection.exec_driver_sql("CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_uuid ON sessions(session_uuid)")
+        if missing_ids:
+            logger.info("已为 %s 个历史会话生成 UUID", len(missing_ids))
+
+    if "chat_messages" in tables:
+        try:
+            msg_columns = {col["name"] for col in sa_inspect(connection).get_columns("chat_messages")}
+            json_columns = {
+                "selection_context",
+                "content_parts",
+                "attached_files",
+                "tool_json",
+            }
+            for col_name in json_columns:
+                if col_name not in msg_columns:
+                    connection.exec_driver_sql(f"ALTER TABLE chat_messages ADD COLUMN {col_name} JSON")
+                    logger.info("已添加字段: chat_messages.%s", col_name)
+            if "thinking" not in msg_columns:
+                connection.exec_driver_sql("ALTER TABLE chat_messages ADD COLUMN thinking TEXT")
+                logger.info("已添加字段: chat_messages.thinking")
+            if "model" not in msg_columns:
+                connection.exec_driver_sql("ALTER TABLE chat_messages ADD COLUMN model VARCHAR(64)")
+                logger.info("已添加字段: chat_messages.model")
+            if "provider" not in msg_columns:
+                connection.exec_driver_sql("ALTER TABLE chat_messages ADD COLUMN provider TEXT")
+                logger.info("已添加字段: chat_messages.provider")
+            if "mode" not in msg_columns:
+                connection.exec_driver_sql("ALTER TABLE chat_messages ADD COLUMN mode VARCHAR(20)")
+                logger.info("已添加字段: chat_messages.mode")
+        except Exception as e:
+            logger.warning("添加 chat_messages 字段失败: %s", e)
+
+
 async def init_db():
-    """
-    初始化数据库，创建所有表并补齐历史版本缺失列。
-    """
+    """初始化数据库，创建所有表并补齐历史版本缺失列。"""
     async with engine.begin() as conn:
-
-        def _check_and_create(connection):
-            from sqlalchemy import inspect as sa_inspect
-
-            inspector = sa_inspect(connection)
-            tables = inspector.get_table_names()
-
-            Base.metadata.create_all(connection)
-
-            if "chat_messages" in tables:
-                try:
-                    msg_columns = {col["name"] for col in sa_inspect(connection).get_columns("chat_messages")}
-                    json_columns = {
-                        "selection_context",
-                        "content_parts",
-                        "attached_files",
-                        "tool_json",
-                    }
-                    for col_name in json_columns:
-                        if col_name not in msg_columns:
-                            connection.exec_driver_sql(f"ALTER TABLE chat_messages ADD COLUMN {col_name} JSON")
-                            logger.info("已添加字段: chat_messages.%s", col_name)
-                    if "thinking" not in msg_columns:
-                        connection.exec_driver_sql("ALTER TABLE chat_messages ADD COLUMN thinking TEXT")
-                        logger.info("已添加字段: chat_messages.thinking")
-                    if "model" not in msg_columns:
-                        connection.exec_driver_sql("ALTER TABLE chat_messages ADD COLUMN model VARCHAR(64)")
-                        logger.info("已添加字段: chat_messages.model")
-                    if "provider" not in msg_columns:
-                        connection.exec_driver_sql("ALTER TABLE chat_messages ADD COLUMN provider TEXT")
-                        logger.info("已添加字段: chat_messages.provider")
-                    if "mode" not in msg_columns:
-                        connection.exec_driver_sql("ALTER TABLE chat_messages ADD COLUMN mode VARCHAR(20)")
-                        logger.info("已添加字段: chat_messages.mode")
-                except Exception as e:
-                    logger.warning("添加 chat_messages 字段失败: %s", e)
-
-        await conn.run_sync(_check_and_create)
+        await conn.run_sync(_initialize_schema)
 
 
 async def close_db():

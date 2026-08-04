@@ -22,6 +22,20 @@ class FakeWebSocket:
 
 
 class ContextOverflowRetryTests(unittest.IsolatedAsyncioTestCase):
+    def test_insufficient_balance_has_actionable_message(self):
+        error = RuntimeError("Error code: 402 - Insufficient Balance")
+        message = single_agent._friendly_agent_error_message(error)
+
+        self.assertIn("余额不足", message)
+        self.assertIn("切换", message)
+
+    def test_invalid_tool_call_has_actionable_message(self):
+        error = RuntimeError("模型连续生成无效工具调用参数: generate_document")
+        message = single_agent._friendly_agent_error_message(error)
+
+        self.assertIn("工具参数格式无效", message)
+        self.assertIn("拆分", message)
+
     def test_agent_generators_rethrow_context_overflow_before_generic_errors(self):
         stream_fn = single_agent.process_writing_request_stream
         tree = ast.parse(inspect.getsource(stream_fn))

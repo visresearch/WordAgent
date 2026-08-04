@@ -6,7 +6,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-from app.services.memory import build_thread_config, single_agent_thread_lock
+from app.services.memory import build_thread_config, get_thread_token_stats, single_agent_thread_lock
 
 
 async def _save_messages(checkpointer, session_id: int, messages: list) -> None:
@@ -89,6 +89,28 @@ def test_single_agent_tool_calls_are_restored(tmp_path) -> None:
         assert restored[1].tool_calls == [tool_call]
         assert isinstance(restored[2], ToolMessage)
         assert restored[2].content == "文档内容"
+
+    asyncio.run(run())
+
+
+def test_single_agent_token_stats_are_restored_from_checkpoint(tmp_path) -> None:
+    async def run() -> None:
+        messages = [
+            HumanMessage(content="问题"),
+            AIMessage(
+                content="回答",
+                usage_metadata={
+                    "input_tokens": 41848,
+                    "output_tokens": 431,
+                    "total_tokens": 42279,
+                },
+            ),
+        ]
+        async with AsyncSqliteSaver.from_conn_string(str(tmp_path / "checkpoint.db")) as checkpointer:
+            await _save_messages(checkpointer, 45, messages)
+            stats = await get_thread_token_stats(checkpointer, 45, 50000)
+
+        assert stats == {"current": 41848, "max": 50000, "percentage": 83.7}
 
     asyncio.run(run())
 

@@ -108,6 +108,7 @@ export default {
       historyLoaded: false,
       _streamingSessionId: null,   // 正在流式生成的 session ID
       _streamingCache: {},         // {sessionId: messages[]} 流式生成期间切走时缓存消息
+      _sessionTokenStats: {},      // {sessionId: tokenStats} 各会话最近的上下文用量
       isWide: false,
       tokenStats: { current: 0, max: 258000, percentage: 0 },
       enableThinking: true,  // 是否启用深度思考
@@ -514,7 +515,7 @@ export default {
         if (savedSessionId) {
           // 有保存的 session_id，直接加载该会话
           console.log('[初始化] 恢复上次会话:', savedSessionId);
-          this.currentSessionId = Number(savedSessionId) || savedSessionId;
+          this.currentSessionId = savedSessionId;
           await this.loadSessionMessages();
         } else {
           // 没有保存的 session_id，查找全局最新会话
@@ -558,6 +559,7 @@ export default {
             if (result.data.lastUsedMode) {
               this.mode = result.data.lastUsedMode;
             }
+            this._restoreTokenStats(result.data.tokenStats, this.currentSessionId);
 
             this.hasHistory = this.messages.length > 0;
             this.historyLoaded = true;
@@ -589,6 +591,7 @@ export default {
         this.messages = [];
         this.hasHistory = false;
         this.historyLoaded = false;
+        this._restoreTokenStats(null);
         return;
       }
 
@@ -599,6 +602,7 @@ export default {
       // 缓存正在流式生成的会话消息
       if (this.isLoading && this._streamingSessionId === this.currentSessionId) {
         this._streamingCache[this.currentSessionId] = this.messages;
+        this._sessionTokenStats[this.currentSessionId] = { ...this.tokenStats };
       }
 
       // 从缓存恢复
@@ -608,6 +612,7 @@ export default {
         this.currentSessionTitle = title || null;
         this.hasHistory = this.messages.length > 0;
         this.historyLoaded = true;
+        this._restoreTokenStats(this._sessionTokenStats[sessionId], sessionId);
         if (window.Application && window.Application.PluginStorage) {
           window.Application.PluginStorage.setItem('current_session_id', String(sessionId));
         }
@@ -637,6 +642,7 @@ export default {
       this.messages = [];
       this.historyLoaded = false;
       this.hasHistory = false;
+      this._restoreTokenStats(null);
       if (window.Application && window.Application.PluginStorage) {
         window.Application.PluginStorage.setItem('current_session_id', String(session.id));
       }
@@ -702,6 +708,7 @@ export default {
           if (result.data.lastUsedMode) {
             this.mode = result.data.lastUsedMode;
           }
+          this._restoreTokenStats(result.data.tokenStats, targetSessionId);
 
           // 更新会话标题
           if (result.data.session) {
@@ -731,9 +738,25 @@ export default {
       this.historyLoading = false;
     },
 
+    _restoreTokenStats(stats, sessionId = null) {
+      const current = Math.max(0, Number(stats?.current) || 0);
+      const max = Math.max(1, Number(stats?.max) || Number(this.tokenStats?.max) || 258000);
+      const next = {
+        current,
+        max,
+        percentage: Number.isFinite(Number(stats?.percentage))
+          ? Number(stats.percentage)
+          : Math.round(current / max * 1000) / 10
+      };
+      this.tokenStats = next;
+      if (sessionId) {
+        this._sessionTokenStats[sessionId] = { ...next };
+      }
+    },
+
     /**
      * 确保当前有一个活跃的会话，如果没有则自动创建
-     * @returns {number|null} sessionId
+     * @returns {string|null} sessionId
      */
     async ensureSession() {
       if (this.currentSessionId) {
@@ -1165,10 +1188,6 @@ export default {
      * 发送流式请求的公共方法
      */
     _sendStreamRequest(userMessage, documentRange, files = [], selectionContext = null) {
-      this.tokenStats = {
-        current: 0,
-        max: this.tokenStats?.max || 258000
-      };
       this.isLoading = true;
       const streamSessionId = this.currentSessionId;
       this._streamingSessionId = streamSessionId;
@@ -1200,7 +1219,7 @@ export default {
         sessionId: streamSessionId,
 
         onMessage: (data) => {
-          this._handleStreamMessage(data, aiMsg);
+          this._handleStreamMessage(data, aiMsg, streamSessionId);
         },
 
         onError: (error) => {
@@ -1245,7 +1264,7 @@ export default {
     /**
      * 处理流式消息
      */
-    _handleStreamMessage(data, aiMsg) {
+    _handleStreamMessage(data, aiMsg, streamSessionId) {
       const msg = aiMsg;
 
       // 后端 keepalive ping 仅用于保活，不影响任何 UI 状态
@@ -1260,10 +1279,15 @@ export default {
 
       // 处理 token 统计信息
       if (data.type === 'token_stats') {
-        this.tokenStats = {
+        const stats = {
           current: data.current_tokens || 0,
-          max: data.max_tokens || 258000
+          max: data.max_tokens || 258000,
+          percentage: data.percentage || 0
         };
+        this._sessionTokenStats[streamSessionId] = stats;
+        if (this.currentSessionId === streamSessionId) {
+          this.tokenStats = stats;
+        }
         return;
       }
 
@@ -1271,10 +1295,23 @@ export default {
         const parts = msg.contentParts;
         const status = String(data.status || '').toLowerCase();
         const isStarted = status === 'started';
+        if (status === 'completed' && Number.isFinite(Number(data.current_tokens))) {
+          const current = Math.max(0, Number(data.current_tokens));
+          const max = Math.max(1, Number(data.max_tokens) || this.tokenStats?.max || 258000);
+          const stats = {
+            current,
+            max,
+            percentage: Math.round(current / max * 1000) / 10
+          };
+          this._sessionTokenStats[streamSessionId] = stats;
+          if (this.currentSessionId === streamSessionId) {
+            this.tokenStats = stats;
+          }
+        }
         const content = isStarted
           ? t('chat.contextCompactionStarted')
           : status === 'completed'
-            ? t('chat.contextCompactionCompleted')
+            ? (data.content || t('chat.contextCompactionCompleted'))
             : (data.content || t('chat.contextCompactionCompleted'));
         const nextPart = {
           type: 'status',

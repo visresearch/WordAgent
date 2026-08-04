@@ -118,6 +118,7 @@ export default {
       historyLoading: false,
       _streamingSessionId: null,
       _streamingCache: {},
+      _sessionTokenStats: {},
       isWide: false,
       tokenStats: { current: 0, max: 258000, percentage: 0 },
       enableThinking: true,  // 是否启用深度思考
@@ -357,7 +358,7 @@ export default {
         } catch (e) { /* ignore */ }
 
         if (savedSessionId) {
-          this.currentSessionId = Number(savedSessionId) || savedSessionId;
+          this.currentSessionId = savedSessionId;
           await this.loadSessionMessages();
         } else {
           const result = await api.getLatestSession();
@@ -396,6 +397,7 @@ export default {
             if (result.data.lastUsedMode) {
               this.mode = result.data.lastUsedMode;
             }
+            this._restoreTokenStats(result.data.tokenStats, this.currentSessionId);
 
             this.hasHistory = this.messages.length > 0;
             this.historyLoaded = true;
@@ -422,6 +424,7 @@ export default {
         this.messages = [];
         this.hasHistory = false;
         this.historyLoaded = false;
+        this._restoreTokenStats(null);
         return;
       }
 
@@ -432,6 +435,7 @@ export default {
       // 缓存正在流式生成的会话消息
       if (this.isLoading && this._streamingSessionId === this.currentSessionId) {
         this._streamingCache[this.currentSessionId] = this.messages;
+        this._sessionTokenStats[this.currentSessionId] = { ...this.tokenStats };
       }
 
       // 从缓存恢复
@@ -441,6 +445,7 @@ export default {
         this.currentSessionTitle = title || null;
         this.hasHistory = this.messages.length > 0;
         this.historyLoaded = true;
+        this._restoreTokenStats(this._sessionTokenStats[sessionId], sessionId);
         try {
           localStorage.setItem('wence_current_session_id', String(sessionId));
         } catch (e) { /* ignore */ }
@@ -467,6 +472,7 @@ export default {
       this.messages = [];
       this.historyLoaded = false;
       this.hasHistory = false;
+      this._restoreTokenStats(null);
       try {
         localStorage.setItem('wence_current_session_id', String(session.id));
       } catch (e) { /* ignore */ }
@@ -516,6 +522,7 @@ export default {
           if (result.data.lastUsedMode) {
             this.mode = result.data.lastUsedMode;
           }
+          this._restoreTokenStats(result.data.tokenStats, targetSessionId);
           if (result.data.session) {
             this.currentSessionTitle = result.data.session.title || null;
           }
@@ -535,6 +542,22 @@ export default {
         console.error('[加载历史] 失败:', e);
       }
       this.historyLoading = false;
+    },
+
+    _restoreTokenStats(stats, sessionId = null) {
+      const current = Math.max(0, Number(stats?.current) || 0);
+      const max = Math.max(1, Number(stats?.max) || Number(this.tokenStats?.max) || 258000);
+      const next = {
+        current,
+        max,
+        percentage: Number.isFinite(Number(stats?.percentage))
+          ? Number(stats.percentage)
+          : Math.round(current / max * 1000) / 10
+      };
+      this.tokenStats = next;
+      if (sessionId) {
+        this._sessionTokenStats[sessionId] = { ...next };
+      }
     },
 
     async ensureSession() {
@@ -897,7 +920,7 @@ export default {
         sessionId: streamSessionId,
 
         onMessage: (data) => {
-          this._handleStreamMessage(data, aiMsg);
+          this._handleStreamMessage(data, aiMsg, streamSessionId);
         },
 
         onError: (error) => {
@@ -936,7 +959,7 @@ export default {
       this.currentStreamCtrl = streamCtrl;
     },
 
-    _handleStreamMessage(data, aiMsg) {
+    _handleStreamMessage(data, aiMsg, streamSessionId) {
       const msg = aiMsg;
 
       // 后端 keepalive ping 仅用于保活，不影响任何 UI 状态
@@ -950,11 +973,15 @@ export default {
       }
 
       if (data.type === 'token_stats') {
-        this.tokenStats = {
+        const stats = {
           current: data.current_tokens || 0,
           max: data.max_tokens || 258000,
           percentage: data.percentage || 0
         };
+        this._sessionTokenStats[streamSessionId] = stats;
+        if (this.currentSessionId === streamSessionId) {
+          this.tokenStats = stats;
+        }
         return;
       }
 
@@ -962,10 +989,23 @@ export default {
         const parts = msg.contentParts;
         const status = String(data.status || '').toLowerCase();
         const isStarted = status === 'started';
+        if (status === 'completed' && Number.isFinite(Number(data.current_tokens))) {
+          const current = Math.max(0, Number(data.current_tokens));
+          const max = Math.max(1, Number(data.max_tokens) || this.tokenStats?.max || 258000);
+          const stats = {
+            current,
+            max,
+            percentage: Math.round(current / max * 1000) / 10
+          };
+          this._sessionTokenStats[streamSessionId] = stats;
+          if (this.currentSessionId === streamSessionId) {
+            this.tokenStats = stats;
+          }
+        }
         const content = isStarted
           ? t('chat.contextCompactionStarted')
           : status === 'completed'
-            ? t('chat.contextCompactionCompleted')
+            ? (data.content || t('chat.contextCompactionCompleted'))
             : (data.content || t('chat.contextCompactionCompleted'));
         const nextPart = {
           type: 'status',

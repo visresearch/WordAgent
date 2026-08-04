@@ -143,7 +143,7 @@ export default {
   name: 'SessionPane',
   props: {
     currentSessionId: {
-      type: [Number, String],
+      type: String,
       default: null
     }
   },

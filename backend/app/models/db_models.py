@@ -11,6 +11,7 @@ from sqlalchemy import JSON, Column, DateTime, ForeignKey, Index, Integer, Strin
 from sqlalchemy.orm import relationship
 
 from app.core.db import Base
+from app.services.utils import generate_uuid7
 
 
 class Session(Base):
@@ -21,7 +22,9 @@ class Session(Base):
 
     __tablename__ = "sessions"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    # 内部关联键保留为整数；对外 sessionId 始终使用不可复用的 UUIDv7。
+    db_id = Column("id", Integer, primary_key=True, autoincrement=True)
+    id = Column("session_uuid", String(36), nullable=False, default=generate_uuid7)
     # 会话标题（默认取第一条用户消息的前50字）
     title = Column(String(255), default="新对话")
     # 最后一条消息预览
@@ -33,6 +36,8 @@ class Session(Base):
 
     # 关联的聊天消息
     messages = relationship("ChatMessage", back_populates="session", cascade="all, delete-orphan")
+
+    __table_args__ = (Index("idx_sessions_uuid", "session_uuid", unique=True),)
 
     def __repr__(self):
         return f"<Session(id={self.id}, title='{self.title}')>"

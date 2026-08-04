@@ -114,7 +114,7 @@ export default {
     paragraphRange: '段落 {start} - {end}', showHistory: '显示历史聊天记录', whatCanIDo: '我能做什么',
     documentation: '使用文档', selectionRef: '引用选区 ({count})', fileRef: '引用文件 ({count})',
     unknownFile: '未知文件', preparing: '🧠 AI 正在准备中', thinking: '深度思考', thinkingDone: '深度思考（已结束）',
-    contextCompactionStarted: '正在整理较早的对话上下文', contextCompactionCompleted: '对话上下文整理完成',
+    contextCompactionStarted: '🗜️ 正在自动压缩上下文', contextCompactionCompleted: '✅ 上下文压缩完成',
     collapseMcp: '收起 MCP 详情', expandMcp: '展开 MCP 详情', callMcp: '调用 MCP 工具：{name}',
     arguments: '参数：', noArguments: '无参数', toolOutput: '工具输出：', noOutput: '（无输出）',
     outputDocument: '输出到文档', copyImage: '复制图片', saveImage: '保存图片', selection: '选区',

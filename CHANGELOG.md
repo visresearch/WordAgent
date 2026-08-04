@@ -39,6 +39,7 @@
 - 修复insertParaID参数为0时的规则，不再只允许空文章
 - 修复换行换页导致的锚点定位错误的bug
 - 同步修复删除工具的提示词，取消pending删除段落机制，删除段落在修订模式下立即生效
+- 编写InvalidToolCallMiddleware中间件拦截invalid_tool_calls提示重新调用模型
 
 ## [v0.6.0-beta.2]
 

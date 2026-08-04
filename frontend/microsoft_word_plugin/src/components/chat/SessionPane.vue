@@ -95,7 +95,7 @@ import { t } from '../../i18n/index.js';
 export default {
   name: 'SessionPane',
   props: {
-    currentSessionId: { type: [Number, String, null], default: null }
+    currentSessionId: { type: String, default: null }
   },
   emits: ['select-session', 'create-session'],
   setup(props, { emit }) {

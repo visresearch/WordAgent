@@ -1,19 +1,31 @@
 import asyncio
 
+import pytest
 from langchain.agents import create_agent
-from langchain.agents.middleware import ModelCallLimitMiddleware
+from langchain.agents.middleware import ModelCallLimitMiddleware, ModelRequest, ModelResponse
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.tools import tool
 from langgraph.config import get_stream_writer
 
 from app.services.agent import agent as single_agent
 from app.services.middleware import (
     _BUILTIN_TOOL_NAMES,
+    MAX_CONTEXT_TOKENS,
+    InvalidToolCallError,
+    InvalidToolCallMiddleware,
+    INVALID_TOOL_CALL_MIDDLEWARE,
     MODEL_CALL_LIMIT_MIDDLEWARE,
     NotifyingSummarizationMiddleware,
+    SUMMARIZATION_KEEP_PCT,
+    SUMMARIZATION_TRIGGER_PCT,
+    TOOL_MAX_RETRIES,
+    TOOL_RETRY_BACKOFF_FACTOR,
+    TOOL_RETRY_INITIAL_DELAY,
+    TOOL_RETRY_MAX_DELAY,
     TOOL_RETRY_MIDDLEWARE,
     build_agent_middleware,
+    get_summarization_limits,
 )
 
 
@@ -50,6 +62,98 @@ def test_agent_middleware_uses_project_compaction_prompt() -> None:
     assert "## Durable Task State" in summary_middleware.summary_prompt
     assert "{messages}" in summary_middleware.summary_prompt
     assert summary_middleware._create_summary([HumanMessage(content="保留这个任务状态")]) == "摘要"
+
+
+def test_summarization_limits_are_context_window_percentages() -> None:
+    trigger_tokens, keep_tokens = get_summarization_limits()
+    expected_trigger = max(1, int(MAX_CONTEXT_TOKENS * min(SUMMARIZATION_TRIGGER_PCT, 100.0) / 100))
+    expected_keep = max(1, int(MAX_CONTEXT_TOKENS * min(SUMMARIZATION_KEEP_PCT, 100.0) / 100))
+    if expected_keep >= expected_trigger:
+        expected_keep = max(1, expected_trigger // 4)
+
+    assert trigger_tokens == expected_trigger
+    assert keep_tokens == expected_keep
+    assert keep_tokens < trigger_tokens
+
+
+def test_tool_retry_middleware_uses_env_configuration() -> None:
+    assert TOOL_RETRY_MIDDLEWARE.max_retries == TOOL_MAX_RETRIES
+    assert TOOL_RETRY_MIDDLEWARE.backoff_factor == TOOL_RETRY_BACKOFF_FACTOR
+    assert TOOL_RETRY_MIDDLEWARE.initial_delay == TOOL_RETRY_INITIAL_DELAY
+    assert TOOL_RETRY_MIDDLEWARE.max_delay == TOOL_RETRY_MAX_DELAY
+
+
+def _invalid_tool_call(name: str = "generate_document") -> AIMessage:
+    return AIMessage(
+        content="",
+        invalid_tool_calls=[
+            {
+                "name": name,
+                "args": '{"document": {"paragraphs": [',
+                "id": "call-invalid-1",
+                "error": "invalid JSON",
+                "type": "invalid_tool_call",
+            }
+        ],
+    )
+
+
+def test_invalid_tool_call_middleware_repairs_model_request() -> None:
+    model = _BindableFakeChatModel(responses=[])
+    middleware = InvalidToolCallMiddleware(max_retries=1)
+    responses = [_invalid_tool_call(), _tool_call("generate_document")]
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        return ModelResponse(result=[responses.pop(0)])
+
+    request = ModelRequest(
+        model=model,
+        messages=[HumanMessage(content="生成文档")],
+        system_message=SystemMessage(content="原始系统提示"),
+    )
+    result = middleware.wrap_model_call(request, handler)
+
+    assert len(requests) == 2
+    assert result.result[0].tool_calls[0]["name"] == "generate_document"
+    assert "Tool call correction" in str(requests[1].system_message.content)
+    # 临时校正提示不会污染原始请求对象。
+    assert requests[0].system_message.content == "原始系统提示"
+
+
+def test_invalid_tool_call_middleware_raises_after_retry() -> None:
+    model = _BindableFakeChatModel(responses=[])
+    middleware = InvalidToolCallMiddleware(max_retries=1)
+    attempts = 0
+
+    def handler(_request):
+        nonlocal attempts
+        attempts += 1
+        return ModelResponse(result=[_invalid_tool_call()])
+
+    request = ModelRequest(model=model, messages=[HumanMessage(content="生成文档")])
+    with pytest.raises(InvalidToolCallError, match="generate_document"):
+        middleware.wrap_model_call(request, handler)
+
+    assert attempts == 2
+
+
+def test_agent_reenters_model_after_invalid_tool_call() -> None:
+    @tool
+    def echo(value: int) -> str:
+        """Return the supplied value."""
+        return str(value)
+
+    model = _BindableFakeChatModel(
+        responses=[_invalid_tool_call("echo"), _tool_call("echo"), AIMessage(content="完成")]
+    )
+    agent = create_agent(model=model, tools=[echo], middleware=_middleware(model))
+
+    output = agent.invoke({"messages": [{"role": "user", "content": "执行"}]})
+
+    assert output["messages"][-1].content == "完成"
+    assert any(getattr(message, "name", "") == "echo" for message in output["messages"])
 
 
 def test_tool_retry_middleware_retries_until_success(monkeypatch) -> None:

@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from weakref import WeakValueDictionary
 
+from langchain_core.messages import AIMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from app.core.logging import get_logger
@@ -34,14 +35,10 @@ _THREAD_LOCKS: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
 
 # ============== 长期记忆配置 ==============
 MEMORY_EXTRACT_TEMPERATURE = _get_env_float("WORDAGENT_MEMORY_EXTRACT_TEMPERATURE", 0.1)
-
-# 长期记忆上限（条数）
-MAX_MEMORY_ITEMS = _get_env_int("WORDAGENT_MEMORY_MAX_ITEMS", 20)
+MAX_MEMORY_ITEMS = _get_env_int("WORDAGENT_MEMORY_MAX_ITEMS", 20)  # 长期记忆上限（条数）
 
 
 # ============== 官方短期记忆（LangGraph Checkpointer） ==============
-
-
 def get_checkpoint_db_path() -> Path:
     """返回独立于业务数据库的 LangGraph Checkpoint 文件路径。"""
     data_dir = _get_memory_dir()
@@ -56,29 +53,61 @@ async def open_checkpointer() -> AsyncIterator[AsyncSqliteSaver]:
         yield checkpointer
 
 
-def build_thread_id(session_id: int) -> str:
+def build_thread_id(session_id: str) -> str:
     """把业务 Session ID 映射为稳定的 LangGraph thread_id。"""
     return f"session:{session_id}"
 
 
-def build_thread_config(session_id: int) -> dict:
+def build_thread_config(session_id: str) -> dict:
     """构造访问某个持久会话 Checkpoint 的配置。"""
     return {"configurable": {"thread_id": build_thread_id(session_id)}}
 
 
-def build_runtime_thread_id(session_id: int | None, chat_id: str | None) -> str:
+def build_runtime_thread_id(session_id: str | None, chat_id: str | None) -> str:
     """持久会话使用 session_id；无 Session 的连接使用临时 thread_id。"""
     if session_id is not None:
         return build_thread_id(session_id)
     return f"ephemeral:{chat_id or 'anonymous'}"
 
 
-async def delete_thread(checkpointer, session_id: int) -> None:
+async def delete_thread(checkpointer, session_id: str) -> None:
     """删除 Session 对应的全部 LangGraph Checkpoint。"""
     await checkpointer.adelete_thread(build_thread_id(session_id))
 
 
-def get_thread_lock(session_id: int | None, chat_id: str | None) -> asyncio.Lock:
+async def get_thread_token_stats(
+    checkpointer,
+    session_id: str,
+    max_tokens: int,
+) -> dict[str, int | float]:
+    """从最新 Checkpoint 恢复会话最后一次主模型调用的真实输入 token。"""
+    current_tokens = 0
+    saved = await checkpointer.aget_tuple(build_thread_config(session_id))
+    if saved is not None:
+        messages = saved.checkpoint.get("channel_values", {}).get("messages", [])
+        for message in reversed(messages):
+            if not isinstance(message, AIMessage):
+                continue
+            usage = getattr(message, "usage_metadata", None)
+            if not isinstance(usage, dict):
+                continue
+            try:
+                input_tokens = int(usage.get("input_tokens", 0))
+            except (TypeError, ValueError):
+                continue
+            if input_tokens > 0:
+                current_tokens = input_tokens
+                break
+
+    safe_max_tokens = max(1, int(max_tokens))
+    return {
+        "current": current_tokens,
+        "max": safe_max_tokens,
+        "percentage": round(current_tokens / safe_max_tokens * 100, 1),
+    }
+
+
+def get_thread_lock(session_id: str | None, chat_id: str | None) -> asyncio.Lock:
     """返回 thread_id 对应的进程内互斥锁。"""
     thread_id = build_runtime_thread_id(session_id, chat_id)
     lock = _THREAD_LOCKS.get(thread_id)
@@ -90,7 +119,7 @@ def get_thread_lock(session_id: int | None, chat_id: str | None) -> asyncio.Lock
 
 @asynccontextmanager
 async def single_agent_thread_lock(
-    session_id: int | None,
+    session_id: str | None,
     chat_id: str | None,
 ) -> AsyncIterator[None]:
     """保证同一持久会话最多运行一个单智能体请求。"""
