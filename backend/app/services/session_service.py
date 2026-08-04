@@ -61,6 +61,11 @@ class SessionService:
         result = await self.db.execute(query)
         return list(result.scalars().all())
 
+    async def get_all_session_ids(self) -> list[int]:
+        """获取全部 Session ID，供关联状态清理使用。"""
+        result = await self.db.execute(select(Session.id))
+        return list(result.scalars().all())
+
     async def get_latest_session(self) -> Session | None:
         """
         获取最新的会话

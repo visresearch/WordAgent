@@ -99,10 +99,8 @@ ASK_BASE_TOOLS = [
 
 
 def get_base_tools_for_mode(mode: str | None) -> list:
-    """按模式返回基础工具列表（plan 暂按 agent 处理）。"""
+    """按单智能体模式返回基础工具列表。"""
     normalized = (mode or "agent").strip().lower()
-    if normalized == "plan":
-        normalized = "agent"
     if normalized == "ask":
         return list(ASK_BASE_TOOLS)
     return list(AGENT_BASE_TOOLS)

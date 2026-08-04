@@ -22,16 +22,7 @@ from app.services.agent.tools import (
     request_stop,
     clear_stop,
 )
-from app.services.multi_agent.agent import (
-    process_writing_request_stream as multi_agent_stream,
-)
-from app.services.multi_agent.tools import (
-    create_tool_request as ma_create_tool_request,
-    cleanup_tool_request as ma_cleanup_tool_request,
-    submit_tool_response as ma_submit_tool_response,
-    request_stop as ma_request_stop,
-    clear_stop as ma_clear_stop,
-)
+from app.services.memory import single_agent_thread_lock
 from app.services.session_service import SessionService
 
 logger = get_logger(__name__)
@@ -48,9 +39,9 @@ KEEPALIVE_INTERVAL = 20
 
 
 def _normalize_mode(mode: str | None) -> str:
-    """标准化前端传入模式：支持 agent/ask/plan。"""
+    """标准化前端传入模式，仅支持单智能体的 agent/ask。"""
     normalized = (mode or "agent").strip().lower()
-    if normalized in {"agent", "ask", "plan"}:
+    if normalized in {"agent", "ask"}:
         return normalized
     return "agent"
 
@@ -94,13 +85,13 @@ async def chat_websocket(websocket: WebSocket):
     前端 → 后端
     ------------
     1. 发起聊天：
-       ``{"type":"chat","message":"...","mode":"agent|ask|plan",``
+       ``{"type":"chat","message":"...","mode":"agent|ask",``
        ``"model":"auto","provider":"...","sessionId":1,``
        ``"documentRange":[...],"documentMeta":{...},``
        ``"selectionContext":{...},"files":[...],"enableThinking":true}``
 
        - ``message``：用户输入。
-       - ``mode``：``agent``、``ask`` 或 ``plan``，非法值回退为 ``agent``。
+       - ``mode``：``agent`` 或 ``ask``，非法值按 ``agent`` 处理。
        - ``documentRange``：可选文档范围；每项的 ``docId`` 必须可转换为整数。
        - ``documentMeta``：可为单文档对象或多文档数组。
        - ``selectionContext``：可选的当前选区上下文。
@@ -196,12 +187,8 @@ async def chat_websocket(websocket: WebSocket):
     chat_id = str(uuid.uuid4())
     logger.info(f"[WebSocket] 连接建立 session={chat_id}")
 
-    # 为此会话创建工具回调队列（单智能体 + 多智能体）
+    # 为此会话创建单智能体工具回调队列
     create_tool_request(chat_id)
-    ma_create_tool_request(chat_id)
-
-    # 跟踪当前请求使用的模式（决定 tool 回调转发目标）
-    active_mode: str = "agent"
 
     # 单一接收者：所有 WebSocket 消息通过此队列分发
     # 避免多个协程同时调用 websocket.receive_text() 导致 RuntimeError
@@ -239,13 +226,10 @@ async def chat_websocket(websocket: WebSocket):
                 # 新请求开始前，清理上一次 stop 状态并重建工具队列（丢弃残留消息）
                 clear_stop(chat_id)
                 create_tool_request(chat_id)
-                ma_clear_stop(chat_id)
-                ma_create_tool_request(chat_id)
 
                 # 聊天请求
                 message = data.get("message", "")
                 mode = _normalize_mode(data.get("mode", "agent"))
-                active_mode = mode  # 记录当前活跃模式，用于后续 tool 回调转发
                 model = data.get("model", "")
                 provider = data.get("provider", "")
                 raw_session_id = data.get("sessionId")
@@ -321,7 +305,6 @@ async def chat_websocket(websocket: WebSocket):
                             # 否则 ThreadPoolExecutor 里的 LangGraph 会变成孤儿继续跑
                             logger.info(f"[WebSocket] 客户端断开，停止 agent (session={chat_id})")
                             request_stop(chat_id)
-                            ma_request_stop(chat_id)
                             stream_task.cancel()
                             try:
                                 await stream_task
@@ -331,42 +314,26 @@ async def chat_websocket(websocket: WebSocket):
                         incoming_type = incoming.get("type", "")
                         if incoming_type == "document_response":
                             logger.info(f"[WebSocket] 收到前端回传文档")
-                            if active_mode == "plan":
-                                await ma_submit_tool_response(chat_id, incoming)
-                            else:
-                                await submit_tool_response(chat_id, incoming)
+                            await submit_tool_response(chat_id, incoming)
                         elif incoming_type == "query_response":
                             logger.info(f"[WebSocket] 收到前端回传查询结果")
-                            if active_mode == "plan":
-                                await ma_submit_tool_response(chat_id, incoming)
-                            else:
-                                await submit_tool_response(chat_id, incoming)
+                            await submit_tool_response(chat_id, incoming)
                         elif incoming_type == "delete_response":
                             logger.info(f"[WebSocket] 收到前端删除结果: {incoming}")
-                            if active_mode == "plan":
-                                await ma_submit_tool_response(chat_id, incoming)
-                            else:
-                                await submit_tool_response(chat_id, incoming)
+                            await submit_tool_response(chat_id, incoming)
                         elif incoming_type == "edit_document_response":
                             logger.info(f"[WebSocket] 收到前端段落编辑结果: {incoming}")
-                            if active_mode == "plan":
-                                await ma_submit_tool_response(chat_id, incoming)
-                            else:
-                                await submit_tool_response(chat_id, incoming)
+                            await submit_tool_response(chat_id, incoming)
                         elif incoming_type in {
                             "create_document_response",
                             "generate_document_response",
                             "insert_break_response",
                         }:
                             logger.info(f"[WebSocket] 收到前端工具执行结果: {incoming}")
-                            if active_mode == "plan":
-                                await ma_submit_tool_response(chat_id, incoming)
-                            else:
-                                await submit_tool_response(chat_id, incoming)
+                            await submit_tool_response(chat_id, incoming)
                         elif incoming_type == "stop":
                             logger.info(f"[WebSocket] 收到停止请求")
                             request_stop(chat_id)
-                            ma_request_stop(chat_id)
                             stream_task.cancel()
                             try:
                                 await stream_task
@@ -386,17 +353,11 @@ async def chat_websocket(websocket: WebSocket):
 
             elif msg_type == "document_response":
                 # 非流式过程中的文档回传（fallback）
-                if active_mode == "plan":
-                    await ma_submit_tool_response(chat_id, data)
-                else:
-                    await submit_tool_response(chat_id, data)
+                await submit_tool_response(chat_id, data)
 
             elif msg_type == "query_response":
                 # 非流式过程中的查询结果回传（fallback）
-                if active_mode == "plan":
-                    await ma_submit_tool_response(chat_id, data)
-                else:
-                    await submit_tool_response(chat_id, data)
+                await submit_tool_response(chat_id, data)
 
             elif msg_type in {
                 "create_document_response",
@@ -405,15 +366,11 @@ async def chat_websocket(websocket: WebSocket):
                 "insert_break_response",
             }:
                 # 前端可变更工具执行完成后回传结果，供工具继续执行后续调用。
-                if active_mode == "plan":
-                    await ma_submit_tool_response(chat_id, data)
-                else:
-                    await submit_tool_response(chat_id, data)
+                await submit_tool_response(chat_id, data)
 
             elif msg_type == "stop":
                 logger.info(f"[WebSocket] 收到停止请求(空闲态)")
                 request_stop(chat_id)
-                ma_request_stop(chat_id)
 
     except WebSocketDisconnect:
         logger.info(f"[WebSocket] 连接断开 session={chat_id}")
@@ -430,12 +387,10 @@ async def chat_websocket(websocket: WebSocket):
         # 兜底：确保 agent 线程拿到停止信号，避免孤儿继续跑 LLM/工具
         try:
             request_stop(chat_id)
-            ma_request_stop(chat_id)
         except Exception:
             pass
         recv_task.cancel()
         cleanup_tool_request(chat_id)
-        ma_cleanup_tool_request(chat_id)
         logger.info(f"[WebSocket] 清理完成 session={chat_id}")
 
 
@@ -498,32 +453,36 @@ async def _iterate_with_idle_watchdog(aiter, on_warn, on_abort):
             next_task.cancel()
 
 
-async def _load_short_term_history_from_db(session_id: int | None) -> list[dict]:
-    """Load persisted chat history for backend-owned short-term memory injection."""
-    if session_id is None:
-        return []
-
-    try:
-        async with AsyncSessionLocal() as db:
-            service = SessionService(db)
-            messages = await service.get_recent_messages(session_id=session_id, limit=200)
-            history: list[dict] = []
-            for msg in messages:
-                history.append(
-                    {
-                        "role": msg.role,
-                        "content": msg.content or "",
-                        "content_parts": msg.content_parts,
-                        "tool_json": msg.tool_json,
-                    }
-                )
-            if history:
-                logger.info(f"[WebSocket] 已从 DB 加载短期记忆 session={session_id}, messages={len(history)}")
-            return history
-    except Exception as e:
-        logger.error(f"[WebSocket] 加载短期记忆失败 session={session_id}: {e}")
-        traceback.print_exc()
-        return []
+async def _single_agent_stream_with_state(
+    *,
+    checkpointer,
+    session_id: int | None,
+    chat_id: str,
+    message: str,
+    document_range: list | None,
+    document_meta: list | dict | None,
+    model: str,
+    provider: str,
+    mode: str,
+    attached_files: list,
+    enable_thinking: bool,
+):
+    """在同一 thread 锁内运行完整的单智能体流。"""
+    async with single_agent_thread_lock(session_id, chat_id):
+        async for chunk in single_agent_stream(
+            message=message,
+            document_range=document_range,
+            document_meta=document_meta or {},
+            model=model,
+            provider=provider,
+            mode=mode,
+            chat_id=chat_id,
+            attached_files=attached_files,
+            enable_thinking=enable_thinking,
+            session_id=session_id,
+            checkpointer=checkpointer,
+        ):
+            yield chunk
 
 
 async def _persist_chat_turn(
@@ -606,10 +565,12 @@ async def _run_ws_stream(
     enable_thinking: bool = True,
     session_id: int | None = None,
 ):
-    """在 WebSocket 上运行流式处理，支持上下文超限时自动重试"""
+    """在 WebSocket 上运行单智能体流式处理。"""
     mode = _normalize_mode(mode)
-    stream_fn = multi_agent_stream if mode == "plan" else single_agent_stream
-    history = await _load_short_term_history_from_db(session_id)
+    try:
+        checkpointer = websocket.app.state.checkpointer
+    except AttributeError as exc:
+        raise RuntimeError("单智能体 Checkpointer 尚未初始化") from exc
 
     # 一把锁串行化所有 WebSocket 发送，避免 keepalive / 主流 / watchdog 并发 send
     send_lock = asyncio.Lock()
@@ -692,8 +653,7 @@ async def _run_ws_stream(
         async with send_lock:
             await websocket.send_text(payload)
 
-    max_retries = 2
-    for attempt in range(max_retries):
+    for _attempt in range(1):
         try:
             _done_sent = False
 
@@ -715,7 +675,6 @@ async def _run_ws_stream(
                 logger.info(f"[Watchdog] ⛔ 已静默 {IDLE_ABORT_SECONDS}s，停止 agent 并断开 session={chat_id}")
                 try:
                     request_stop(chat_id)
-                    ma_request_stop(chat_id)
                 except Exception:
                     pass
                 try:
@@ -745,15 +704,16 @@ async def _run_ws_stream(
                 except Exception:
                     pass
 
-            stream_iter = stream_fn(
+            stream_iter = _single_agent_stream_with_state(
+                checkpointer=checkpointer,
+                session_id=session_id,
+                chat_id=chat_id,
                 message=message,
                 document_range=document_range,
-                document_meta=document_meta or {},
-                history=history,
+                document_meta=document_meta,
                 model=model,
                 provider=provider,
                 mode=mode,
-                chat_id=chat_id,
                 attached_files=attached_files or [],
                 enable_thinking=enable_thinking,
             )
@@ -878,18 +838,21 @@ async def _run_ws_stream(
             # 看门狗已经处理了通知和 agent 停止，这里直接退出，不重试
             return
         except ContextOverflowError as e:
-            logger.info(
-                f"[WebSocket] 上下文超限，尝试重试（{attempt + 1}/{max_retries}），压缩后 {len(e.compressed_history)} 条历史"
-            )
-            history = e.compressed_history  # 更新 history，用压缩后的历史重试
-            # 发一条前端通知
+            logger.error("[WebSocket] 单智能体摘要后上下文仍然超限: %s", e)
             try:
-                await websocket.send_text(
-                    json.dumps({"type": "status", "content": "🗜️ 上下文压缩完成，正在重试…"}, ensure_ascii=False)
+                await _send(
+                    json.dumps(
+                        {
+                            "type": "error",
+                            "content": "上下文仍超出模型限制，请新建会话或减少输入内容",
+                        },
+                        ensure_ascii=False,
+                    )
                 )
+                await _send(json.dumps({"type": "done"}, ensure_ascii=False))
             except Exception:
                 pass
-            continue
+            return
         except Exception as e:
             logger.error(f"[WebSocket Stream] 错误: {e}")
             traceback.print_exc()

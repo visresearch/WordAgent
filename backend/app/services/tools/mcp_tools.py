@@ -13,6 +13,7 @@ from urllib.request import Request, urlopen
 
 from app.core.config import get_user_settings_file
 from app.core.logging import get_logger
+from app.services.utils import _get_env_int
 
 logger = get_logger(__name__)
 
@@ -43,18 +44,6 @@ def _apply_proxy_to_environ() -> None:
         # 未启用时清除代理环境变量
         for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
             os.environ.pop(key, None)
-
-
-def _get_env_int(name: str, default: int) -> int:
-    """Read positive integer from env with fallback."""
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    try:
-        value = int(str(raw).strip())
-        return value if value > 0 else default
-    except Exception:
-        return default
 
 
 _MCP_PREVIEW_MAX_CHARS = _get_env_int("WORDAGENT_MCP_PREVIEW_MAX_CHARS", 100000)
@@ -455,9 +444,9 @@ async def load_mcp_tools() -> tuple[list, list, list[dict[str, str]]]:
 
     try:
         from langchain_mcp_adapters.client import MultiServerMCPClient
-    except ImportError:
-        logger.warning("[MCP] ⚠️ langchain-mcp-adapters 未安装，跳过 MCP 工具加载")
-        return [], [], [{"name": "MCP", "error": "缺少依赖 langchain-mcp-adapters"}]
+    except ImportError as exc:
+        logger.warning(f"[MCP] ⚠️ langchain-mcp-adapters 导入失败，跳过 MCP 工具加载: {exc}")
+        return [], [], [{"name": "MCP", "error": f"MCP 依赖加载失败: {exc}"}]
 
     loop = asyncio.get_running_loop()
     all_tools: list = []

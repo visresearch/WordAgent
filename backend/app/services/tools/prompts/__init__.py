@@ -1,8 +1,4 @@
-"""Shared markdown for tool descriptions and tool-usage system snippets.
-
-Single-agent (`app.services.agent`) and multi-agent (`app.services.multi_agent`)
-load from here so tool guidance stays in one place.
-"""
+"""Shared markdown for single-agent tool descriptions and usage snippets."""
 
 from __future__ import annotations
 
@@ -34,8 +30,6 @@ _TOOL_DESCRIPTION_FILES: dict[str, str] = {
     "read_file": "tool-description-read-file.md",
     "edit_file": "tool-description-edit-file.md",
     "run_sub_agent": "tool-description-run-subagent.md",
-    "create_workflow": "tool-description-create-workflow.md",
-    "review_document": "tool-description-review-document.md",
     "python_repl": "tool-description-python-repl.md",
 }
 

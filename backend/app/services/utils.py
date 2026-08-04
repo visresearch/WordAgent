@@ -11,6 +11,30 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 
+def _get_env_int(name: str, default: int) -> int:
+    """读取正整数环境变量；未设置或值无效时返回默认值。"""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = int(str(raw).strip())
+        return value if value > 0 else default
+    except (TypeError, ValueError):
+        return default
+
+
+def _get_env_float(name: str, default: float) -> float:
+    """读取正浮点数环境变量；未设置或值无效时返回默认值。"""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = float(str(raw).strip())
+        return value if value > 0 else default
+    except (TypeError, ValueError):
+        return default
+
+
 def try_init_langsmith() -> bool:
     """尝试加载项目环境变量并初始化 LangSmith tracing。"""
     try:

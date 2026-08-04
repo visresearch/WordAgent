@@ -4,58 +4,32 @@
 提供两层记忆机制：
 
 记忆层级：
-1. 短期记忆 (Short-term)   — 固定 token 预算（类 Claude Code）
+1. 短期记忆 (Short-term)   — LangGraph Checkpointer 持久化会话状态
 2. 长期记忆 (Long-term)    — 单个 md 文件持久化（memory.md）
 
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
-import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from weakref import WeakValueDictionary
 
-from langchain_core.messages import AIMessage, HumanMessage
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from app.core.logging import get_logger
+from app.services.utils import _get_env_float, _get_env_int
 
 logger = get_logger(__name__)
 
 if TYPE_CHECKING:
     from langchain_openai import ChatOpenAI
 
-# ============== 配置常量 ==============
-
-
-def _get_env_int(name: str, default: int) -> int:
-    """Read positive int env value with fallback."""
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    try:
-        val = int(str(raw).strip())
-        return val if val > 0 else default
-    except Exception:
-        return default
-
-
-def _get_env_float(name: str, default: float) -> float:
-    """Read positive float env value with fallback."""
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    try:
-        val = float(str(raw).strip())
-        return val if val > 0 else default
-    except Exception:
-        return default
-
-
-# ============ 短期记忆 Token 预算（类 Claude Code 风格） ============
-SHORT_TERM_TOKEN_BUDGET = _get_env_int("WORDAGENT_SHORT_TERM_TOKEN_BUDGET", 100000)
-SHORT_TERM_MIN_TURNS = _get_env_int("WORDAGENT_SHORT_TERM_MIN_TURNS", 3)
-SHORT_TERM_LARGE_TOOL_OUTPUT_TOKENS = _get_env_int("WORDAGENT_SHORT_TERM_LARGE_TOOL_OUTPUT_TOKENS", 5000)
+_THREAD_LOCKS: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
 
 
 # ============== 长期记忆配置 ==============
@@ -63,6 +37,65 @@ MEMORY_EXTRACT_TEMPERATURE = _get_env_float("WORDAGENT_MEMORY_EXTRACT_TEMPERATUR
 
 # 长期记忆上限（条数）
 MAX_MEMORY_ITEMS = _get_env_int("WORDAGENT_MEMORY_MAX_ITEMS", 20)
+
+
+# ============== 官方短期记忆（LangGraph Checkpointer） ==============
+
+
+def get_checkpoint_db_path() -> Path:
+    """返回独立于业务数据库的 LangGraph Checkpoint 文件路径。"""
+    data_dir = _get_memory_dir()
+    data_dir.mkdir(parents=True, exist_ok=True)
+    return data_dir / "langgraph_checkpoints.db"
+
+
+@asynccontextmanager
+async def open_checkpointer() -> AsyncIterator[AsyncSqliteSaver]:
+    """在应用生命周期内打开并复用官方异步 SQLite Checkpointer。"""
+    async with AsyncSqliteSaver.from_conn_string(str(get_checkpoint_db_path())) as checkpointer:
+        yield checkpointer
+
+
+def build_thread_id(session_id: int) -> str:
+    """把业务 Session ID 映射为稳定的 LangGraph thread_id。"""
+    return f"session:{session_id}"
+
+
+def build_thread_config(session_id: int) -> dict:
+    """构造访问某个持久会话 Checkpoint 的配置。"""
+    return {"configurable": {"thread_id": build_thread_id(session_id)}}
+
+
+def build_runtime_thread_id(session_id: int | None, chat_id: str | None) -> str:
+    """持久会话使用 session_id；无 Session 的连接使用临时 thread_id。"""
+    if session_id is not None:
+        return build_thread_id(session_id)
+    return f"ephemeral:{chat_id or 'anonymous'}"
+
+
+async def delete_thread(checkpointer, session_id: int) -> None:
+    """删除 Session 对应的全部 LangGraph Checkpoint。"""
+    await checkpointer.adelete_thread(build_thread_id(session_id))
+
+
+def get_thread_lock(session_id: int | None, chat_id: str | None) -> asyncio.Lock:
+    """返回 thread_id 对应的进程内互斥锁。"""
+    thread_id = build_runtime_thread_id(session_id, chat_id)
+    lock = _THREAD_LOCKS.get(thread_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _THREAD_LOCKS[thread_id] = lock
+    return lock
+
+
+@asynccontextmanager
+async def single_agent_thread_lock(
+    session_id: int | None,
+    chat_id: str | None,
+) -> AsyncIterator[None]:
+    """保证同一持久会话最多运行一个单智能体请求。"""
+    async with get_thread_lock(session_id, chat_id):
+        yield
 
 
 # ============== Memory Tool 定义 ==============
@@ -242,312 +275,6 @@ def build_long_term_memory_prompt() -> str:
 
 {content}
 """
-
-
-# ============== 短期记忆（固定 Token 预算，类 Claude Code） ==============
-
-
-def build_short_term_messages(
-    history: list[dict],
-    token_budget: int | None = None,
-) -> list[HumanMessage | AIMessage]:
-    """
-    使用固定 token 预算加载短期记忆（类 Claude Code 风格）。
-
-    从最近的消息开始，保留足够的内容满足 token 预算。
-
-    """
-    if not history:
-        return []
-
-    budget = token_budget or SHORT_TERM_TOKEN_BUDGET
-    pairs = _pair_history(history)
-
-    if not pairs:
-        return []
-
-    def _render_pair(pair: tuple[dict, dict], include_tool_outputs: bool) -> tuple[str, str]:
-        user_entry, ai_entry = pair
-        return (
-            _format_history_entry(user_entry, include_tool_outputs=include_tool_outputs).strip(),
-            _format_history_entry(ai_entry, include_tool_outputs=include_tool_outputs).strip(),
-        )
-
-    def _pair_token_count(rendered_pair: tuple[str, str]) -> int:
-        user_msg, ai_msg = rendered_pair
-        return _estimate_token_count(user_msg) + _estimate_token_count(ai_msg) + 40
-
-    min_turns = min(SHORT_TERM_MIN_TURNS, len(pairs))
-    selected: list[dict[str, Any]] = []
-    total_tokens = 0
-
-    for pair in pairs[-min_turns:]:
-        rendered = _render_pair(pair, include_tool_outputs=True)
-        pair_tokens = _pair_token_count(rendered)
-        selected.append(
-            {
-                "pair": pair,
-                "rendered": rendered,
-                "include_outputs": True,
-                "tokens": pair_tokens,
-            }
-        )
-        total_tokens += pair_tokens
-
-    # If the selected window is over budget, remove tool outputs from the oldest
-    # selected turns first. Keep tool names and input parameters.
-    stripped_outputs = 0
-    for item in selected:
-        if total_tokens <= budget:
-            break
-        if not item["include_outputs"]:
-            continue
-        stripped = _render_pair(item["pair"], include_tool_outputs=False)
-        stripped_tokens = _pair_token_count(stripped)
-        total_tokens -= item["tokens"] - stripped_tokens
-        item["rendered"] = stripped
-        item["tokens"] = stripped_tokens
-        item["include_outputs"] = False
-        stripped_outputs += 1
-
-    older_pairs = pairs[: len(pairs) - min_turns]
-    for pair in reversed(older_pairs):
-        rendered = _render_pair(pair, include_tool_outputs=True)
-        pair_tokens = _pair_token_count(rendered)
-        if total_tokens + pair_tokens <= budget:
-            selected.insert(
-                0,
-                {
-                    "pair": pair,
-                    "rendered": rendered,
-                    "include_outputs": True,
-                    "tokens": pair_tokens,
-                },
-            )
-            total_tokens += pair_tokens
-            continue
-
-        stripped = _render_pair(pair, include_tool_outputs=False)
-        stripped_tokens = _pair_token_count(stripped)
-        if total_tokens + stripped_tokens <= budget:
-            selected.insert(
-                0,
-                {
-                    "pair": pair,
-                    "rendered": stripped,
-                    "include_outputs": False,
-                    "tokens": stripped_tokens,
-                },
-            )
-            total_tokens += stripped_tokens
-            stripped_outputs += 1
-            continue
-
-        break
-
-    result: list[HumanMessage | AIMessage] = []
-    for item in selected:
-        user_msg, ai_msg = item["rendered"]
-        result.append(HumanMessage(content=user_msg))
-        if ai_msg:
-            result.append(AIMessage(content=ai_msg))
-
-    over_budget_note = " (over budget after stripping tool outputs)" if total_tokens > budget else ""
-    logger.info(
-        f"[Memory] 短期记忆: 保留 {len(selected)} 轮对话, "
-        f"剥离工具输出 {stripped_outputs} 轮, ~{total_tokens} tokens{over_budget_note}"
-    )
-    return result
-
-
-# ============== 工具函数 ==============
-
-
-def _normalize_history_role(entry: dict) -> str:
-    """将不同来源的角色字段统一为 user / assistant。"""
-    role = str(entry.get("role", "")).strip().lower()
-    if role in ("user", "assistant"):
-        return role
-
-    msg_type = str(entry.get("type", "")).strip().lower()
-    if msg_type in ("human", "user"):
-        return "user"
-    if msg_type in ("ai", "assistant"):
-        return "assistant"
-
-    return ""
-
-
-def _normalize_history_content(content: Any) -> str:
-    """将消息 content 统一转换为文本。"""
-    if content is None:
-        return ""
-
-    if isinstance(content, str):
-        return content
-
-    if isinstance(content, dict):
-        text = content.get("text")
-        if isinstance(text, str):
-            return text
-        fallback = content.get("content")
-        return fallback if isinstance(fallback, str) else ""
-
-    if isinstance(content, list):
-        parts: list[str] = []
-        for item in content:
-            item_text = _normalize_history_content(item)
-            if item_text:
-                parts.append(item_text)
-        return "".join(parts)
-
-    return ""
-
-
-def _dump_memory_json(value: Any) -> str:
-    """Compact JSON used in short-term memory while preserving Chinese text."""
-    try:
-        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
-    except Exception:
-        return str(value)
-
-
-def _get_history_field(entry: dict, snake_name: str, camel_name: str) -> Any:
-    if snake_name in entry:
-        return entry.get(snake_name)
-    return entry.get(camel_name)
-
-
-def _has_tool_calls(tool_json: Any) -> bool:
-    if isinstance(tool_json, dict) and isinstance(tool_json.get("calls"), list):
-        return len(tool_json.get("calls") or []) > 0
-    return bool(tool_json)
-
-
-def _format_tool_value_for_memory(value: Any, indent: str = "  ") -> str:
-    text = _dump_memory_json(value)
-    if "\n" not in text:
-        return text
-    return "\n" + "\n".join(f"{indent}{line}" for line in text.splitlines())
-
-
-def _format_tool_output_for_memory(value: Any, indent: str = "  ") -> str:
-    text = _dump_memory_json(value)
-    token_count = _estimate_token_count(text)
-    if token_count > SHORT_TERM_LARGE_TOOL_OUTPUT_TOKENS:
-        max_chars = max(500, SHORT_TERM_LARGE_TOOL_OUTPUT_TOKENS * 2)
-        text = (
-            f"[tool output preview: original ~{token_count} tokens, "
-            f"threshold={SHORT_TERM_LARGE_TOOL_OUTPUT_TOKENS}]\n" + _truncate_text(text, max_chars)
-        )
-    if "\n" not in text:
-        return text
-    return "\n" + "\n".join(f"{indent}{line}" for line in text.splitlines())
-
-
-def _format_tool_json_for_memory(tool_json: Any, include_outputs: bool = True) -> str:
-    """Render tool_json as readable Markdown for short-term memory."""
-    if not isinstance(tool_json, dict):
-        return _dump_memory_json(tool_json)
-
-    calls = tool_json.get("calls")
-    if not isinstance(calls, list):
-        return _dump_memory_json(tool_json)
-
-    lines: list[str] = []
-    for index, call in enumerate(calls, 1):
-        if not isinstance(call, dict):
-            lines.append(f"- tool_call_{index}: {_format_tool_value_for_memory(call)}")
-            continue
-
-        tool_name = str(call.get("tool") or call.get("name") or f"tool_call_{index}")
-        lines.append(f"- tool: {tool_name}")
-
-        if tool_name != "generate_document" and "input" in call:
-            lines.append(f"  - input: {_format_tool_value_for_memory(call.get('input'), indent='    ')}")
-
-        if include_outputs and "output" in call:
-            lines.append(f"  - output: {_format_tool_output_for_memory(call.get('output'), indent='    ')}")
-
-        if call.get("error"):
-            lines.append(f"  - error: {str(call.get('error')).lower()}")
-
-        for key in ("agent", "repaired", "is_mcp"):
-            if key in call and call.get(key) not in (None, False):
-                lines.append(f"  - {key}: {_format_tool_value_for_memory(call.get(key), indent='    ')}")
-
-    return "\n".join(lines)
-
-
-def _format_history_entry(entry: dict, include_tool_outputs: bool = True) -> str:
-    """Format one DB/front-end compatible history entry for short-term memory."""
-    sections: list[str] = []
-
-    content = _normalize_history_content(entry.get("content")).strip()
-    if content:
-        sections.append(content)
-
-    tool_json = _get_history_field(entry, "tool_json", "toolJson")
-    if _has_tool_calls(tool_json):
-        sections.append("[tool_json]\n" + _format_tool_json_for_memory(tool_json, include_outputs=include_tool_outputs))
-
-    return "\n\n".join(sections)
-
-
-def _pair_history(history: list[dict]) -> list[tuple[dict, dict]]:
-    """将 history 列表配对为 (user_entry, assistant_entry) 元组列表。"""
-    pairs: list[tuple[dict, dict]] = []
-    i = 0
-    valid: list[dict[str, Any]] = []
-    for entry in history:
-        if not isinstance(entry, dict):
-            continue
-
-        role = _normalize_history_role(entry)
-        if role not in ("user", "assistant"):
-            continue
-
-        content = _format_history_entry(entry, include_tool_outputs=False).strip()
-
-        if role == "user" and not content:
-            continue
-        if role == "assistant" and not content:
-            continue
-
-        valid.append({"role": role, "entry": entry})
-
-    logger.info(f"[Memory] _pair_history: 原始 history={len(history)}, 过滤后 valid={len(valid)}")
-
-    while i < len(valid) - 1:
-        if valid[i]["role"] == "user" and valid[i + 1]["role"] == "assistant":
-            pairs.append((valid[i]["entry"], valid[i + 1]["entry"]))
-            i += 2
-        else:
-            i += 1
-    return pairs
-
-
-def _estimate_token_count(text: str) -> int:
-    """Estimate token count with tiktoken (cl100k_base), fallback to char heuristic."""
-    if not text:
-        return 0
-
-    try:
-        import tiktoken
-
-        enc = tiktoken.get_encoding("cl100k_base")
-        return len(enc.encode(text))
-    except Exception:
-        return max(1, int(len(text) / 1.7))
-
-
-def _truncate_text(text: str, max_chars: int) -> str:
-    """Truncate text by chars with a readable suffix."""
-    if len(text) <= max_chars:
-        return text
-    keep = max(0, max_chars - 48)
-    omitted = len(text) - keep
-    return f"{text[:keep]}\n[内容过长，已截断 {omitted} 字符]"
 
 
 # ============== 长期记忆提取 ==============

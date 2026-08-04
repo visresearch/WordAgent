@@ -6,6 +6,7 @@ import json
 import re
 import time
 import traceback
+import uuid
 from collections.abc import AsyncGenerator
 from typing import Any
 
@@ -14,7 +15,6 @@ from langchain_core.messages import (
     AIMessage,
     AIMessageChunk,
     HumanMessage,
-    SystemMessage,
     ToolMessage,
 )
 
@@ -37,11 +37,34 @@ from app.services.document import (
     normalize_document_meta,
 )
 from app.services.llm_client import init_chat_model_with_reasoning, resolve_model, supports_thinking
-from app.services.middleware import DEFAULT_AGENT_MIDDLEWARE
+from app.services.memory import build_runtime_thread_id
+from app.services.middleware import build_agent_middleware
 from app.services.tools.tool_log import build_tool_json, set_current_tool_log
-from app.services.utils import try_init_langsmith
+from app.services.utils import _get_env_int, try_init_langsmith
 
 logger = get_logger(__name__)
+
+MAX_CHECKPOINT_IMAGE_BYTES = 512 * 1024
+MAX_CONTEXT_TOKENS = _get_env_int("WORDAGENT_MAX_CONTEXT_TOKENS", 258000)
+
+
+def _attachment_size_bytes(attachment: dict, file_id: str) -> int | None:
+    """读取附件大小，供 Checkpoint 内联图片保护使用。"""
+    raw_size = attachment.get("size")
+    try:
+        size = int(raw_size)
+        if size >= 0:
+            return size
+    except (TypeError, ValueError):
+        pass
+
+    try:
+        from app.api.routes.files import get_file_path
+
+        file_path = get_file_path(file_id)
+        return file_path.stat().st_size if file_path else None
+    except OSError:
+        return None
 
 
 def _summarize_custom_event(chunk: Any) -> str:
@@ -123,14 +146,7 @@ def _summarize_custom_event(chunk: Any) -> str:
 
 
 class ContextOverflowError(Exception):
-    """
-    上下文超限异常：携带压缩后的对话历史，
-    通知调用方（chat.py）用压缩后的历史重试请求。
-    """
-
-    def __init__(self, message: str, compressed_history: list):
-        super().__init__(message)
-        self.compressed_history = compressed_history
+    """单智能体在摘要后仍然超过模型上下文限制。"""
 
 
 _langsmith_enabled = try_init_langsmith()
@@ -331,23 +347,25 @@ async def process_writing_request_stream(
     message: str,
     document_range: list[dict] | None = None,
     document_meta: dict | None = None,
-    history: list | None = None,
     model: str | None = None,
     provider: str | None = None,
     mode: str | None = None,
     chat_id: str | None = None,
     attached_files: list[dict] | None = None,
     enable_thinking: bool = True,
+    session_id: int | None = None,
+    checkpointer=None,
 ) -> AsyncGenerator[str, None]:
     """
     使用 LangChain create_agent 处理写作请求并流式输出。
 
     重构要点：
     - Todo、工具参数规范化、日志、结果压缩和失败重试均由中间件处理
-    - 保留记忆、上下文压缩、MCP 自定义事件和 thinking 流式输出
+    - 单智能体短期记忆和摘要由 Checkpointer + SummarizationMiddleware 管理
+    - 保留长期记忆、MCP 自定义事件和 thinking 流式输出
     """
     mode = (mode or "agent").strip().lower()
-    if mode == "plan" or mode not in {"agent", "ask"}:
+    if mode not in {"agent", "ask"}:
         mode = "agent"
 
     logger.info("[Agent] 开始处理请求")
@@ -412,7 +430,8 @@ async def process_writing_request_stream(
         model=llm,
         tools=tools,
         system_prompt=system_prompt,
-        middleware=DEFAULT_AGENT_MIDDLEWARE,
+        middleware=build_agent_middleware(summary_model=llm),
+        checkpointer=checkpointer,
     )
     tool_log: list[dict] = []
     meta_list = normalize_document_meta(document_meta)
@@ -421,16 +440,8 @@ async def process_writing_request_stream(
     executor: concurrent.futures.ThreadPoolExecutor | None = None
 
     try:
-        # 构建初始消息列表
+        # Checkpointer 自动恢复历史；本轮只提交当前用户消息。
         messages = []
-
-        # 注入短期记忆（仅保留最近 k 轮对话原文）
-        from app.services.memory import build_short_term_messages
-
-        short_term = build_short_term_messages(history)
-        if short_term:
-            messages.extend(short_term)
-            logger.info(f"[Agent] 注入 {len(short_term)} 条短期记忆")
 
         # 构建用户消息
         user_content = message
@@ -485,7 +496,16 @@ async def process_writing_request_stream(
                     line = f"- {filename} [image] | project_path={project_path or '(unknown)'}"
                     file_reference_parts.append(line)
 
-                    b64 = read_file_as_base64(file_id)
+                    image_size = _attachment_size_bytes(f, file_id)
+                    if image_size is not None and image_size <= MAX_CHECKPOINT_IMAGE_BYTES:
+                        b64 = read_file_as_base64(file_id)
+                    else:
+                        b64 = None
+                        logger.warning(
+                            "[Agent] 图片未内联到 Checkpoint，改用项目路径: %s (%s bytes)",
+                            filename,
+                            image_size if image_size is not None else "unknown",
+                        )
                     if b64:
                         image_content_parts.append(
                             {
@@ -520,12 +540,13 @@ async def process_writing_request_stream(
             text_only_user_content += "\nImportant: direct image input is unavailable in this retry. Use `read_file(path)` on the image project_path when image content is needed."
 
         # 构建 HumanMessage
+        message_id = str(uuid.uuid4())
         if image_content_parts:
             human_content = [{"type": "text", "text": image_user_content}] + image_content_parts
-            messages.append(HumanMessage(content=human_content))
+            messages.append(HumanMessage(content=human_content, id=message_id))
         else:
-            messages.append(HumanMessage(content=user_content))
-        text_only_messages = list(messages[:-1]) + [HumanMessage(content=text_only_user_content)]
+            messages.append(HumanMessage(content=user_content, id=message_id))
+        text_only_messages = list(messages[:-1]) + [HumanMessage(content=text_only_user_content, id=message_id)]
 
         logger.debug(f"[Agent] 消息数量: {len(messages)}")
 
@@ -579,9 +600,7 @@ async def process_writing_request_stream(
                     }
                 )
 
-                import uuid as _uuid
-
-                _thread_id = str(_uuid.uuid4())
+                _thread_id = build_runtime_thread_id(session_id, chat_id)
                 _config = {
                     "configurable": {"thread_id": _thread_id},
                 }
@@ -618,7 +637,7 @@ async def process_writing_request_stream(
                             continue
 
                         if _is_context_overflow_error(e):
-                            logger.error(f"[Agent] ⚠️ 上下文超限错误（{e}），触发被动重量重压缩")
+                            logger.error(f"[Agent] ⚠️ 摘要后上下文仍超限（{e}）")
                             raise
                         if attempt < max_attempts and (not has_any_stream_item) and _is_transient_stream_error(e):
                             logger.error(f"[Agent] ⚠️ 流式连接异常（第 {attempt} 次）: {e}，准备重试")
@@ -643,44 +662,10 @@ async def process_writing_request_stream(
             if isinstance(stream_item, tuple) and stream_item[0] == "error":
                 raise Exception(stream_item[1])
 
-            # 上下文超限被动重压缩
+            # SummarizationMiddleware 仍无法处理的上下文超限只作为最终兜底报错。
             if isinstance(stream_item, tuple) and stream_item[0] == "context_overflow":
-                logger.warning("[Agent] ⚠️ 收到上下文超限信号，触发被动重量重压缩")
-                from app.services.context import _estimate_messages_tokens, compress_conversation_history_if_needed
-
-                current_tokens = _estimate_messages_tokens(_conversation_history)
-                compressed, meta = compress_conversation_history_if_needed(
-                    _conversation_history,
-                    llm=llm,
-                    query=message,
-                    history=history,
-                    compact_level="heavy",
-                )
-                heavy_meta = meta.get("heavy_compact", {})
-                if heavy_meta.get("heavy_compact_triggered"):
-                    before = heavy_meta.get("before_tokens", current_tokens)
-                    after = heavy_meta.get("after_tokens", 0)
-                    logger.info(f"[Agent] 🗜️ 被动重量重压缩完成: {before} -> {after} tokens")
-                    updated_history = []
-                    for m in compressed:
-                        role = {"HumanMessage": "user", "AIMessage": "assistant", "SystemMessage": "system"}.get(
-                            type(m).__name__, "assistant"
-                        )
-                        content_val = getattr(m, "content", "")
-                        if hasattr(content_val, "__iter__") and not isinstance(content_val, str):
-                            text_content = "".join(
-                                part.get("text", "")
-                                if isinstance(part, dict)
-                                else (part if isinstance(part, str) else "")
-                                for part in content_val
-                            )
-                            content_val = text_content
-                        if isinstance(m, (HumanMessage, AIMessage, SystemMessage)):
-                            updated_history.append({"role": role, "content": str(content_val)})
-                    raise ContextOverflowError("上下文超限，已触发重量重压缩", updated_history)
-                else:
-                    logger.error("[Agent] ⚠️ 被动重量重压缩失败，无法生成摘要")
-                    raise Exception("上下文超限但重量重压缩失败，请手动减少对话历史")
+                logger.error("[Agent] SummarizationMiddleware 执行后上下文仍然超限")
+                raise ContextOverflowError("上下文仍超出模型限制，请新建会话或减少输入内容")
 
             if not isinstance(stream_item, tuple):
                 continue
@@ -690,7 +675,14 @@ async def process_writing_request_stream(
             if input_type == "messages":
                 if not chunk or len(chunk) == 0:
                     continue
-                msg = chunk[0]
+                msg, metadata = chunk
+                if isinstance(msg, (AIMessage, AIMessageChunk)) and metadata.get("langgraph_node") != "model":
+                    logger.debug(
+                        "[Agent] 过滤内部模型流: node=%s source=%s",
+                        metadata.get("langgraph_node"),
+                        metadata.get("lc_source"),
+                    )
+                    continue
                 content = msg.content
 
                 # reasoning_content 透传（OpenAI/DeepSeek）
@@ -705,8 +697,6 @@ async def process_writing_request_stream(
                     usage = getattr(msg, "usage_metadata", None)
                     if isinstance(usage, dict) and "input_tokens" in usage and usage.get("input_tokens", 0) > 0:
                         _last_input_tokens = int(usage.get("input_tokens", 0))
-                        from app.services.context import MAX_CONTEXT_TOKENS
-
                         tokens_k = _last_input_tokens / 1000
                         logger.info(f"[Agent] 当前上下文: {tokens_k:.1f}k tokens")
                         yield f"data: {json.dumps({'type': 'token_stats', 'current_tokens': _last_input_tokens, 'max_tokens': MAX_CONTEXT_TOKENS}, ensure_ascii=False)}\n\n"

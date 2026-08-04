@@ -18,7 +18,7 @@ from app.services.agent.tools import (
     is_stop_requested,
 )
 from app.services.llm_client import init_chat_model_with_reasoning, resolve_model
-from app.services.middleware import DEFAULT_AGENT_MIDDLEWARE
+from app.services.middleware import build_agent_middleware
 
 logger = get_logger(__name__)
 
@@ -150,7 +150,7 @@ def run_sub_agent_task(
         model=llm,
         tools=tools,
         system_prompt=system_prompt,
-        middleware=DEFAULT_AGENT_MIDDLEWARE,
+        middleware=build_agent_middleware(summary_model=llm),
         checkpointer=InMemorySaver(),
     )
 

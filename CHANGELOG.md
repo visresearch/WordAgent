@@ -24,6 +24,8 @@
 - 规定空段落也必须要有pStyle
 - 注释掉运行subagent的相关代码，修改提示词增加主智能体的review功能
 - 使用langchain官方create_agent方法和middleware的写法重构后端单智能体
+- 重构上下文压缩功能
+- 设置docID为search_document和read_document工具的必填参数
 
 ### Fixed
 - 修复search_document工具搜不到表格内部段落的bug

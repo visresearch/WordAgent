@@ -958,6 +958,37 @@ export default {
         return;
       }
 
+      if (data.type === 'context_compaction') {
+        const parts = msg.contentParts;
+        const status = String(data.status || '').toLowerCase();
+        const isStarted = status === 'started';
+        const content = isStarted
+          ? t('chat.contextCompactionStarted')
+          : status === 'completed'
+            ? t('chat.contextCompactionCompleted')
+            : (data.content || t('chat.contextCompactionCompleted'));
+        const nextPart = {
+          type: 'status',
+          content,
+          loading: isStarted,
+          contextCompaction: true
+        };
+        let existingIndex = -1;
+        for (let index = parts.length - 1; index >= 0; index--) {
+          if (parts[index].contextCompaction) {
+            existingIndex = index;
+            break;
+          }
+        }
+        if (existingIndex >= 0) {
+          parts.splice(existingIndex, 1, nextPart);
+        } else {
+          parts.push(nextPart);
+        }
+        this.scrollToBottom();
+        return;
+      }
+
       // 后端请求读取文档
       if (data.type === 'read_document') {
         const hasParaIDMode =
@@ -1000,7 +1031,7 @@ export default {
         const parts = msg.contentParts;
         let found = false;
         for (let i = parts.length - 1; i >= 0; i--) {
-          if (parts[i].type === 'status' && parts[i].loading) {
+          if (parts[i].type === 'status' && parts[i].loading && !parts[i].contextCompaction) {
             parts.splice(i, 1, {
               type: 'status',
               content: data.content || t('chat.searchComplete'),
@@ -1023,7 +1054,7 @@ export default {
         const parts = msg.contentParts;
         let found = false;
         for (let i = parts.length - 1; i >= 0; i--) {
-          if (parts[i].type === 'status' && parts[i].loading) {
+          if (parts[i].type === 'status' && parts[i].loading && !parts[i].contextCompaction) {
             parts.splice(i, 1, {
               type: 'status',
               content: data.content || t('chat.documentReadComplete'),
@@ -1076,7 +1107,7 @@ export default {
         const parts = msg.contentParts;
         let found = false;
         for (let i = parts.length - 1; i >= 0; i--) {
-          if (parts[i].type === 'status' && parts[i].loading) {
+          if (parts[i].type === 'status' && parts[i].loading && !parts[i].contextCompaction) {
             parts.splice(i, 1, {
               type: 'status',
               content: data.content || t('chat.deleteComplete'),
@@ -1130,7 +1161,7 @@ export default {
         const parts = msg.contentParts;
         let found = false;
         for (let i = parts.length - 1; i >= 0; i--) {
-          if (parts[i].type === 'status' && parts[i].loading) {
+          if (parts[i].type === 'status' && parts[i].loading && !parts[i].contextCompaction) {
             parts.splice(i, 1, {
               type: 'status',
               content: data.content || `段落 ${data.paraID ?? ''} 已更新`,
@@ -1249,7 +1280,7 @@ export default {
         const parts = msg.contentParts;
         let found = false;
         for (let i = parts.length - 1; i >= 0; i--) {
-          if (parts[i].type === 'status' && parts[i].loading) {
+          if (parts[i].type === 'status' && parts[i].loading && !parts[i].contextCompaction) {
             parts.splice(i, 1, {
               type: 'status',
               content: data.content || t('chat.documentGenerated'),

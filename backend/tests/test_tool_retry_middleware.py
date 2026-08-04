@@ -3,16 +3,17 @@ import asyncio
 from langchain.agents import create_agent
 from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import tool
 from langgraph.config import get_stream_writer
 
 from app.services.agent import agent as single_agent
 from app.services.middleware import (
     _BUILTIN_TOOL_NAMES,
-    DEFAULT_AGENT_MIDDLEWARE,
     MODEL_CALL_LIMIT_MIDDLEWARE,
+    NotifyingSummarizationMiddleware,
     TOOL_RETRY_MIDDLEWARE,
+    build_agent_middleware,
 )
 
 
@@ -38,6 +39,19 @@ def _tool_call(name: str, call_id: str = "call-1") -> AIMessage:
     )
 
 
+def _middleware(model) -> list:
+    return build_agent_middleware(summary_model=model)
+
+
+def test_agent_middleware_uses_project_compaction_prompt() -> None:
+    model = _BindableFakeChatModel(responses=[AIMessage(content="摘要")])
+    summary_middleware = next(item for item in _middleware(model) if isinstance(item, NotifyingSummarizationMiddleware))
+
+    assert "## Durable Task State" in summary_middleware.summary_prompt
+    assert "{messages}" in summary_middleware.summary_prompt
+    assert summary_middleware._create_summary([HumanMessage(content="保留这个任务状态")]) == "摘要"
+
+
 def test_tool_retry_middleware_retries_until_success(monkeypatch) -> None:
     attempts = 0
 
@@ -54,7 +68,7 @@ def test_tool_retry_middleware_retries_until_success(monkeypatch) -> None:
     monkeypatch.setattr(TOOL_RETRY_MIDDLEWARE, "jitter", False)
 
     model = _BindableFakeChatModel(responses=[_tool_call("flaky_tool"), AIMessage(content="完成")])
-    agent = create_agent(model=model, tools=[flaky_tool], middleware=DEFAULT_AGENT_MIDDLEWARE)
+    agent = create_agent(model=model, tools=[flaky_tool], middleware=_middleware(model))
     output = agent.invoke({"messages": [{"role": "user", "content": "开始"}]})
     result = next(message for message in output["messages"] if getattr(message, "name", "") == "flaky_tool")
 
@@ -77,7 +91,7 @@ def test_tool_retry_middleware_returns_error_after_retries(monkeypatch) -> None:
     monkeypatch.setattr(TOOL_RETRY_MIDDLEWARE, "jitter", False)
 
     model = _BindableFakeChatModel(responses=[_tool_call("failing_tool"), AIMessage(content="已处理失败")])
-    agent = create_agent(model=model, tools=[failing_tool], middleware=DEFAULT_AGENT_MIDDLEWARE)
+    agent = create_agent(model=model, tools=[failing_tool], middleware=_middleware(model))
     output = agent.invoke({"messages": [{"role": "user", "content": "开始"}]})
     result = next(message for message in output["messages"] if getattr(message, "name", "") == "failing_tool")
 
@@ -103,7 +117,7 @@ def test_todo_list_middleware_adds_tool_and_state() -> None:
         ],
     )
     model = _BindableFakeChatModel(responses=[message, AIMessage(content="规划完成")])
-    agent = create_agent(model=model, tools=[], middleware=DEFAULT_AGENT_MIDDLEWARE)
+    agent = create_agent(model=model, tools=[], middleware=_middleware(model))
     output = agent.invoke({"messages": [{"role": "user", "content": "制定计划"}]})
 
     assert output["todos"] == [{"content": "完成重构", "status": "in_progress"}]
@@ -173,7 +187,7 @@ def test_create_agent_preserves_retry_message_and_custom_streaming(monkeypatch) 
         model=model,
         tools=[emitting_tool],
         system_prompt="test system prompt",
-        middleware=DEFAULT_AGENT_MIDDLEWARE,
+        middleware=_middleware(model),
     )
 
     stream_items = list(
@@ -229,7 +243,6 @@ def test_single_agent_create_agent_streams_sse_and_tool_events(monkeypatch) -> N
     from app.services import llm_client, memory
 
     monkeypatch.setattr(memory, "is_long_term_memory_enabled", lambda: False)
-    monkeypatch.setattr(memory, "build_short_term_messages", lambda _history: [])
     monkeypatch.setattr(llm_client, "get_custom_prompt", lambda: "")
 
     async def collect_stream() -> list[str]:

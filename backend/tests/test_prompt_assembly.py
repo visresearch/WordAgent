@@ -5,14 +5,9 @@ from app.services.agent import prompts as single_prompts
 from app.services.agent.subAgents import SUB_AGENTS
 from app.services.agent.subAgents.runner import SUB_AGENT_PROMPT_FILES, SUB_AGENT_TOOLS, build_sub_agent_system_prompt
 from app.services.agent.tools import AGENT_BASE_TOOLS
-from app.services.multi_agent import prompts as multi_prompts
 
 
 class PromptAssemblyTests(unittest.TestCase):
-    def tearDown(self) -> None:
-        multi_prompts.update_mcp_tools_prompt("")
-        multi_prompts.update_skills_prompt("")
-
     def test_single_agent_and_ask_mode_are_isolated(self) -> None:
         agent_prompt = single_prompts.get_agent_prompt("agent")
         ask_prompt = single_prompts.get_agent_prompt("ask")
@@ -43,26 +38,8 @@ class PromptAssemblyTests(unittest.TestCase):
     def test_single_agent_does_not_register_sub_agent_tool(self) -> None:
         self.assertNotIn("run_sub_agent", {tool.name for tool in AGENT_BASE_TOOLS})
 
-    def test_multi_agent_writer_rules_do_not_leak_to_other_roles(self) -> None:
-        writer_prompt = multi_prompts.get_agent_prompt("writer")
-        self.assertIn("generate_document Usage Policy", writer_prompt)
-        self.assertIn("insert_break Usage Policy", writer_prompt)
-        self.assertIn("Default Document Style", writer_prompt)
-
-        for role in ("planner", "research", "outline", "reviewer"):
-            prompt = multi_prompts.get_agent_prompt(role)
-            self.assertNotIn("generate_document Usage Policy", prompt)
-            self.assertNotIn("insert_break Usage Policy", prompt)
-            self.assertNotIn("Default Document Style", prompt)
-
     def test_prompts_do_not_restore_conflicting_retry_or_read_rules(self) -> None:
-        assembled = "\n".join(
-            [single_prompts.get_agent_prompt("agent")]
-            + [
-                multi_prompts.get_agent_prompt(role)
-                for role in ("planner", "research", "outline", "writer", "reviewer")
-            ]
-        )
+        assembled = single_prompts.get_agent_prompt("agent")
         self.assertNotIn("Tool fails | Retry once", assembled)
         self.assertNotIn("Call `read_document` first", assembled)
         self.assertNotIn("Call read_document first", assembled)
@@ -90,11 +67,9 @@ class PromptAssemblyTests(unittest.TestCase):
         backend_dir = Path(__file__).resolve().parents[1]
         shared = backend_dir / "app/services/tools/prompts/system-prompt-default-document-style.md"
         old_single = backend_dir / "app/services/agent/prompts/system-prompt-default-recommend-document-style.md"
-        old_multi = backend_dir / "app/services/multi_agent/prompts/system-prompt-default-recommend-document-style.md"
 
         self.assertTrue(shared.is_file())
         self.assertFalse(old_single.exists())
-        self.assertFalse(old_multi.exists())
 
 
 if __name__ == "__main__":

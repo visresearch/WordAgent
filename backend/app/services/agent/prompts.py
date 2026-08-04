@@ -71,10 +71,8 @@ _MODE_PROMPT_FILES = {
 
 
 def _normalize_mode(mode: str | None) -> str:
-    """标准化对话模式：plan 暂时按 agent 处理。"""
+    """标准化单智能体对话模式。"""
     normalized = (mode or "agent").strip().lower()
-    if normalized == "plan":
-        return "agent"
     if normalized not in _MODE_PROMPT_FILES:
         return "agent"
     return normalized
@@ -118,10 +116,17 @@ def get_compaction_summary_prompt() -> str:
     return _read_local_prompt_file("system-prompt-context-compaction-summary.md")
 
 
+@lru_cache(maxsize=1)
+def get_summarization_middleware_prompt() -> str:
+    """将项目摘要提示词适配为官方 SummarizationMiddleware 模板。"""
+    return get_compaction_summary_prompt().replace("{history_text}", "{messages}").replace("{current_task}", "")
+
+
 __all__ = [
     "get_tool_description",
     "get_core_prompts",
     "get_agent_prompt_parts",
     "get_agent_prompt",
     "get_compaction_summary_prompt",
+    "get_summarization_middleware_prompt",
 ]

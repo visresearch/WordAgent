@@ -200,8 +200,8 @@ class HomeInterface(QWidget):
         row2.addWidget(
             _InfoCard(
                 FluentIcon.CHAT,
-                "多智能体协作",
-                "研究员、大纲师、写手、审阅者等多智能体分工协作，面向长文写作提供更有深度的内容生成。",
+                "工具化工作流",
+                "通过文档工具、MCP 和 Skill 完成长文写作、资料查询与复杂编辑任务。",
                 self,
             )
         )

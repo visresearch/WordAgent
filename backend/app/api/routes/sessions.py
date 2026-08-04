@@ -4,14 +4,27 @@
 提供 Session CRUD 和 Session 下的消息操作接口
 """
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
+from app.core.logging import get_logger
+from app.services.memory import delete_thread
 from app.services.session_service import SessionService
 
 router = APIRouter()
+logger = get_logger(__name__)
+
+
+async def _delete_checkpoint(request: Request, session_id: int) -> None:
+    """删除 Session 对应的 Agent 状态，失败时记录并向调用方抛出。"""
+    try:
+        checkpointer = request.app.state.checkpointer
+        await delete_thread(checkpointer, session_id)
+    except Exception:
+        logger.exception("删除 Session Checkpoint 失败: session_id=%s", session_id)
+        raise
 
 
 # ============== 请求/响应模型 ==============
@@ -135,6 +148,7 @@ async def create_session(
 
 @router.delete("/sessions", response_model=CommonResponse)
 async def clear_all_sessions(
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -142,6 +156,9 @@ async def clear_all_sessions(
     """
     try:
         service = SessionService(db)
+        session_ids = await service.get_all_session_ids()
+        for session_id in session_ids:
+            await _delete_checkpoint(request, session_id)
         count = await service.clear_all_sessions()
         return CommonResponse(success=True, message=f"已清空所有会话，共删除 {count} 条消息")
     except Exception as e:
@@ -227,6 +244,7 @@ async def rename_session(
 @router.delete("/sessions/{session_id}", response_model=CommonResponse)
 async def delete_session(
     session_id: int,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -234,6 +252,9 @@ async def delete_session(
     """
     try:
         service = SessionService(db)
+        if not await service.get_session(session_id):
+            return CommonResponse(success=False, error="会话不存在")
+        await _delete_checkpoint(request, session_id)
         success = await service.delete_session(session_id)
         if not success:
             return CommonResponse(success=False, error="会话不存在")
@@ -306,6 +327,7 @@ async def add_message(
 @router.delete("/sessions/{session_id}/messages", response_model=CommonResponse)
 async def clear_session_messages(
     session_id: int,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -313,6 +335,9 @@ async def clear_session_messages(
     """
     try:
         service = SessionService(db)
+        if not await service.get_session(session_id):
+            return CommonResponse(success=False, error="会话不存在")
+        await _delete_checkpoint(request, session_id)
         success = await service.clear_session_messages(session_id)
         if not success:
             return CommonResponse(success=False, error="会话不存在")

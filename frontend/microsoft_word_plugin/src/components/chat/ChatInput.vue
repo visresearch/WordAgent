@@ -101,10 +101,6 @@
                   <span class="mode-option-icon" :style="modeIconStyle(askIcon)" aria-hidden="true"></span>
                   <span>Ask</span>
                 </div>
-                <div class="select-option" :class="{ active: mode === 'plan' }" @click="selectMode('plan')">
-                  <span class="mode-option-icon" :style="modeIconStyle(planIcon)" aria-hidden="true"></span>
-                  <span>Plan</span>
-                </div>
               </div>
             </div>
 
@@ -215,7 +211,6 @@ import addIcon from '../../assets/icons/add.svg';
 import agentIcon from '../../assets/icons/agent.svg';
 import askIcon from '../../assets/icons/ask.svg';
 import fileIcon from '../../assets/icons/file.svg';
-import planIcon from '../../assets/icons/plan.svg';
 import sendIcon from '../../assets/icons/send.svg';
 import { t } from '../../i18n/index.js';
 
@@ -246,33 +241,23 @@ export default {
       agentIcon,
       askIcon,
       fileIcon,
-      planIcon,
       sendIcon
     };
   },
   computed: {
     inputPlaceholder() {
-      if (this.mode === 'plan') {
-        return t('chat.planPlaceholder');
-      }
       if (this.mode === 'ask') {
         return t('chat.askPlaceholder');
       }
       return t('chat.agentPlaceholder');
     },
     currentModeLabel() {
-      if (this.mode === 'plan') {
-        return 'Plan';
-      }
       if (this.mode === 'ask') {
         return 'Ask';
       }
       return 'Agent';
     },
     currentModeIcon() {
-      if (this.mode === 'plan') {
-        return this.planIcon;
-      }
       if (this.mode === 'ask') {
         return this.askIcon;
       }
