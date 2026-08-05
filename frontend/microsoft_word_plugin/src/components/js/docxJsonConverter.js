@@ -5,61 +5,59 @@
  * 1. parseDocxToJSON - 将 Word 文档内容解析为 JSON 格式
  * 2. generateDocxFromJSON - 从 JSON 数据生成 Word 文档
  *
- * JSON schema 数据结构（精简版）：
+ * 后端 DocumentOutput 数据结构（JSONC 精简示意）：
  * {
- *   paragraphs: [{             // 唯一的有序内容流：段落或 { tables: [...] } 表格块
- *     pageStart?: number,      // 原生 API 可用时的段落起始页（full 模式）
- *     pageEnd?: number,        // 原生 API 可用时的段落结束页（full 模式）
- *     pStyle: [                // 段落样式数组（按顺序）
- *       alignment,             // [0] 对齐: left/center/right/justify
- *       lineSpacing,           // [1] 行间距
- *       indentLeft,            // [2] 左缩进
- *       indentRight,           // [3] 右缩进
- *       indentFirstLine,       // [4] 首行缩进
- *       spaceBefore,           // [5] 段前间距
- *       spaceAfter,            // [6] 段后间距
- *       styleName              // [7] 样式名称
- *     ],
- *     runs: [{                 // 格式块数组
- *       text: string,          // 文字内容
- *       rStyle: [              // 字符样式数组（按顺序）
- *         fontName,            // [0] 字体名称
- *         fontSize,            // [1] 字号
- *         bold,                // [2] 加粗
- *         italic,              // [3] 斜体
- *         underline,           // [4] 下划线: 0=无、1=单线
- *         underlineColor,      // [5] 下划线颜色: #RRGGBB
- *         color,               // [6] 字体颜色: #RRGGBB
- *         highlight,           // [7] 高亮色: 0=无
- *         strikethrough,       // [8] 删除线
- *         superscript,         // [9] 上标
- *         subscript            // [10] 下标
- *       ]
- *     }]
- *   }],
- *   { tables: [{               // 位于相邻段落之间的表格块
- *     rows: number,
- *     columns: number,
- *     tStyle: [tableAlignment],// 表格样式数组
- *     cells: [[{               // 单元格二维数组
- *       text: string,
- *       cStyle: [              // 单元格样式数组
- *         rowSpan,             // [0] 跨行数
- *         colSpan,             // [1] 跨列数
- *         alignment,           // [2] 水平对齐
- *         verticalAlignment    // [3] 垂直对齐
- *       ]
- *     }]]
- *   }] },
- *   fields: [],               // 域代码数组
- *   hasTOC: boolean,          // 是否包含目录
- *   styles: {                 // 样式字典（去重）
- *     pS_1: [...],            // 段落样式，键名 pS_N
- *     rS_1: [...],            // 字符样式，键名 rS_N
- *     cS_1: [...],            // 单元格样式，键名 cS_N
- *     tS_1: [...]             // 表格样式，键名 tS_N
+ *   paragraphs: [              // 唯一的有序内容流
+ *     {                        // 普通段落
+ *       pStyle: "pS_1",       // 必填：styles 中的段落样式 ID
+ *       runs: [                // 空数组表示空白段落
+ *         { text: "正文", rStyle: "rS_1" },
+ *         {                    // 图片 run：省略 text
+ *           url: "image.png",
+ *           width: 320,
+ *           height: 240,
+ *           left: 0,
+ *           top: 0,
+ *           wrapType: "inline",
+ *           altText: "图片说明"
+ *         }
+ *       ],
+ *       paraIndex: 0           // 可选；生成时仅用于图片锚定，不决定块顺序
+ *     },
+ *     {                        // 表格块，位于相邻段落之间
+ *       tables: [{
+ *         rows: 1,
+ *         columns: 1,
+ *         cells: [[{
+ *           text: "单元格",   // 简单模式
+ *           rStyle: "rS_1",   // 简单模式下可选
+ *           cStyle: "cS_1",   // 必填
+ *           paragraphs: [{    // 可选：多段落模式；提供后忽略 text
+ *             text: "单元格段落",
+ *             pStyle: "pS_1",
+ *             rStyle: "rS_1",
+ *             runs: [{ text: "单元格段落", rStyle: "rS_1" }]
+ *           }]
+ *         }]],
+ *         tStyle: "tS_1",
+ *         columnWidths: [120],                 // 可选，单位：磅
+ *         rowHeights: [[40, 1]]                // 可选：[高度, 高度规则]
+ *       }]
+ *     }
+ *   ],
+ *   styles: {                  // 所有引用 ID 都必须在这里定义
+ *     pS_1: [alignment, lineSpacing, indentLeft, indentRight,
+ *            indentFirstLine, spaceBefore, spaceAfter, styleName, lineSpacingRule],
+ *     rS_1: [fontName, fontSize, bold, italic, underline, underlineColor,
+ *            color, highlight, strikethrough, superscript, subscript],
+ *     cS_1: [rowSpan, colSpan, alignment, verticalAlignment],
+ *     tS_1: [tableAlignment]
  *   }
  * }
+ *
+ * read_document(full) 的读取结果是上述结构的扩展：普通段落还会带 paraID、
+ * paraIndex，以及客户端支持时的 pageStart/pageEnd；顶层也可能带 fields、hasTOC
+ * 和 tocFieldCode。这些读取元数据不属于后端生成用的 DocumentOutput。
  *
  * 图片作为段落内 inline runs（无 text、有 url），与 WPS 版一致。
  * Office 解析时通过 InlinePicture.getBase64ImageSrc 得到 data URL 写入 url（不落地 temp 文件）；

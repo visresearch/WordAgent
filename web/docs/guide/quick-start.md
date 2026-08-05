@@ -10,6 +10,9 @@
 | Ubuntu / Debian | `wence_ai-linux-x86_64.deb` |
 | macOS Apple Silicon | `wence_ai-macos-arm64.dmg` |
 
+- WPS Office Linux 版本 12.1.2.24722及以上、Windows 版本 12.1.0.28043 以下
+- Microsoft Word（Windows、Web）版本 LTSC 2024及以上(wordAPI 1.6及以上)
+
 安装并启动 **WenCe AI / 文策 AI**。免安装包、Intel Mac 和源码运行方式请查看 [安装方式](/guide/installation)。
 
 ## 2. 加载 Word 插件

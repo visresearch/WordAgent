@@ -53,7 +53,7 @@ Agent 或 Plan 模式准备修改文档时，加载项会展示待确认的生�
 | `read_document` | 读取 Word 内容 | ✅ | ✅ | ✅ |
 | `search_document` | 按文本或格式定位段落 | ✅ | ✅ | ✅ |
 | `generate_document` | 生成并插入结构化内容 | ✅ | ❌ | ✅ |
-| `edit_document` | 按 `paraID` 原位替换段落正文并保留 `pStyle` | ✅ | ❌ | ❌ |
+| `edit_document` | 原位替换段落正文 | ✅ | ❌ | ❌ |
 | `delete_document` | 删除指定段落 | ✅ | ❌ | ✅ |
 | `create_document` | 创建并打开新的空白 DOCX 文档 | ✅ | ❌ | ✅ |
 | `insert_break` | 插入换行、分页或下一页分节符 | ✅ | ❌ | ✅ |

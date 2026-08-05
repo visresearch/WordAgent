@@ -9,16 +9,20 @@
 
 ## 文档数据结构
 
-生成结构化 Word 文档是本项目的核心。项目中定义的 JSON Schema 格式类似于 Web 开发中的 HTML 和 CSS，将 Word 文章的段落和文本块的样式属性都进行了抽象和结构化，方便智能体理解和生成。
+生成结构化 Word 文档是本项目的核心。后端的 `DocumentOutput` 模型将内容与样式分离：`paragraphs` 保存唯一的有序内容流，`styles` 保存去重后的样式数组。内容节点通过 `pS_N`、`rS_N`、`cS_N`、`tS_N` 形式的 ID 引用样式，作用类似 HTML 元素引用 CSS 规则。
 
-- **paragraphs**: word文档段落数组，包含多个run文本块，paragraphs是agent主要修改的对象
-  - **pStyle**: 段落样式ID（如标题1、标题2、正文等）
-  - **runs**: 文本块数组，本项目中定义的文档的最小单位
-    - **text**: 文本内容
-    - **rStyle**: 字符样式ID（如加粗、红色等）
-  - **paraIndex**: 段落索引，智能体可以根据这个索引定位到文档中的具体段落进行读取
-  - **paraID**: 段落唯一标识，智能体可以根据这个标识定位到文档中的具体段落进行修改
-- **styles**: 样式定义字典，包含所有段落样式和字符样式的定义，智能体生成文档时需要引用这些样式ID来保证文档格式正确
+![](/jsonschema.png)
+
+`styles` 中的每个值都是由字符串、数字或布尔值组成的数组，不能包含 `null`。所有被内容节点引用的样式 ID 都必须存在。
+
+| 样式 ID | 最少项数 | 数组顺序 | 含义 |
+|---|---|---|---|
+| `pS_N` | 9 | [alignment, lineSpacing, indentLeft, indentRight, indentFirstLine, spaceBefore, spaceAfter, styleName, lineSpacingRule] | [对齐方式, 行间距, 左缩进, 右缩进, 首行缩进, 段前间距, 段后间距, 样式名称, 行间距规则] |
+| `rS_N` | 11 | [fontName, fontSize, bold, italic, underline, underlineColor, color, highlight, strikethrough, superscript, subscript] | [字体名, 字号, 粗体, 斜体, 下划线, 下划线颜色, 颜色, 高亮, 删除线, 上标, 下标] |
+| `cS_N` | 4 | [rowSpan, colSpan, alignment, verticalAlignment] | [行跨度, 列跨度, 水平对齐方式, 垂直对齐方式] |
+| `tS_N` | 1 | [tableAlignment] | [表格对齐方式] |
+
+其中，段落对齐方式为 `left`、`center`、`right` 或 `justify`；颜色使用 `#RRGGBB`。下划线常用值包括 `0`（无）、`1`（单线）、`3`（双线）、`4`（虚线）、`6`（粗线）和 `11`（波浪线）。表格对齐值为 `0`（左）、`1`（中）、`2`（右）；行高规则为 `0`（自动）、`1`（至少）或 `2`（固定）。
 
 ## Agent / Ask 架构
 
@@ -39,7 +43,7 @@ Agent 与 Ask 使用 ReAct 循环。Agent 可以读取并修改文档；Ask 只�
 
 单智能体 Agent 模式当前暂时停用 `run_sub_agent` 工具，不会自动委派子任务；需要改写单个段落时，使用 `edit_document(paraID, runs)` 直接替换正文并保留原段落样式。
 
-## Plan（Multi-Agent）架构
+## Plan（Multi-Agent）架构 (实验功能，在0.6.0版本后移除)
 
 多智能体协作框架中设计了一个 **Planner Agent** 负责编排和调度其他专家智能体的工作流。
 
@@ -83,14 +87,6 @@ Agent 与 Ask 使用 ReAct 循环。Agent 可以读取并修改文档；Ask 只�
 
 ![Langsmith](/Langsmith.png)
 
-## MCP 服务器支持
+## 前后端接口预览
 
-本项目支持用户自定义工具的接入，通过配置 MCP 服务器的方式让智能体调用第三方 API 来增强智能体的能力。
-
-支持的 MCP 服务器类型：
-
-- **远程 MCP 服务器**：如高德地图等在线服务
-- **本地 MCP 服务器**：本地部署的工具服务
-- **Skill 工具**：自定义技能工具
-
-示例：以**高德地图**和**可视化图表-MCP-Server**为例，用户输入"查询长沙未来五天的天气，绘制一个气温折线统计图，写一份天气预报文章"。智能体会调用高德地图 MCP 服务器进行查询长沙最近几天的气温数据，然后智能体会调用可视化图表-MCP-Server 生成一个折线统计图的图片 URL，把这张图片渲染在前端加载项界面中。
+![](/api.jpg)
