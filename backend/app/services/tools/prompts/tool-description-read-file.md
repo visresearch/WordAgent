@@ -8,7 +8,7 @@ Read file content from the project sandbox.
 
 ## Capabilities
 - Text files: return line-numbered content.
-- Image files (`png/jpg/jpeg/webp/bmp/gif/tiff`): return image size attributes and OCR text.
+- Image files (`png/jpg/jpeg/webp/bmp/gif/tiff`): return image size attributes and OCR text when the OCR plugin is installed.
 - `pdf`: extract text from pages.
 - `docx`: extract paragraph/table text.
 
@@ -19,7 +19,7 @@ Read file content from the project sandbox.
 
 ## Returns
 - Text content with line numbers for text files.
-- OCR text for image files.
+- OCR text for image files when the OCR plugin is installed; otherwise an availability message.
 
 ## Security boundary
 - Access is strictly limited to the project sandbox.

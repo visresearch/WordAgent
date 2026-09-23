@@ -28,8 +28,6 @@ _EDITABLE_TEXT_EXTENSIONS = {
 _MAX_LIST_ENTRIES = 500
 _MAX_READ_CHARS = 80_000
 _LINE_RANGE_RE = re.compile(r"^(.*?):(\d+)(?:-(\d+))?$")
-_OCR_ENGINE = None
-_OCR_ENGINE_LOAD_ERROR = None
 
 
 def _project_root() -> Path:
@@ -119,68 +117,14 @@ def _format_with_line_numbers(text: str, start_line: int | None, end_line: int |
     return "\n".join(numbered)
 
 
-def _get_python_ocr_engine():
-    """Lazy-load pure Python OCR engine (RapidOCR)."""
-    global _OCR_ENGINE, _OCR_ENGINE_LOAD_ERROR
-    if _OCR_ENGINE is not None:
-        return _OCR_ENGINE
-    if _OCR_ENGINE_LOAD_ERROR is not None:
-        return None
-
-    try:
-        import importlib
-
-        rapidocr_module = importlib.import_module("rapidocr_onnxruntime")
-        rapidocr_class = getattr(rapidocr_module, "RapidOCR", None)
-        if rapidocr_class is None:
-            raise RuntimeError("rapidocr_onnxruntime.RapidOCR not found")
-        _OCR_ENGINE = rapidocr_class()
-        return _OCR_ENGINE
-    except Exception as exc:
-        _OCR_ENGINE_LOAD_ERROR = str(exc)
-        return None
-
-
-def _load_grayscale_image_for_ocr(file_path: Path):
-    """Load an image as a grayscale numpy array before OCR."""
-    from PIL import Image, ImageOps
-    import numpy as np
-
-    with Image.open(file_path) as img:
-        gray_img = ImageOps.exif_transpose(img).convert("L")
-        return np.ascontiguousarray(gray_img)
-
-
 def _ocr_image_text(file_path: Path) -> str:
-    engine = _get_python_ocr_engine()
-    if engine is None:
-        reason = _OCR_ENGINE_LOAD_ERROR or "rapidocr_onnxruntime is unavailable"
-        return (
-            f"OCR unavailable: pure Python engine not ready. Please install `rapidocr-onnxruntime`. Details: {reason}"
-        )
+    from app.services.plugins.manager import recognize_image
 
     try:
-        grayscale_image = _load_grayscale_image_for_ocr(file_path)
-        result, _elapsed = engine(grayscale_image)
+        text = recognize_image(file_path)
     except Exception as exc:
-        return f"OCR failed: {exc}"
-
-    if not result:
-        return "OCR completed but no readable text was detected."
-
-    texts: list[str] = []
-    for item in result:
-        if not isinstance(item, (list, tuple)) or len(item) < 2:
-            continue
-        text_part = item[1]
-        if isinstance(text_part, str):
-            cleaned = text_part.strip()
-            if cleaned:
-                texts.append(cleaned)
-
-    if not texts:
-        return "OCR completed but no readable text was detected."
-    return _truncate_text("\n".join(texts))
+        return f"OCR unavailable: {exc}"
+    return _truncate_text(text) if text else "OCR completed but no readable text was detected."
 
 
 def _get_image_metadata(file_path: Path) -> str:

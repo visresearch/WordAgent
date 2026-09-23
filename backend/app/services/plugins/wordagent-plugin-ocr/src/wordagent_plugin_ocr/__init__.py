@@ -1,0 +1,1 @@
+"""WordAgent OCR plugin."""

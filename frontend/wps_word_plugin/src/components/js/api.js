@@ -1505,6 +1505,41 @@ async function deleteSkill(folder) {
   return response.data;
 }
 
+// ============== Python 插件管理 API ==============
+
+async function getPlugins() {
+  const response = await request('/api/plugins');
+  if (!response.success) throw new Error(response.data?.detail || response.error);
+  return response.data;
+}
+
+async function installPlugin(source) {
+  const response = await request('/api/plugins/install', { method: 'POST', body: { source } });
+  if (!response.success) throw new Error(response.data?.detail || response.error);
+  return response.data;
+}
+
+async function uploadPlugin(file) {
+  const body = new FormData();
+  body.append('file', file);
+  const response = await fetch(`${CONFIG.baseURL}/api/plugins/upload`, { method: 'POST', body });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
+  return data;
+}
+
+async function removePlugin(pluginId) {
+  const response = await request(`/api/plugins/${encodeURIComponent(pluginId)}`, { method: 'DELETE' });
+  if (!response.success) throw new Error(response.data?.detail || response.error);
+  return response.data;
+}
+
+async function getPluginOperation(operationId) {
+  const response = await request(`/api/plugins/operations/${encodeURIComponent(operationId)}`);
+  if (!response.success) throw new Error(response.data?.detail || response.error);
+  return response.data;
+}
+
 /**
  * 创建并打开一个新的空白 DOCX 文档。
  * WPS 的 Documents.Add 默认创建可保存为 DOCX 的空白文档。
@@ -1591,6 +1626,11 @@ export default {
   openSkillFolder,
   setSkillEnabled,
   deleteSkill,
+  getPlugins,
+  installPlugin,
+  uploadPlugin,
+  removePlugin,
+  getPluginOperation,
 
   // 配置方法
   updateConfig,
@@ -1638,6 +1678,11 @@ export {
   openSkillFolder,
   setSkillEnabled,
   deleteSkill,
+  getPlugins,
+  installPlugin,
+  uploadPlugin,
+  removePlugin,
+  getPluginOperation,
   updateConfig,
   getConfig,
   request

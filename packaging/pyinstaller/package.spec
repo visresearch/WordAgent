@@ -8,6 +8,7 @@ PyInstaller from backend/ while still using this single shared spec.
 """
 
 import os
+import shutil
 import subprocess
 import sys
 
@@ -62,11 +63,21 @@ if version_value:
 
 datas = [
     _data(os.path.join(backend_dir, "README.md"), "."),
-    _data(os.path.join(backend_dir, "app"), "app"),
     _data(os.path.join(backend_dir, "resources", "builtin_skills"), "resources/builtin_skills"),
     _data(os.path.join(frontend_dir, "wps_word_plugin", "dist"), "frontend"),
     _data(os.path.join(frontend_dir, "microsoft_word_plugin", "dist"), "msoffice"),
 ]
+
+# Prompt and template resources are needed at runtime. The separately
+# downloadable plugin package source must not be copied into the main bundle.
+app_source = os.path.join(backend_dir, "app")
+for directory, subdirs, filenames in os.walk(app_source):
+    subdirs[:] = [name for name in subdirs if name != "__pycache__"]
+    if os.path.relpath(directory, app_source).replace(os.sep, "/") == "services/plugins":
+        subdirs[:] = [name for name in subdirs if name != "wordagent-plugin-ocr"]
+    relative = os.path.relpath(directory, app_source)
+    destination = os.path.join("app", relative) if relative != "." else "app"
+    datas.extend((os.path.join(directory, name), destination) for name in filenames if not name.endswith(".pyc"))
 
 optional_datas = [
     _data(os.path.join(backend_dir, "gui", "resources"), "gui/resources", required=False),
@@ -74,6 +85,10 @@ optional_datas = [
 datas.extend(item for item in optional_datas if item)
 if generated_env_path:
     datas.append((generated_env_path, "."))
+
+uv_executable = shutil.which("uv")
+if not uv_executable:
+    raise FileNotFoundError("uv is required for installable Python plugins")
 
 hiddenimports = [
     "uvicorn.logging",
@@ -107,8 +122,6 @@ hiddenimports = [
     "langchain_community",
     "langgraph",
     "dotenv",
-    "rapidocr_onnxruntime",
-    "onnxruntime",
     "PySide6.QtCharts",
     "PySide6",
     "PySide6.QtCore",
@@ -147,13 +160,16 @@ hiddenimports += collect_submodules("langgraph")
 a = Analysis(
     [os.path.join(backend_dir, "main.py")],
     pathex=[backend_dir],
-    binaries=[],
+    binaries=[(uv_executable, "tools")],
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
     excludes=[
+        "rapidocr_onnxruntime",
+        "onnxruntime",
+        "cv2",
         "matplotlib",
         "seaborn",
         "tkinter",

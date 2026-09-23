@@ -217,6 +217,8 @@ class DashboardInterface(QWidget):
             title_key = self._metric_title_keys.get(key)
             if title_key is not None:
                 card.setTitle(t(title_key))
+        for series, (_, title_key, _) in zip(self._data_series, SERIES):
+            series.setName(t(title_key))
         self.refresh()
 
     def _set_period(self, period: str):
@@ -404,12 +406,12 @@ class DashboardInterface(QWidget):
         self._chart.addAxis(axis_x, Qt.AlignBottom)
         self._chart.addAxis(axis_y, Qt.AlignLeft)
 
-        for key, title, color in SERIES:
+        for key, title_key, color in SERIES:
             series = QLineSeries()
             for index, point in enumerate(self._points):
                 series.append(index, max(0.0, int(point.get(key, 0) or 0) / 1000))
             series.setPointsVisible(len(self._points) == 1)
-            series.setName(title)
+            series.setName(t(title_key))
             series.setPen(QPen(color, 2.4))
             self._chart.addSeries(series)
             series.attachAxis(axis_x)

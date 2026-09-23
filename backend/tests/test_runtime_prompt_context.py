@@ -201,3 +201,30 @@ def test_image_fallback_retains_runtime_context_and_message_identity(runtime, mo
     assert "Direct image input is unavailable" in fallback.content
     assert "read_file(path)" in fallback.content
     assert original_text.split("[Image Input]")[0] == fallback.content.split("[Image Input]")[0]
+
+
+def test_image_fallback_includes_downloaded_ocr_text(runtime, monkeypatch):
+    from app.api.routes import files
+
+    monkeypatch.setattr(files, "read_file_as_base64", lambda _file_id: "aW1hZ2U=")
+    monkeypatch.setattr(
+        agent, "_ocr_attachment_context", lambda paths: f"[OCR text from attached images]\n{paths[0]}: 发票金额 120 元"
+    )
+    runtime.reject_images = True
+    collect(
+        message="读取这张图片",
+        attached_files=[
+            {
+                "file_id": "image",
+                "filename": "receipt.png",
+                "is_image": True,
+                "content_type": "image/png",
+                "size": 5,
+                "project_path": "uploads/receipt.png",
+            }
+        ],
+    )
+    fallback = runtime.inputs[1][-1]
+    assert isinstance(fallback.content, str)
+    assert "uploads/receipt.png: 发票金额 120 元" in fallback.content
+    assert runtime.inputs[0][-1].id == fallback.id

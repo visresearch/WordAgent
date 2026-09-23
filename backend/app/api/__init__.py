@@ -4,7 +4,7 @@ WenCe AI Writing Assistant - API 模块
 
 from fastapi import APIRouter
 
-from app.api.routes import chat, files, models, sessions, settings, skills, usage
+from app.api.routes import chat, files, models, plugins, sessions, settings, skills, usage
 
 api_router = APIRouter()
 
@@ -17,3 +17,4 @@ api_router.include_router(files.router, prefix="/chat", tags=["文件上传"])
 api_router.include_router(sessions.router, tags=["会话管理"])
 api_router.include_router(settings.router, prefix="/settings", tags=["设置管理"])
 api_router.include_router(skills.router, tags=["技能管理"])
+api_router.include_router(plugins.router, tags=["插件管理"])

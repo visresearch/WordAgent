@@ -1,0 +1,16 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "wordagent-plugin-ocr"
+version = "0.1.0"
+description = "Optional OCR plugin for WordAgent"
+requires-python = ">=3.11"
+dependencies = ["rapidocr-onnxruntime==1.4.4"]
+
+[project.entry-points."wordagent.plugins"]
+ocr = "wordagent_plugin_ocr.plugin:Plugin"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/wordagent_plugin_ocr"]

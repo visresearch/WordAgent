@@ -55,6 +55,24 @@ logger = get_logger(__name__)
 MAX_CHECKPOINT_IMAGE_BYTES = 512 * 1024
 
 
+def _ocr_attachment_context(project_paths: list[str]) -> str:
+    """Supply image text directly when an image must be sent to a text-only model."""
+    from app.services.plugins.manager import has_capability
+
+    if not project_paths or not has_capability("ocr"):
+        return ""
+    from app.services.tools.file_tools import _ocr_image_text, _resolve_project_path
+
+    lines = ["[OCR text from attached images]"]
+    for path in project_paths:
+        try:
+            image = _resolve_project_path(path, must_exist=True)
+            lines.append(f"{path}:\n{_ocr_image_text(image)}")
+        except (OSError, ValueError) as exc:
+            lines.append(f"{path}: OCR unavailable ({exc})")
+    return "\n".join(lines)
+
+
 class WordAgentState(AgentState):
     # Keep the original document/model context while a human clarification is pending.
     request_context: dict
@@ -525,6 +543,7 @@ async def process_writing_request_stream(
             )
         # 处理附件
         image_content_parts = []
+        image_project_paths = []
         file_reference_parts = []
         attached_image_count = 0
         if attached_files:
@@ -539,6 +558,8 @@ async def process_writing_request_stream(
 
                 if is_image:
                     attached_image_count += 1
+                    if project_path:
+                        image_project_paths.append(project_path)
                     line = f"- {filename} [image] | project_path={project_path or '(unknown)'}"
                     file_reference_parts.append(line)
 
@@ -583,7 +604,10 @@ async def process_writing_request_stream(
 
         text_only_image_context = ""
         if attached_image_count:
-            text_only_image_context = "Direct image input is unavailable in this request. Use `read_file(path)` on the image project_path when image content is needed."
+            text_only_image_context = (
+                "Direct image input is unavailable in this request. Use the OCR text below when provided; "
+                "otherwise call `read_file(path)` on the image project_path when image content is needed."
+            )
 
         image_user_content = build_user_prompt(
             message, context_sections=context_sections, image_context=image_context, **user_prompt_options
@@ -591,6 +615,15 @@ async def process_writing_request_stream(
         text_only_user_content = build_user_prompt(
             message, context_sections=context_sections, image_context=text_only_image_context, **user_prompt_options
         )
+        if attached_image_count and not image_content_parts:
+            ocr_context = await asyncio.to_thread(_ocr_attachment_context, image_project_paths)
+            if ocr_context:
+                text_only_user_content = build_user_prompt(
+                    message,
+                    context_sections=context_sections + [ocr_context],
+                    image_context=text_only_image_context,
+                    **user_prompt_options,
+                )
 
         # 构建 HumanMessage
         message_id = str(uuid.uuid4())
@@ -708,7 +741,19 @@ async def process_writing_request_stream(
                         ):
                             image_fallback_applied = True
                             logger.warning("[Agent] ⚠️ 当前端点不支持图像输入，自动降级为文本模式重试")
-                            stream_kwargs["input"] = {**stream_kwargs["input"], "messages": text_only_messages}
+                            ocr_context = _ocr_attachment_context(image_project_paths)
+                            fallback_messages = text_only_messages
+                            if ocr_context:
+                                fallback_content = build_user_prompt(
+                                    message,
+                                    context_sections=context_sections + [ocr_context],
+                                    image_context=text_only_image_context,
+                                    **user_prompt_options,
+                                )
+                                fallback_messages = list(messages[:-1]) + [
+                                    HumanMessage(content=fallback_content, id=message_id)
+                                ]
+                            stream_kwargs["input"] = {**stream_kwargs["input"], "messages": fallback_messages}
                             continue
 
                         if _is_context_overflow_error(e):

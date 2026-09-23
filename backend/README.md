@@ -37,6 +37,12 @@ uv run python main.py
 
 默认服务地址是 `http://127.0.0.1:3880`。`main.py` 会启动 API 服务和桌面 GUI；GUI 中可安装 WPS 插件和 Microsoft Word 插件。
 
+## 可选 Python 插件
+
+WPS 设置页的“插件”面板可下载 OCR 插件、安装已发布的 `wordagent-plugin-*` 包或上传 `.whl`，也可查看安装日志并删除插件。每个插件使用用户数据目录下独立的 uv 环境；默认后端依赖和安装包不含 RapidOCR、OpenCV、ONNX Runtime 或 OCR 模型。OCR 插件源码位于 `app/services/plugins/wordagent-plugin-ocr/`，构建主应用时会被排除；发布版按应用版本从 GitHub 下载这份源码并用 uv 安装。
+
+自定义插件需提供 `wordagent.plugins` 入口点。入口对象声明 `name`、`description`、`capabilities`，实现 `run(capability, payload) -> dict`，可选实现 `check()`；插件逻辑在独立 Python 进程中执行。具体示例见 OCR 插件的 README。
+
 ## 运行测试
 
 在 `backend/` 目录执行：
