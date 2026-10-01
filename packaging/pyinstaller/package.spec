@@ -141,6 +141,8 @@ hiddenimports = [
     "app.api.routes.models",
     "app.api.routes.settings",
     "app.services",
+    "app.services.mcp-server",
+    "app.services.mcp_runtime",
     "app.services.agent",
     "app.services.chat_history",
     "app.services.llm_client",

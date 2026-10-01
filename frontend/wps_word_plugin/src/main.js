@@ -5,6 +5,7 @@ import App from './App.vue';
 import router from './router';
 import ribbon from './components/ribbon.js';
 import { i18n } from './i18n/index.js';
+import { startMcpBridge } from './components/js/mcp-server.js';
 
 // 将 ribbon 挂载到全局，供 WPS 调用
 window.ribbon = ribbon;
@@ -15,3 +16,4 @@ app.use(router);
 app.use(i18n);
 
 app.mount('#app');
+startMcpBridge();

@@ -5,12 +5,12 @@ WenCe AI Writing Assistant - FastAPI 应用
 import os
 import sys
 from contextlib import asynccontextmanager
+from importlib import import_module
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from starlette.responses import Response
 from fastapi.staticfiles import StaticFiles
 
 from app.api import api_router
@@ -19,7 +19,11 @@ from app.core.db import close_db, init_db
 from app.core.logging import get_logger
 from app.services.agent.skills import sync_builtin_skills
 from app.services.background_tasks import background_tasks
+from app.services.mcp_runtime import runtime as mcp_runtime
 from app.services.memory import open_checkpointer
+
+# The service file is named mcp-server.py, so load it through importlib.
+mcp_server = import_module("app.services.mcp-server")
 
 logger = get_logger(__name__)
 
@@ -76,13 +80,15 @@ async def lifespan(app: FastAPI):
         await init_db()
         logger.info("数据库初始化完成")
 
-        async with open_checkpointer() as checkpointer:
+        async with open_checkpointer() as checkpointer, mcp_server.mcp.session_manager.run():
             app.state.checkpointer = checkpointer
             app.state.background_tasks = background_tasks
             logger.info("LangGraph Checkpointer 已初始化")
+            mcp_runtime.set_ready(True)
             try:
                 yield
             finally:
+                mcp_runtime.set_ready(False)
                 await background_tasks.shutdown()
     except Exception as e:
         logger.exception("应用生命周期异常: %s", e)
@@ -114,6 +120,7 @@ app.add_middleware(
 
 # 注册 API 路由
 app.include_router(api_router, prefix=settings.API_PREFIX)
+app.include_router(mcp_server.router, prefix=settings.API_PREFIX)
 
 
 @app.get(f"{settings.API_PREFIX}/version")
@@ -173,3 +180,7 @@ async def root():
         "docs": f"{settings.API_PREFIX}/docs",
         "plugin": "/plugin/manifest.xml",
     }
+
+
+# MCP Streamable HTTP: http://127.0.0.1:3880/mcp/
+app.mount("/mcp", mcp_server.mcp_app)

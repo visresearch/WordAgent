@@ -9,6 +9,7 @@ import { createApp } from "vue";
 import App from "../App.vue";
 import router from "../router";
 import api from "../components/js/api.js";
+import { startMcpBridge, stopMcpBridge } from "../components/js/mcp-server.js";
 import { i18n } from "../i18n/index.js";
 
 /**
@@ -27,11 +28,17 @@ async function checkAutoShowPanel() {
   }
 }
 
-Office.onReady(() => {
+Office.onReady((info) => {
   const app = createApp(App);
   app.use(router);
   app.use(i18n);
   app.mount("#app");
+
+  if (info.host === Office.HostType.Word) {
+    startMcpBridge();
+    window.addEventListener("pagehide", stopMcpBridge);
+    window.addEventListener("pageshow", startMcpBridge);
+  }
 
   // 检查是否需要自动显示面板
   checkAutoShowPanel();

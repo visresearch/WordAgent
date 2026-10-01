@@ -24,6 +24,7 @@ from qfluentwidgets import (
 from .home_interface import HomeInterface
 from .wps_install_interface import InstallInterface
 from .office_install_interface import OfficeInstallInterface
+from .mcp_server_interface import McpServerInterface
 from .console_interface import ConsoleInterface
 from .dashboard_interface import DashboardInterface
 from gui.i18n import subscribe_locale_changed, t
@@ -113,12 +114,14 @@ class MainWindow(QMainWindow):
         self._dashboardInterface = DashboardInterface(self)
         self._installInterface = InstallInterface(self)
         self._officeInstallInterface = OfficeInstallInterface(self)
+        self._mcpServerInterface = McpServerInterface(self)
         self._consoleInterface = ConsoleInterface(self)
 
         self._stack.addWidget(self._homeInterface)
         self._stack.addWidget(self._dashboardInterface)
         self._stack.addWidget(self._installInterface)
         self._stack.addWidget(self._officeInstallInterface)
+        self._stack.addWidget(self._mcpServerInterface)
         self._stack.addWidget(self._consoleInterface)
 
         # 注册导航项
@@ -155,6 +158,14 @@ class MainWindow(QMainWindow):
             position=NavigationItemPosition.TOP,
         )
         self._nav.addItem(
+            routeKey="mcpServerInterface",
+            icon=QIcon(_icon_path("mcp-server.svg")),
+            text=t("nav.mcp"),
+            tooltip=t("nav.mcp"),
+            onClick=lambda: self._switchPage(self._mcpServerInterface),
+            position=NavigationItemPosition.TOP,
+        )
+        self._nav.addItem(
             routeKey="consoleInterface",
             icon=FluentIcon.COMMAND_PROMPT,
             text=t("nav.console"),
@@ -179,6 +190,7 @@ class MainWindow(QMainWindow):
             "dashboardInterface": t("nav.dashboard"),
             "installInterface": t("nav.wps"),
             "officeInstallInterface": t("nav.office"),
+            "mcpServerInterface": t("nav.mcp"),
             "consoleInterface": t("nav.console"),
         }
         for key, text in labels.items():
