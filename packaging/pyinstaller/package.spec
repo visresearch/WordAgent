@@ -68,13 +68,13 @@ datas = [
     _data(os.path.join(frontend_dir, "microsoft_word_plugin", "dist"), "msoffice"),
 ]
 
-# Prompt and template resources are needed at runtime. The separately
-# downloadable plugin package source must not be copied into the main bundle.
+# Prompts, the plugin catalog, and the plugin host runner are needed at runtime.
+# resources/plugins contains downloadable packages and is never collected here.
 app_source = os.path.join(backend_dir, "app")
 for directory, subdirs, filenames in os.walk(app_source):
     subdirs[:] = [name for name in subdirs if name != "__pycache__"]
     if os.path.relpath(directory, app_source).replace(os.sep, "/") == "services/plugins":
-        subdirs[:] = [name for name in subdirs if name != "wordagent-plugin-ocr"]
+        subdirs[:] = []  # Only the host's Python files belong in the bundle.
     relative = os.path.relpath(directory, app_source)
     destination = os.path.join("app", relative) if relative != "." else "app"
     datas.extend((os.path.join(directory, name), destination) for name in filenames if not name.endswith(".pyc"))
@@ -169,6 +169,8 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=[],
     excludes=[
+        "resources.plugins",
+        "wordagent_plugin_ocr",
         "rapidocr_onnxruntime",
         "onnxruntime",
         "cv2",

@@ -2,9 +2,9 @@ import pytest
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 
-from app.services import middleware as middleware_module
 from app.services.agent.prompts import get_compaction_summary_prompt, get_summarization_middleware_prompt
 from app.services.middleware import NotifyingSummarizationMiddleware
+from app.services.middleware import notifying_summarization as middleware_module
 
 
 def test_compaction_prompt_contains_required_durable_state_fields() -> None:

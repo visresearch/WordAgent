@@ -51,7 +51,7 @@ def test_actual_tool_schema_keeps_reference_but_frontend_receives_character_arra
     middleware = ToolNormalizationAndLoggingMiddleware()
     writer = Mock()
     with (
-        patch("app.services.middleware._record_result"),
+        patch("app.services.middleware.tool_normalization_and_logging._record_result"),
         patch("app.services.tools.document_tools.get_stream_writer", return_value=writer),
         patch("app.services.tools.document_tools._wait_for_frontend_mutation", return_value={"success": True}),
     ):

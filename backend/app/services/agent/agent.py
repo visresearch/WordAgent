@@ -45,7 +45,8 @@ from app.services.document import (
 from app.services.llm_client import init_chat_model_with_reasoning, resolve_model, supports_thinking
 from app.services.memory import build_runtime_thread_id
 from app.services.human_input import pending_questions
-from app.services.middleware import MAX_CONTEXT_TOKENS, build_agent_middleware
+from app.services.agent.middleware import build_agent_middleware
+from app.services.middleware.notifying_summarization import MAX_CONTEXT_TOKENS
 from app.services.tools.tool_log import build_tool_json, set_current_tool_log
 from app.services.token_usage import normalize_usage_metadata
 from app.services.utils import try_init_langsmith

@@ -3,14 +3,21 @@
 保存和加载用户的大模型配置
 """
 
+import asyncio
 import json
+import math
 import os
 import shutil
+from contextlib import AsyncExitStack
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
 import httpx
 from fastapi import APIRouter, HTTPException
+from mcp import ClientSession
+from mcp.client.sse import sse_client
+from mcp.client.streamable_http import streamable_http_client
 from pydantic import BaseModel, Field
 
 from app.core.config import get_user_settings_file, get_temp_dir, get_upload_dir
@@ -126,6 +133,78 @@ async def save_settings(settings: UserSettings):
         raise HTTPException(status_code=500, detail=f"保存设置失败: {str(e)}")
 
 
+async def _check_mcp_connection(url: str, transport: str, headers: dict, timeout: float) -> None:
+    """通过 MCP 初始化握手测试远程连接，并在超时内关闭会话。"""
+    post_error = None
+
+    async def check_post_status(response: httpx.Response) -> None:
+        nonlocal post_error
+        # 保留 POST 的 HTTP 错误；Streamable HTTP 允许 GET/DELETE 返回 405。
+        if response.request.method == "POST":
+            try:
+                response.raise_for_status()
+            except httpx.HTTPStatusError as error:
+                post_error = error
+                raise
+
+    def create_http_client(**kwargs) -> httpx.AsyncClient:
+        return httpx.AsyncClient(follow_redirects=True, event_hooks={"response": [check_post_status]}, **kwargs)
+
+    # 总超时也覆盖持续发送事件、但没有完成握手的 SSE 连接。
+    try:
+        async with asyncio.timeout(timeout):
+            async with AsyncExitStack() as stack:
+                if transport == "sse":
+                    connection = sse_client(
+                        url,
+                        headers=headers,
+                        timeout=timeout,
+                        sse_read_timeout=timeout,
+                        httpx_client_factory=create_http_client,
+                    )
+                else:
+                    client = await stack.enter_async_context(create_http_client(headers=headers, timeout=timeout))
+                    connection = streamable_http_client(url, http_client=client)
+                streams = await stack.enter_async_context(connection)
+                session = await stack.enter_async_context(
+                    ClientSession(streams[0], streams[1], read_timeout_seconds=timedelta(seconds=timeout))
+                )
+                await session.initialize()
+    except Exception:
+        # 旧版 SSE 的写入任务可能吞掉 POST 错误，握手失败时返回原始状态码。
+        if post_error is not None:
+            raise post_error from None
+        raise
+
+
+def _format_mcp_connection_error(error: Exception, timeout: float) -> str:
+    """提取 SDK 任务组中的具体错误，HTTP 错误不包含服务 URL。"""
+    errors = [error]
+    leaves = []
+    while errors:
+        current = errors.pop(0)
+        nested = getattr(current, "exceptions", None)
+        if isinstance(nested, list | tuple) and nested:
+            errors.extend(nested)
+        else:
+            leaves.append(current)
+
+    for current in leaves:
+        if isinstance(current, httpx.HTTPStatusError):
+            status = current.response.status_code
+            hint = {
+                401: "请检查鉴权信息",
+                403: "请检查访问权限",
+                404: "地址不存在，请检查 URL 路径",
+                405: "请求方法不被支持，请检查传输类型和 URL",
+            }.get(status)
+            detail = f"远端 MCP 返回 HTTP {status}（{current.request.method}）"
+            return f"{detail}：{hint}" if hint else detail
+    if any(isinstance(current, TimeoutError | httpx.TimeoutException) for current in leaves):
+        return f"MCP 握手超时（{timeout:g} 秒）"
+    return str(leaves[0]).strip() or type(leaves[0]).__name__
+
+
 @router.post("/mcp/test")
 async def test_mcp_server(payload: MCPServerTestRequest):
     """测试 MCP 服务器连接"""
@@ -146,33 +225,26 @@ async def test_mcp_server(payload: MCPServerTestRequest):
         url = str(config.get("url") or config.get("endpoint") or "").strip()
         if url:
             timeout = float(config.get("timeout", 8))
+            if not math.isfinite(timeout) or timeout <= 0:
+                return {"success": False, "message": "连接超时必须是大于 0 的有限秒数"}
             headers = config.get("headers") if isinstance(config.get("headers"), dict) else {}
+            configured_transport = str(config.get("transport") or config.get("type") or "").strip()
+            # Match the runtime loader: URL connections default to Streamable HTTP.
+            transport = "sse" if configured_transport == "sse" else "http"
 
             try:
-                async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-                    # 连接测试：2xx 视为成功，4xx/5xx 视为失败
-                    resp = await client.get(url, headers=headers)
-                status_code = resp.status_code
-                if 200 <= status_code < 300:
-                    return {
-                        "success": True,
-                        "message": f"{server_name} 连接成功 (HTTP {status_code})",
-                    }
-
-                if status_code == 404:
-                    return {
-                        "success": False,
-                        "message": f"{server_name} 连接失败: 服务器返回 HTTP 404（地址不存在，请检查 URL 路径）",
-                    }
-
+                await _check_mcp_connection(url, transport, headers, timeout)
+                logger.info("[MCP 测试] %s (%s): MCP 握手成功", server_name, transport)
                 return {
-                    "success": False,
-                    "message": f"{server_name} 连接失败 (HTTP {status_code})",
+                    "success": True,
+                    "message": f"{server_name} 连接成功（MCP 握手成功）",
                 }
             except Exception as e:
+                detail = _format_mcp_connection_error(e, timeout)
+                logger.warning("[MCP 测试] %s (%s): %s", server_name, transport, detail)
                 return {
                     "success": False,
-                    "message": f"{server_name} 连接失败: {str(e)}",
+                    "message": f"{server_name} 连接失败: {detail}",
                 }
 
         # 其次按 stdio 方式测试（仅检查命令可执行，不真正启动进程）

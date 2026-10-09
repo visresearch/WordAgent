@@ -1505,7 +1505,7 @@ async function deleteSkill(folder) {
   return response.data;
 }
 
-// ============== Python 插件管理 API ==============
+// ============== Python 插件 API ==============
 
 async function getPlugins() {
   const response = await request('/api/plugins');
@@ -1517,15 +1517,6 @@ async function installPlugin(source) {
   const response = await request('/api/plugins/install', { method: 'POST', body: { source } });
   if (!response.success) throw new Error(response.data?.detail || response.error);
   return response.data;
-}
-
-async function uploadPlugin(file) {
-  const body = new FormData();
-  body.append('file', file);
-  const response = await fetch(`${CONFIG.baseURL}/api/plugins/upload`, { method: 'POST', body });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
-  return data;
 }
 
 async function removePlugin(pluginId) {
@@ -1628,7 +1619,6 @@ export default {
   deleteSkill,
   getPlugins,
   installPlugin,
-  uploadPlugin,
   removePlugin,
   getPluginOperation,
 
@@ -1680,7 +1670,6 @@ export {
   deleteSkill,
   getPlugins,
   installPlugin,
-  uploadPlugin,
   removePlugin,
   getPluginOperation,
   updateConfig,

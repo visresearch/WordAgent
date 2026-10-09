@@ -478,6 +478,8 @@
                     '<div class="addonItemName5"><div class="addonItemButton" id="' + id + '_button' + '" onclick="WpsAddonHandle(\'' + id + '\')">' + buttonLabel + '</div></div>\n' +
                     '<div class="addonItemName6" id="' + id + '_status' + '">验证中...</div>\n';
                 addonList.appendChild(ele);
+            }
+            if (serverVersion !== "wait") {
                 CheckPlugin(element);
             }
         }
@@ -588,7 +590,10 @@
                 req,
                 JSON.stringify({ serverId: serverId }),
                 function (res) {
-                    if (res.status !== 0) {
+                    if (res.status !== 0 || res.res.target.status !== 200) {
+                        var status = document.getElementById("wence_word_plugin/wps_status");
+                        status.innerHTML = "未连接";
+                        status.title = res.message || "WPS 本地服务未启动，请启动 WPS 后重试安装。";
                         return;
                     }
                     if (serverVersion == "wait") {
@@ -605,6 +610,8 @@
             addonList.style.maxWidth = 800 * window.devicePixelRatio + "px";
             var ClearAll = document.getElementById("ClearAll");
             ClearAll.style.maxWidth = 800 * window.devicePixelRatio + "px";
+            // 安装入口无需等待 WPS 服务启动成功，避免失败时只剩空表格。
+            LoadPublishAddons();
             InitSdk();
         }
 

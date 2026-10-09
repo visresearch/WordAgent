@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
-import re
-import shutil
-import tempfile
 import threading
 import uuid
-from pathlib import Path
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.services.plugins import manager
@@ -21,7 +17,7 @@ _busy: set[str] = set()
 
 
 class InstallRequest(BaseModel):
-    source: str = Field(min_length=1, max_length=150)
+    source: str = Field(min_length=1, max_length=2048)
 
 
 @router.get("/plugins")
@@ -32,7 +28,7 @@ async def list_plugins():
     return {"plugins": manager.discover_plugins(), "busy": busy, "operations": running}
 
 
-def _start(plugin_id: str, action: str, source: str = "", package_file: Path | None = None) -> dict:
+def _start(plugin_id: str, action: str, source: str = "") -> dict:
     with _lock:
         if plugin_id in _busy:
             raise HTTPException(status_code=409, detail="Plugin operation already running")
@@ -63,15 +59,13 @@ def _start(plugin_id: str, action: str, source: str = "", package_file: Path | N
         error = ""
         try:
             if action == "install":
-                manager.install_plugin(source, log, package_file)
+                manager.install_plugin(source, log)
             else:
                 manager.remove_plugin(plugin_id, log)
         except Exception as exc:
-            error = str(exc)
+            error = str(exc) or type(exc).__name__
             log(error)
         finally:
-            if package_file:
-                shutil.rmtree(package_file.parent, ignore_errors=True)
             with _lock:
                 _busy.discard(plugin_id)
                 _operations[operation_id]["status"] = "failed" if error else "completed"
@@ -84,40 +78,12 @@ def _start(plugin_id: str, action: str, source: str = "", package_file: Path | N
 @router.post("/plugins/install")
 async def install_plugin(payload: InstallRequest):
     try:
-        plugin_id, _package = manager._parse_source(payload.source.strip())
+        plugin_id, github_source = manager._parse_source(payload.source.strip())
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if plugin_id in {item["id"] for item in manager.installed_plugins()}:
         raise HTTPException(status_code=409, detail="Plugin is already installed")
-    return _start(plugin_id, "install", payload.source.strip())
-
-
-@router.post("/plugins/upload")
-async def upload_plugin(file: UploadFile = File(...)):
-    name = Path(file.filename or "").name
-    if not re.fullmatch(r"[A-Za-z0-9_.-]+\.whl", name):
-        raise HTTPException(status_code=400, detail="Upload a Python .whl file")
-    package_name = name.split("-", 1)[0].replace("_", "-")
-    try:
-        plugin_id, _package = manager._parse_source(package_name)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if plugin_id in {item["id"] for item in manager.installed_plugins()}:
-        raise HTTPException(status_code=409, detail="Plugin is already installed")
-    temp_dir = Path(tempfile.mkdtemp(prefix="wordagent-plugin-upload-"))
-    package_file = temp_dir / name
-    try:
-        size = 0
-        with package_file.open("wb") as target:
-            while chunk := await file.read(1024 * 1024):
-                size += len(chunk)
-                if size > 150 * 1024 * 1024:
-                    raise HTTPException(status_code=413, detail="Plugin wheel exceeds 150 MB")
-                target.write(chunk)
-        return _start(plugin_id, "install", package_name, package_file)
-    except Exception:
-        shutil.rmtree(temp_dir, ignore_errors=True)
-        raise
+    return _start(plugin_id, "install", github_source)
 
 
 @router.delete("/plugins/{plugin_id}")

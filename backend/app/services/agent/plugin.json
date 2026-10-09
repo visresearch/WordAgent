@@ -1,0 +1,12 @@
+{
+  "plugins": [
+    {
+      "id": "ocr",
+      "name": "OCR",
+      "description": "Read text in image files for language models without vision support.",
+      "package": "wordagent-plugin-ocr",
+      "capabilities": ["ocr"],
+      "source": "https://github.com/visresearch/WordAgent/tree/master/backend/resources/plugins/wordagent-plugin-ocr"
+    }
+  ]
+}

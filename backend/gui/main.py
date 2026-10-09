@@ -40,6 +40,31 @@ def _find_wpscloudsvr():
                 candidates.append(os.path.join(base, "Kingsoft", "WPS Office", "wpscloudsvr.exe"))
                 candidates.append(os.path.join(base, "kingsoft", "WPS Office", "wpscloudsvr.exe"))
                 candidates.append(os.path.join(base, "Kingsoft", "WPS Office", "ksolaunch.exe"))
+        # WPS 支持安装到自定义目录，实际安装路径以系统注册信息为准。
+        import winreg
+
+        registry_paths = [
+            (winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\wps.exe"),
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\wps.exe"),
+            (winreg.HKEY_CLASSES_ROOT, r"ksowpscloudsvr\shell\open\command"),
+        ]
+        for root, key_path in registry_paths:
+            try:
+                with winreg.OpenKey(root, key_path) as key:
+                    command = str(winreg.QueryValueEx(key, "")[0]).strip()
+            except OSError:
+                continue
+            if command.startswith('"'):
+                executable = command.split('"', 2)[1]
+            else:
+                end = command.lower().find(".exe")
+                if end < 0:
+                    continue
+                executable = command[:end + 4]
+            executable = os.path.expandvars(executable)
+            candidates.insert(0, os.path.join(os.path.dirname(executable), "wpscloudsvr.exe"))
+            if os.path.basename(executable).lower() in {"wpscloudsvr.exe", "ksolaunch.exe"}:
+                candidates.append(executable)
         import shutil
 
         path_found = shutil.which("wpscloudsvr.exe") or shutil.which("wpscloudsvr")

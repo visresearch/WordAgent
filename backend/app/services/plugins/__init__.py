@@ -1,1 +1,1 @@
-"""Installable WordAgent plugin support. Plugin implementations run out of process."""
+"""Plugin host support. Downloadable implementations live in resources/plugins."""

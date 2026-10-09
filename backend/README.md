@@ -39,9 +39,11 @@ uv run python main.py
 
 ## 可选 Python 插件
 
-WPS 设置页的“插件”面板可下载 OCR 插件、安装已发布的 `wordagent-plugin-*` 包或上传 `.whl`，也可查看安装日志并删除插件。每个插件使用用户数据目录下独立的 uv 环境；默认后端依赖和安装包不含 RapidOCR、OpenCV、ONNX Runtime 或 OCR 模型。OCR 插件源码位于 `app/services/plugins/wordagent-plugin-ocr/`，构建主应用时会被排除；发布版按应用版本从 GitHub 下载这份源码并用 uv 安装。
+WPS 设置页的“插件”面板可下载 OCR 插件，或输入 GitHub 仓库、插件目录链接安装自定义插件，也可查看安装日志并删除插件。每个插件使用用户数据目录下独立的 uv 环境；默认后端依赖和安装包不含 RapidOCR、OpenCV、ONNX Runtime 或 OCR 模型。插件源码位于 `resources/plugins/`，不会打包进主程序。`app/services/agent/plugin.json` 保存可安装插件的元信息及同一 WordAgent 仓库中的 GitHub 文件夹链接；点击安装后会递归下载该文件夹并用 uv 安装。目录中的插件在发布版优先下载应用版本对应的标签，目录不存在时回退到索引指定的分支；自定义插件按用户链接指定的分支下载，仓库链接使用其默认分支。插件管理器及独立进程启动器位于 `app/services/plugins/`，随主程序提供。
 
-自定义插件需提供 `wordagent.plugins` 入口点。入口对象声明 `name`、`description`、`capabilities`，实现 `run(capability, payload) -> dict`，可选实现 `check()`；插件逻辑在独立 Python 进程中执行。具体示例见 OCR 插件的 README。
+单个中间件实现及配置位于 `app/services/middleware/`；`app/services/agent/middleware.py` 只负责按原顺序组装中间件链，供主 Agent 和子 Agent 共同使用。
+
+自定义插件的链接必须指向包含 `pyproject.toml` 和 `.py` 源码的 Python 项目目录，并在 `[project.entry-points."wordagent.plugins"]` 中声明入口点。入口对象声明 `name`、`description`、非空 `capabilities`，实现同步 `run(capability, payload) -> dict`，可选实现 `check()`；`api_version` 可选，默认 `1`，当前仅支持 `1`。安装时会检查项目元数据、Python 3.11 环境兼容性、源码语法、入口加载、接口签名及插件自检。任一检查或依赖安装失败均保留日志、清理未完成的插件环境，不登记为已安装；只有全部通过才启用插件。插件逻辑在独立 Python 进程中执行。具体示例见 OCR 插件的 README。
 
 ## 运行测试
 

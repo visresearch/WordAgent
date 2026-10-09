@@ -1,8 +1,12 @@
 <template>
   <div class="plugin-panel">
-    <div v-if="message" :class="['plugin-message', messageError ? 'error' : 'success']">{{ message }}</div>
+    <div v-if="message" :class="['plugin-message', messageError ? 'error' : 'success']">
+      {{ message }}
+    </div>
 
-    <div v-if="loading" class="plugin-muted">{{ $t('plugin.loading') }}</div>
+    <div v-if="loading" class="plugin-muted">
+      {{ $t('plugin.loading') }}
+    </div>
     <div v-for="plugin in plugins" :key="plugin.id" class="plugin-card">
       <div class="plugin-info">
         <strong>{{ plugin.name }}</strong>
@@ -14,29 +18,33 @@
         class="plugin-button danger"
         :disabled="busy.includes(plugin.id)"
         @click="remove(plugin)"
-      >{{ busy.includes(plugin.id) ? $t('plugin.removing') : $t('plugin.remove') }}</button>
+      >
+        {{ busy.includes(plugin.id) ? $t('plugin.removing') : $t('plugin.remove') }}
+      </button>
       <button
         v-else
         class="plugin-button"
         :disabled="busy.includes(plugin.id)"
         @click="install(plugin.id)"
-      >{{ busy.includes(plugin.id) ? $t('plugin.installing') : $t('plugin.install') }}</button>
+      >
+        {{ busy.includes(plugin.id) ? $t('plugin.installing') : $t('plugin.install') }}
+      </button>
     </div>
 
     <div class="plugin-custom">
       <h3>{{ $t('plugin.customTitle') }}</h3>
       <p>{{ $t('plugin.customHint') }}</p>
       <div class="plugin-form">
-        <input v-model.trim="customSource" :placeholder="$t('plugin.packagePlaceholder')" @keyup.enter="installCustom" />
+        <input
+          v-model.trim="customSource"
+          type="url"
+          :disabled="customBusy"
+          :placeholder="$t('plugin.githubPlaceholder')"
+          @keyup.enter="installCustom"
+        />
         <button class="plugin-button" :disabled="!customSource || customBusy" @click="installCustom">
           {{ customBusy ? $t('plugin.installing') : $t('plugin.installCustom') }}
         </button>
-      </div>
-      <div class="plugin-upload">
-        <label class="plugin-button upload-button">
-          {{ $t('plugin.uploadWheel') }}
-          <input type="file" accept=".whl" :disabled="customBusy" @change="uploadWheel" />
-        </label>
       </div>
     </div>
 
@@ -58,6 +66,7 @@ const operations = ref({});
 const selectedId = ref('');
 const customSource = ref('');
 const customBusy = ref(false);
+const customOperationId = ref('');
 const loading = ref(true);
 const message = ref('');
 const messageError = ref(false);
@@ -72,7 +81,9 @@ async function refresh() {
     busy.value = data.busy || [];
     for (const operation of data.operations || []) {
       operations.value[operation.id] = operation;
-      if (!selectedId.value) selectedId.value = operation.id;
+      if (!selectedId.value) {
+        selectedId.value = operation.id;
+      }
     }
   } catch (error) {
     message.value = error.message;
@@ -83,7 +94,9 @@ async function refresh() {
 }
 
 async function poll() {
-  if (polling) return;
+  if (polling) {
+    return;
+  }
   polling = true;
   try {
     const active = Object.values(operations.value).filter(item => item.status === 'running');
@@ -91,9 +104,17 @@ async function poll() {
       const next = await api.getPluginOperation(operation.id);
       operations.value[operation.id] = next;
       if (next.status !== 'running') {
-        messageError.value = next.status === 'failed';
-        message.value = messageError.value ? next.error : t(next.action === 'install' ? 'plugin.installDone' : 'plugin.removeDone');
-        customBusy.value = false;
+        if (next.id === selectedId.value) {
+          messageError.value = next.status === 'failed';
+          message.value = messageError.value ? next.error : t(next.action === 'install' ? 'plugin.installDone' : 'plugin.removeDone');
+        }
+        if (next.id === customOperationId.value) {
+          customBusy.value = false;
+          customOperationId.value = '';
+          if (next.status === 'completed') {
+            customSource.value = '';
+          }
+        }
         await refresh();
       }
     }
@@ -128,25 +149,23 @@ async function install(source) {
 }
 
 async function installCustom() {
-  if (!customSource.value || customBusy.value) return;
-  customBusy.value = true;
-  try {
-    track(await api.installPlugin(customSource.value));
-    customSource.value = '';
-  } catch (error) {
-    customBusy.value = false;
-    message.value = error.message;
-    messageError.value = true;
+  if (!customSource.value || customBusy.value) {
+    return;
   }
-}
-
-async function uploadWheel(event) {
-  const file = event.target.files?.[0];
-  event.target.value = '';
-  if (!file || customBusy.value) return;
-  customBusy.value = true;
   try {
-    track(await api.uploadPlugin(file));
+    let url;
+    try {
+      url = new URL(customSource.value);
+    } catch {
+      throw new Error(t('plugin.invalidGitHub'));
+    }
+    if (url.protocol !== 'https:' || url.host.toLowerCase() !== 'github.com' || url.pathname.split('/').filter(Boolean).length < 2) {
+      throw new Error(t('plugin.invalidGitHub'));
+    }
+    customBusy.value = true;
+    const operation = await api.installPlugin(customSource.value);
+    customOperationId.value = operation.operationId;
+    track(operation);
   } catch (error) {
     customBusy.value = false;
     message.value = error.message;
@@ -155,7 +174,9 @@ async function uploadWheel(event) {
 }
 
 async function remove(plugin) {
-  if (!confirm(t('plugin.removeConfirm', { name: plugin.name }))) return;
+  if (!confirm(t('plugin.removeConfirm', { name: plugin.name }))) {
+    return;
+  }
   try {
     const operation = await api.removePlugin(plugin.id);
     track(operation);
@@ -186,9 +207,6 @@ onUnmounted(() => clearInterval(timer));
 .plugin-custom h3 { font-size: 15px; margin: 0; }
 .plugin-form { display: flex; gap: 8px; margin-top: 12px; }
 .plugin-form input { flex: 1; min-width: 0; padding: 8px 10px; border: 1px solid #d4d9e1; border-radius: 7px; }
-.plugin-upload { margin-top: 10px; }
-.upload-button { display: inline-block; }
-.upload-button input { display: none; }
 .plugin-message { padding: 9px 12px; border-radius: 7px; color: #166534; background: #ecfdf3; }
 .plugin-message.error { color: #b91c1c; background: #fef2f2; }
 .plugin-muted { color: #737b86; }

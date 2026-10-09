@@ -12,7 +12,7 @@ from app.core.db import get_db
 from app.core.logging import get_logger
 from app.services.memory import delete_thread, get_thread_token_stats, build_thread_config
 from app.services.human_input import load_pending_questions
-from app.services.middleware import MAX_CONTEXT_TOKENS
+from app.services.middleware.notifying_summarization import MAX_CONTEXT_TOKENS
 from app.services.session_service import SessionService
 
 router = APIRouter()

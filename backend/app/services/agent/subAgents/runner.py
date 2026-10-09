@@ -18,7 +18,7 @@ from app.services.agent.tools import (
     is_stop_requested,
 )
 from app.services.llm_client import init_chat_model_with_reasoning, resolve_model
-from app.services.middleware import build_agent_middleware
+from app.services.agent.middleware import build_agent_middleware
 
 logger = get_logger(__name__)
 

@@ -9,14 +9,12 @@ from langchain_core.tools import tool
 from langgraph.config import get_stream_writer
 
 from app.services.agent import agent as single_agent
+from app.services.agent.middleware import build_agent_middleware
 from app.services.middleware import (
     _BUILTIN_TOOL_NAMES,
-    MAX_CONTEXT_TOKENS,
-    InvalidToolCallError,
-    InvalidToolCallMiddleware,
     INVALID_TOOL_CALL_MIDDLEWARE,
+    MAX_CONTEXT_TOKENS,
     MODEL_CALL_LIMIT_MIDDLEWARE,
-    NotifyingSummarizationMiddleware,
     SUMMARIZATION_KEEP_PCT,
     SUMMARIZATION_TRIGGER_PCT,
     TOOL_MAX_RETRIES,
@@ -24,7 +22,9 @@ from app.services.middleware import (
     TOOL_RETRY_INITIAL_DELAY,
     TOOL_RETRY_MAX_DELAY,
     TOOL_RETRY_MIDDLEWARE,
-    build_agent_middleware,
+    InvalidToolCallError,
+    InvalidToolCallMiddleware,
+    NotifyingSummarizationMiddleware,
     get_summarization_limits,
 )
 
