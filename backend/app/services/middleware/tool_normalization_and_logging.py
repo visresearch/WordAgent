@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from langchain.agents.middleware import AgentMiddleware, ToolCallRequest
 from langchain_core.messages import ToolMessage
 from langgraph.types import Command
 
-from app.services.document_edit_policy import edit_style_context, prepare_document_call
 from app.services.tools.tool_log import append_tool_call
 from app.services.utils import normalize_tool_args
 
@@ -85,20 +83,7 @@ class ToolNormalizationAndLoggingMiddleware(AgentMiddleware):
             )
             normalized_request = request
         else:
-            styles, refusal = prepare_document_call(normalized_request.tool_call, normalized_request.state)
-            if refusal:
-                result = ToolMessage(
-                    content=json.dumps(refusal, ensure_ascii=False),
-                    tool_call_id=request.tool_call["id"],
-                    name=request.tool_call["name"],
-                    status="error",
-                )
-            else:
-                token = edit_style_context.set(styles)
-                try:
-                    result = handler(normalized_request)
-                finally:
-                    edit_style_context.reset(token)
+            result = handler(normalized_request)
         _record_result(normalized_request, result, agent_name=None, repaired=False)
         return result
 
@@ -114,20 +99,7 @@ class ToolNormalizationAndLoggingMiddleware(AgentMiddleware):
             )
             normalized_request = request
         else:
-            styles, refusal = prepare_document_call(normalized_request.tool_call, normalized_request.state)
-            if refusal:
-                result = ToolMessage(
-                    content=json.dumps(refusal, ensure_ascii=False),
-                    tool_call_id=request.tool_call["id"],
-                    name=request.tool_call["name"],
-                    status="error",
-                )
-            else:
-                token = edit_style_context.set(styles)
-                try:
-                    result = await handler(normalized_request)
-                finally:
-                    edit_style_context.reset(token)
+            result = await handler(normalized_request)
         _record_result(normalized_request, result, agent_name=None, repaired=False)
         return result
 

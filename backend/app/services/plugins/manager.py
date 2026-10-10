@@ -9,7 +9,6 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from urllib.error import HTTPError
@@ -51,9 +50,7 @@ CATALOG = _load_catalog()
 
 
 def plugins_dir() -> Path:
-    if sys.platform == "win32" and not os.environ.get("WENCE_DATA_DIR"):
-        return Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "WenCeAI" / "plugins"
-    return get_wence_data_dir() / "plugins"
+    return (get_wence_data_dir() / "plugins").resolve()
 
 
 def _plugin_dir(plugin_id: str) -> Path:
@@ -94,6 +91,15 @@ def _env() -> dict[str, str]:
     env["PYTHONUNBUFFERED"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONUTF8"] = "1"
+    root = plugins_dir()
+    temp = root / ".tmp"
+    temp.mkdir(parents=True, exist_ok=True)
+    env["UV_CACHE_DIR"] = str(root / ".cache")
+    env["UV_PYTHON_INSTALL_DIR"] = str(root / ".python")
+    env["UV_PYTHON_CACHE_DIR"] = str(root / ".cache" / "python")
+    env["UV_PYTHON_BIN_DIR"] = str(root / ".bin")
+    for key in ("TEMP", "TMP", "TMPDIR"):
+        env[key] = str(temp)
     return env
 
 
@@ -154,13 +160,13 @@ def _github_folder(source: str) -> tuple[str, str, str, str]:
     return parts[0].lower(), repo.lower(), parts[3] if len(parts) >= 4 else "", "/".join(parts[4:])
 
 
-def _download_plugin_source(item: dict, log: Callable[[str], None], temp_dir: Path) -> Path:
+def _download_plugin_source(item: dict, log: Callable[[str], None], plugin_dir: Path) -> Path:
     owner, repo, default_ref, folder = _github_folder(item["source"])
     release = os.environ.get("APP_VERSION", "")
     use_release = any(item["id"] == catalog["id"] for catalog in CATALOG)
     refs = [release, default_ref] if use_release and re.fullmatch(r"v[0-9][A-Za-z0-9._-]*", release) else [default_ref]
     refs = list(dict.fromkeys(refs))
-    source = temp_dir / item["package"]
+    source = plugin_dir / "source"
 
     def download_directory(repo_path: str, target_dir: Path, ref: str) -> None:
         api_url = (
@@ -312,31 +318,34 @@ def install_plugin(source: str, log: Callable[[str], None] = print) -> dict:
     if (root / "plugin.json").is_file():
         raise ValueError("Plugin is already installed")
     root.mkdir(parents=True, exist_ok=True)
-    shutil.rmtree(root / "venv", ignore_errors=True)
     try:
-        with tempfile.TemporaryDirectory(prefix="wordagent-plugin-") as temp:
-            catalog_item = next((item for item in CATALOG if item["id"] == plugin_id), None)
-            item = catalog_item or {"id": plugin_id, "package": plugin_id, "source": github_source}
-            install_source = _download_plugin_source(item, log, Path(temp))
-            project = _validate_plugin_source(install_source, log)
-            uv = _uv()
-            _run([uv, "venv", str(root / "venv"), "--python", "3.11"], log)
-            runtime = _result(
-                _run([str(_python(plugin_id)), str(_runner()), "--validate-source", str(install_source)], log)
+        shutil.rmtree(root / "venv", ignore_errors=True)
+        shutil.rmtree(root / "source", ignore_errors=True)
+        log(f"Plugin files and environment: {root}")
+        catalog_item = next((item for item in CATALOG if item["id"] == plugin_id), None)
+        item = catalog_item or {"id": plugin_id, "package": plugin_id, "source": github_source}
+        install_source = _download_plugin_source(item, log, root)
+        project = _validate_plugin_source(install_source, log)
+        uv = _uv()
+        log("Preparing Python runtime in the plugins directory")
+        _run([uv, "python", "install", "3.11", "--no-bin", "--no-registry"], log)
+        _run([uv, "venv", str(root / "venv"), "--python", "3.11", "--managed-python", "--relocatable"], log)
+        runtime = _result(
+            _run([str(_python(plugin_id)), str(_runner()), "--validate-source", str(install_source)], log)
+        )
+        requirement = project.get("requires-python", "")
+        if not SpecifierSet(requirement).contains(runtime["pythonVersion"]):
+            raise ValueError(
+                f"Plugin requires Python {requirement}, but the plugin environment uses Python {runtime['pythonVersion']}"
             )
-            requirement = project.get("requires-python", "")
-            if not SpecifierSet(requirement).contains(runtime["pythonVersion"]):
-                raise ValueError(
-                    f"Plugin requires Python {requirement}, but the plugin environment uses Python {runtime['pythonVersion']}"
-                )
-            log("Installing Python plugin and dependencies")
-            _run([uv, "pip", "install", "--no-cache", "--python", str(_python(plugin_id)), str(install_source)], log)
-            log("Checking WordAgent plugin interface and compatibility")
-            info = _result(_run([str(_python(plugin_id)), str(_runner()), "--inspect"], log))
-            log("Running plugin self-check")
-            checked = _result(_run([str(_python(plugin_id)), str(_runner()), "--check"], log))
-            if checked.get("ready") is not True:
-                raise RuntimeError("Plugin self-check did not report a ready state")
+        log("Installing Python plugin and dependencies")
+        _run([uv, "pip", "install", "--python", str(_python(plugin_id)), str(install_source)], log)
+        log("Checking WordAgent plugin interface and compatibility")
+        info = _result(_run([str(_python(plugin_id)), str(_runner()), "--inspect"], log))
+        log("Running plugin self-check")
+        checked = _result(_run([str(_python(plugin_id)), str(_runner()), "--check"], log))
+        if checked.get("ready") is not True:
+            raise RuntimeError("Plugin self-check did not report a ready state")
         if not info.get("capabilities") or not isinstance(info["capabilities"], list):
             raise ValueError("Plugin declares no capabilities")
         info = {

@@ -48,6 +48,7 @@ def runtime(monkeypatch):
     monkeypatch.setattr(agent, "get_base_tools_for_mode", lambda _mode: [])
     monkeypatch.setattr(agent, "build_mcp_tools_prompt", lambda _tools: "Fixed MCP description")
     monkeypatch.setattr(agent, "build_skills_prompt", lambda: "Fixed skills description")
+    monkeypatch.setattr(agent, "_ocr_attachment_context", lambda _paths: "")
     monkeypatch.setattr(agent, "build_agent_middleware", middleware)
     monkeypatch.setattr(agent, "create_agent", create_agent)
     monkeypatch.setattr(agent, "datetime", SimpleNamespace(now=lambda: state.now))

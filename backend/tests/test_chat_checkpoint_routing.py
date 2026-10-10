@@ -1,8 +1,10 @@
 import asyncio
 import json
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
+import pytest
 from langchain_core.messages import AIMessage, AIMessageChunk
 
 from app.api.routes import chat
@@ -18,7 +20,7 @@ class _WebSocket:
     def __init__(self, checkpointer=None, *, expose_state: bool = True):
         self.sent: list[str] = []
         if expose_state:
-            self.app = SimpleNamespace(state=SimpleNamespace(checkpointer=checkpointer))
+            self.app = SimpleNamespace(state=SimpleNamespace(checkpointer=checkpointer, memory_tasks=set()))
 
     async def send_text(self, payload: str) -> None:
         self.sent.append(payload)
@@ -116,7 +118,8 @@ def test_single_agent_summary_tokens_not_forwarded(monkeypatch) -> None:
     ]
 
 
-def test_compaction_notifications_are_sent_and_saved(monkeypatch):
+@pytest.mark.parametrize("memory_fails", [False, True])
+def test_compaction_notifications_are_sent_and_saved(monkeypatch, memory_fails, caplog):
     websocket = _WebSocket(checkpointer=object())
     saved = []
     events = [
@@ -139,7 +142,12 @@ def test_compaction_notifications_are_sent_and_saved(monkeypatch):
     monkeypatch.setattr(chat, "_single_agent_stream_with_state", stream)
     monkeypatch.setattr(chat, "_persist_chat_turn", persist)
     monkeypatch.setattr(chat, "record_token_usage", record_usage)
-    monkeypatch.setattr(chat, "_extract_long_term_memory_sync", lambda *_args: None)
+
+    def extract_memory(*_args):
+        if memory_fails:
+            raise RuntimeError("memory service unavailable")
+
+    monkeypatch.setattr(chat, "_extract_long_term_memory_sync", extract_memory)
 
     async def run():
         await chat._run_ws_stream(
@@ -153,15 +161,76 @@ def test_compaction_notifications_are_sent_and_saved(monkeypatch):
             document_range=None,
             document_meta=None,
         )
-        await chat.background_tasks.shutdown()
+        await asyncio.gather(*websocket.app.state.memory_tasks, return_exceptions=True)
+        await asyncio.sleep(0)
+        assert not websocket.app.state.memory_tasks
 
     asyncio.run(run())
     assert [json.loads(payload) for payload in websocket.sent] == [*events, {"type": "done"}]
     assert len(saved) == 1
+    if memory_fails:
+        assert "memory service unavailable" in caplog.text
     assert saved[0]["content_parts"] == [
         {"type": "status", "content": "压缩完成", "contextCompaction": True, "loading": False},
         {"type": "text", "content": "继续回答"},
     ]
+
+
+@pytest.mark.parametrize("pending", [False, True])
+def test_lifespan_finishes_memory_tasks_before_closing_storage(monkeypatch, pending):
+    from app import main
+
+    events = []
+    app = SimpleNamespace(state=SimpleNamespace())
+    original_wait = asyncio.wait
+
+    @asynccontextmanager
+    async def checkpointer():
+        try:
+            yield object()
+        finally:
+            events.append("checkpoint-closed")
+
+    @asynccontextmanager
+    async def mcp_session():
+        yield
+
+    async def close_db():
+        events.append("database-closed")
+
+    async def wait_for_tasks(tasks, *, timeout):
+        assert timeout == 10.0
+        return await original_wait(tasks, timeout=0 if pending else timeout)
+
+    monkeypatch.setattr(main, "sync_builtin_skills", lambda: {"copied": 0, "skipped": 0, "invalid": 0})
+    monkeypatch.setattr(main, "init_db", AsyncMock())
+    monkeypatch.setattr(main, "close_db", close_db)
+    monkeypatch.setattr(main, "open_checkpointer", checkpointer)
+    monkeypatch.setattr(main.mcp_server.mcp.session_manager, "run", mcp_session)
+    monkeypatch.setattr(main.mcp_runtime, "set_ready", Mock())
+    monkeypatch.setattr(main.asyncio, "wait", wait_for_tasks)
+
+    async def memory():
+        try:
+            if pending:
+                await asyncio.Event().wait()
+            else:
+                await asyncio.sleep(0)
+        finally:
+            events.append("memory-finished")
+
+    async def run():
+        async with main.lifespan(app):
+            task = asyncio.create_task(memory())
+            app.state.memory_tasks.add(task)
+            task.add_done_callback(app.state.memory_tasks.discard)
+        assert task.done()
+        assert task.cancelled() is pending
+        assert not app.state.memory_tasks
+
+    asyncio.run(run())
+    assert events == ["memory-finished", "checkpoint-closed", "database-closed"]
+    assert [call.args[0] for call in main.mcp_runtime.set_ready.call_args_list] == [True, False]
 
 
 def test_single_agent_large_image_is_not_saved_in_checkpoint_input(monkeypatch) -> None:

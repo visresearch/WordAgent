@@ -1,8 +1,8 @@
 {
   "plugins": [
     {
-      "id": "ocr",
-      "name": "OCR",
+      "id": "wordagent-plugin-ocr",
+      "name": "wordagent-plugin-ocr",
       "description": "Read text in image files for language models without vision support.",
       "package": "wordagent-plugin-ocr",
       "capabilities": ["ocr"],

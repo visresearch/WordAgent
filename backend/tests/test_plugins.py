@@ -14,6 +14,34 @@ import pytest
 from app.services.plugins import manager, runner
 
 
+def test_development_plugins_use_backend_wence_data(monkeypatch):
+    monkeypatch.delenv("WENCE_DATA_DIR", raising=False)
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(sys, "frozen", False, raising=False)
+    assert manager.plugins_dir() == Path(__file__).resolve().parents[1] / "wence_data" / "plugins"
+
+
+def test_packaged_plugins_use_data_next_to_executable_not_extraction_dir(tmp_path, monkeypatch):
+    monkeypatch.delenv("WENCE_DATA_DIR", raising=False)
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(tmp_path / "app" / "WenCeAI.exe"))
+    monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path / "extracted"), raising=False)
+    assert manager.plugins_dir() == tmp_path / "app" / "wence_data" / "plugins"
+
+
+def test_plugin_environment_keeps_python_cache_and_temp_in_wence_data(tmp_path, monkeypatch):
+    monkeypatch.setenv("WENCE_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("UV_CACHE_DIR", str(tmp_path / "elsewhere"))
+    env = manager._env()
+    root = tmp_path / "plugins"
+    assert env["UV_PYTHON_INSTALL_DIR"] == str(root / ".python")
+    assert env["UV_PYTHON_CACHE_DIR"] == str(root / ".cache/python")
+    assert env["UV_CACHE_DIR"] == str(root / ".cache")
+    assert all(env[key] == str(root / ".tmp") for key in ("TEMP", "TMP", "TMPDIR"))
+    assert (root / ".tmp").is_dir()
+
+
 def _python_project(root, requirement=">=3.11", program=None):
     root.mkdir(parents=True, exist_ok=True)
     (root / "pyproject.toml").write_text(
@@ -41,9 +69,9 @@ def test_plugin_install_verify_discover_and_remove(tmp_path, monkeypatch):
     monkeypatch.setattr(manager, "_uv", lambda: "uv")
     downloads = []
 
-    def download(item, log, temp_dir):
+    def download(item, log, plugin_dir):
         downloads.append(item["source"])
-        return _python_project(temp_dir / item["package"])
+        return _python_project(plugin_dir / "source")
 
     monkeypatch.setattr(manager, "_download_plugin_source", download)
     commands = []
@@ -70,6 +98,8 @@ def test_plugin_install_verify_discover_and_remove(tmp_path, monkeypatch):
     assert manager.has_capability("ocr")
     assert manager.discover_plugins()[0]["installed"] is True
     assert any(command[-1] == "--check" for command in commands)
+    assert (manager._plugin_dir("ocr") / "source/pyproject.toml").is_file()
+    assert any("--managed-python" in command and "--relocatable" in command for command in commands)
     manager.remove_plugin("ocr", lambda _: None)
     assert not manager.has_capability("ocr")
     assert not manager.plugins_dir().joinpath("ocr").exists()
@@ -243,9 +273,7 @@ def test_catalog_supports_new_plugin_ids_without_ocr_specific_code(monkeypatch):
 def test_install_failure_removes_environment_and_leaves_plugin_unavailable(tmp_path, monkeypatch):
     monkeypatch.setenv("WENCE_DATA_DIR", str(tmp_path))
     monkeypatch.setattr(manager, "_uv", lambda: "uv")
-    monkeypatch.setattr(
-        manager, "_download_plugin_source", lambda item, log, temp: _python_project(temp / item["package"])
-    )
+    monkeypatch.setattr(manager, "_download_plugin_source", lambda item, log, root: _python_project(root / "source"))
 
     def fail(command, log):
         raise RuntimeError("installation failed")
@@ -397,15 +425,20 @@ def test_runner_detects_invalid_python_without_importing_source(tmp_path, monkey
         runner.main()
 
 
+@pytest.fixture(scope="module")
+def real_plugin_data_dir(tmp_path_factory):
+    return tmp_path_factory.mktemp("plugin-data")
+
+
 @pytest.mark.skipif(not shutil.which("uv"), reason="uv is required to exercise isolated installation")
 @pytest.mark.parametrize("compatible", [True, False])
-def test_custom_plugin_real_environment_install_invoke_and_cleanup(tmp_path, monkeypatch, compatible):
-    monkeypatch.setenv("WENCE_DATA_DIR", str(tmp_path / "data"))
+def test_custom_plugin_real_environment_install_invoke_and_cleanup(real_plugin_data_dir, monkeypatch, compatible):
+    monkeypatch.setenv("WENCE_DATA_DIR", str(real_plugin_data_dir))
     source = "https://github.com/owner/demo"
     plugin_id, _ = manager._parse_source(source)
 
-    def download(item, log, temp):
-        project = _python_project(temp / "project")
+    def download(item, log, root):
+        project = _python_project(root / "source")
         if not compatible:
             module = project / "demo_plugin/__init__.py"
             module.write_text(module.read_text() + "    api_version = 2\n", encoding="utf-8")
@@ -417,6 +450,11 @@ def test_custom_plugin_real_environment_install_invoke_and_cleanup(tmp_path, mon
         info = manager.install_plugin(source, logs.append)
         assert info["source"] == source
         assert info["package"] == "demo-plugin"
+        assert (manager._plugin_dir(plugin_id) / "source/pyproject.toml").is_file()
+        base_prefix = manager._run(
+            [str(manager._python(plugin_id)), "-c", "import sys; print(sys.base_prefix)"], logs.append
+        )
+        assert Path(base_prefix).resolve().is_relative_to(manager.plugins_dir() / ".python")
         assert manager.invoke_capability("demo", {"text": "installed in isolation"}) == {
             "text": "installed in isolation"
         }

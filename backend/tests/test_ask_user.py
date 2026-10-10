@@ -201,13 +201,15 @@ def test_websocket_saves_question_before_allowing_resume(monkeypatch):
     monkeypatch.setattr(chat, "_persist_chat_turn", persist)
     monkeypatch.setattr(chat, "record_token_usage", usage)
     monkeypatch.setattr(chat, "_extract_long_term_memory_sync", lambda *args: None)
-    websocket = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(checkpointer=object())), send_text=send_text)
+    websocket = SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(checkpointer=object(), memory_tasks=set())), send_text=send_text
+    )
 
     async def run():
         await chat._run_ws_stream(
             websocket, "ws", "正式", "agent", "fake", "", None, None, session_id="session", user_response=response
         )
-        await chat.background_tasks.shutdown()
+        await asyncio.gather(*websocket.app.state.memory_tasks)
 
     asyncio.run(run())
     assert sent == [question, {"type": "done"}]

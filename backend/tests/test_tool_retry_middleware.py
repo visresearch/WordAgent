@@ -1,8 +1,9 @@
 import asyncio
+import json
 
 import pytest
 from langchain.agents import create_agent
-from langchain.agents.middleware import ModelCallLimitMiddleware, ModelRequest, ModelResponse
+from langchain.agents.middleware import ModelCallLimitMiddleware, ModelRequest, ModelResponse, ToolCallRequest
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.tools import tool
@@ -12,7 +13,6 @@ from app.services.agent import agent as single_agent
 from app.services.agent.middleware import build_agent_middleware
 from app.services.middleware import (
     _BUILTIN_TOOL_NAMES,
-    INVALID_TOOL_CALL_MIDDLEWARE,
     MAX_CONTEXT_TOKENS,
     MODEL_CALL_LIMIT_MIDDLEWARE,
     SUMMARIZATION_KEEP_PCT,
@@ -154,6 +154,33 @@ def test_agent_reenters_model_after_invalid_tool_call() -> None:
 
     assert output["messages"][-1].content == "完成"
     assert any(getattr(message, "name", "") == "echo" for message in output["messages"])
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+def test_document_write_exception_is_not_automatically_replayed(asynchronous):
+    request = ToolCallRequest(
+        tool_call={"name": "edit_document", "id": "edit", "args": {"docId": 9, "paraID": 101}},
+        tool=None,
+        state={},
+        runtime=None,
+    )
+    attempts = []
+
+    def handler(req):
+        attempts.append(req)
+        raise RuntimeError("connection lost after write")
+
+    if asynchronous:
+
+        async def async_handler(req):
+            return handler(req)
+
+        result = asyncio.run(TOOL_RETRY_MIDDLEWARE.awrap_tool_call(request, async_handler))
+    else:
+        result = TOOL_RETRY_MIDDLEWARE.wrap_tool_call(request, handler)
+    assert len(attempts) == 1
+    assert json.loads(result.content)["requiresRead"] is True
+    assert json.loads(result.content)["success"] is None
 
 
 def test_tool_retry_middleware_retries_until_success(monkeypatch) -> None:

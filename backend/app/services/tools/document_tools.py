@@ -13,11 +13,12 @@ from typing import Literal
 from urllib.parse import unquote, urlparse
 from urllib.request import Request, urlopen
 
+from langchain.tools import ToolRuntime
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool
 from langgraph.config import get_stream_writer
 
 from app.core.config import get_temp_dir, get_wence_data_dir, get_wence_project_dir
-from app.services.document_edit_policy import edit_style_context
 from app.core.logging import get_logger
 
 from .callback import (
@@ -965,7 +966,49 @@ def _delete_document_impl(paraIDs: list[int | str], docId: DocIdInput) -> dict:
     return result
 
 
-def _edit_document_impl(paraID: RequiredParaIdInput, runs: list[Run], docId: DocIdInput) -> dict:
+def _document_character_styles(state: dict, doc_id: DocIdInput) -> dict:
+    """Look up the latest style dictionary for this document in the tool's state."""
+    meta = (state.get("request_context") or {}).get("document_meta") or []
+    if isinstance(meta, dict):
+        meta = [meta]
+    active_id = _normalize_doc_id(meta[0].get("documentId")) if meta else 0
+    target_id = _normalize_doc_id(doc_id) or active_id
+    messages = state.get("messages", [])
+    turn_start = max((index for index, message in enumerate(messages) if isinstance(message, HumanMessage)), default=0)
+    calls = {
+        call["id"]: (call, index)
+        for index, message in enumerate(messages)
+        if isinstance(message, AIMessage)
+        for call in message.tool_calls
+    }
+    for message in reversed(messages):
+        if not isinstance(message, ToolMessage) or message.status == "error":
+            continue
+        matched = calls.get(message.tool_call_id)
+        if not matched:
+            continue
+        call, index = matched
+        previous_id = _normalize_doc_id(call.get("args", {}).get("docId"))
+        if (previous_id == 0 and index < turn_start) or (previous_id or active_id) != target_id:
+            continue
+        try:
+            data = json.loads(message.content) if isinstance(message.content, str) else message.content
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(data, dict) or data.get("error"):
+            continue
+        if call["name"] == "read_document" and isinstance(data.get("styles"), dict):
+            return data["styles"]
+        if call["name"] == "generate_document" and data.get("success") is True:
+            document = call.get("args", {}).get("document", {})
+            if isinstance(document, dict) and isinstance(document.get("styles"), dict):
+                return document["styles"]
+    return {}
+
+
+def _edit_document_impl(
+    paraID: RequiredParaIdInput, runs: list[Run], docId: DocIdInput, styles: dict | None = None
+) -> dict:
     """edit_document 的核心逻辑：替换一个段落的内容，保留段落本身及其 pStyle。"""
     resolved_doc_id = _normalize_doc_id(docId)
     normalized_para_id = _normalize_para_id(paraID)
@@ -1009,7 +1052,7 @@ def _edit_document_impl(paraID: RequiredParaIdInput, runs: list[Run], docId: Doc
             }
         style_ref = run_dict.get("rStyle")
         if style_ref is not None:
-            style = (edit_style_context.get() or {}).get(style_ref) if isinstance(style_ref, str) else None
+            style = (styles or {}).get(style_ref) if isinstance(style_ref, str) else None
             if not isinstance(style, list) or len(style) != 11:
                 return {
                     "success": False,
@@ -1308,6 +1351,7 @@ def build_edit_document(description: str):
         paraID: RequiredParaIdInput,
         runs: list[Run],
         docId: DocIdInput = 0,
+        runtime: ToolRuntime = None,
     ) -> dict:
         """Replace the text runs of one existing paragraph while preserving its paragraph style.
 
@@ -1316,7 +1360,8 @@ def build_edit_document(description: str):
             runs: New text runs. Use an empty list to clear the paragraph content.
             docId: Document ID (int-like). 0 means the active document.
         """
-        return _edit_document_impl(paraID, runs, docId)
+        styles = _document_character_styles(runtime.state, docId) if runtime is not None else {}
+        return _edit_document_impl(paraID, runs, docId, styles)
 
     return edit_document
 

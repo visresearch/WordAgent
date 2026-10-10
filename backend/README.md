@@ -39,7 +39,9 @@ uv run python main.py
 
 ## 可选 Python 插件
 
-WPS 设置页的“插件”面板可下载 OCR 插件，或输入 GitHub 仓库、插件目录链接安装自定义插件，也可查看安装日志并删除插件。每个插件使用用户数据目录下独立的 uv 环境；默认后端依赖和安装包不含 RapidOCR、OpenCV、ONNX Runtime 或 OCR 模型。插件源码位于 `resources/plugins/`，不会打包进主程序。`app/services/agent/plugin.json` 保存可安装插件的元信息及同一 WordAgent 仓库中的 GitHub 文件夹链接；点击安装后会递归下载该文件夹并用 uv 安装。目录中的插件在发布版优先下载应用版本对应的标签，目录不存在时回退到索引指定的分支；自定义插件按用户链接指定的分支下载，仓库链接使用其默认分支。插件管理器及独立进程启动器位于 `app/services/plugins/`，随主程序提供。
+WPS 设置页的“插件”面板可下载 OCR 插件，或输入 GitHub 仓库、插件目录链接安装自定义插件，也可查看安装日志并删除插件。插件统一使用应用现有的 `wence_data/plugins/` 目录：Windows 开发环境为 `backend/wence_data/plugins/`，打包后为可执行文件旁的 `wence_data/plugins/`，显式设置 `WENCE_DATA_DIR` 时使用该数据目录。每个插件的完整下载源码保存在 `<插件ID>/source/`，独立环境保存在 `<插件ID>/venv/`，安装信息为 `<插件ID>/plugin.json`。插件专用的 Python 本体、依赖缓存和下载临时文件分别保存在 `plugins/.python/`、`plugins/.cache/`、`plugins/.tmp/`，均不依赖 AppData 中的插件环境。删除插件会同时删除其源码和独立环境。
+
+默认后端依赖和安装包不含 RapidOCR、OpenCV、ONNX Runtime 或 OCR 模型。仓库中的插件源码位于 `resources/plugins/`，不会打包进主程序。`app/services/agent/plugin.json` 保存可安装插件的元信息及同一 WordAgent 仓库中的 GitHub 文件夹链接；点击安装后会递归下载该文件夹并用 uv 安装。目录中的插件在发布版优先下载应用版本对应的标签，目录不存在时回退到索引指定的分支；自定义插件按用户链接指定的分支下载，仓库链接使用其默认分支。插件管理器及独立进程启动器位于 `app/services/plugins/`，随主程序提供。
 
 单个中间件实现及配置位于 `app/services/middleware/`；`app/services/agent/middleware.py` 只负责按原顺序组装中间件链，供主 Agent 和子 Agent 共同使用。
 

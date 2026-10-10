@@ -2,6 +2,7 @@
 WenCe AI Writing Assistant - FastAPI 应用
 """
 
+import asyncio
 import os
 import sys
 from contextlib import asynccontextmanager
@@ -18,7 +19,6 @@ from app.core.config import settings
 from app.core.db import close_db, init_db
 from app.core.logging import get_logger
 from app.services.agent.skills import sync_builtin_skills
-from app.services.background_tasks import background_tasks
 from app.services.mcp_runtime import runtime as mcp_runtime
 from app.services.memory import open_checkpointer
 
@@ -82,14 +82,19 @@ async def lifespan(app: FastAPI):
 
         async with open_checkpointer() as checkpointer, mcp_server.mcp.session_manager.run():
             app.state.checkpointer = checkpointer
-            app.state.background_tasks = background_tasks
+            memory_tasks: set[asyncio.Task] = set()
+            app.state.memory_tasks = memory_tasks
             logger.info("LangGraph Checkpointer 已初始化")
             mcp_runtime.set_ready(True)
             try:
                 yield
             finally:
                 mcp_runtime.set_ready(False)
-                await background_tasks.shutdown()
+                if memory_tasks:
+                    _, pending = await asyncio.wait(list(memory_tasks), timeout=10.0)
+                    for task in pending:
+                        task.cancel()
+                    await asyncio.gather(*pending, return_exceptions=True)
     except Exception as e:
         logger.exception("应用生命周期异常: %s", e)
         raise

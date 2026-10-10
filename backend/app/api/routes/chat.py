@@ -13,18 +13,19 @@ from app.core.db import AsyncSessionLocal
 from app.core.logging import get_logger
 from app.services.agent.agent import (
     ContextOverflowError,
+)
+from app.services.agent.agent import (
     process_writing_request_stream as single_agent_stream,
 )
 from app.services.agent.tools import (
-    create_tool_request,
     cleanup_tool_request,
-    submit_tool_response,
-    request_stop,
     clear_stop,
+    create_tool_request,
+    request_stop,
+    submit_tool_response,
 )
-from app.services.background_tasks import background_tasks
-from app.services.memory import single_agent_thread_lock, build_runtime_thread_id
-from app.services.human_input import load_pending_questions, answer_command
+from app.services.human_input import answer_command, load_pending_questions
+from app.services.memory import build_runtime_thread_id, single_agent_thread_lock
 from app.services.session_service import SessionService
 from app.services.token_usage import record_token_usage
 from app.services.utils import _get_env_int, normalize_uuid
@@ -347,10 +348,10 @@ async def chat_websocket(websocket: WebSocket):
                             return
                         incoming_type = incoming.get("type", "")
                         if incoming_type == "document_response":
-                            logger.info(f"[WebSocket] 收到前端回传文档")
+                            logger.info("[WebSocket] 收到前端回传文档")
                             await submit_tool_response(chat_id, incoming)
                         elif incoming_type == "query_response":
-                            logger.info(f"[WebSocket] 收到前端回传查询结果")
+                            logger.info("[WebSocket] 收到前端回传查询结果")
                             await submit_tool_response(chat_id, incoming)
                         elif incoming_type == "delete_response":
                             logger.info(f"[WebSocket] 收到前端删除结果: {incoming}")
@@ -366,7 +367,7 @@ async def chat_websocket(websocket: WebSocket):
                             logger.info(f"[WebSocket] 收到前端工具执行结果: {incoming}")
                             await submit_tool_response(chat_id, incoming)
                         elif incoming_type == "stop":
-                            logger.info(f"[WebSocket] 收到停止请求")
+                            logger.info("[WebSocket] 收到停止请求")
                             request_stop(chat_id)
                             stream_task.cancel()
                             try:
@@ -403,7 +404,7 @@ async def chat_websocket(websocket: WebSocket):
                 await submit_tool_response(chat_id, data)
 
             elif msg_type == "stop":
-                logger.info(f"[WebSocket] 收到停止请求(空闲态)")
+                logger.info("[WebSocket] 收到停止请求(空闲态)")
                 request_stop(chat_id)
 
     except WebSocketDisconnect:
@@ -860,8 +861,20 @@ async def _run_ws_stream(
                 except (asyncio.CancelledError, Exception):
                     pass
 
-            # 客户端创建和同步 LLM 调用全部在线程中执行；任务由应用统一追踪和关闭。
-            background_tasks.create(
+            # 记忆提取在线程中执行；任务归应用生命周期管理，不阻塞聊天完成。
+            memory_tasks = websocket.app.state.memory_tasks
+
+            def memory_done(task: asyncio.Task, tasks=memory_tasks):
+                tasks.discard(task)
+                if not task.cancelled() and (error := task.exception()) is not None:
+                    logger.error(
+                        "长期记忆任务 %s 失败: %s",
+                        task.get_name(),
+                        error,
+                        exc_info=(type(error), error, error.__traceback__),
+                    )
+
+            memory_task = asyncio.create_task(
                 asyncio.to_thread(
                     _extract_long_term_memory_sync,
                     memory_conversation if isinstance(memory_conversation, dict) else None,
@@ -870,6 +883,8 @@ async def _run_ws_stream(
                 ),
                 name=f"memory-extract:{chat_id}",
             )
+            memory_tasks.add(memory_task)
+            memory_task.add_done_callback(memory_done)
 
             await record_token_usage(
                 input_tokens=token_usage.get("input_tokens", 0),

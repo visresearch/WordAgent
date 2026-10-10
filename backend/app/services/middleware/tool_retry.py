@@ -7,9 +7,9 @@ import json
 from langchain.agents.middleware import ToolRetryMiddleware
 from langchain_core.messages import ToolMessage
 
-from app.services.document_edit_policy import MUTATIONS
 from app.services.utils import _get_env_float, _get_env_int
 
+_DOCUMENT_MUTATIONS = {"edit_document", "delete_document", "generate_document", "insert_break"}
 TOOL_MAX_RETRIES = _get_env_int("WORDAGENT_TOOL_MAX_RETRIES", 2)
 TOOL_RETRY_ON_FAILURE = "continue"
 TOOL_RETRY_BACKOFF_FACTOR = _get_env_float("WORDAGENT_TOOL_RETRY_BACKOFF_FACTOR", 2.0)
@@ -39,7 +39,7 @@ class MutationSafeToolRetryMiddleware(ToolRetryMiddleware):
         )
 
     def wrap_tool_call(self, request, handler):
-        if request.tool_call["name"] not in MUTATIONS:
+        if request.tool_call["name"] not in _DOCUMENT_MUTATIONS:
             return super().wrap_tool_call(request, handler)
         try:
             return handler(request)
@@ -47,7 +47,7 @@ class MutationSafeToolRetryMiddleware(ToolRetryMiddleware):
             return self._uncertain(request, exc)
 
     async def awrap_tool_call(self, request, handler):
-        if request.tool_call["name"] not in MUTATIONS:
+        if request.tool_call["name"] not in _DOCUMENT_MUTATIONS:
             return await super().awrap_tool_call(request, handler)
         try:
             return await handler(request)
