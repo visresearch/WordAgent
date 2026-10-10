@@ -15,6 +15,26 @@ function safeRead(read, fallback = null) {
   }
 }
 
+function now() {
+  return typeof performance !== 'undefined' ? performance.now() : Date.now();
+}
+
+function suspendScreenUpdating(doc) {
+  const application = safeRead(() => doc.Application) || safeRead(() => window.Application);
+  // 尊重外层操作已经关闭屏幕更新的状态；不支持此属性的版本照常处理。
+  if (safeRead(() => application.ScreenUpdating) !== true) {
+    return () => {};
+  }
+  try {
+    application.ScreenUpdating = false;
+  } catch (error) {
+    return () => {};
+  }
+  return () => {
+    application.ScreenUpdating = true;
+  };
+}
+
 function listRevisions(revisions) {
   const items = [];
   const count = Number(safeRead(() => revisions.Count, 0)) || 0;
@@ -153,6 +173,7 @@ function acquireDocumentPreviewState(doc, editState) {
       previousRevisionsView: editState.previousRevisionsView,
       previousShowInsertionsAndDeletions: editState.previousShowInsertionsAndDeletions,
       previousShowFormatChanges: editState.previousShowFormatChanges,
+      before: editState.before,
       batches: 0
     };
     documentPreviewStates.set(doc, state);
@@ -314,6 +335,9 @@ export function settleRevisionBatch(batchId, action) {
   if (action !== 'accept' && action !== 'reject') {
     return { success: false, handled: 0, failed: 0, error: 'action 必须是 accept 或 reject' };
   }
+  if (action === 'reject') {
+    return rejectRevisionBatches(batch.doc, [batchId]);
+  }
 
   const revisions = [...batch.revisions].sort((a, b) => {
     const aIndex = Number(safeRead(() => a.revision.Index, a.index)) || a.index;
@@ -328,22 +352,13 @@ export function settleRevisionBatch(batchId, action) {
   const failedRevisions = [];
 
   for (const item of revisions) {
-    if (action === 'reject' && FORMAT_REVISION_TYPES.has(item.type)) {
-      // WPS 明确不支持 Reject() 格式修订；拒绝对应的文本/结构修订后，
-      // 插入内容上的格式修订会随内容一起消失。
-      continue;
-    }
     try {
-      if (action === 'accept') {
-        item.revision.Accept();
-      } else {
-        item.revision.Reject();
-      }
+      item.revision.Accept();
       handled += 1;
     } catch (error) {
       failed += 1;
       failedRevisions.push(item);
-      console.warn(`[revisionPreview] Revision.${action === 'accept' ? 'Accept' : 'Reject'}() 失败:`, error);
+      console.warn('[revisionPreview] Revision.Accept() 失败:', error);
     }
   }
 
@@ -355,6 +370,148 @@ export function settleRevisionBatch(batchId, action) {
   revisionBatches.delete(batchId);
   releaseDocumentPreviewState(batch.doc);
   return { success: true, handled, failed };
+}
+
+// 每次处理后重新读取集合，不复用可能已经重排/失效的 COM Revision。
+// 签名不包含位置，因为拒绝插入后，已有修订的范围会向前移动。
+function matchRevisions(expected, current, exactRange = false) {
+  const remaining = [...current];
+  const matched = [];
+  for (const item of expected) {
+    const signature = revisionSignature(item);
+    let bestIndex = -1;
+    for (let index = 0; index < remaining.length; index++) {
+      const candidate = remaining[index];
+      if (revisionSignature(candidate) !== signature) {
+        continue;
+      }
+      if (exactRange && (candidate.start !== item.start || candidate.end !== item.end)) {
+        continue;
+      }
+      if (bestIndex < 0 || Math.abs(candidate.start - item.start) < Math.abs(remaining[bestIndex].start - item.start)) {
+        bestIndex = index;
+      }
+    }
+    if (bestIndex >= 0) {
+      matched.push(remaining.splice(bestIndex, 1)[0]);
+    }
+  }
+  return matched;
+}
+
+function readDocumentRevisions(doc) {
+  const revisions = doc.Revisions;
+  const count = Number(revisions?.Count);
+  if (!Number.isInteger(count) || count < 0) {
+    throw new Error('无法读取 WPS 修订集合');
+  }
+  const items = listRevisions(revisions);
+  if (items.length !== count) {
+    throw new Error('无法完整读取 WPS 修订集合');
+  }
+  return items;
+}
+
+/**
+ * 取消一组待确认操作。没有其它修订时使用文档级 RejectAll，与 WPS
+ * “拒绝对文档所做的所有修订”一致；否则只拒绝属于这些批次的范围。
+ */
+export function rejectRevisionBatches(doc, batchIds) {
+  const ids = [...new Set(batchIds)];
+  const batches = ids.map((id) => revisionBatches.get(id));
+  const sameDocument = (other) => other === doc || (
+    doc?.DocID !== undefined && doc?.DocID !== null &&
+    other?.DocID !== undefined && other?.DocID !== null && Number(other.DocID) === Number(doc.DocID)
+  );
+  if (!doc || batches.some((batch) => !batch || !sameDocument(batch.doc))) {
+    return { success: false, handled: 0, failed: 1, settledBatchIds: [], error: '修订批次不存在或文档不匹配' };
+  }
+  doc = batches[0]?.doc || doc;
+  const expected = batches.flatMap((batch) => batch.revisions);
+  const baseline = documentPreviewStates.get(doc)?.before || [];
+  const ownedRevisions = (current, snapshots = expected) => {
+    const protectedItems = new Set(matchRevisions(baseline, current));
+    return matchRevisions(snapshots, current.filter((item) => !protectedItems.has(item)));
+  };
+  let handled = 0;
+  let error = null;
+  let current;
+  let rejectingWholeDocument = false;
+  const retainRemainingRevisions = () => {
+    if (rejectingWholeDocument && current?.length > 0) {
+      // 原集合全部属于选中的批次，RejectAll 部分成功后新建/重排的标记
+      // 仍属于本轮操作。保留新快照，防止签名变化后误报撤销成功。
+      expected.splice(0, expected.length, ...current);
+      for (const batch of batches) {
+        batch.revisions = [...current];
+      }
+    }
+  };
+  try {
+    current = readDocumentRevisions(doc);
+    let owned = ownedRevisions(current);
+    while (owned.length > 0) {
+      const beforeCount = current.length;
+      if (owned.length === current.length) {
+        rejectingWholeDocument = true;
+        // 包括插入、删除、样式和段落格式，一次交给 WPS 内核处理。
+        if (typeof doc.Revisions.RejectAll === 'function') {
+          doc.Revisions.RejectAll();
+        } else if (typeof doc.RejectAllRevisions === 'function') {
+          doc.RejectAllRevisions();
+        } else {
+          throw new Error('当前 WPS 版本不支持拒绝全部修订');
+        }
+      } else {
+        // 格式必须先处理，避免拒绝文字后其 Range/签名失效。
+        owned.sort((left, right) => (
+          Number(FORMAT_REVISION_TYPES.has(right.type)) - Number(FORMAT_REVISION_TYPES.has(left.type)) ||
+          right.index - left.index
+        ));
+        const item = owned[0];
+        const rangeRevisions = doc.Range?.(item.start, item.end)?.Revisions;
+        const inRange = rangeRevisions ? listRevisions(rangeRevisions) : [];
+        const rangeOwned = matchRevisions(owned, inRange, true);
+        if (inRange.length > 0 && rangeOwned.length === inRange.length && typeof rangeRevisions.RejectAll === 'function') {
+          // WPS 的 Revision.Reject() 不支持格式修订，使用范围集合接口。
+          rangeRevisions.RejectAll();
+        } else if (!FORMAT_REVISION_TYPES.has(item.type)) {
+          item.revision.Reject();
+        } else {
+          throw new Error('无法单独拒绝本轮格式修订，操作保留以便重试');
+        }
+      }
+      current = readDocumentRevisions(doc);
+      retainRemainingRevisions();
+      if (current.length >= beforeCount) {
+        throw new Error('WPS 拒绝修订后仍有标记残留，操作保留以便重试');
+      }
+      handled += beforeCount - current.length;
+      owned = ownedRevisions(current);
+    }
+  } catch (failure) {
+    error = failure?.message || String(failure);
+    console.warn('[revisionPreview] 拒绝修订失败:', failure);
+    // RejectAll 也可能部分成功，重新读取后只清除已处理的批次。
+    try {
+      current = readDocumentRevisions(doc);
+      retainRemainingRevisions();
+    } catch (readError) {
+      current = null;
+    }
+  }
+  const settledBatchIds = [];
+  if (current) {
+    for (let index = 0; index < ids.length; index++) {
+      if (ownedRevisions(current, batches[index].revisions).length === 0) {
+        revisionBatches.delete(ids[index]);
+        releaseDocumentPreviewState(doc);
+        settledBatchIds.push(ids[index]);
+      }
+    }
+  }
+  const failed = ids.length - settledBatchIds.length;
+  return { success: failed === 0, handled, failed, settledBatchIds, ...(error ? { error } : {}) };
 }
 
 /**
@@ -370,50 +527,81 @@ export function settleAllDocumentRevisions(doc, action) {
     return { success: false, handled: 0, error: 'action 必须是 accept 或 reject' };
   }
 
-  const revisions = safeRead(() => doc.Revisions);
-  if (!revisions) {
-    return { success: false, handled: 0, error: '当前 WPS 文档不支持 Revisions 集合' };
-  }
-  const handled = Number(safeRead(() => revisions.Count, 0)) || 0;
-
+  const startedAt = now();
+  const timings = { readMs: 0, nativeMs: 0, restoreViewMs: 0, screenUpdateMs: 0, totalMs: 0 };
+  let resumeScreenUpdating = () => {};
   try {
-    if (action === 'accept') {
-      if (typeof revisions.AcceptAll === 'function') {
-        revisions.AcceptAll();
-      } else if (typeof doc.AcceptAllRevisions === 'function') {
-        doc.AcceptAllRevisions();
-      } else {
-        throw new Error('当前 WPS 版本不支持 Revisions.AcceptAll()');
-      }
-    } else if (typeof revisions.RejectAll === 'function') {
-      revisions.RejectAll();
-    } else if (typeof doc.RejectAllRevisions === 'function') {
-      doc.RejectAllRevisions();
-    } else {
-      throw new Error('当前 WPS 版本不支持 Revisions.RejectAll()');
+    const revisions = doc.Revisions;
+    const handled = Number(revisions?.Count);
+    if (!Number.isInteger(handled) || handled < 0) {
+      throw new Error('无法读取 WPS 文档的 Revisions 集合');
     }
-  } catch (error) {
-    return { success: false, handled: 0, error: error?.message || String(error) };
-  }
-
-  for (const [batchId, batch] of revisionBatches.entries()) {
-    if (batch.doc === doc) {
-      revisionBatches.delete(batchId);
+    timings.readMs = now() - startedAt;
+    const previewState = documentPreviewStates.get(doc);
+    if (handled > 0 || previewState) {
+      // 接受修订和恢复显示设置期间暂停重绘，结束后统一刷新。
+      const screenStartedAt = now();
+      resumeScreenUpdating = suspendScreenUpdating(doc);
+      timings.screenUpdateMs = now() - screenStartedAt;
     }
-  }
-
-  const previewState = documentPreviewStates.get(doc);
-  if (previewState) {
+    const nativeStartedAt = now();
     try {
-      doc.ShowRevisions = previewState.previousShowRevisions;
-      restoreRevisionView(previewState);
-    } catch (error) {
-      console.warn('[revisionPreview] 整体处理修订后恢复显示设置失败:', error);
+      // 用户已在审阅栏处理完时，无需再让 WPS 扫描整篇文档。
+      if (handled > 0) {
+        if (action === 'accept') {
+          if (typeof revisions.AcceptAll === 'function') {
+            revisions.AcceptAll();
+          } else if (typeof doc.AcceptAllRevisions === 'function') {
+            doc.AcceptAllRevisions();
+          } else {
+            throw new Error('当前 WPS 版本不支持 Revisions.AcceptAll()');
+          }
+        } else if (typeof revisions.RejectAll === 'function') {
+          revisions.RejectAll();
+        } else if (typeof doc.RejectAllRevisions === 'function') {
+          doc.RejectAllRevisions();
+        } else {
+          throw new Error('当前 WPS 版本不支持 Revisions.RejectAll()');
+        }
+        // 保留未完成的批次，避免接口返回后仍残留标记却丢失确认入口。
+        if (Number(doc.Revisions.Count) !== 0) {
+          throw new Error('WPS 未完整处理文档修订，请重试');
+        }
+      }
+    } finally {
+      timings.nativeMs = now() - nativeStartedAt;
     }
-    documentPreviewStates.delete(doc);
-  }
 
-  return { success: true, handled };
+    for (const [batchId, batch] of revisionBatches.entries()) {
+      if (batch.doc === doc) {
+        revisionBatches.delete(batchId);
+      }
+    }
+
+    const viewStartedAt = now();
+    if (previewState) {
+      try {
+        doc.ShowRevisions = previewState.previousShowRevisions;
+        restoreRevisionView(previewState);
+      } catch (error) {
+        console.warn('[revisionPreview] 整体处理修订后恢复显示设置失败:', error);
+      }
+      documentPreviewStates.delete(doc);
+    }
+    timings.restoreViewMs = now() - viewStartedAt;
+    return { success: true, handled, timings };
+  } catch (error) {
+    return { success: false, handled: 0, error: error?.message || String(error), timings };
+  } finally {
+    const screenStartedAt = now();
+    try {
+      resumeScreenUpdating();
+    } catch (error) {
+      console.warn('[revisionPreview] 恢复屏幕更新失败:', error);
+    }
+    timings.screenUpdateMs += now() - screenStartedAt;
+    timings.totalMs = now() - startedAt;
+  }
 }
 
 export function hasRevisionBatch(batchId) {

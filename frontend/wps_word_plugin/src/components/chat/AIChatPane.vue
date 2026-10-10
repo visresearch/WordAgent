@@ -66,6 +66,7 @@ import {
   beginTrackedEdit,
   finishTrackedEdit,
   hasRevisionBatch,
+  rejectRevisionBatches,
   settleRevisionBatch,
   settleAllDocumentRevisions
 } from '../js/revisionPreview.js';
@@ -550,7 +551,10 @@ export default {
           .sort((a, b) => (b.insertStartPos ?? -1) - (a.insertStartPos ?? -1));
         if (pendingRevisionInsertions.length > 0) {
           for (const item of pendingRevisionInsertions) {
-            settleRevisionBatch(item._revisionBatchId, 'reject');
+            const result = settleRevisionBatch(item._revisionBatchId, 'reject');
+            if (!result.success) {
+              throw new Error(result.error || '无法完整拒绝文档修订，请重试');
+            }
             item._revisionBatchId = null;
           }
           this.pendingInsertions = this.pendingInsertions.filter((item) => item.msg !== msg);
@@ -2302,13 +2306,23 @@ export default {
       const pendingItems = [...this.pendingInsertions, ...this.pendingEdits, ...this.deleteRevisions];
       for (const item of pendingItems) {
         const documentKey = this._toIntOrDefault(item.docId, 0);
+        // 去重必须在访问 WPS 前完成，每个批次重复遍历文档会增加跨进程调用。
+        if (documentResults.has(documentKey)) {
+          continue;
+        }
+        const lookupStartedAt = performance.now();
         const doc = this._resolveTargetDoc(item.docId);
-        if (!doc || documentResults.has(documentKey)) {
+        const lookupMs = performance.now() - lookupStartedAt;
+        if (!doc) {
+          documentResults.set(documentKey, { success: false, error: '无法获取目标文档' });
           continue;
         }
         const settled = settleAllDocumentRevisions(doc, 'accept');
         documentResults.set(documentKey, settled);
-        console.log('[AIChatPane] WPS 原生接受文档全部修订:', settled);
+        console.log('[AIChatPane] WPS 原生接受文档全部修订:', {
+          ...settled,
+          timings: { documentLookupMs: lookupMs, ...settled.timings }
+        });
       }
 
       const operationSettled = (item) => {
@@ -2330,87 +2344,85 @@ export default {
       this.deleteRevisions = this.deleteRevisions.filter((item) => !operationSettled(item));
       this._syncPendingDocumentPreview();
       this._streamInsertions = [];
+      if ([...documentResults.values()].some((result) => result.success)) {
+        api.wsManager.clearDocumentCache();
+      }
     },
 
     /**
      * 拒绝本轮已经执行的原生增删修订。
      */
     cancelPending() {
-      // 先拒绝删除修订以恢复原文。
-      for (const pd of this.deleteRevisions) {
-        const doc = this._resolveTargetDoc(pd.docId);
+      const groups = new Map();
+      const completed = new Set();
+      const errors = [];
+      for (const item of [...this.deleteRevisions, ...this.pendingEdits, ...this.pendingInsertions]) {
+        const key = this._toIntOrDefault(item.docId, 0);
+        if (!groups.has(key)) {
+          groups.set(key, { doc: this._resolveTargetDoc(item.docId), items: [] });
+        }
+        groups.get(key).items.push(item);
+      }
+      for (const { doc, items } of groups.values()) {
         if (!doc) {
+          errors.push('无法获取目标文档');
           continue;
         }
-        try {
-          if (pd._markingMode === 'revision' && hasRevisionBatch(pd._revisionBatchId)) {
-            const settled = settleRevisionBatch(pd._revisionBatchId, 'reject');
-            console.log('[AIChatPane] 已拒绝删除内容修订:', settled);
-            pd._revisionBatchId = null;
-          }
-        } catch (e) {
-          console.warn('[AIChatPane] cancelPending 清理删除标记失败:', e);
-        }
-      }
-
-      // 再拒绝段落编辑修订，恢复被替换的原文。
-      for (const edit of this.pendingEdits) {
-        const doc = this._resolveTargetDoc(edit.docId);
-        if (!doc) {
-          continue;
-        }
-        try {
-          if (edit._markingMode === 'revision' && hasRevisionBatch(edit._revisionBatchId)) {
-            const settled = settleRevisionBatch(edit._revisionBatchId, 'reject');
-            console.log('[AIChatPane] 已拒绝段落编辑修订:', settled);
-            edit._revisionBatchId = null;
-            if (edit.msg) {
-              edit.msg._revisionBatchId = null;
-            }
-          } else if (edit._markingMode === 'revision-unavailable') {
-            // 极少数 WPS 版本不产生 Revision 时，用当前替换范围写回原文。
-            // 段落标记仍未被触碰，因此 pStyle 和段落边界保持不变。
-            doc.Range(edit.startPos, edit.endPos).Text = edit.originalText || '';
-          }
-        } catch (e) {
-          console.warn('[AIChatPane] cancelPending 清理段落编辑失败:', e);
-        }
-      }
-
-      // 再倒序拒绝新增修订，避免位置变化影响后续批次。
-      const inserts = [...this.pendingInsertions].sort(
-        (a, b) => (b.insertStartPos ?? -1) - (a.insertStartPos ?? -1)
-      );
-      for (const ins of inserts) {
-        const doc = this._resolveTargetDoc(ins.docId);
-        if (!doc) {
-          continue;
-        }
-        try {
-          if (ins._markingMode === 'revision' && hasRevisionBatch(ins._revisionBatchId)) {
-            const settled = settleRevisionBatch(ins._revisionBatchId, 'reject');
-            console.log('[AIChatPane] 已拒绝新增内容修订:', settled);
-            if (ins.msg) {
-              ins.msg._revisionBatchId = null;
-            }
-            ins._revisionBatchId = null;
-          } else if (ins._markingMode === 'revision-unavailable') {
-            if (ins.insertStartPos !== undefined && ins.insertEndPos !== undefined) {
-              doc.Range(ins.insertStartPos, ins.insertEndPos).Delete();
+        const tracked = items.filter((item) => hasRevisionBatch(item._revisionBatchId));
+        if (tracked.length > 0) {
+          const result = rejectRevisionBatches(doc, tracked.map((item) => item._revisionBatchId));
+          for (const item of tracked) {
+            if (result.settledBatchIds.includes(item._revisionBatchId)) {
+              completed.add(item);
             }
           }
-        } catch (e) {
-          console.warn('[AIChatPane] cancelPending 回滚新增失败:', e);
+          if (!result.success) {
+            errors.push(result.error || '无法完整拒绝本轮修订，请重试');
+          }
+        }
+        // 极少数版本不产生 Revision 时，回写/删除不得再生成新的修订。
+        const fallback = items.filter((item) => !tracked.includes(item)).sort(
+          (left, right) => (right.insertStartPos ?? right.startPos ?? -1) - (left.insertStartPos ?? left.startPos ?? -1)
+        );
+        for (const item of fallback) {
+          if (item._markingMode !== 'revision-unavailable') {
+            completed.add(item); // 已在 WPS 审阅栏手动处理的批次。
+            continue;
+          }
+          const previousTracking = doc.TrackRevisions;
+          try {
+            doc.TrackRevisions = false;
+            if (this.pendingEdits.includes(item)) {
+              doc.Range(item.startPos, item.endPos).Text = item.originalText || '';
+            } else if (item.insertStartPos !== undefined && item.insertEndPos !== undefined) {
+              doc.Range(item.insertStartPos, item.insertEndPos).Delete();
+            } else {
+              throw new Error('缺少待撤销内容的范围');
+            }
+            completed.add(item);
+          } catch (error) {
+            errors.push(error?.message || String(error));
+          } finally {
+            doc.TrackRevisions = previousTracking;
+          }
         }
       }
-
-      this.deleteRevisions = [];
-      this.pendingEdits = [];
-      this.pendingInsertions = [];
-      this.pendingDocument = null;
-      this.pendingDocumentMsg = null;
-      this._streamInsertions = [];
-      console.log('用户取消了所有待确认标记与操作');
+      for (const item of completed) {
+        item._revisionBatchId = null;
+        if (item.msg) {
+          item.msg._revisionBatchId = null;
+        }
+      }
+      this.deleteRevisions = this.deleteRevisions.filter((item) => !completed.has(item));
+      this.pendingEdits = this.pendingEdits.filter((item) => !completed.has(item));
+      this.pendingInsertions = this.pendingInsertions.filter((item) => !completed.has(item));
+      this._syncPendingDocumentPreview();
+      if (errors.length === 0) {
+        this._streamInsertions = [];
+      } else {
+        alert(t('chat.undoFailed', { error: [...new Set(errors)].join('；') }));
+      }
+      api.wsManager.clearDocumentCache();
     },
 
     /**

@@ -3160,7 +3160,6 @@ function generateDocxFromJSON(jsonData, doc, insertParaID) {
           const range = doc.Range(currentPos, currentPos);
           range.Text = '\r';
           currentPos += 1;
-          applyParagraphStyleAtPosition(doc, paraStartPos, pStyle);
           insertedParagraphStyles.push({ position: paraStartPos, pStyle: [...pStyle] });
           paraIndex++;
           continue;
@@ -3257,17 +3256,12 @@ function generateDocxFromJSON(jsonData, doc, insertParaID) {
           }
         }
 
-        // WPS 修订模式可能在插入段落标记后重建段落。先应用一次，完成
-        // 全部内容插入后再按起点二次固化，避免继承锚点段落的 pStyle。
-        try {
-          applyParagraphStyleAtPosition(doc, paraStartPos, pStyle);
-          insertedParagraphStyles.push({ position: paraStartPos, pStyle: [...pStyle] });
-          paraIndex++;
-        } catch (error) {
-          console.warn('记录段落格式失败:', error);
-        }
+        // 先记录样式，等段落分隔符全部插入后再应用。此时新文本仍与
+        // 后面的原文属于同一段，提前设置 Style 会修改原有标题/段落。
+        insertedParagraphStyles.push({ position: paraStartPos, pStyle: [...pStyle] });
+        paraIndex++;
 
-        // 段落格式设置完成后，再添加段落结束符
+        // 先建立段落边界，再设置段落格式。
         if (i < processedElements.length - 1) {
           const nextElement = processedElements[i + 1];
           if (nextElement && nextElement.type !== 'table') {
@@ -3312,7 +3306,7 @@ function generateDocxFromJSON(jsonData, doc, insertParaID) {
       currentPos += 1;
     }
 
-    // 段落结束符均已落定后重新应用 pStyle。尤其是向已有修订内容后继续
+    // 段落结束符均已落定后应用 pStyle。尤其是向已有修订内容后继续
     // 写入时，WPS 否则可能用锚点空段落的格式覆盖英文摘要等后续内容。
     for (const item of insertedParagraphStyles) {
       applyParagraphStyleAtPosition(doc, item.position, item.pStyle);
