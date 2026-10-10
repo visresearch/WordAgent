@@ -71,7 +71,6 @@ def test_production_stream_interrupt_restart_resume_and_tool_memory(tmp_path, mo
         ]
     )
     monkeypatch.setattr(agent, "resolve_model", lambda *args: "fake-model")
-    monkeypatch.setattr(agent, "supports_thinking", lambda *args: False)
     monkeypatch.setattr(agent, "init_chat_model_with_reasoning", lambda *args, **kwargs: model)
 
     async def mcp():
@@ -99,7 +98,6 @@ def test_production_stream_interrupt_restart_resume_and_tool_memory(tmp_path, mo
                 provider="",
                 mode="agent",
                 attached_files=[],
-                enable_thinking=False,
                 **kwargs,
             )
         ]

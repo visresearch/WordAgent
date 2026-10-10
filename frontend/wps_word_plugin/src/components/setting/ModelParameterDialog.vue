@@ -1,0 +1,532 @@
+<template>
+  <Teleport to="body">
+    <div class="model-parameter-overlay" @click.self="$emit('close')">
+      <form
+        ref="dialog"
+        class="model-parameter-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="model-parameter-title"
+        @submit.prevent="confirmSettings"
+        @keydown="onKeydown"
+      >
+        <header class="dialog-header">
+          <div class="dialog-heading">
+            <h3 id="model-parameter-title">
+              {{ $t('model.parameters.editTitle', { name: model.name || model.id }) }}
+            </h3>
+            <p class="model-identity">
+              <span v-if="providerName">{{ providerName }} · </span>{{ model.id }}
+            </p>
+          </div>
+          <button
+            type="button"
+            class="dialog-close"
+            :aria-label="$t('common.close')"
+            @click="$emit('close')"
+          >
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              aria-hidden="true"
+            >
+              <path d="m6 6 12 12M18 6 6 18" />
+            </svg>
+          </button>
+        </header>
+
+        <div class="dialog-body">
+          <div
+            v-for="parameter in samplingParameters"
+            :key="parameter.key"
+            class="parameter-field sampling-field"
+          >
+            <div class="parameter-description">
+              <label :for="`model-${parameter.key}-slider`">{{ parameter.label }}</label>
+              <p :id="`model-${parameter.key}-hint`" class="field-hint">
+                {{ $t(parameter.hint) }}
+              </p>
+            </div>
+            <div class="parameter-control sampling-control">
+              <div class="range-control">
+                <span class="range-limit" aria-hidden="true">0</span>
+                <input
+                  :id="`model-${parameter.key}-slider`"
+                  v-model.number="draft[parameter.key]"
+                  class="parameter-range"
+                  type="range"
+                  min="0"
+                  :max="parameter.max"
+                  step="0.01"
+                  :style="{ '--range-progress': `${rangeProgress(parameter)}%` }"
+                  :aria-describedby="`model-${parameter.key}-hint`"
+                />
+                <span class="range-limit" aria-hidden="true">{{ parameter.max }}</span>
+              </div>
+              <input
+                :id="`model-${parameter.key}-value`"
+                v-model.number="draft[parameter.key]"
+                class="sampling-value"
+                type="number"
+                min="0"
+                :max="parameter.max"
+                step="0.01"
+                required
+                :aria-label="$t('model.parameters.numericValue', { name: parameter.label })"
+                :aria-describedby="`model-${parameter.key}-hint`"
+              />
+            </div>
+          </div>
+
+          <div class="parameter-field">
+            <div class="parameter-description">
+              <label for="model-max-tokens">Max Tokens</label>
+              <p id="model-max-tokens-hint" class="field-hint">
+                {{ $t('model.parameters.maxTokensHint') }}
+              </p>
+            </div>
+            <div class="parameter-control token-input">
+              <input
+                id="model-max-tokens"
+                v-model.number="draft.maxTokens"
+                type="number"
+                min="1"
+                :max="maxSafeInteger"
+                step="1"
+                placeholder="8192"
+                aria-describedby="model-max-tokens-hint"
+              />
+              <span aria-hidden="true">Tokens</span>
+            </div>
+          </div>
+
+          <div class="parameter-field">
+            <div class="parameter-description">
+              <label for="model-reasoning-effort">Reasoning Effort</label>
+              <p id="model-reasoning-hint" class="field-hint">
+                {{ $t('model.parameters.reasoningHint') }}
+              </p>
+            </div>
+            <div class="parameter-control">
+              <select
+                id="model-reasoning-effort"
+                v-model="draft.reasoningEffort"
+                aria-describedby="model-reasoning-hint"
+              >
+                <option v-for="effort in reasoningOptions" :key="effort" :value="effort">
+                  {{ effort }}
+                </option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <footer class="dialog-footer">
+          <button type="button" class="dialog-button cancel-button" @click="$emit('close')">
+            {{ $t('common.cancel') }}
+          </button>
+          <button type="submit" class="dialog-button confirm-button">
+            {{ $t('common.confirm') }}
+          </button>
+        </footer>
+      </form>
+    </div>
+  </Teleport>
+</template>
+
+<script>
+import { nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+
+export default {
+  name: 'ModelParameterDialog',
+  props: {
+    model: { type: Object, required: true },
+    providerName: { type: String, default: '' }
+  },
+  emits: ['confirm', 'close'],
+  setup(props, { emit }) {
+    const dialog = ref(null);
+    const previousFocus = document.activeElement;
+    const parameters = props.model.parameters || {};
+    const maxSafeInteger = Number.MAX_SAFE_INTEGER;
+    const validNumber = (value, fallback, max = maxSafeInteger, integer = false, min = 0) => {
+      const number = Number(value);
+      return value !== null && value !== undefined && value !== ''
+        && Number.isFinite(number) && number >= min && number <= max
+        && (!integer || Number.isSafeInteger(number)) ? number : fallback;
+    };
+    // A separate draft ensures closing or cancelling never mutates the selected model.
+    const reasoningOptions = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'];
+    const draft = reactive({
+      temperature: validNumber(parameters.temperature, 0.5, 2),
+      topP: validNumber(parameters.topP, 1, 1),
+      maxTokens: validNumber(parameters.maxTokens, 8192, maxSafeInteger, true, 1),
+      reasoningEffort: reasoningOptions.includes(parameters.reasoningEffort) ? parameters.reasoningEffort : 'medium'
+    });
+    const samplingParameters = [
+      { key: 'temperature', label: 'Temperature', max: 2, hint: 'model.parameters.temperatureHint' },
+      { key: 'topP', label: 'Top-p', max: 1, hint: 'model.parameters.topPHint' }
+    ];
+    const rangeProgress = (parameter) => {
+      return Math.min(100, Math.max(0, (Number(draft[parameter.key]) || 0) / parameter.max * 100));
+    };
+
+    const confirmSettings = () => {
+      if (!dialog.value?.reportValidity()) {
+        return;
+      }
+      emit('confirm', {
+        temperature: draft.temperature,
+        topP: draft.topP,
+        maxTokens: draft.maxTokens === '' ? 8192 : draft.maxTokens,
+        reasoningEffort: draft.reasoningEffort
+      });
+    };
+
+    const onKeydown = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        emit('close');
+      } else if (event.key === 'Tab') {
+        const controls = [...dialog.value.querySelectorAll('button, input, select')];
+        const first = controls[0];
+        const last = controls[controls.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
+    };
+
+    onMounted(() => dialog.value?.querySelector('input')?.focus());
+    onBeforeUnmount(() => {
+      nextTick(() => {
+        if (previousFocus?.isConnected) {
+          previousFocus.focus();
+        }
+      });
+    });
+
+    return { dialog, draft, maxSafeInteger, samplingParameters, reasoningOptions, rangeProgress, confirmSettings, onKeydown };
+  }
+};
+</script>
+
+<style scoped>
+.model-parameter-overlay {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.4);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.model-parameter-dialog {
+  display: flex;
+  flex-direction: column;
+  width: 640px;
+  max-width: 100%;
+  max-height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: #fff;
+  color: #333;
+  border: 1px solid #e8e8e8;
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(24, 30, 48, 0.2);
+}
+
+.dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 24px 16px;
+  border-bottom: 1px solid #eee;
+  flex-shrink: 0;
+}
+
+.dialog-heading {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.dialog-heading h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.model-identity {
+  margin: 5px 0 0;
+  color: #888;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.dialog-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #888;
+  cursor: pointer;
+}
+
+.dialog-close:hover {
+  background: #f5f5f5;
+  color: #333;
+}
+
+.dialog-body {
+  min-height: 0;
+  padding: 16px 24px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.parameter-field {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  align-items: center;
+  gap: 24px;
+}
+
+.parameter-field + .parameter-field {
+  margin-top: 14px;
+}
+
+.parameter-description,
+.parameter-control {
+  min-width: 0;
+}
+
+.parameter-description {
+  overflow-wrap: anywhere;
+}
+
+.parameter-field label {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.field-hint {
+  margin: 4px 0 0;
+  color: #888;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.token-input {
+  position: relative;
+}
+
+.token-input input,
+.parameter-field select,
+.sampling-value {
+  width: 100%;
+  height: 36px;
+  padding: 8px 12px;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  background: #fff;
+  color: #333;
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.token-input input {
+  padding-right: 72px;
+}
+
+.token-input span {
+  position: absolute;
+  top: 50%;
+  right: 28px;
+  transform: translateY(-50%);
+  color: #999;
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.token-input input::placeholder {
+  color: #999;
+}
+
+.sampling-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 88px;
+  align-items: center;
+  gap: 16px;
+}
+
+.range-control {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 10px;
+}
+
+.range-limit {
+  flex-shrink: 0;
+  color: #888;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.sampling-value {
+  background: #f8f9ff;
+  color: #596bda;
+  font-variant-numeric: tabular-nums;
+}
+
+.parameter-range {
+  display: block;
+  appearance: none;
+  -webkit-appearance: none;
+  flex: 1;
+  min-width: 0;
+  width: 0;
+  height: 6px;
+  margin: 0 2px;
+  border-radius: 6px;
+  background: linear-gradient(to right, #667eea var(--range-progress), #e9ecf5 var(--range-progress));
+  cursor: pointer;
+}
+
+.parameter-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #667eea;
+  box-shadow: 0 1px 4px rgba(63, 80, 175, 0.3);
+}
+
+.parameter-range::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #667eea;
+  box-shadow: 0 1px 4px rgba(63, 80, 175, 0.3);
+}
+
+.dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 24px;
+  border-top: 1px solid #eee;
+  flex-shrink: 0;
+}
+
+.dialog-button {
+  padding: 8px 24px;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.cancel-button {
+  background: #fff;
+  color: #666;
+}
+
+.cancel-button:hover {
+  background: #f5f5f5;
+}
+
+.confirm-button {
+  border-color: #667eea;
+  background: #667eea;
+  color: #fff;
+}
+
+.confirm-button:hover {
+  border-color: #596bda;
+  background: #596bda;
+}
+
+.token-input input:focus,
+.parameter-field select:focus,
+.sampling-value:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.12);
+}
+
+.dialog-close:focus-visible,
+.dialog-button:focus-visible,
+.parameter-range:focus-visible {
+  outline: 2px solid #667eea;
+  outline-offset: 3px;
+}
+
+@media (max-width: 480px) {
+  .model-parameter-overlay {
+    padding: 12px;
+  }
+
+  .dialog-header,
+  .dialog-body,
+  .dialog-footer {
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+
+  .parameter-field {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+    gap: 12px;
+  }
+
+  .sampling-control {
+    grid-template-columns: minmax(0, 1fr) 62px;
+    gap: 8px;
+  }
+
+  .range-control {
+    gap: 6px;
+  }
+
+  .sampling-value {
+    padding: 8px 6px;
+  }
+
+  .token-input input {
+    padding-left: 8px;
+    padding-right: 56px;
+  }
+
+  .token-input span {
+    right: 20px;
+    font-size: 10px;
+  }
+}
+</style>

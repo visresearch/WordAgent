@@ -64,6 +64,10 @@ def _initialize_schema(connection) -> None:
 
     Base.metadata.create_all(connection)
 
+    from app.services.model_settings import migrate_model_parameters
+
+    migrate_model_parameters(connection)
+
     # token_usage was used by the first dashboard prototype. The dashboard now
     # keeps only today's hourly buckets and the latest seven daily buckets.
     if "token_usage" in tables:

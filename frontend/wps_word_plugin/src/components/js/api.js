@@ -695,7 +695,6 @@ function chatStream(message, options = {}) {
     documentRange = null,
     selectionContext = null,
     files = [],
-    enableThinking = true,
     sessionId = null,
     userResponse = null
   } = options;
@@ -738,7 +737,6 @@ function chatStream(message, options = {}) {
         selectionContext,
         documentMeta,
         files,
-        enableThinking,
         timestamp: Date.now()
       });
     } catch (error) {

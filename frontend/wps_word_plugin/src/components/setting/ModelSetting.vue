@@ -272,6 +272,7 @@
                     class="btn-model-action"
                     :title="$t('settings.modelTitle')"
                     :aria-label="$t('settings.modelTitle')"
+                    @click="openModelSettings(pIndex, model)"
                   >
                     <img :src="iconSetting" class="action-icon" alt="" />
                   </button>
@@ -321,6 +322,13 @@
         </p>
       </div>
     </div>
+    <ModelParameterDialog
+      v-if="editingModel"
+      :model="editingModel"
+      :provider-name="localProviders[editingTarget.providerIndex].name"
+      @confirm="applyModelSettings"
+      @close="editingTarget = null"
+    />
   </div>
 </template>
 
@@ -332,9 +340,11 @@ import { t } from '../../i18n/index.js';
 import iconConnect from '../../assets/icons/connect.svg';
 import iconSetting from '../../assets/icons/setting.svg';
 import iconDelete from '../../assets/icons/delete.svg';
+import ModelParameterDialog from './ModelParameterDialog.vue';
 
 export default {
   name: 'ModelSetting',
+  components: { ModelParameterDialog },
   props: {
     providers: {
       type: Array,
@@ -343,6 +353,7 @@ export default {
   },
   emits: ['update:providers'],
   setup(props, { emit }) {
+    const editingTarget = ref(null);
     const testingConnection = ref(null);
     const isTestingModel = (providerIndex, modelId) => (
       testingConnection.value?.providerIndex === providerIndex
@@ -390,6 +401,29 @@ export default {
         showKey: p.showKey,
         fetchingModels: p.fetchingModels
       })));
+    };
+
+    const editingModel = computed(() => {
+      const target = editingTarget.value;
+      return target
+        ? localProviders.value[target.providerIndex]?.models?.find(model => model.id === target.modelId)
+        : null;
+    });
+
+    const openModelSettings = (providerIndex, model) => {
+      editingTarget.value = { providerIndex, modelId: model.id };
+    };
+
+    const applyModelSettings = (parameters) => {
+      const target = editingTarget.value;
+      const provider = target && localProviders.value[target.providerIndex];
+      const modelIndex = provider?.models?.findIndex(model => model.id === target.modelId) ?? -1;
+      if (modelIndex !== -1) {
+        const model = provider.models[modelIndex];
+        provider.models[modelIndex] = { ...model, parameters: { ...parameters } };
+        emitChange();
+      }
+      editingTarget.value = null;
     };
 
     const addNewProvider = () => {
@@ -527,6 +561,10 @@ export default {
     };
 
     return {
+      editingTarget,
+      editingModel,
+      openModelSettings,
+      applyModelSettings,
       iconConnect,
       iconSetting,
       iconDelete,

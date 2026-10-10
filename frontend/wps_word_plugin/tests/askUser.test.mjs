@@ -63,12 +63,14 @@ test('resume transport keeps session and correlated answers in the chat request'
   const sent = [];
   t.mock.method(wsManager, 'send', async body => sent.push(body));
   const userResponse = { answers: [{ id: 'interrupt:0', answer: '正式' }] };
-  chatStream('正式', { sessionId: 'same-session', userResponse });
+  // A stale caller must not reintroduce the removed per-chat thinking override.
+  chatStream('正式', { sessionId: 'same-session', userResponse, enableThinking: false });
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(sent.length, 1);
   assert.equal(sent[0].type, 'chat');
   assert.equal(sent[0].sessionId, 'same-session');
   assert.deepEqual(sent[0].userResponse, userResponse);
+  assert.equal('enableThinking' in sent[0], false);
 });
 
 const paneSource = readFileSync(new URL('../src/components/chat/AIChatPane.vue', import.meta.url), 'utf8');

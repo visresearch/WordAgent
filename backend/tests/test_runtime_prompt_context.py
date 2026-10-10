@@ -42,7 +42,6 @@ def runtime(monkeypatch):
         return [], [], []
 
     monkeypatch.setattr(agent, "resolve_model", lambda *_args: "fake-model")
-    monkeypatch.setattr(agent, "supports_thinking", lambda _model: False)
     monkeypatch.setattr(agent, "init_chat_model_with_reasoning", lambda *_args, **_kwargs: object())
     monkeypatch.setattr(agent, "load_mcp_tools", load_mcp_tools)
     monkeypatch.setattr(agent, "get_base_tools_for_mode", lambda _mode: [])

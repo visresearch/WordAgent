@@ -43,6 +43,14 @@ export default {
     builtinDeleteDisabled: '内置 Skill 不能删除'
   },
   model: {
+    parameters: {
+      editTitle: '编辑 {name} 模型',
+      temperatureHint: '控制输出的随机性，范围通常为 0–2。值越高越随机。',
+      topPHint: '核采样参数，范围通常为 0–1。控制模型考虑的概率质量。',
+      maxTokensHint: '生成的最大词元（Tokens）数。留空使用 8192。',
+      reasoningHint: '控制推理模型的推理强度，支持的值取决于具体模型。',
+      numericValue: '{name} 数值'
+    },
     connect: '测试连接',
     connectionSuccess: '连接成功\n模型：{model}\n延迟：{latency} ms',
     connectionFailed: '连接失败\n模型：{model}\n原因：{error}',

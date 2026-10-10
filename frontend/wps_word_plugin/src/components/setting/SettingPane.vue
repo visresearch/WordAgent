@@ -227,8 +227,7 @@ export default {
       },
       providers: [],
       mcpServers: [],
-      customPrompt: '',
-      temperature: 0.5
+      customPrompt: ''
     });
 
     // 缓存信息（只加载一次）
@@ -246,8 +245,7 @@ export default {
     }));
 
     const personalizationSettings = computed(() => ({
-      customPrompt: settings.customPrompt,
-      temperature: settings.temperature
+      customPrompt: settings.customPrompt
     }));
 
     const loadCacheInfo = async () => {
@@ -313,9 +311,6 @@ export default {
           if (data.customPrompt !== undefined) {
             settings.customPrompt = data.customPrompt;
           }
-          if (data.temperature !== undefined) {
-            settings.temperature = data.temperature;
-          }
           if (Array.isArray(data.mcpServers)) {
             settings.mcpServers = data.mcpServers.map(s => {
               const config = (s.config && typeof s.config === 'object') ? s.config : {};
@@ -362,8 +357,7 @@ export default {
               enabled: s.enabled !== false
             };
           }),
-          customPrompt: settings.customPrompt,
-          temperature: settings.temperature
+          customPrompt: settings.customPrompt
         };
 
         await api.saveSettings(settingsToSave);
@@ -402,7 +396,6 @@ export default {
 
     const onPersonalizationChange = (newSettings) => {
       settings.customPrompt = newSettings.customPrompt;
-      settings.temperature = newSettings.temperature;
     };
 
     const onProvidersChange = (newProviders) => {

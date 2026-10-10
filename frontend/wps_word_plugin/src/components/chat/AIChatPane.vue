@@ -33,11 +33,9 @@
         :pending-edits="pendingEdits"
         :delete-revisions="deleteRevisions"
         :token-stats="tokenStats"
-        :enable-thinking="enableThinking"
         @update:mode="mode = $event"
         @update:selected-model="selectedModel = $event"
         @update:selected-model-provider="selectedModelProvider = $event"
-        @update:enable-thinking="enableThinking = $event"
         @send="handleSend"
         @stop="stopGeneration"
         @add-selection="addSelectionManually"
@@ -119,7 +117,6 @@ export default {
       _sessionTokenStats: {},      // {sessionId: tokenStats} 各会话最近的上下文用量
       isWide: false,
       tokenStats: { current: 0, max: 258000, percentage: 0 },
-      enableThinking: true,  // 是否启用深度思考
       _initializing: false   // 是否正在初始化，防止 ensureSession 创建重复会话
     };
   },
@@ -1340,7 +1337,6 @@ export default {
         documentRange: documentRange,
         selectionContext: selectionContext,
         files: files,
-        enableThinking: this.enableThinking,
         sessionId: streamSessionId,
         userResponse,
 

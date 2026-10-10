@@ -14,6 +14,7 @@ from langchain_openai import ChatOpenAI as _BaseChatOpenAI
 from langchain_core.outputs import ChatGenerationChunk
 
 from app.core.logging import get_logger
+from app.services.model_settings import enrich_providers, load_model_parameters, normalize_legacy_parameters, provider_key
 
 logger = get_logger(__name__)
 
@@ -381,7 +382,7 @@ class ChatOpenAI(_BaseChatOpenAI):
         return generation_chunk
 
 
-def init_chat_model_with_reasoning(model_name: str, enable_thinking: bool = False):
+def init_chat_model_with_reasoning(model_name: str, provider: str = ""):
     """
     创建支持 reasoning_content 的 ChatOpenAI 实例。
 
@@ -389,41 +390,31 @@ def init_chat_model_with_reasoning(model_name: str, enable_thinking: bool = Fals
     ChatOpenAI 子类，能在流式处理中正确提取 reasoning_content。
     仅用于 OpenAI 兼容接口。Anthropic 模型走 init_chat_model。
     """
-    kwargs = get_llm_init_kwargs(model_name, enable_thinking=enable_thinking)
+    kwargs, effort = _resolve_llm_params(model_name, provider)
     model_provider = kwargs.pop("model_provider", None)
 
     # Anthropic 模型走标准 init_chat_model（内部会路由到 ChatAnthropic）
     if model_provider == "anthropic":
-        return _init_chat_model_fallback(model_name, kwargs, enable_thinking)
+        llm = _init_chat_model_fallback(kwargs)
+    else:
+        # OpenAI 兼容接口：thinking 需要从顶层移到 extra_body
+        if "thinking" in kwargs:
+            thinking_cfg = kwargs.pop("thinking")
+            extra_body = kwargs.get("extra_body") or {}
+            extra_body["thinking"] = thinking_cfg
+            kwargs["extra_body"] = extra_body
+        llm = ChatOpenAI(**kwargs)
+    # Local metadata is never sent to the provider. It controls visible reasoning
+    # using exactly the configuration that created this client.
+    llm._wence_reasoning_effort = effort
+    return llm
 
-    # OpenAI 兼容接口：thinking 需要从顶层移到 extra_body
-    if "thinking" in kwargs:
-        thinking_cfg = kwargs.pop("thinking")
-        extra_body = kwargs.get("extra_body") or {}
-        extra_body["thinking"] = thinking_cfg
-        kwargs["extra_body"] = extra_body
 
-    return ChatOpenAI(**kwargs)
-
-
-def _init_chat_model_fallback(model_name: str, kwargs: dict, enable_thinking: bool):
+def _init_chat_model_fallback(kwargs: dict):
     """Anthropic 模型走 init_chat_model，不做额外处理"""
     from langchain.chat_models import init_chat_model as _init_chat_model
 
-    return _init_chat_model(
-        model=kwargs.pop("model"),
-        model_provider="anthropic",
-        api_key=kwargs.pop("api_key"),
-        base_url=kwargs.pop("base_url", None) or None,
-        temperature=kwargs.pop("temperature"),
-        max_tokens=kwargs.pop("max_tokens"),
-        streaming=kwargs.pop("streaming"),
-        http_client=kwargs.pop("http_client", None),
-        http_async_client=kwargs.pop("http_async_client", None),
-        thinking=kwargs.pop("thinking", None) if enable_thinking else None,
-        # 剩余参数透传
-        **kwargs,
-    )
+    return _init_chat_model(model_provider="anthropic", **kwargs)
 
 
 # ============== 配置文件路径 ==============
@@ -453,7 +444,11 @@ def load_user_settings() -> dict:
     try:
         if SETTINGS_FILE.exists():
             with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
+                data = json.load(f)
+            data["providers"] = enrich_providers(
+                data.get("providers", []), load_model_parameters(), data.get("temperature", 0.5)
+            )
+            return data
         return {"providers": []}
     except Exception as e:
         logger.error(f"加载用户设置失败: {e}")
@@ -504,7 +499,7 @@ def get_providers_from_settings() -> dict[str, LLMProvider]:
         if not provider_data.get("enabled", True):
             continue
 
-        name = provider_data.get("name", "").lower()
+        name = provider_key(provider_data.get("name", ""))
         if not name:
             continue
 
@@ -532,7 +527,7 @@ def get_providers_from_settings() -> dict[str, LLMProvider]:
     return providers
 
 
-def find_provider_for_model(model_id: str) -> tuple[LLMProvider | None, str]:
+def find_provider_for_model(model_id: str, provider_name: str = "") -> tuple[LLMProvider | None, str]:
     """
     根据模型 ID 找到对应的提供商
 
@@ -542,7 +537,9 @@ def find_provider_for_model(model_id: str) -> tuple[LLMProvider | None, str]:
     providers = get_providers_from_settings()
 
     # 遍历所有 provider，查找包含该模型的 provider
-    for provider_name, provider in providers.items():
+    for name, provider in providers.items():
+        if provider_name and name != provider_key(provider_name):
+            continue
         for model in provider.models:
             if model.get("id") == model_id and model.get("enabled", False):
                 return provider, model_id
@@ -561,15 +558,6 @@ def get_first_available_model() -> tuple[LLMProvider | None, str]:
                 return provider, model.get("id", "")
 
     return None, ""
-
-
-def get_temperature() -> float:
-    """从用户设置中获取 temperature 值"""
-    settings = load_user_settings()
-    try:
-        return min(1, max(0, float(settings.get("temperature", 0.5))))
-    except (TypeError, ValueError):
-        return 0.5
 
 
 def get_custom_prompt() -> str:
@@ -622,20 +610,18 @@ def get_httpx_proxy_url() -> str | None:
     return get_proxy_url()
 
 
-def get_reasoning_extra_body(model_name: str) -> dict | None:
+def get_reasoning_extra_body(model_name: str, effort: str = "medium") -> dict | None:
     """
     返回 OpenAI 兼容模型的 reasoning/thinking extra_body 参数。
 
-    包含多种启用参数格式，适用于任意 OpenAI 兼容 API
-    （Qwen、DeepSeek、vLLM、OneAPI 等均支持）。
-    API 不支持该参数时会忽略，不影响正常调用。
-    注意：reasoning_effort 只接受 low/medium/high，不接受 off/none/highest 等值。
+    为未单独适配的兼容接口保留现有的多种启用参数格式。
+    具体支持的字段及强度取值由提供商决定。
     """
     lowered = model_name.lower()
 
-    # 通用参数（所有 API 都支持，忽略不支持的字段）
+    # Preserve the existing compatibility fields for these providers.
     base = {
-        "thinking": {"type": "enabled", "parameters": {"effort": "high"}},
+        "thinking": {"type": "enabled", "parameters": {"effort": effort}},
         "enable_thinking": True,
         "reasoning": {"type": "enabled"},
     }
@@ -651,13 +637,10 @@ def get_disable_thinking_extra_body(model_name: str) -> dict | None:
     """
     返回禁用 thinking 的 extra_body 参数。
 
-    对于强制 thinking 的模型（如 DeepSeek r1、Qwen 等），需要显式禁用。
-    包含多种禁用参数格式，API 会自动忽略不认识的参数。
-    注意：reasoning_effort 只接受 low/medium/high，不接受 none，所以禁用时不传此参数。
+    为未单独适配的兼容接口保留现有的多种禁用参数格式。
+    具体是否支持关闭推理由提供商决定。
     """
-    lowered = model_name.lower()
-
-    # 通用的禁用参数（所有 API 都支持，忽略不支持的字段）
+    # Preserve the existing compatibility fields for these providers.
     return {
         "thinking": {"type": "disabled"},
         "enable_thinking": False,
@@ -665,23 +648,50 @@ def get_disable_thinking_extra_body(model_name: str) -> dict | None:
     }
 
 
-def supports_thinking(model_name: str) -> bool:
-    """
-    检查模型是否支持 thinking 模式。
-    目前对所有模型返回 True，因为 API 不支持时会自动忽略，不影响正常调用。
-    """
-    return True
+def _apply_anthropic_parameters(kwargs: dict, model_name: str, effort: str, thinking_enabled: bool) -> None:
+    """Map effort to Anthropic's output_config or legacy thinking-token budget."""
+    lowered = model_name.lower().replace(".", "-")
+    match = re.search(r"(opus|sonnet|haiku)-(\d+)(?:-(\d)(?!\d))?", lowered)
+    family, major, minor = (match[1], int(match[2]), int(match[3] or 0)) if match else ("", 0, 0)
+    version = (major, minor)
+    adaptive = (family in {"opus", "sonnet"} and version >= (4, 6)) or major >= 5
+    supports_effort = adaptive or (family == "opus" and version >= (4, 5))
+    if supports_effort:
+        mapped_effort = {"none": "low", "minimal": "low"}.get(effort, effort)
+        if mapped_effort == "xhigh" and version < (4, 7):
+            mapped_effort = "max" if adaptive else "high"
+        kwargs["output_config"] = {"effort": mapped_effort}
+
+    if adaptive:
+        kwargs["thinking"] = {"type": "adaptive" if thinking_enabled else "disabled"}
+    elif major >= 4 or "3-7-sonnet" in lowered:
+        if thinking_enabled:
+            if kwargs["max_tokens"] <= 1024:
+                raise ValueError("Anthropic 深度思考要求 Max Tokens 大于 1024，请调整模型设置或将 Reasoning Effort 设为 none")
+            budget = {"minimal": 1024, "low": 2048, "medium": 4096, "high": 8192, "xhigh": 16384}[effort]
+            kwargs["thinking"] = {"type": "enabled", "budget_tokens": min(budget, kwargs["max_tokens"] - 1)}
+        else:
+            kwargs["thinking"] = {"type": "disabled"}
+
+    # Anthropic's thinking modes constrain sampling; newer models do not accept
+    # sampling controls at all. See platform.claude.com/docs/en/build-with-claude/thinking.
+    if (thinking_enabled and "thinking" in kwargs) or version >= (4, 7) or major >= 5:
+        kwargs.pop("temperature", None)
+        kwargs.pop("top_p", None)
+    elif kwargs["top_p"] == 1:
+        kwargs.pop("top_p")
+    else:
+        # Anthropic disallows setting both temperature and top_p on newer models.
+        kwargs.pop("temperature")
 
 
-def _resolve_llm_params(model_name: str, enable_thinking: bool = False) -> dict:
+def _resolve_llm_params(model_name: str, provider: str = "") -> tuple[dict, str]:
     """
-    根据模型名解析出 init_chat_model 所需的全部参数（含 model、model_provider）。
-
-    返回值可直接用于 init_chat_model(**params)。
+    根据模型名解析出 init_chat_model 所需的参数及保存的推理程度。
     不处理环境变量清理/恢复（由调用方负责）。
     """
-    actual_model_name = resolve_model(model_name)
-    provider_info = LLMClientManager.get_provider_info(actual_model_name)
+    actual_model_name = resolve_model(model_name, provider)
+    provider_info, _ = find_provider_for_model(actual_model_name, provider)
 
     if not provider_info:
         raise ValueError(f"未找到模型 {actual_model_name} 对应的提供商配置，请在设置中添加")
@@ -691,12 +701,17 @@ def _resolve_llm_params(model_name: str, enable_thinking: bool = False) -> dict:
 
     effective_api_type = infer_api_type(actual_model_name, provider_info.base_url, provider_info.api_type)
     proxy_url = get_https_proxy_url() or get_http_proxy_url()
+    selected_model = next(model for model in provider_info.models if model.get("id") == actual_model_name)
+    parameters = normalize_legacy_parameters(selected_model.get("parameters"))
+    effort = parameters["reasoningEffort"]
+    thinking_enabled = effort != "none"
 
     kwargs: dict = {
         "model": actual_model_name,
         "api_key": provider_info.api_key,
-        "temperature": get_temperature(),
-        "max_tokens": 16384,
+        "temperature": parameters["temperature"],
+        "top_p": parameters["topP"],
+        "max_tokens": parameters["maxTokens"],
         "streaming": True,
     }
 
@@ -706,20 +721,7 @@ def _resolve_llm_params(model_name: str, enable_thinking: bool = False) -> dict:
             kwargs["base_url"] = provider_info.base_url
         if proxy_url:
             kwargs["anthropic_proxy"] = proxy_url
-        if enable_thinking:
-            lowered = actual_model_name.lower()
-            if "opus-4" in lowered:
-                kwargs["thinking"] = {"type": "enabled", "budget_tokens": 10000}
-                kwargs["temperature"] = 1
-                logger.info(f"[LLM] 🧠 Anthropic thinking (opus-4): budget=10000")
-            elif "sonnet-4" in lowered:
-                kwargs["thinking"] = {"type": "enabled", "budget_tokens": 8000}
-                kwargs["temperature"] = 1
-                logger.info(f"[LLM] 🧠 Anthropic thinking (sonnet-4): budget=8000")
-            elif "3-5-sonnet" in lowered:
-                kwargs["thinking"] = {"type": "enabled", "budget_tokens": 8000}
-                kwargs["temperature"] = 1
-                logger.info(f"[LLM] 🧠 Anthropic thinking (3.5-sonnet): budget=8000")
+        _apply_anthropic_parameters(kwargs, actual_model_name, effort, thinking_enabled)
     else:
         kwargs["model_provider"] = "openai"
         kwargs["base_url"] = provider_info.base_url
@@ -731,26 +733,44 @@ def _resolve_llm_params(model_name: str, enable_thinking: bool = False) -> dict:
 
             kwargs["http_client"] = httpx.Client(proxy=proxy_url)
             kwargs["http_async_client"] = httpx.AsyncClient(proxy=proxy_url)
-        if enable_thinking:
-            kwargs["extra_body"] = get_reasoning_extra_body(actual_model_name)
-            logger.info(f"[LLM] 🧠 已注入 thinking extra_body（模型不支持则自动忽略）")
+        lowered = actual_model_name.lower()
+        if "deepseek" in lowered or "deepseek.com" in provider_info.base_url.lower():
+            # DeepSeek accepts medium as a compatibility alias; the switch and
+            # effort belong to separate top-level request fields.
+            kwargs["extra_body"] = {"thinking": {"type": "enabled" if thinking_enabled else "disabled"}}
+            kwargs["reasoning_effort"] = effort if thinking_enabled else "none"
+        elif re.match(r"^(?:o\d(?:-|$)|gpt-[56])", lowered):
+            supports_none = re.match(r"^gpt-5\.[1-9]", lowered) is not None and "pro" not in lowered
+            if effort == "none" and not supports_none:
+                raise ValueError(f"模型 {actual_model_name} 不支持 Reasoning Effort=none，请选择其支持的推理程度或更换模型")
+            kwargs["reasoning_effort"] = effort
+            # GPT-5.1/5.2 accept sampling only with effort=none; older reasoning
+            # models do not support these fields at all.
+            if not supports_none or kwargs.get("reasoning_effort") != "none":
+                kwargs.pop("temperature", None)
+                kwargs.pop("top_p", None)
+        elif re.match(r"^gpt-[34]", lowered) or "api.openai.com" in provider_info.base_url.lower():
+            pass  # Non-reasoning OpenAI models reject thinking/effort parameters.
+        elif thinking_enabled:
+            kwargs["reasoning_effort"] = effort
+            kwargs["extra_body"] = get_reasoning_extra_body(actual_model_name, effort)
         else:
-            # 对于强制 thinking 的模型（如 DeepSeek r1），需要显式禁用
             disable_extra = get_disable_thinking_extra_body(actual_model_name)
             if disable_extra:
                 kwargs["extra_body"] = disable_extra
-                logger.info(f"[LLM] ⏸️ 已禁用 thinking（模型强制思考时生效）")
+                logger.info("[LLM] Reasoning Effort=none，已发送禁用 thinking 参数")
 
-    return kwargs
+    return kwargs, effort
 
 
-def get_llm_init_kwargs(model_name: str, enable_thinking: bool = False) -> dict:
+def get_llm_init_kwargs(model_name: str, provider: str = "") -> dict:
     """
     获取 init_chat_model 所需的完整参数字典。
 
     用法: init_chat_model(**get_llm_init_kwargs("gpt-4o"))
     """
-    return _resolve_llm_params(model_name, enable_thinking)
+    kwargs, _effort = _resolve_llm_params(model_name, provider)
+    return kwargs
 
 
 class LLMClientManager:
@@ -836,7 +856,7 @@ class LLMClientManager:
         try:
             settings_data = load_user_settings()
             for p in settings_data.get("providers", []):
-                if p.get("name") == provider_name:
+                if provider_key(p.get("name", "")) == provider_key(provider_name):
                     return p
         except Exception:
             pass
@@ -894,25 +914,16 @@ def create_sync_llm_client(
         ChatOpenAI 实例，失败返回 None
     """
     try:
-        kwargs = get_llm_init_kwargs(model_name, enable_thinking=False)
+        kwargs = get_llm_init_kwargs(model_name, provider=provider)
         model_provider = kwargs.pop("model_provider", None)
+        kwargs["streaming"] = False
 
-        # 允许覆盖 temperature
-        if temperature is not None:
+        # Preserve provider sampling restrictions when memory extraction overrides temperature.
+        if temperature is not None and "temperature" in kwargs:
             kwargs["temperature"] = temperature
 
         if model_provider == "anthropic":
-            from langchain.chat_models import init_chat_model as _init_chat_model
-
-            return _init_chat_model(
-                model=kwargs.pop("model"),
-                model_provider="anthropic",
-                api_key=kwargs.pop("api_key"),
-                base_url=kwargs.pop("base_url", None) or None,
-                temperature=kwargs.pop("temperature"),
-                max_tokens=kwargs.pop("max_tokens"),
-                streaming=kwargs.pop("streaming", False),
-            )
+            return _init_chat_model_fallback(kwargs)
 
         # OpenAI 兼容接口
         return ChatOpenAI(**kwargs)

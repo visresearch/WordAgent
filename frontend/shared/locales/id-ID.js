@@ -43,6 +43,14 @@ export default {
     builtinDeleteDisabled: 'Skill bawaan tidak dapat dihapus'
   },
   model: {
+    parameters: {
+      editTitle: 'Edit model {name}',
+      temperatureHint: 'Mengontrol keacakan keluaran, biasanya dari 0 hingga 2. Nilai lebih tinggi menghasilkan keluaran lebih acak.',
+      topPHint: 'Parameter nucleus sampling, biasanya dari 0 hingga 1. Mengontrol massa probabilitas yang dipertimbangkan model.',
+      maxTokensHint: 'Jumlah maksimum token yang dihasilkan. Kosongkan untuk menggunakan 8192.',
+      reasoningHint: 'Mengontrol intensitas penalaran. Nilai yang didukung bergantung pada model.',
+      numericValue: 'Nilai {name}'
+    },
     title: 'Konfigurasi penyedia AI', subtitle: 'Kelola penyedia dan model AI', configured: 'Penyedia terkonfigurasi',
     availableCount: '{count} model tersedia', addProvider: 'Tambah penyedia', newProvider: 'Penyedia baru', modelCount: '{count} model',
     name: 'Nama', namePlaceholder: 'Contoh: openai', apiType: 'Tipe API', openaiCompatible: 'Kompatibel OpenAI',

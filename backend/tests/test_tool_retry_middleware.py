@@ -365,7 +365,6 @@ def test_single_agent_create_agent_streams_sse_and_tool_events(monkeypatch) -> N
         return [], [], []
 
     monkeypatch.setattr(single_agent, "resolve_model", lambda *_args, **_kwargs: "fake-model")
-    monkeypatch.setattr(single_agent, "supports_thinking", lambda _model: False)
     monkeypatch.setattr(single_agent, "init_chat_model_with_reasoning", lambda *_args, **_kwargs: model)
     monkeypatch.setattr(single_agent, "load_mcp_tools", fake_load_mcp_tools)
     monkeypatch.setattr(single_agent, "get_base_tools_for_mode", lambda _mode: [emitting_tool])
@@ -383,7 +382,6 @@ def test_single_agent_create_agent_streams_sse_and_tool_events(monkeypatch) -> N
                 message="执行流式测试",
                 mode="agent",
                 model="fake-model",
-                enable_thinking=False,
             )
         ]
 

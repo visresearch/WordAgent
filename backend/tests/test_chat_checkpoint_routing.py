@@ -50,7 +50,6 @@ def test_single_agent_does_not_load_business_history(monkeypatch) -> None:
             "provider": "fake",
             "mode": "agent",
             "attached_files": [],
-            "enable_thinking": False,
         }
         assert [chunk async for chunk in chat._single_agent_stream_with_state(**arguments)]
 
@@ -84,7 +83,6 @@ def test_single_agent_summary_tokens_not_forwarded(monkeypatch) -> None:
         return [], [], []
 
     monkeypatch.setattr(single_agent, "resolve_model", lambda *_args, **_kwargs: "fake-model")
-    monkeypatch.setattr(single_agent, "supports_thinking", lambda _model: False)
     monkeypatch.setattr(single_agent, "init_chat_model_with_reasoning", lambda *_args, **_kwargs: object())
     monkeypatch.setattr(single_agent, "load_mcp_tools", fake_load_mcp_tools)
     monkeypatch.setattr(single_agent, "get_base_tools_for_mode", lambda _mode: [])
@@ -103,7 +101,6 @@ def test_single_agent_summary_tokens_not_forwarded(monkeypatch) -> None:
             async for chunk in single_agent.process_writing_request_stream(
                 message="测试摘要过滤",
                 model="fake-model",
-                enable_thinking=False,
             )
         ]
 
@@ -248,7 +245,6 @@ def test_single_agent_large_image_is_not_saved_in_checkpoint_input(monkeypatch) 
         raise AssertionError("大图片不应读取为 Base64")
 
     monkeypatch.setattr(single_agent, "resolve_model", lambda *_args, **_kwargs: "fake-model")
-    monkeypatch.setattr(single_agent, "supports_thinking", lambda _model: False)
     monkeypatch.setattr(single_agent, "init_chat_model_with_reasoning", lambda *_args, **_kwargs: object())
     monkeypatch.setattr(single_agent, "load_mcp_tools", fake_load_mcp_tools)
     monkeypatch.setattr(single_agent, "get_base_tools_for_mode", lambda _mode: [])
@@ -267,7 +263,6 @@ def test_single_agent_large_image_is_not_saved_in_checkpoint_input(monkeypatch) 
         async for _chunk in single_agent.process_writing_request_stream(
             message="分析图片",
             model="fake-model",
-            enable_thinking=False,
             attached_files=[
                 {
                     "file_id": "large-image",

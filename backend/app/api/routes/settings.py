@@ -8,6 +8,7 @@ import json
 import math
 import os
 import shutil
+import tempfile
 from contextlib import AsyncExitStack
 from datetime import timedelta
 from pathlib import Path
@@ -20,9 +21,17 @@ from mcp.client.sse import sse_client
 from mcp.client.streamable_http import streamable_http_client
 from pydantic import BaseModel, Field
 
-from app.core.config import get_user_settings_file, get_temp_dir, get_upload_dir
+from app.core.config import get_temp_dir, get_upload_dir, get_user_settings_file
 from app.core.logging import get_logger
-from app.services.memory import read_long_term_memory, _get_memory_file
+from app.models.model_config import ModelConfig, ModelParameters
+from app.services.memory import _get_memory_file, read_long_term_memory
+from app.services.model_settings import (
+    enrich_providers,
+    load_model_parameters,
+    normalize_legacy_parameters,
+    provider_key,
+    save_model_parameters,
+)
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -45,7 +54,7 @@ class ProviderConfig(BaseModel):
     baseUrl: str
     apiKey: str
     apiType: str = "openai"  # openai / anthropic
-    models: list[dict[str, Any]] = []
+    models: list[ModelConfig] = Field(default_factory=list)
     enabled: bool = True
 
 
@@ -90,6 +99,8 @@ async def get_settings():
             with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 data["temperature"] = _clamp_temperature(data.get("temperature", 0.5))
+                stored = await asyncio.to_thread(load_model_parameters)
+                data["providers"] = enrich_providers(data.get("providers", []), stored, data["temperature"])
                 return UserSettings(**data)
         # 返回默认设置
         return UserSettings()
@@ -112,12 +123,29 @@ async def save_settings(settings: UserSettings):
                 existing_data = json.load(f)
 
         # 合并：只用实际传入的字段覆盖，未传入的保留原值
-        merged = {**existing_data, **settings.model_dump(exclude_unset=True)}
+        updates = settings.model_dump(exclude_unset=True)
+        merged = {**existing_data, **updates}
         merged["temperature"] = _clamp_temperature(merged.get("temperature", 0.5))
 
-        # 保存设置
-        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-            json.dump(merged, f, ensure_ascii=False, indent=2)
+        stored = await asyncio.to_thread(load_model_parameters)
+        previous = enrich_providers(existing_data.get("providers", []), stored, merged["temperature"])
+        previous_parameters = {
+            (provider_key(provider["name"]), model["id"]): model["parameters"]
+            for provider in previous
+            for model in provider.get("models", [])
+        }
+        for provider in merged.get("providers", []):
+            for model in provider.get("models", []):
+                old = previous_parameters.get((provider_key(provider["name"]), model["id"]), {})
+                # Only explicit provider updates may override authoritative database values.
+                changed_parameters = model.get("parameters") if "providers" in updates else {}
+                parameters = {**old, **(changed_parameters or {})}
+                model["parameters"] = ModelParameters.model_validate(
+                    normalize_legacy_parameters(parameters, merged["temperature"])
+                ).model_dump()
+
+        # Persist model parameters in SQLite, retaining JSON compatibility for other settings consumers.
+        await asyncio.to_thread(save_model_parameters, merged.get("providers", []), lambda: _write_settings_file(merged))
 
         # 清除 LLM 客户端缓存，使代理等配置变更生效
         try:
@@ -131,6 +159,18 @@ async def save_settings(settings: UserSettings):
     except Exception as e:
         logger.error(f"保存设置失败: {e}")
         raise HTTPException(status_code=500, detail=f"保存设置失败: {str(e)}")
+
+
+def _write_settings_file(data: dict) -> None:
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=SETTINGS_FILE.parent, delete=False) as file:
+            temporary_path = Path(file.name)
+            json.dump(data, file, ensure_ascii=False, indent=2)
+        os.replace(temporary_path, SETTINGS_FILE)
+    finally:
+        if temporary_path and temporary_path.exists():
+            temporary_path.unlink()
 
 
 async def _check_mcp_connection(url: str, transport: str, headers: dict, timeout: float) -> None:

@@ -125,7 +125,7 @@ async def chat_websocket(websocket: WebSocket):
        ``{"type":"chat","message":"...","mode":"agent|ask",``
        ``"model":"auto","provider":"...","sessionId":"019f...",``
        ``"documentRange":[...],"documentMeta":{...},``
-       ``"selectionContext":{...},"files":[...],"enableThinking":true}``
+       ``"selectionContext":{...},"files":[...]}``
 
        - ``message``：用户输入。
        - ``mode``：``agent`` 或 ``ask``，非法值按 ``agent`` 处理。
@@ -283,14 +283,12 @@ async def chat_websocket(websocket: WebSocket):
                     await websocket.send_text(json.dumps({"type": "done"}, ensure_ascii=False))
                     continue
                 attached_files = data.get("files", [])  # 附件列表 [{file_id, filename, content_type, is_image}, ...]
-                enable_thinking = data.get("enableThinking", True)  # 是否启用深度思考
 
                 logger.info("=" * 50)
                 logger.info("收到 WebSocket 聊天请求:")
                 logger.info(f"用户消息: {message}")
                 logger.info(f"模式: {mode}")
                 logger.info(f"模型: {model}")
-                logger.info(f"深度思考: {enable_thinking}")
                 if session_id is not None:
                     logger.info(f"会话ID: {session_id}")
                 if document_range:
@@ -325,7 +323,6 @@ async def chat_websocket(websocket: WebSocket):
                         document_meta,
                         selection_context,
                         attached_files,
-                        enable_thinking,
                         session_id,
                         data.get("userResponse"),
                     )
@@ -500,7 +497,6 @@ async def _single_agent_stream_with_state(
     provider: str,
     mode: str,
     attached_files: list,
-    enable_thinking: bool,
     user_response: dict | None = None,
 ):
     """在同一 thread 锁内运行完整的单智能体流。"""
@@ -527,7 +523,6 @@ async def _single_agent_stream_with_state(
             model = original.get("model", model)
             provider = original.get("provider", provider)
             mode = original.get("mode", mode)
-            enable_thinking = original.get("enable_thinking", enable_thinking)
         async for chunk in single_agent_stream(
             message=message,
             document_range=document_range,
@@ -537,7 +532,6 @@ async def _single_agent_stream_with_state(
             mode=mode,
             chat_id=chat_id,
             attached_files=attached_files,
-            enable_thinking=enable_thinking,
             session_id=session_id,
             checkpointer=checkpointer,
             **resume_kwargs,
@@ -622,7 +616,6 @@ async def _run_ws_stream(
     document_meta: list | dict | None,  # 支持单个文档（dict）和多个文档（list）
     selection_context: list | dict | None = None,
     attached_files: list | None = None,
-    enable_thinking: bool = True,
     session_id: str | None = None,
     user_response: dict | None = None,
 ):
@@ -791,7 +784,6 @@ async def _run_ws_stream(
                 provider=provider,
                 mode=mode,
                 attached_files=attached_files or [],
-                enable_thinking=enable_thinking,
                 user_response=user_response,
             )
 

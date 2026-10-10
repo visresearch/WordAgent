@@ -43,6 +43,14 @@ export default {
     builtinDeleteDisabled: 'Built-in skills cannot be deleted'
   },
   model: {
+    parameters: {
+      editTitle: 'Edit {name} model',
+      temperatureHint: 'Controls output randomness, usually from 0 to 2. Higher values produce more random output.',
+      topPHint: 'Nucleus sampling, usually from 0 to 1. Controls the probability mass considered by the model.',
+      maxTokensHint: 'Maximum number of generated tokens. Leave blank to use 8192.',
+      reasoningHint: 'Controls reasoning intensity. Supported values depend on the model.',
+      numericValue: '{name} value'
+    },
     connect: 'Test connection',
     connectionSuccess: 'Connection successful\nModel: {model}\nLatency: {latency} ms',
     connectionFailed: 'Connection failed\nModel: {model}\nReason: {error}',

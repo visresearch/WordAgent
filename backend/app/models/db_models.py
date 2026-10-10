@@ -7,7 +7,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import JSON, Column, Date, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import JSON, Column, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import relationship
 
 from app.core.db import Base
@@ -135,3 +135,17 @@ class TokenWeekly(Base):
     output_tokens = Column(Integer, nullable=False, default=0)
     cached_tokens = Column(Integer, nullable=False, default=0)
     updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
+
+
+class ModelParameterConfig(Base):
+    """Generation settings for a model within one provider."""
+
+    __tablename__ = "model_parameters"
+
+    provider_name = Column(String(255), primary_key=True)
+    model_id = Column(String(255), primary_key=True)
+    temperature = Column(Float, nullable=False, default=0.5)
+    top_p = Column(Float, nullable=False, default=1)
+    max_tokens = Column(Integer, nullable=False, default=8192)
+    reasoning_effort = Column(String(16), nullable=False, default="medium")
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)

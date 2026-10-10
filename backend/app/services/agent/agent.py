@@ -42,7 +42,7 @@ from app.services.document import (
     format_document_range_line,
     normalize_document_meta,
 )
-from app.services.llm_client import init_chat_model_with_reasoning, resolve_model, supports_thinking
+from app.services.llm_client import init_chat_model_with_reasoning, resolve_model
 from app.services.memory import build_runtime_thread_id
 from app.services.human_input import pending_questions
 from app.services.agent.middleware import build_agent_middleware
@@ -238,6 +238,8 @@ def _extract_text_content(content) -> str:
         return visible
 
     if isinstance(content, dict):
+        if content.get("type") in {"thinking", "reasoning", "reasoning_content", "summary_text"}:
+            return ""
         text = content.get("text")
         if isinstance(text, str):
             return _extract_text_content(text)
@@ -408,7 +410,6 @@ async def process_writing_request_stream(
     mode: str | None = None,
     chat_id: str | None = None,
     attached_files: list[dict] | None = None,
-    enable_thinking: bool = True,
     session_id: str | None = None,
     checkpointer=None,
     resume_command=None,
@@ -428,11 +429,12 @@ async def process_writing_request_stream(
 
     logger.info("[Agent] 开始处理请求")
     logger.info(f"[Agent] 模式: {mode}")
-    logger.info(f"[Agent] 深度思考: {enable_thinking}")
 
     model_name = resolve_model(model or "auto", provider or "")
-    _thinking_enabled = enable_thinking and supports_thinking(model_name)
-    llm = init_chat_model_with_reasoning(model_name, enable_thinking=_thinking_enabled)
+    llm = init_chat_model_with_reasoning(model_name, provider=provider or "")
+    # Use the same parameter snapshot as the model request. Providers that return
+    # reasoning despite none must not expose it in the chat stream or persisted turn.
+    show_thinking = getattr(llm, "_wence_reasoning_effort", "medium") != "none"
 
     # agent/ask 模式按用户设置加载 MCP 动态工具
     mcp_clients = []
@@ -708,7 +710,6 @@ async def process_writing_request_stream(
                             "model": model,
                             "provider": provider,
                             "mode": mode,
-                            "enable_thinking": enable_thinking,
                         },
                     },
                     "stream_mode": ["messages", "custom", "updates"],
@@ -824,7 +825,7 @@ async def process_writing_request_stream(
                 # reasoning_content 透传（OpenAI/DeepSeek）
                 if isinstance(msg, AIMessageChunk):
                     reasoning_content = getattr(msg, "additional_kwargs", {}).get("reasoning_content")
-                    if reasoning_content:
+                    if show_thinking and reasoning_content:
                         yield f"data: {json.dumps({'type': 'thinking', 'content': reasoning_content}, ensure_ascii=False)}\n\n"
 
                 # AIMessage：完整响应，追踪历史和 token
@@ -855,7 +856,7 @@ async def process_writing_request_stream(
                         _pending_text_chunks.clear()
                         continue
                     tagged_thinking = _extract_tagged_thinking_content(msg.content)
-                    if tagged_thinking:
+                    if show_thinking and tagged_thinking:
                         yield f"data: {json.dumps({'type': 'thinking', 'content': tagged_thinking}, ensure_ascii=False)}\n\n"
                     normalized = _extract_text_content(msg.content)
                     if normalized:
@@ -893,14 +894,14 @@ async def process_writing_request_stream(
 
                                 if block_type in {"thinking", "reasoning", "reasoning_content", "summary_text"}:
                                     thinking_text = _extract_thinking_content(block)
-                                    if thinking_text:
+                                    if show_thinking and thinking_text:
                                         yield f"data: {json.dumps({'type': 'thinking', 'content': thinking_text}, ensure_ascii=False)}\n\n"
                                     continue
 
                                 if block_type in {"text", "output_text"}:
                                     raw_text = block.get("text", "") or block.get("content", "")
                                     tagged_thinking = _extract_tagged_thinking_content(raw_text)
-                                    if tagged_thinking:
+                                    if show_thinking and tagged_thinking:
                                         yield f"data: {json.dumps({'type': 'thinking', 'content': tagged_thinking}, ensure_ascii=False)}\n\n"
                                     text = _extract_text_content(raw_text)
                                     if text:
@@ -913,7 +914,7 @@ async def process_writing_request_stream(
 
                     # 普通文本
                     tagged_thinking = _extract_tagged_thinking_content(content)
-                    if tagged_thinking:
+                    if show_thinking and tagged_thinking:
                         yield f"data: {json.dumps({'type': 'thinking', 'content': tagged_thinking}, ensure_ascii=False)}\n\n"
                     normalized_text = _extract_text_content(content)
                     if not normalized_text and _pending_text_chunks:
@@ -931,7 +932,8 @@ async def process_writing_request_stream(
                 logger.debug(f"[Agent] 自定义输出: {chunk}")
                 if chunk:
                     if isinstance(chunk, dict):
-                        yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+                        if show_thinking or chunk.get("type") != "thinking":
+                            yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
                     else:
                         yield f"data: {json.dumps({'type': 'status', 'content': str(chunk)}, ensure_ascii=False)}\n\n"
 
