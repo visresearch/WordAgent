@@ -1,56 +1,70 @@
 <template>
-  <div class="plugin-panel">
-    <div v-if="message" :class="['plugin-message', messageError ? 'error' : 'success']">
-      {{ message }}
-    </div>
-
-    <div v-if="loading" class="plugin-muted">
-      {{ $t('plugin.loading') }}
-    </div>
-    <div v-for="plugin in plugins" :key="plugin.id" class="plugin-card">
-      <div class="plugin-info">
-        <strong>{{ plugin.name }}</strong>
-        <p>{{ plugin.id === 'ocr' ? $t('plugin.ocrDescription') : plugin.description }}</p>
-        <small>{{ plugin.package || plugin.source || plugin.id }}</small>
+  <div class="plugin-setting-container">
+    <div class="section-header">
+      <span
+        class="section-icon section-icon-mask"
+        :style="{ '--section-icon-url': `url(${iconPlugin})` }"
+        aria-hidden="true"
+      ></span>
+      <div class="section-title-group">
+        <h2 class="section-title">{{ $t('plugin.managementTitle') }}</h2>
+        <p class="section-subtitle">{{ $t('plugin.subtitle') }}</p>
       </div>
-      <button
-        v-if="plugin.installed"
-        class="plugin-button danger"
-        :disabled="busy.includes(plugin.id)"
-        @click="remove(plugin)"
-      >
-        {{ busy.includes(plugin.id) ? $t('plugin.removing') : $t('plugin.remove') }}
-      </button>
-      <button
-        v-else
-        class="plugin-button"
-        :disabled="busy.includes(plugin.id)"
-        @click="install(plugin.id)"
-      >
-        {{ busy.includes(plugin.id) ? $t('plugin.installing') : $t('plugin.install') }}
-      </button>
     </div>
 
-    <div class="plugin-custom">
-      <h3>{{ $t('plugin.customTitle') }}</h3>
-      <p>{{ $t('plugin.customHint') }}</p>
-      <div class="plugin-form">
-        <input
-          v-model.trim="customSource"
-          type="url"
-          :disabled="customBusy"
-          :placeholder="$t('plugin.githubPlaceholder')"
-          @keyup.enter="installCustom"
-        />
-        <button class="plugin-button" :disabled="!customSource || customBusy" @click="installCustom">
-          {{ customBusy ? $t('plugin.installing') : $t('plugin.installCustom') }}
+    <div class="plugin-panel">
+      <div v-if="message" :class="['plugin-message', messageError ? 'error' : 'success']">
+        {{ message }}
+      </div>
+
+      <div v-if="loading" class="plugin-muted">
+        {{ $t('plugin.loading') }}
+      </div>
+      <div v-for="plugin in plugins" :key="plugin.id" class="plugin-card">
+        <div class="plugin-info">
+          <strong>{{ plugin.name }}</strong>
+          <p>{{ plugin.id === 'ocr' ? $t('plugin.ocrDescription') : plugin.description }}</p>
+          <small>{{ plugin.package || plugin.source || plugin.id }}</small>
+        </div>
+        <button
+          v-if="plugin.installed"
+          class="plugin-button danger"
+          :disabled="busy.includes(plugin.id)"
+          @click="remove(plugin)"
+        >
+          {{ busy.includes(plugin.id) ? $t('plugin.removing') : $t('plugin.remove') }}
+        </button>
+        <button
+          v-else
+          class="plugin-button"
+          :disabled="busy.includes(plugin.id)"
+          @click="install(plugin.id)"
+        >
+          {{ busy.includes(plugin.id) ? $t('plugin.installing') : $t('plugin.install') }}
         </button>
       </div>
-    </div>
 
-    <div v-if="selectedOperation" class="plugin-log">
-      <strong>{{ $t('plugin.log') }} · {{ selectedOperation.pluginId }}</strong>
-      <pre>{{ selectedOperation.logs.join('\n') }}</pre>
+      <div class="plugin-custom">
+        <h3>{{ $t('plugin.customTitle') }}</h3>
+        <p>{{ $t('plugin.customHint') }}</p>
+        <div class="plugin-form">
+          <input
+            v-model.trim="customSource"
+            type="url"
+            :disabled="customBusy"
+            :placeholder="$t('plugin.githubPlaceholder')"
+            @keyup.enter="installCustom"
+          />
+          <button class="plugin-button" :disabled="!customSource || customBusy" @click="installCustom">
+            {{ customBusy ? $t('plugin.installing') : $t('plugin.installCustom') }}
+          </button>
+        </div>
+      </div>
+
+      <div v-if="selectedOperation" class="plugin-log">
+        <strong>{{ $t('plugin.log') }} · {{ selectedOperation.pluginId }}</strong>
+        <pre>{{ selectedOperation.logs.join('\n') }}</pre>
+      </div>
     </div>
   </div>
 </template>
@@ -58,6 +72,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import api from '../js/api.js';
+import iconPlugin from '../../assets/icons/plugin.svg';
 import { t } from '../../i18n/index.js';
 
 const plugins = ref([]);
@@ -193,6 +208,8 @@ onMounted(async () => {
 });
 onUnmounted(() => clearInterval(timer));
 </script>
+
+<style scoped src="./setting.css"></style>
 
 <style scoped>
 .plugin-panel { display: flex; flex-direction: column; gap: 14px; }

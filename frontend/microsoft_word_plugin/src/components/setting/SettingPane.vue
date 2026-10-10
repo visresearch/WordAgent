@@ -111,10 +111,18 @@
         </div>
       </div>
 
+      <div v-if="currentTab === 'plugin'" class="tab-content">
+        <div class="tab-header">
+          <h2 class="tab-title">{{ $t('settings.pluginTitle') }}</h2>
+          <p class="tab-desc">{{ $t('settings.pluginDesc') }}</p>
+        </div>
+        <div class="setting-section"><PluginSetting /></div>
+      </div>
+
       <!-- 底部保存按钮（通用、模型和个性化设置需要） -->
       <div class="setting-footer">
         <button
-          v-if="currentTab !== 'data' && currentTab !== 'skill'"
+          v-if="currentTab !== 'data' && currentTab !== 'skill' && currentTab !== 'plugin'"
           class="btn btn-save"
           :disabled="saving"
           @click="saveSettings"
@@ -142,12 +150,14 @@ import MCPserverSetting from './MCPserverSetting.vue';
 import PersonalizationPane from './PersonalizationSetting.vue';
 import DataManagementPane from './DataManagementSetting.vue';
 import SkillSetting from './SkillSetting.vue';
+import PluginSetting from './PluginSetting.vue';
 import iconSetting from '../../assets/icons/setting-nav.svg';
 import iconModel from '../../assets/icons/model.svg';
 import iconUser from '../../assets/icons/user.svg';
 import iconMcp from '../../assets/icons/mcp.svg';
 import iconData from '../../assets/icons/data.svg';
 import iconSkill from '../../assets/icons/skill.svg';
+import iconPlugin from '../../assets/icons/plugin.svg';
 import { locale, setLocale, t } from '../../i18n/index.js';
 
 export default {
@@ -158,7 +168,8 @@ export default {
     MCPserverSetting,
     PersonalizationPane,
     DataManagementPane,
-    SkillSetting
+    SkillSetting,
+    PluginSetting
   },
   setup() {
     const currentTab = ref('general');
@@ -191,6 +202,11 @@ export default {
         id: 'skill',
         name: 'Skill',
         icon: iconSkill
+      },
+      {
+        id: 'plugin',
+        name: t('settings.tabs.plugin'),
+        icon: iconPlugin
       },
       {
         id: 'data',
@@ -439,6 +455,8 @@ export default {
 };
 </script>
 
+<style scoped src="./setting.css"></style>
+
 <style scoped>
 .setting-container {
   display: flex;
@@ -534,15 +552,6 @@ export default {
   font-size: 13px;
   color: #888888;
   margin: 0;
-}
-
-/* 设置分组卡片 */
-.setting-section {
-  background: white;
-  border-radius: 12px;
-  padding: 24px;
-  margin-bottom: 24px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 }
 
 /* ========== 底部保存按钮 ========== */

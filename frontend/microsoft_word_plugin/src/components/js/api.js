@@ -1136,6 +1136,33 @@ async function deleteSkill(folder) {
   return response.data;
 }
 
+// ============== Python 插件 API ==============
+
+async function getPlugins() {
+  const response = await request('/api/plugins');
+  if (!response.success) throw new Error(response.data?.detail || response.error);
+  return response.data;
+}
+
+async function installPlugin(source) {
+  const response = await request('/api/plugins/install', { method: 'POST', body: { source } });
+  if (!response.success) throw new Error(response.data?.detail || response.error);
+  return response.data;
+}
+
+async function removePlugin(pluginId) {
+  const response = await request(`/api/plugins/${encodeURIComponent(pluginId)}`, { method: 'DELETE' });
+  if (!response.success) throw new Error(response.data?.detail || response.error);
+  return response.data;
+}
+
+async function getPluginOperation(operationId) {
+  const response = await request(`/api/plugins/operations/${encodeURIComponent(operationId)}`);
+  if (!response.success) throw new Error(response.data?.detail || response.error);
+  return response.data;
+}
+
+
 /**
  * 更新配置
  */
@@ -1234,6 +1261,10 @@ export default {
   setSkillEnabled,
   openSkillFolder,
   deleteSkill,
+  getPlugins,
+  installPlugin,
+  removePlugin,
+  getPluginOperation,
 
   updateConfig,
   getConfig,
@@ -1273,6 +1304,10 @@ export {
   setSkillEnabled,
   openSkillFolder,
   deleteSkill,
+  getPlugins,
+  installPlugin,
+  removePlugin,
+  getPluginOperation,
   updateConfig,
   getConfig,
   request,

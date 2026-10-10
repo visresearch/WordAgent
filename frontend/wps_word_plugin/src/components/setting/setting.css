@@ -53,6 +53,18 @@
   margin-top: 2px;
 }
 
+.section-icon-mask {
+  background-color: currentColor;
+  -webkit-mask-image: var(--section-icon-url);
+  mask-image: var(--section-icon-url);
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+}
+
 .section-title-group {
   flex: 1;
 }
@@ -68,6 +80,12 @@
   font-size: 13px;
   color: #7f8c8d;
   margin: 0;
+}
+
+.section-divider {
+  height: 1px;
+  background: #e8e8e8;
+  margin: 32px 0;
 }
 
 /* 滚动条样式 */

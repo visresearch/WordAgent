@@ -657,6 +657,8 @@ export default {
 };
 </script>
 
+<style scoped src="./setting.css"></style>
+
 <style scoped>
 .data-management-container {
   height: 100%;
@@ -665,86 +667,16 @@ export default {
   background-color: #ffffff;
 }
 
-.page-header {
-  padding: 24px 32px 16px 32px;
-  border-bottom: 2px solid #f0f0f0;
-}
-
-.page-title {
-  font-size: 20px;
-  font-weight: 600;
-  margin: 0 0 4px 0;
-  color: #333333;
-}
-
-.page-desc {
-  font-size: 13px;
-  margin: 0;
-  color: #888888;
-}
-
-.settings-content {
-  flex: 1;
-  overflow-y: auto;
-  padding: 24px 32px;
-}
-
-.setting-section {
-  background: white;
-  border-radius: 12px;
-  padding: 24px;
-  margin-bottom: 24px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-}
-
 .danger-section {
   border: 2px solid #fee2e2;
-}
-
-.section-header {
-  display: flex;
-  align-items: flex-start;
-  gap: 16px;
-  margin-bottom: 24px;
-  padding-bottom: 16px;
-  border-bottom: 2px solid #f0f0f0;
 }
 
 .danger-section .section-header {
   border-bottom-color: #fee2e2;
 }
 
-.section-icon {
-  width: 24px;
-  height: 24px;
-  color: #d97706;
-  flex-shrink: 0;
-  margin-top: 2px;
-}
-
-.danger-section .section-icon {
-  color: #e74c3c;
-}
-
-.section-title-group {
-  flex: 1;
-}
-
-.section-title {
-  font-size: 18px;
-  font-weight: 600;
-  margin: 0 0 4px 0;
-  color: #2c3e50;
-}
-
 .danger-section .section-title {
   color: #c0392b;
-}
-
-.section-subtitle {
-  font-size: 13px;
-  color: #7f8c8d;
-  margin: 0;
 }
 
 /* 缓存信息 */
@@ -1184,21 +1116,4 @@ export default {
   opacity: 0;
 }
 
-/* 滚动条样式 */
-.settings-content::-webkit-scrollbar {
-  width: 8px;
-}
-
-.settings-content::-webkit-scrollbar-track {
-  background: #f1f1f1;
-}
-
-.settings-content::-webkit-scrollbar-thumb {
-  background: #bdc3c7;
-  border-radius: 4px;
-}
-
-.settings-content::-webkit-scrollbar-thumb:hover {
-  background: #95a5a6;
-}
 </style>

@@ -1,7 +1,11 @@
 <template>
   <div class="mcp-setting-container">
     <div class="section-header">
-      <img class="section-icon" :src="iconSkill" alt="" />
+      <span
+        class="section-icon section-icon-mask"
+        :style="{ '--section-icon-url': `url(${iconSkill})` }"
+        aria-hidden="true"
+      ></span>
       <div class="section-title-group">
         <h2 class="section-title">
           {{ $t('settings.skillTitle') }}
@@ -243,49 +247,17 @@ export default {
 };
 </script>
 
+<style scoped src="./setting.css"></style>
+
 <style scoped>
 .mcp-setting-container {
   width: 100%;
-}
-
-.section-header {
-  display: flex;
-  align-items: flex-start;
-  gap: 16px;
-  margin-bottom: 24px;
-  padding-bottom: 16px;
-  border-bottom: 2px solid #f0f0f0;
-}
-
-.section-icon {
-  width: 24px;
-  height: 24px;
-  color: #667eea;
-  flex-shrink: 0;
-  margin-top: 2px;
 }
 
 .action-icon {
   width: 14px;
   height: 14px;
   display: block;
-}
-
-.section-title-group {
-  flex: 1;
-}
-
-.section-title {
-  font-size: 18px;
-  font-weight: 600;
-  margin: 0 0 4px 0;
-  color: #2c3e50;
-}
-
-.section-subtitle {
-  font-size: 13px;
-  color: #7f8c8d;
-  margin: 0;
 }
 
 .toolbar {

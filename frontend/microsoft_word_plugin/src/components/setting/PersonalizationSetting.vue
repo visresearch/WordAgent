@@ -1,205 +1,205 @@
 <template>
   <div class="personalization-container">
-    <div class="settings-content">
-      <!-- 自定义指令 -->
-      <div class="setting-section">
-        <div class="section-header">
-          <svg
-            class="section-icon"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-          >
-            <path d="M12 20h9" />
-            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
-          </svg>
-          <div class="section-title-group">
-            <h2 class="section-title">
-              {{ $t('personalization.instructions') }}
-            </h2>
-            <p class="section-subtitle">
-              {{ $t('personalization.instructionsDesc') }}
-            </p>
-          </div>
+    <!-- 自定义指令 -->
+    <section>
+      <div class="section-header">
+        <svg
+          class="section-icon"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+        >
+          <path d="M12 20h9" />
+          <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+        </svg>
+        <div class="section-title-group">
+          <h2 class="section-title">
+            {{ $t('personalization.instructions') }}
+          </h2>
+          <p class="section-subtitle">
+            {{ $t('personalization.instructionsDesc') }}
+          </p>
         </div>
+      </div>
 
-        <div class="setting-item">
-          <label class="setting-label">
-            {{ $t('personalization.globalPrompt') }}
-            <span class="label-hint">{{ $t('personalization.promptHint') }}</span>
-          </label>
-          <textarea
-            v-model="settings.customPrompt"
-            class="custom-prompt-input"
-            :placeholder="$t('personalization.promptPlaceholder')"
-            rows="6"
-            @input="onSettingChange"
-          ></textarea>
-          <div class="input-footer">
-            <span class="char-count">{{ $t('personalization.chars', { count: settings.customPrompt.length }) }}</span>
-            <button v-if="settings.customPrompt.length > 0" class="btn-clear" @click="clearCustomPrompt">
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 16 16"
-                fill="currentColor"
-              >
-                <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z" />
-              </svg>
-              {{ $t('common.clear') }}
-            </button>
-          </div>
-        </div>
-
-        <!-- 预设模板 -->
-        <div class="setting-item">
-          <label class="setting-label">{{ $t('personalization.quickTemplates') }}</label>
-          <div class="template-grid">
-            <button
-              v-for="template in promptTemplates"
-              :key="template.id"
-              class="template-card"
-              @click="applyTemplate(template)"
+      <div class="setting-item">
+        <label class="setting-label">
+          {{ $t('personalization.globalPrompt') }}
+          <span class="label-hint">{{ $t('personalization.promptHint') }}</span>
+        </label>
+        <textarea
+          v-model="settings.customPrompt"
+          class="custom-prompt-input"
+          :placeholder="$t('personalization.promptPlaceholder')"
+          rows="6"
+          @input="onSettingChange"
+        ></textarea>
+        <div class="input-footer">
+          <span class="char-count">{{ $t('personalization.chars', { count: settings.customPrompt.length }) }}</span>
+          <button v-if="settings.customPrompt.length > 0" class="btn-clear" @click="clearCustomPrompt">
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 16 16"
+              fill="currentColor"
             >
-              <div class="template-header">
+              <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z" />
+            </svg>
+            {{ $t('common.clear') }}
+          </button>
+        </div>
+      </div>
+
+      <!-- 预设模板 -->
+      <div class="setting-item">
+        <label class="setting-label">{{ $t('personalization.quickTemplates') }}</label>
+        <div class="template-grid">
+          <button
+            v-for="template in promptTemplates"
+            :key="template.id"
+            class="template-card"
+            @click="applyTemplate(template)"
+          >
+            <div class="template-header">
+              <svg
+                class="template-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path :d="template.icon" />
+              </svg>
+              <span class="template-name">{{ template.name }}</span>
+            </div>
+            <p class="template-desc">
+              {{ template.description }}
+            </p>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <div class="section-divider"></div>
+
+    <!-- LLM温度设置 -->
+    <section>
+      <div class="section-header">
+        <svg
+          class="section-icon"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+        >
+          <path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z" />
+        </svg>
+        <div class="section-title-group">
+          <h2 class="section-title">
+            {{ $t('personalization.temperature') }}
+          </h2>
+          <p class="section-subtitle">
+            {{ $t('personalization.temperatureDesc') }}
+          </p>
+        </div>
+      </div>
+
+      <div class="setting-item">
+        <div class="temperature-control">
+          <div class="temperature-header">
+            <label class="setting-label">Temperature</label>
+            <span class="temperature-value">{{ settings.temperature.toFixed(2) }}</span>
+          </div>
+
+          <div class="slider-container">
+            <input
+              v-model.number="settings.temperature"
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              class="temperature-slider"
+              @input="onSettingChange"
+            />
+            <div class="slider-marks">
+              <span class="mark">0</span>
+              <span class="mark">0.25</span>
+              <span class="mark">0.5</span>
+              <span class="mark">0.75</span>
+              <span class="mark">1</span>
+            </div>
+          </div>
+
+          <div class="temperature-description">
+            <div class="temp-zone" :class="{ active: settings.temperature < 0.33 }">
+              <div class="zone-header">
                 <svg
-                  class="template-icon"
+                  class="zone-icon"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
                   stroke-width="2"
                 >
-                  <path :d="template.icon" />
+                  <rect
+                    x="3"
+                    y="11"
+                    width="18"
+                    height="11"
+                    rx="2"
+                    ry="2"
+                  />
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
                 </svg>
-                <span class="template-name">{{ template.name }}</span>
+                <span class="zone-name">{{ $t('personalization.precise') }}</span>
               </div>
-              <p class="template-desc">
-                {{ template.description }}
+              <p class="zone-desc">
+                {{ $t('personalization.preciseDesc') }}
               </p>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <!-- LLM温度设置 -->
-      <div class="setting-section">
-        <div class="section-header">
-          <svg
-            class="section-icon"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-          >
-            <path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z" />
-          </svg>
-          <div class="section-title-group">
-            <h2 class="section-title">
-              {{ $t('personalization.temperature') }}
-            </h2>
-            <p class="section-subtitle">
-              {{ $t('personalization.temperatureDesc') }}
-            </p>
-          </div>
-        </div>
-
-        <div class="setting-item">
-          <div class="temperature-control">
-            <div class="temperature-header">
-              <label class="setting-label">Temperature</label>
-              <span class="temperature-value">{{ settings.temperature.toFixed(2) }}</span>
             </div>
 
-            <div class="slider-container">
-              <input
-                v-model.number="settings.temperature"
-                type="range"
-                min="0"
-                max="1"
-                step="0.01"
-                class="temperature-slider"
-                @input="onSettingChange"
-              />
-              <div class="slider-marks">
-                <span class="mark">0</span>
-                <span class="mark">0.25</span>
-                <span class="mark">0.5</span>
-                <span class="mark">0.75</span>
-                <span class="mark">1</span>
+            <div class="temp-zone" :class="{ active: settings.temperature >= 0.33 && settings.temperature < 0.67 }">
+              <div class="zone-header">
+                <svg
+                  class="zone-icon"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <circle cx="12" cy="12" r="10" />
+                  <polyline points="12 6 12 12 16 14" />
+                </svg>
+                <span class="zone-name">{{ $t('personalization.balanced') }}</span>
               </div>
+              <p class="zone-desc">
+                {{ $t('personalization.balancedDesc') }}
+              </p>
             </div>
 
-            <div class="temperature-description">
-              <div class="temp-zone" :class="{ active: settings.temperature < 0.33 }">
-                <div class="zone-header">
-                  <svg
-                    class="zone-icon"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                  >
-                    <rect
-                      x="3"
-                      y="11"
-                      width="18"
-                      height="11"
-                      rx="2"
-                      ry="2"
-                    />
-                    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                  </svg>
-                  <span class="zone-name">{{ $t('personalization.precise') }}</span>
-                </div>
-                <p class="zone-desc">
-                  {{ $t('personalization.preciseDesc') }}
-                </p>
+            <div class="temp-zone" :class="{ active: settings.temperature >= 0.67 }">
+              <div class="zone-header">
+                <svg
+                  class="zone-icon"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                  <path d="M2 17l10 5 10-5" />
+                  <path d="M2 12l10 5 10-5" />
+                </svg>
+                <span class="zone-name">{{ $t('personalization.creative') }}</span>
               </div>
-
-              <div class="temp-zone" :class="{ active: settings.temperature >= 0.33 && settings.temperature < 0.67 }">
-                <div class="zone-header">
-                  <svg
-                    class="zone-icon"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                  >
-                    <circle cx="12" cy="12" r="10" />
-                    <polyline points="12 6 12 12 16 14" />
-                  </svg>
-                  <span class="zone-name">{{ $t('personalization.balanced') }}</span>
-                </div>
-                <p class="zone-desc">
-                  {{ $t('personalization.balancedDesc') }}
-                </p>
-              </div>
-
-              <div class="temp-zone" :class="{ active: settings.temperature >= 0.67 }">
-                <div class="zone-header">
-                  <svg
-                    class="zone-icon"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                  >
-                    <path d="M12 2L2 7l10 5 10-5-10-5z" />
-                    <path d="M2 17l10 5 10-5" />
-                    <path d="M2 12l10 5 10-5" />
-                  </svg>
-                  <span class="zone-name">{{ $t('personalization.creative') }}</span>
-                </div>
-                <p class="zone-desc">
-                  {{ $t('personalization.creativeDesc') }}
-                </p>
-              </div>
+              <p class="zone-desc">
+                {{ $t('personalization.creativeDesc') }}
+              </p>
             </div>
           </div>
         </div>
       </div>
-    </div>
+    </section>
   </div>
 </template>
 
@@ -295,59 +295,15 @@ export default {
 };
 </script>
 
+<style scoped src="./setting.css"></style>
+
 <style scoped>
 .personalization-container {
   padding: 0;
 }
 
-.settings-content {
-  display: flex;
-  flex-direction: column;
-}
-
-.setting-section {
-  background: white;
-  border-radius: 12px;
-  padding: 24px;
-  margin-bottom: 24px;
-}
-
-.section-header {
-  display: flex;
-  align-items: flex-start;
-  gap: 16px;
-  margin-bottom: 24px;
-  padding-bottom: 16px;
-  border-bottom: 2px solid #f0f0f0;
-}
-
-.section-icon {
-  width: 24px;
-  height: 24px;
-  color: #667eea;
-  flex-shrink: 0;
-  margin-top: 2px;
-}
-
-.section-title-group {
-  flex: 1;
-}
-
-.section-title {
-  font-size: 18px;
-  font-weight: 600;
-  margin: 0 0 4px 0;
-  color: #2c3e50;
-}
-
-.section-subtitle {
-  font-size: 13px;
-  color: #7f8c8d;
-  margin: 0;
-}
-
 .setting-item {
-  margin-bottom: 20px;
+  margin-bottom: 24px;
 }
 
 .setting-item:last-child {
@@ -358,7 +314,7 @@ export default {
   display: block;
   font-size: 14px;
   font-weight: 500;
-  color: #34495e;
+  color: #333333;
   margin-bottom: 8px;
 }
 
@@ -373,8 +329,8 @@ export default {
 .custom-prompt-input {
   width: 100%;
   padding: 12px;
-  border: 2px solid #e0e0e0;
-  border-radius: 8px;
+  border: 1px solid #dddddd;
+  border-radius: 6px;
   font-size: 14px;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   line-height: 1.6;
@@ -426,15 +382,15 @@ export default {
 
 .template-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(200px, 100%), 1fr));
   gap: 12px;
-  margin-top: 12px;
+  margin-top: 8px;
 }
 
 .template-card {
   padding: 16px;
-  background: #f8f9fa;
-  border: 2px solid #e9ecef;
+  background: white;
+  border: 1px solid #e8e8e8;
   border-radius: 8px;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -442,9 +398,8 @@ export default {
 }
 
 .template-card:hover {
-  background: #e3f2fd;
+  background: #f8faff;
   border-color: #667eea;
-  transform: translateY(-2px);
 }
 
 .template-header {
@@ -474,8 +429,9 @@ export default {
 }
 
 .temperature-control {
-  background: #f8f9fa;
-  padding: 20px;
+  background: white;
+  border: 1px solid #e8e8e8;
+  padding: 16px;
   border-radius: 8px;
 }
 
@@ -550,15 +506,14 @@ export default {
 .temp-zone {
   padding: 12px;
   background: white;
-  border: 2px solid #e9ecef;
+  border: 1px solid #e8e8e8;
   border-radius: 8px;
   transition: all 0.3s ease;
 }
 
 .temp-zone.active {
   border-color: #667eea;
-  background: linear-gradient(135deg, rgba(102, 126, 234, 0.05), rgba(118, 75, 162, 0.05));
-  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.15);
+  background: #f8faff;
 }
 
 .zone-header {
@@ -587,21 +542,4 @@ export default {
   line-height: 1.5;
 }
 
-/* 滚动条样式 */
-.settings-content::-webkit-scrollbar {
-  width: 8px;
-}
-
-.settings-content::-webkit-scrollbar-track {
-  background: #f1f1f1;
-}
-
-.settings-content::-webkit-scrollbar-thumb {
-  background: #bdc3c7;
-  border-radius: 4px;
-}
-
-.settings-content::-webkit-scrollbar-thumb:hover {
-  background: #95a5a6;
-}
 </style>

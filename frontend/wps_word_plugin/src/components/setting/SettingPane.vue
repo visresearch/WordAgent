@@ -455,6 +455,8 @@ export default {
 };
 </script>
 
+<style scoped src="./setting.css"></style>
+
 <style scoped>
 .setting-container {
   display: flex;
@@ -550,15 +552,6 @@ export default {
   font-size: 13px;
   color: #888888;
   margin: 0;
-}
-
-/* 设置分组卡片 */
-.setting-section {
-  background: white;
-  border-radius: 12px;
-  padding: 24px;
-  margin-bottom: 24px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 }
 
 /* ========== 底部保存按钮 ========== */

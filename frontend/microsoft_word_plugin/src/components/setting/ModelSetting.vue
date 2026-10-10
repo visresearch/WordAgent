@@ -558,46 +558,14 @@ export default {
 };
 </script>
 
+<style scoped src="./setting.css"></style>
+
 <style scoped>
 .model-setting-container {
   padding: 0;
 }
 
 /* 标题区 */
-.section-header {
-  display: flex;
-  align-items: flex-start;
-  gap: 16px;
-  margin-bottom: 24px;
-  padding-bottom: 16px;
-  border-bottom: 2px solid #f0f0f0;
-}
-
-.section-icon {
-  width: 24px;
-  height: 24px;
-  color: #667eea;
-  flex-shrink: 0;
-  margin-top: 2px;
-}
-
-.section-title-group {
-  flex: 1;
-}
-
-.section-title {
-  font-size: 18px;
-  font-weight: 600;
-  margin: 0 0 4px 0;
-  color: #2c3e50;
-}
-
-.section-subtitle {
-  font-size: 13px;
-  color: #7f8c8d;
-  margin: 0;
-}
-
 /* 工具栏 */
 .models-toolbar {
   display: flex;
