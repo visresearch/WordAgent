@@ -38,13 +38,13 @@ Compared with existing AI writing assistants on the market, WenCe AI provides:
 | -- | -- |
 | ![](./web/docs/public/wps_addon.png) | ![](./web/docs/public/QtGUI.png) |
 
-For example, in WPS **Single Agent** mode, a user can enter: "Expand my internship objective into five points." The agent completes the task through the "**locate -> read -> understand -> edit**" workflow: it first calls `search_document` to locate the target paragraph and obtain its paragraph ID, then calls `read_document` to read the paragraph content by ID. After analysis and understanding, it calls `delete_document` to remove the original paragraph, and finally calls `generate_document` to generate the expanded result. The frontend add-in renders the before/after content with different colored annotations, making changes easy to review.
+For example, in WPS **Single Agent** mode, a user can enter: "Revise my internship objectives into five points." The agent completes the task through the "**locate -> read -> understand -> edit**" workflow: it first calls `search_document` to locate the target paragraph and obtain its paragraph ID, then calls `read_document` to read the paragraph content by ID. After analysis and understanding, it calls `delete_document` to remove the original paragraph, and finally calls `generate_document` to generate the revised result. The frontend add-in displays changes through WPS native tracked changes and revision balloons, making them easy to review.
 
-![](./web/docs/public/preview2.png)
+![](./web/docs/public/generate_document_2x.gif)
 
 For small changes within a single paragraph, WenCe AI also provides the `edit_document` tool. It edits the target paragraph by ID while preserving its paragraph properties and ID, making it especially useful for modifying table content.
 
-![](./web/docs/public/edit_document.gif)
+![](./web/docs/public/edit_document_2x.gif)
 
 > Note: the generated result includes not only text content, but also matching style information such as heading/body style, bold text, font, indentation, and line spacing. The frontend add-in renders the final result according to these styles so that it matches the Word document structure and format.
 
@@ -69,7 +69,7 @@ In addition, this project supports two types of pluggable extensions for custom 
 
 #### Supported Office Software
 
-- WPS Office (Windows, Linux), version 12.1.2.24722 and above
+- WPS Office: Linux version 12.1.2.24722 or later; Windows versions below 12.1.0.28043
 - Microsoft Word (Windows, Web), LTSC 2024 or later (WordApi 1.6 or later)
 
 ## 4. System Architecture
@@ -85,8 +85,6 @@ The core of this project is the stable generation of **structured documents**. W
 ### Agent Loop Architecture
 
 To better meet user needs and ensure the stability and depth of generated articles, this project uses an Agent loop architecture:
-
-### Single Agent Loop Architecture
 
 #### Overall Architecture Diagram
 

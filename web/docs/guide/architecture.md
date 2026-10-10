@@ -6,6 +6,7 @@
 
 - **前端**：Vue3 + JavaScript 开发，包含 DocxJson 双向转化器模块，能够将带格式的 Word 文档内容与 JSON 格式进行相互转换
 - **后端**：使用 Python、LangChain 和 LangGraph 实现智能体编排，通过 OpenAI/Anthropic 兼容接口完成流式输出与工具调用，并由 PySide6 提供桌面服务界面
+- **外部 Agent 接口**：通过 Streamable HTTP 文档 MCP Server 将 WPS / Microsoft Word 工具提供给 Codex 等客户端，工具请求经加载项的 WebSocket 桥接在目标文档执行
 
 ## 文档数据结构
 
@@ -41,6 +42,19 @@ Agent 与 Ask 使用 ReAct 循环。Agent 可以读取并修改文档；Ask 只�
 - **MCP 工具**：调用用户配置的搜索、图表和其他外部服务
 
 当前仅提供 Agent 和 Ask 两种模式。需要改写单个段落时，使用 `edit_document(paraID, runs)` 直接替换正文并保留原段落样式；Ask 模式不会生成或删除 Word 内容。
+
+## 模型参数与文档 MCP
+
+内置 Agent / Ask 对话按“提供商 + 模型”读取已保存的生成参数：Temperature、Top-p、Max Tokens 和 Reasoning Effort。模型参数持久化到本机数据库，前端编辑入口见 [模型参数面板](/guide/api-config#编辑-llm-模型参数)。
+
+MCP 有两条调用路径：
+
+| 路径 | 配置入口 | 用途 |
+|---|---|---|
+| 文策 AI → 第三方 MCP | 加载项 **设置 → MCP** | 为内置智能体添加搜索、图表等工具 |
+| 外部 Agent → 文策 AI 文档 MCP | 桌面程序 **MCP 服务器** | 让 Codex 等客户端调用当前 WPS / Microsoft Word 文档工具 |
+
+外部文档 MCP 的默认地址为 `http://127.0.0.1:3880/mcp/`，调用时需打开目标文档的加载项侧栏。外部 Agent 使用其客户端的模型和推理配置，文策 AI 的模型参数用于内置对话。连接方式见 [文档 MCP Server](/guide/mcp-server)。
 
 ## Langsmith 集成
 

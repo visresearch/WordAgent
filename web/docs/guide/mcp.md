@@ -1,6 +1,8 @@
-# MCP 服务器配置
+# 接入第三方 MCP 服务器
 
 MCP（Model Context Protocol）是一种开放协议，允许你向 AI 接入**外部工具和数据源**，极大扩展智能体的能力边界。
+
+本页介绍在加载项的 **设置 → MCP** 中，为文策 AI 内置智能体添加第三方工具。若要让 Codex 等外部 Agent 操作 WPS / Microsoft Word，请阅读 [文档 MCP Server](/guide/mcp-server)，并在桌面程序的 **MCP 服务器** 页面启动服务。
 
 ## 什么是 MCP
 

@@ -33,6 +33,8 @@
 
 完整字段说明见 [配置大模型服务](/guide/api-config)。
 
+需要调整输出时，点击已添加模型右侧的齿轮，设置 Temperature、Top-p、Max Tokens 和 Reasoning Effort，再点击 **确定 → 保存设置**。最大输出默认 `8192` Tokens，推理强度默认 `medium`。
+
 ## 4. 开始第一个任务
 
 在输入框中选择 **Agent** 模式，然后尝试：
@@ -41,12 +43,14 @@
 读取当前文档，为文章补充一个结构清晰的总结，并保持现有文档风格。
 ```
 
-涉及文档修改时，前端会展示待确认操作。确认后才会将内容写入 Word。
+涉及文档修改时，前端会以原生修订展示待确认变更。点击 **确认** 接受本轮修订，点击 **取消** 拒绝本轮修订并恢复原有内容。
 
 ## 5. 继续配置
 
 - [如何提问](/guide/how-to-ask)
 - [功能与 Agent 模式](/guide/features)
 - [个性化配置](/guide/personalization)
-- [MCP 服务器](/guide/mcp)
+- [第三方 MCP 配置](/guide/mcp)
+- [外部 Agent 文档 MCP Server](/guide/mcp-server)：让 Codex 等客户端调用文档工具
 - [Skill 配置](/guide/skills)
+- [插件管理](/guide/plugins)：安装 OCR 或自定义 Python 插件

@@ -4,7 +4,7 @@
 
 - 已完成 [文策 AI 安装](/guide/installation)。
 - 可使用 Microsoft Word 桌面版或 [Word 网页版](https://word.cloud.microsoft/)。
-- 桌面版建议使用 Office 2019/2021 或 Microsoft 365 的最新版本。
+- 加载项要求 WordApi 1.6 或以上；Windows 桌面版使用 LTSC 2024 或以上，Microsoft 365 / Word 网页版需满足同一 API 要求。
 
 Microsoft Word 加载项通过 HTTPS 连接本机的文策 AI 后端。使用期间需要保持文策 AI 和 HTTPS 服务运行。
 

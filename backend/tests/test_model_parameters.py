@@ -206,8 +206,10 @@ def test_json_write_failure_rolls_back_database(model_store, monkeypatch):
     assert model_settings.load_model_parameters() == before
 
 
-def test_deepseek_request_sends_saved_values_to_wire(model_store):
-    save([provider(parameters={"temperature": 0.6, "topP": 0.9, "maxTokens": 8192, "reasoningEffort": "medium"})])
+@pytest.mark.parametrize("effort", ["medium", "high"])
+@pytest.mark.parametrize("with_tools", [False, True])
+def test_deepseek_request_sends_saved_values_to_wire(model_store, effort, with_tools):
+    save([provider(parameters={"temperature": 0.6, "topP": 0.9, "maxTokens": 8192, "reasoningEffort": effort})])
     requests = []
 
     def respond(request):
@@ -227,11 +229,16 @@ def test_deepseek_request_sends_saved_values_to_wire(model_store):
     kwargs.pop("model_provider")
     with httpx.Client(transport=httpx.MockTransport(respond)) as client:
         model = llm_client.ChatOpenAI(**kwargs, http_client=client)
+        if with_tools:
+            model = model.bind_tools(
+                [{"type": "function", "function": {"name": "read_document", "parameters": {"type": "object"}}}]
+            )
         assert model.invoke([HumanMessage(content="hello")]).content == "ok"
     payload = requests[0]
-    assert (payload["temperature"], payload["top_p"], payload["reasoning_effort"]) == (0.6, 0.9, "medium")
+    assert (payload["temperature"], payload["top_p"], payload["reasoning_effort"]) == (0.6, 0.9, effort)
     assert payload.get("max_tokens", payload.get("max_completion_tokens")) == 8192
     assert payload["thinking"] == {"type": "enabled"}
+    assert bool(payload.get("tools")) == with_tools
 
 
 def test_saved_effort_alone_controls_reasoning_without_resetting_other_parameters(model_store):
@@ -290,7 +297,7 @@ def test_models_without_none_support_do_not_silently_use_default_reasoning(model
         llm_client.get_llm_init_kwargs(model_id)
 
 
-@pytest.mark.parametrize("effort", ["none", "medium"])
+@pytest.mark.parametrize("effort", ["none", "medium", "high"])
 @pytest.mark.parametrize("mode", ["ask", "agent"])
 def test_chat_uses_saved_effort_and_filters_reasoning_from_stream_and_history(model_store, monkeypatch, effort, mode):
     from app.api.routes import chat

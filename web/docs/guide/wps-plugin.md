@@ -4,7 +4,7 @@
 
 - 已完成 [安装方式](/guide/installation) 中的后端服务部署
 - 已安装 WPS Office 桌面版（Windows 或 Linux）
-- WPS版本要求：12.1.25225 及以上（建议使用最新版本以获得最佳兼容性）
+- WPS 版本要求：Linux 12.1.2.24722 及以上；Windows 12.1.0.28043 以下。
 
 ::: info macOS 用户
 当前 WPS 加载项自动安装流程面向 Windows 和 Linux。macOS 用户请使用 [Microsoft Word 加载项](/guide/msword-plugin)。

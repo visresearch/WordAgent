@@ -38,13 +38,13 @@
 |--|--|
 |![](./web/docs/public/wps_addon.png)|![](./web/docs/public/QtGUI.png)|
 
-举个例子，以 WPS 的**单智能体（Single Agent）模式**为例：用户在加载项里输入“帮我把实习目的扩写成 5 点”。智能体会按“**定位 → 读取 → 理解 → 编辑**”的流程完成任务：先调用 `search_document` 定位目标段落获取段落ID，再调用 `read_document` 根据段落ID读取对应段落内容；在分析理解后，调用 `delete_document` 删除原段落内容，最后调用 `generate_document` 生成新的扩写结果。前端加载项会以不同颜色的批注方式渲染修改前/修改后内容，便于用户直观看到变更。
+举个例子，以 WPS 的**单智能体（Single Agent）模式**为例：用户在加载项里输入“帮我把实习目的修改成 5 点”。智能体会按“**定位 → 读取 → 理解 → 编辑**”的流程完成任务：先调用 `search_document` 定位目标段落获取段落ID，再调用 `read_document` 根据段落ID读取对应段落内容；在分析理解后，调用 `delete_document` 删除原段落内容，最后调用 `generate_document` 生成新的修改结果。前端加载项会的WPS原生批注的方式显示修改后内容，便于用户直观看到变更。
 
-![](./web/docs/public/preview2.png)
+![](./web/docs/public/generate_document_2x.gif)
 
 另外，如果是小范围某一段落内的修改的，文策AI还提供 `edit_document` 工具，可以直接编辑修改目标段落ID的内容保持段落属性和段落ID不变，非常适合修改表格内容。
 
-![](./web/docs/public/edit_document.gif)
+![](./web/docs/public/edit_document_2x.gif)
 
 > 注意：生成结果不仅包含文字内容，还包含与之匹配的样式信息（如标题/正文、加粗、字体、缩进、行距等）。前端加载项会依据这些样式信息将内容渲染为符合 Word 文档结构与格式的最终效果。
 
