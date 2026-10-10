@@ -1,3 +1,5 @@
+import shared from '../../../shared/locales/id-ID.js';
+
 export default {
   common: {
     add: 'Tambah', cancel: 'Batal', clear: 'Kosongkan', close: 'Tutup', confirm: 'Konfirmasi', delete: 'Hapus',
@@ -43,6 +45,7 @@ export default {
     builtinDeleteDisabled: 'Skill bawaan tidak dapat dihapus'
   },
   model: {
+    parameters: shared.model.parameters,
     title: 'Konfigurasi penyedia AI', subtitle: 'Kelola penyedia dan model AI', configured: 'Penyedia terkonfigurasi',
     availableCount: '{count} model tersedia', addProvider: 'Tambah penyedia', newProvider: 'Penyedia baru', modelCount: '{count} model',
     name: 'Nama', namePlaceholder: 'Contoh: openai', apiType: 'Tipe API', openaiCompatible: 'Kompatibel OpenAI',

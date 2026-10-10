@@ -264,6 +264,7 @@
                     class="btn-model-action"
                     :title="$t('settings.modelTitle')"
                     :aria-label="$t('settings.modelTitle')"
+                    @click="openModelSettings(pIndex, model)"
                   >
                     <img :src="iconSetting" class="action-icon" alt="" />
                   </button>
@@ -321,19 +322,28 @@
         </p>
       </div>
     </div>
+    <ModelParameterDialog
+      v-if="editingModel"
+      :model="editingModel"
+      :provider-name="localProviders[editingTarget.providerIndex].name"
+      @confirm="applyModelSettings"
+      @close="editingTarget = null"
+    />
   </div>
 </template>
 
 <script>
-import { ref, watch, computed } from 'vue';
+import { ref, watch, computed, nextTick } from 'vue';
 import api from '../js/api.js';
 import { t } from '../../i18n/index.js';
 import iconConnect from '../../assets/icons/connect.svg';
 import iconSetting from '../../assets/icons/setting-nav.svg';
 import iconDelete from '../../assets/icons/delete.svg';
+import ModelParameterDialog from './ModelParameterDialog.vue';
 
 export default {
   name: 'ModelSetting',
+  components: { ModelParameterDialog },
   props: {
     providers: {
       type: Array,
@@ -342,8 +352,10 @@ export default {
   },
   emits: ['update:providers'],
   setup(props, { emit }) {
+    const editingTarget = ref(null);
     const testingConnection = ref(null);
     const connectionFeedback = ref(null);
+    const isSyncingFromLocal = ref(false);
     const isTestingModel = (providerIndex, modelId) => (
       testingConnection.value?.provider === localProviders.value[providerIndex]
       && testingConnection.value?.modelId === modelId
@@ -358,6 +370,7 @@ export default {
     })));
 
     watch(() => props.providers, (newVal) => {
+      if (isSyncingFromLocal.value) return;
       // Replaced settings invalidate feedback and any in-flight result for the old form.
       connectionFeedback.value = null;
       localProviders.value = newVal.map(p => ({
@@ -381,6 +394,7 @@ export default {
     });
 
     const emitChange = () => {
+      isSyncingFromLocal.value = true;
       emit('update:providers', localProviders.value.map(p => ({
         name: p.name,
         baseUrl: p.baseUrl,
@@ -392,6 +406,7 @@ export default {
         showKey: p.showKey,
         fetchingModels: p.fetchingModels
       })));
+      nextTick(() => { isSyncingFromLocal.value = false; });
     };
 
     const addNewProvider = () => {
@@ -410,11 +425,34 @@ export default {
       emitChange();
     };
 
-    const removeProvider = (index) => {
-      if (confirm(t('model.deleteConfirm'))) {
-        localProviders.value.splice(index, 1);
+    const editingModel = computed(() => {
+      const target = editingTarget.value;
+      return target
+        ? localProviders.value[target.providerIndex]?.models?.find(model => model.id === target.modelId)
+        : null;
+    });
+    const openModelSettings = (providerIndex, model) => {
+      editingTarget.value = { providerIndex, modelId: model.id };
+    };
+    const applyModelSettings = (parameters) => {
+      const target = editingTarget.value;
+      const provider = target && localProviders.value[target.providerIndex];
+      const modelIndex = provider?.models?.findIndex(model => model.id === target.modelId) ?? -1;
+      if (modelIndex !== -1) {
+        provider.models[modelIndex] = { ...provider.models[modelIndex], parameters: { ...parameters } };
         emitChange();
       }
+      editingTarget.value = null;
+    };
+
+    const removeProvider = (index) => {
+      const provider = localProviders.value[index];
+      if (!provider) return;
+      if (connectionFeedback.value?.provider === provider) connectionFeedback.value = null;
+      if (editingTarget.value?.providerIndex === index) editingTarget.value = null;
+      else if (editingTarget.value?.providerIndex > index) editingTarget.value.providerIndex--;
+      localProviders.value.splice(index, 1);
+      emitChange();
     };
 
     const toggleProviderExpand = (index) => {
@@ -424,8 +462,10 @@ export default {
     const fetchModelsForProvider = async (index) => {
       const provider = localProviders.value[index];
 
-      if (!provider.apiKey || !provider.baseUrl) {
-        alert(t('model.credentialsRequired'));
+      if (!provider || provider.fetchingModels) return;
+      connectionFeedback.value = null;
+      if (!provider.apiKey?.trim() || !provider.baseUrl?.trim()) {
+        connectionFeedback.value = { provider, error: true, message: t('model.credentialsRequired') };
         return;
       }
 
@@ -433,8 +473,8 @@ export default {
 
       try {
         const response = await api.fetchAvailableModels({
-          baseUrl: provider.baseUrl,
-          apiKey: provider.apiKey,
+          baseUrl: provider.baseUrl.trim(),
+          apiKey: provider.apiKey.trim(),
           apiType: provider.apiType || 'openai'
         });
 
@@ -443,10 +483,13 @@ export default {
           name: m.name || m.id || m
         })) : [];
 
+        if (!localProviders.value.includes(provider)) return;
         provider.availableModels = availableModels;
       } catch (error) {
         console.error('获取模型失败:', error);
-        alert(t('model.fetchFailed', { error: error.message || t('model.checkConfig') }));
+        if (!localProviders.value.includes(provider)) return;
+        connectionFeedback.value = { provider, error: true,
+          message: t('model.fetchFailed', { error: error.message || t('model.checkConfig') }) };
       } finally {
         provider.fetchingModels = false;
       }
@@ -534,6 +577,10 @@ export default {
     };
 
     return {
+      editingTarget,
+      editingModel,
+      openModelSettings,
+      applyModelSettings,
       iconConnect,
       iconSetting,
       iconDelete,

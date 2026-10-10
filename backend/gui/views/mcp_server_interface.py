@@ -119,10 +119,9 @@ class McpServerInterface(QWidget):
         clients = state["clients"] if running else []
         self._clients_title.setText(t("mcp.clients", count=len(clients)))
         if clients:
-            self._clients.setText("\n".join(
-                t("mcp.client", name=item["name"], seconds=item["seconds_ago"])
-                for item in clients
-            ))
+            self._clients.setText(
+                "\n".join(t("mcp.client", name=item["name"], seconds=item["seconds_ago"]) for item in clients)
+            )
         else:
             self._clients.setText(t("mcp.noClients"))
 
@@ -133,8 +132,11 @@ class McpServerInterface(QWidget):
         self._start.setText(t("mcp.start"))
         self._stop.setText(t("mcp.stop"))
         self._config_title.setText(t("mcp.configTitle"))
-        self._config.setText(json.dumps(
-            {"mcpServers": {"wordagent": {"url": self._endpoint_url()}}}, indent=2,
-        ))
+        self._config.setText(
+            json.dumps(
+                {"mcpServers": {"wordagent": {"url": self._endpoint_url()}}},
+                indent=2,
+            )
+        )
         self._activity_hint.setText(t("mcp.activityHint"))
         self._refresh()

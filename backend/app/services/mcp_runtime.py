@@ -59,9 +59,7 @@ class McpRuntime:
         now = time.monotonic()
         with self._lock:
             self._clients = {
-                key: value
-                for key, value in self._clients.items()
-                if now - value["last_seen"] < ACTIVE_SECONDS
+                key: value for key, value in self._clients.items() if now - value["last_seen"] < ACTIVE_SECONDS
             }
             clients = [
                 {"name": value["name"], "seconds_ago": int(now - value["last_seen"])}
@@ -87,10 +85,16 @@ class ControlledMcpApp:
             return
         if not self.state.enabled():
             body = b'{"error":"MCP server is stopped"}'
-            await send({"type": "http.response.start", "status": 503, "headers": [
-                (b"content-type", b"application/json"),
-                (b"content-length", str(len(body)).encode()),
-            ]})
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 503,
+                    "headers": [
+                        (b"content-type", b"application/json"),
+                        (b"content-length", str(len(body)).encode()),
+                    ],
+                }
+            )
             await send({"type": "http.response.body", "body": body})
             return
 
@@ -114,8 +118,11 @@ class ControlledMcpApp:
             return message
 
         async def observed_send(message):
-            if (scope.get("method") == "POST" and message["type"] == "http.response.start"
-                    and 200 <= message["status"] < 300):
+            if (
+                scope.get("method") == "POST"
+                and message["type"] == "http.response.start"
+                and 200 <= message["status"] < 300
+            ):
                 name = None
                 if scope.get("method") == "POST" and body_parts:
                     try:

@@ -268,17 +268,14 @@ export default {
     };
 
     const onConfigChange = (server, index) => {
-      const isValid = parseConfig(server);
+      parseConfig(server);
       syncLineNumberScroll(index);
-      if (isValid) {
-        emitChange();
-      }
+      emitChange();
     };
 
     const onConfigBlur = (server) => {
-      if (parseConfig(server)) {
-        emitChange();
-      }
+      parseConfig(server);
+      emitChange();
     };
 
     const addServer = () => {
@@ -308,6 +305,7 @@ export default {
 
     const testConnection = async (index) => {
       const server = localServers.value[index];
+      if (!server || server.testing) return;
       if (!server.name.trim()) {
         server.testSuccess = false;
         server.testMessage = t('mcp.nameRequired');

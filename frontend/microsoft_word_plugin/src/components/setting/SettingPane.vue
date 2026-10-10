@@ -92,7 +92,9 @@
       <div v-if="currentTab === 'data'" class="tab-content full-height">
         <DataManagementPane
           :cache-info="cacheInfo"
+          :enable-long-term-memory="settings.enableLongTermMemory"
           @update:cache-info="onCacheUpdate"
+          @update:enable-long-term-memory="onMemoryEnabledChange"
         />
       </div>
 
@@ -124,11 +126,14 @@
         <button
           v-if="currentTab !== 'data' && currentTab !== 'skill' && currentTab !== 'plugin'"
           class="btn btn-save"
-          :disabled="saving"
+          :disabled="saving || loadingSettings || !settingsLoaded"
           @click="saveSettings"
         >
           <span v-if="saving" class="loading-spinner"></span>
           {{ saving ? $t('common.saving') : $t('settings.save') }}
+        </button>
+        <button v-if="!settingsLoaded && !loadingSettings" class="btn btn-save" @click="loadSettings">
+          {{ $t('common.refresh') }}
         </button>
         <transition name="fade">
           <span v-if="saveMessage" :class="['save-msg', saveSuccess ? 'success' : 'error']">
@@ -176,6 +181,8 @@ export default {
     const saving = ref(false);
     const saveMessage = ref('');
     const saveSuccess = ref(false);
+    const loadingSettings = ref(false);
+    const settingsLoaded = ref(false);
 
     const tabs = computed(() => [
       {
@@ -227,8 +234,7 @@ export default {
       },
       providers: [],
       mcpServers: [],
-      customPrompt: '',
-      temperature: 0.5
+      customPrompt: ''
     });
 
     // 缓存信息（只加载一次）
@@ -246,8 +252,7 @@ export default {
     }));
 
     const personalizationSettings = computed(() => ({
-      customPrompt: settings.customPrompt,
-      temperature: settings.temperature
+      customPrompt: settings.customPrompt
     }));
 
     const loadCacheInfo = async () => {
@@ -258,8 +263,6 @@ export default {
         cacheInfo.totalSize = data.totalSize || 0;
       } catch (error) {
         console.error('加载缓存信息失败:', error);
-        cacheInfo.fileCount = 0;
-        cacheInfo.totalSize = 0;
       }
     };
 
@@ -276,11 +279,14 @@ export default {
     };
 
     const loadSettings = async () => {
+      if (loadingSettings.value) return;
+      loadingSettings.value = true;
+      saveMessage.value = '';
       try {
         const data = await api.getSettings();
         if (data) {
-          settings.language = ['en-US', 'id-ID'].includes(data.language) ? data.language : 'zh-CN';
-          setLocale(settings.language);
+          setLocale(data.language || settings.language);
+          settings.language = locale.value;
           if (data.showPanelOnStart !== undefined) {
             settings.showPanelOnStart = data.showPanelOnStart;
           }
@@ -313,9 +319,6 @@ export default {
           if (data.customPrompt !== undefined) {
             settings.customPrompt = data.customPrompt;
           }
-          if (data.temperature !== undefined) {
-            settings.temperature = data.temperature;
-          }
           if (Array.isArray(data.mcpServers)) {
             settings.mcpServers = data.mcpServers.map(s => {
               const config = (s.config && typeof s.config === 'object') ? s.config : {};
@@ -328,17 +331,36 @@ export default {
               };
             });
           }
+          settingsLoaded.value = true;
         }
       } catch (error) {
         console.error('加载设置失败:', error);
+        saveMessage.value = error.message || t('common.unknownError');
+        saveSuccess.value = false;
+      } finally {
+        loadingSettings.value = false;
       }
     };
 
     const saveSettings = async () => {
+      if (saving.value || loadingSettings.value || !settingsLoaded.value) return;
       saving.value = true;
       saveMessage.value = '';
 
       try {
+        for (const server of settings.mcpServers.filter(server => server.enabled !== false)) {
+          if (!server.name?.trim()) throw new Error(t('mcp.nameRequired'));
+          if (!server.configSource?.trim()) throw new Error(t('mcp.configRequired'));
+          let config;
+          try {
+            config = JSON.parse(server.configSource);
+          } catch (error) {
+            throw new Error(t('mcp.jsonError', { error: error.message }));
+          }
+          if (!config || typeof config !== 'object' || Array.isArray(config)) {
+            throw new Error(t('mcp.objectRequired'));
+          }
+        }
         const settingsToSave = {
           language: settings.language,
           showPanelOnStart: settings.showPanelOnStart,
@@ -362,8 +384,7 @@ export default {
               enabled: s.enabled !== false
             };
           }),
-          customPrompt: settings.customPrompt,
-          temperature: settings.temperature
+          customPrompt: settings.customPrompt
         };
 
         await api.saveSettings(settingsToSave);
@@ -376,7 +397,7 @@ export default {
         }, 2000);
       } catch (error) {
         console.error('保存设置失败:', error);
-        saveMessage.value = t('settings.saveFailed');
+        saveMessage.value = `${t('settings.saveFailed')}: ${error.message || t('common.unknownError')}`;
         saveSuccess.value = false;
       } finally {
         saving.value = false;
@@ -402,7 +423,11 @@ export default {
 
     const onPersonalizationChange = (newSettings) => {
       settings.customPrompt = newSettings.customPrompt;
-      settings.temperature = newSettings.temperature;
+    };
+
+    const onMemoryEnabledChange = (enabled) => {
+      settings.enableLongTermMemory = !!enabled;
+      settingsState.enableLongTermMemory = !!enabled;
     };
 
     const onProvidersChange = (newProviders) => {
@@ -441,6 +466,9 @@ export default {
       generalSettings,
       personalizationSettings,
       saving,
+      loadingSettings,
+      settingsLoaded,
+      loadSettings,
       saveMessage,
       saveSuccess,
       cacheInfo,
@@ -449,7 +477,8 @@ export default {
       onPersonalizationChange,
       onProvidersChange,
       onMcpServersChange,
-      onCacheUpdate
+      onCacheUpdate,
+      onMemoryEnabledChange
     };
   }
 };

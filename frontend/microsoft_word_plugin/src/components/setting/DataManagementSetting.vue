@@ -58,7 +58,7 @@
         <div class="action-area">
           <button
             class="btn btn-secondary"
-            :disabled="scanningCache"
+            :disabled="scanningCache || clearingCache"
             @click="scanCache"
           >
             <svg
@@ -81,7 +81,7 @@
           </button>
           <button
             class="btn btn-warning"
-            :disabled="clearingCache || cacheFileCount === 0"
+            :disabled="clearingCache || scanningCache || cacheFileCount === 0"
             @click="clearCache"
           >
             <svg
@@ -126,7 +126,7 @@
         <div class="setting-row">
           <span class="setting-label">{{ $t('data.enableMemory') }}</span>
           <label class="switch">
-            <input v-model="enableLongTermMemory" type="checkbox" @change="saveMemoryToggle" />
+            <input v-model="enableLongTermMemory" type="checkbox" :disabled="memoryToggleSaving" @change="saveMemoryToggle" />
             <span class="slider"></span>
           </label>
         </div>
@@ -142,7 +142,7 @@
               class="json-editor memory-json-editor"
               spellcheck="false"
               :placeholder="$t('data.memoryPlaceholder')"
-              :disabled="memoryLoading"
+              :disabled="memoryLoading || memorySaving"
               @input="onMemoryInput"
               @scroll="syncMemoryLineNumberScroll"
             ></textarea>
@@ -157,14 +157,14 @@
         <div class="action-area">
           <button
             class="btn btn-secondary"
-            :disabled="memoryLoading"
+            :disabled="memoryLoading || memorySaving"
             @click="loadMemory"
           >
             {{ memoryLoading ? $t('common.loading') : $t('common.refresh') }}
           </button>
           <button
             class="btn btn-primary"
-            :disabled="!memoryHasChanged || memorySaving"
+            :disabled="!memoryHasChanged || memorySaving || memoryLoading"
             @click="saveMemory"
           >
             <svg
@@ -372,9 +372,13 @@ export default {
     cacheInfo: {
       type: Object,
       required: true
+    },
+    enableLongTermMemory: {
+      type: Boolean,
+      default: false
     }
   },
-  emits: ['update:cache-info'],
+  emits: ['update:cache-info', 'update:enable-long-term-memory'],
   setup(props, { emit }) {
     const showDeleteConfirm = ref(false);
     const confirmText = ref('');
@@ -387,7 +391,13 @@ export default {
     const memoryLoading = ref(false);
     const memorySaving = ref(false);
     const memoryHasChanged = ref(false);
-    const enableLongTermMemory = ref(false);
+    const enableLongTermMemory = ref(props.enableLongTermMemory);
+    const memoryToggleSaving = ref(false);
+    let savedMemoryEnabled = props.enableLongTermMemory;
+    watch(() => props.enableLongTermMemory, (enabled) => {
+      savedMemoryEnabled = enabled;
+      enableLongTermMemory.value = enabled;
+    });
     const memoryTextareaRef = ref(null);
     const memoryLineNumberRef = ref(null);
 
@@ -451,6 +461,7 @@ export default {
      * 扫描缓存文件大小
      */
     const scanCache = async () => {
+      if (scanningCache.value || clearingCache.value) return;
       scanningCache.value = true;
       try {
         const data = await api.scanCache();
@@ -460,9 +471,8 @@ export default {
         emit('update:cache-info', { dir: cacheDir.value, fileCount: cacheFileCount.value, totalSize: cacheSizeBytes.value });
       } catch (error) {
         console.error('扫描缓存失败:', error);
-        cacheSizeBytes.value = 0;
-        cacheFileCount.value = 0;
-        emit('update:cache-info', { dir: '', fileCount: 0, totalSize: 0 });
+        resultMessage.value = error.message || t('common.unknownError');
+        resultSuccess.value = false;
       } finally {
         scanningCache.value = false;
       }
@@ -472,10 +482,7 @@ export default {
      * 清除缓存图片文件
      */
     const clearCacheFiles = async () => {
-      if (cacheFileCount.value === 0) {
-        return;
-      }
-      if (!confirm(t('data.clearConfirm'))) {
+      if (cacheFileCount.value === 0 || clearingCache.value || scanningCache.value) {
         return;
       }
 
@@ -508,7 +515,7 @@ export default {
     };
 
     const confirmDelete = async () => {
-      if (confirmText.value !== 'DELETE') {
+      if (confirmText.value !== 'DELETE' || deleting.value) {
         return;
       }
 
@@ -541,6 +548,7 @@ export default {
     };
 
     const loadMemory = async () => {
+      if (memoryLoading.value || memorySaving.value) return;
       memoryLoading.value = true;
       try {
         const content = await api.getMemory();
@@ -560,6 +568,7 @@ export default {
     };
 
     const saveMemory = async () => {
+      if (memorySaving.value || memoryLoading.value || !memoryHasChanged.value) return;
       memorySaving.value = true;
       try {
         await api.saveMemory(memoryContent.value);
@@ -581,19 +590,14 @@ export default {
       }
     };
 
-    const loadMemoryToggle = async () => {
-      try {
-        const data = await api.getSettings();
-        enableLongTermMemory.value = !!data?.enableLongTermMemory;
-      } catch (error) {
-        console.error('加载长期记忆开关失败:', error);
-        enableLongTermMemory.value = false;
-      }
-    };
-
     const saveMemoryToggle = async () => {
+      if (memoryToggleSaving.value) return;
+      memoryToggleSaving.value = true;
+      const enabled = !!enableLongTermMemory.value;
       try {
-        await api.saveSettings({ enableLongTermMemory: !!enableLongTermMemory.value });
+        await api.saveSettings({ enableLongTermMemory: enabled });
+        savedMemoryEnabled = enabled;
+        emit('update:enable-long-term-memory', enabled);
         resultMessage.value = t('data.memoryToggled', {
           state: t(enableLongTermMemory.value ? 'data.memoryEnabled' : 'data.memoryDisabled')
         });
@@ -603,16 +607,18 @@ export default {
         }, 2500);
       } catch (error) {
         console.error('保存长期记忆开关失败:', error);
+        enableLongTermMemory.value = savedMemoryEnabled;
         resultMessage.value = t('data.toggleFailed', { error: error.message || t('common.unknownError') });
         resultSuccess.value = false;
         setTimeout(() => {
           resultMessage.value = '';
         }, 5000);
+      } finally {
+        memoryToggleSaving.value = false;
       }
     };
 
     // 初始化时加载记忆
-    loadMemoryToggle();
     loadMemory();
 
     return {
@@ -635,6 +641,7 @@ export default {
       memorySaving,
       memoryHasChanged,
       enableLongTermMemory,
+      memoryToggleSaving,
       memoryLineCount,
       memoryTextareaRef,
       loadMemory,

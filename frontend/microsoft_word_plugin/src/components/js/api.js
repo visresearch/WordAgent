@@ -109,7 +109,9 @@ async function request(url, options = {}) {
     if (!response.ok) {
       return {
         success: false,
-        error: data.message || data.error || `HTTP ${response.status}: ${response.statusText}`,
+        error: (Array.isArray(data?.detail)
+          ? data.detail.map(item => `${item.loc?.at(-1) || ''}: ${item.msg}`).join('; ')
+          : data?.detail) || data?.message || data?.error || `HTTP ${response.status}: ${response.statusText}`,
         status: response.status,
         data,
       };
@@ -624,7 +626,6 @@ function chatStream(message, options = {}) {
     selectionContext = null,
     history = [],
     files = [],
-    enableThinking = true,
     sessionId = null,
     userResponse = null,
   } = options;
@@ -660,7 +661,6 @@ function chatStream(message, options = {}) {
         documentMeta,
         history,
         files,
-        enableThinking,
         timestamp: Date.now(),
       });
     } catch (error) {
@@ -822,9 +822,13 @@ async function addSessionMessage(sessionId, messageData) {
  * 清空所有会话及消息
  */
 async function clearAllSessions() {
-  return await request("/api/sessions", {
+  const response = await request("/api/sessions", {
     method: "DELETE",
   });
+  if (!response.success || response.data?.success === false) {
+    throw new Error(response.data?.error || response.error || "删除会话失败");
+  }
+  return response;
 }
 
 /**
@@ -895,21 +899,11 @@ async function testModelConnection({ baseUrl, apiKey, apiType = 'openai', model 
  * 获取用户设置
  */
 async function getSettings() {
-  try {
-    const response = await request("/api/settings", {
-      method: "GET",
-    });
-
-    if (!response.success) {
-      console.error("获取设置失败:", response.error);
-      return { providers: [], mcpServers: [] };
-    }
-
-    return response.data;
-  } catch (error) {
-    console.error("获取设置异常:", error);
-    return { providers: [], mcpServers: [] };
+  const response = await request("/api/settings", { method: "GET" });
+  if (!response.success) {
+    throw new Error(response.error || "获取设置失败");
   }
+  return response.data;
 }
 
 /**

@@ -60,7 +60,7 @@ def _find_wpscloudsvr():
                 end = command.lower().find(".exe")
                 if end < 0:
                     continue
-                executable = command[:end + 4]
+                executable = command[: end + 4]
             executable = os.path.expandvars(executable)
             candidates.insert(0, os.path.join(os.path.dirname(executable), "wpscloudsvr.exe"))
             if os.path.basename(executable).lower() in {"wpscloudsvr.exe", "ksolaunch.exe"}:

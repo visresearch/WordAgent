@@ -104,3 +104,5 @@ Word 的 `docId` 仅支持 `0`，代表加载项侧栏所属文档。请仅保�
 - 如果 Word 插件页面打不开，请确认本地 HTTPS `localhost:3000` 服务已经启动，或在桌面 GUI 中启动 Microsoft Word 插件安装服务。
 - 如果插件提示网络错误，请确认后端服务运行在 `localhost:3880`。
 - 如果 manifest 修改后没有生效，先执行 `pnpm stop`，关闭 Word，再重新 `pnpm start`。
+- 如果功能区显示默认图标，先检查清单中的 PNG 地址能否正常打开。Office 要求图标可缓存，图片响应不能包含 `Cache-Control` 指令；GUI 静态服务只对页面、脚本和清单禁用缓存，图片保留默认缓存行为。参见 [微软图标响应要求](https://learn.microsoft.com/en-us/javascript/api/manifest/image)。
+- 如果修改图标或按钮名称后仍显示旧内容，重新加载新版清单；必要时在 Word 的“文件 → 选项 → 信任中心 → 信任中心设置 → 受信任的加载项目录”中勾选下次启动清除 Web 加载项缓存，再重启 Word。仅刷新侧栏不能保证清单更新。参见 [清除 Office 缓存](https://learn.microsoft.com/en-us/office/dev/add-ins/testing/clear-cache)。

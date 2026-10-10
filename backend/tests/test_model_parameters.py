@@ -304,22 +304,34 @@ def test_chat_uses_saved_effort_and_filters_reasoning_from_stream_and_history(mo
     class FakeGraph:
         def stream(self, **kwargs):
             stream_inputs.append(kwargs["input"])
-            yield "messages", (
-                AIMessageChunk(content="", additional_kwargs={"reasoning_content": "secret-delta"}),
-                {"langgraph_node": "model"},
+            yield (
+                "messages",
+                (
+                    AIMessageChunk(content="", additional_kwargs={"reasoning_content": "secret-delta"}),
+                    {"langgraph_node": "model"},
+                ),
             )
-            yield "messages", (
-                AIMessageChunk(content=[{"type": "reasoning", "text": "secret-structured-chunk"}]),
-                {"langgraph_node": "model"},
+            yield (
+                "messages",
+                (
+                    AIMessageChunk(content=[{"type": "reasoning", "text": "secret-structured-chunk"}]),
+                    {"langgraph_node": "model"},
+                ),
             )
-            yield "messages", (
-                AIMessage(content=[{"type": "thinking", "thinking": "secret-thinking-block"}]),
-                {"langgraph_node": "model"},
+            yield (
+                "messages",
+                (
+                    AIMessage(content=[{"type": "thinking", "thinking": "secret-thinking-block"}]),
+                    {"langgraph_node": "model"},
+                ),
             )
             yield "custom", {"type": "thinking", "content": "secret-custom"}
-            yield "messages", (
-                AIMessage(content="<think>secret-tagged</think>Visible answer"),
-                {"langgraph_node": "model"},
+            yield (
+                "messages",
+                (
+                    AIMessage(content="<think>secret-tagged</think>Visible answer"),
+                    {"langgraph_node": "model"},
+                ),
             )
 
     def create_agent(**kwargs):

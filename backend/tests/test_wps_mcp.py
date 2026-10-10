@@ -54,17 +54,20 @@ def test_mcp_lists_tools_and_roundtrips_through_wps_bridge(monkeypatch):
         assert runtime.snapshot()["clients"][0]["name"] == "Codex"
         listed = _mcp_request(client, "tools/list")
         assert {tool["name"] for tool in listed.json()["result"]["tools"]} == {
-            "delete_document", "edit_document", "create_document", "insert_break",
-            "generate_document", "read_document", "search_document",
+            "delete_document",
+            "edit_document",
+            "create_document",
+            "insert_break",
+            "generate_document",
+            "read_document",
+            "search_document",
         }
         disconnected = _mcp_request(client, "tools/call", {"name": "create_document", "arguments": {}})
         assert disconnected.json()["result"]["isError"] is True
         assert "WPS 插件页面未连接" in disconnected.json()["result"]["content"][0]["text"]
         with client.websocket_connect("/api/mcp/bridge") as socket:
             with ThreadPoolExecutor(max_workers=1) as executor:
-                call = executor.submit(
-                    _mcp_request, client, "tools/call", {"name": "create_document", "arguments": {}}
-                )
+                call = executor.submit(_mcp_request, client, "tools/call", {"name": "create_document", "arguments": {}})
                 request = socket.receive_json()
                 assert request["tool"] == "create_document"
                 assert request["arguments"] == {}

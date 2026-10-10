@@ -141,11 +141,11 @@ async function poll() {
   }
 }
 
-function track(operation) {
+function track(operation, action = 'install') {
   operations.value[operation.operationId] = {
     id: operation.operationId,
     pluginId: operation.pluginId,
-    action: 'install',
+    action,
     status: 'running',
     logs: []
   };
@@ -155,9 +155,14 @@ function track(operation) {
 }
 
 async function install(source) {
+  if (busy.value.includes(source)) return;
+  busy.value = [...busy.value, source];
+  message.value = '';
+  messageError.value = false;
   try {
     track(await api.installPlugin(source));
   } catch (error) {
+    busy.value = busy.value.filter(id => id !== source);
     message.value = error.message;
     messageError.value = true;
   }
@@ -189,14 +194,16 @@ async function installCustom() {
 }
 
 async function remove(plugin) {
-  if (!confirm(t('plugin.removeConfirm', { name: plugin.name }))) {
-    return;
-  }
+  if (busy.value.includes(plugin.id)) return;
+  // Lock immediately, including the time before the server returns an operation ID.
+  busy.value = [...busy.value, plugin.id];
+  message.value = '';
+  messageError.value = false;
   try {
     const operation = await api.removePlugin(plugin.id);
-    track(operation);
-    operations.value[operation.operationId].action = 'remove';
+    track(operation, 'remove');
   } catch (error) {
+    busy.value = busy.value.filter(id => id !== plugin.id);
     message.value = error.message;
     messageError.value = true;
   }

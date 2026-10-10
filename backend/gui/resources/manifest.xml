@@ -5,13 +5,13 @@
            xmlns:ov="http://schemas.microsoft.com/office/taskpaneappversionoverrides"
            xsi:type="TaskPaneApp">
   <Id>d95e5329-570b-4dcc-838b-4f072bf2f290</Id>
-  <Version>1.0.0.0</Version>
+  <Version>1.0.0.1</Version>
   <ProviderName>WenCe Team</ProviderName>
   <DefaultLocale>zh-CN</DefaultLocale>
   <DisplayName DefaultValue="文策AI助手"/>
   <Description DefaultValue="WenCe AI Writing Assistant - 智能写作助手"/>
-  <IconUrl DefaultValue="https://localhost:3000/assets/icon-32.png"/>
-  <HighResolutionIconUrl DefaultValue="https://localhost:3000/assets/icon-64.png"/>
+  <IconUrl DefaultValue="https://localhost:3000/assets/wence-32.png"/>
+  <HighResolutionIconUrl DefaultValue="https://localhost:3000/assets/wence-64.png"/>
   <SupportUrl DefaultValue="https://github.com/visresearch/WordAgent"/>
   <AppDomains>
     <AppDomain>https://localhost:3000</AppDomain>
@@ -71,9 +71,9 @@
     </Hosts>
     <Resources>
       <bt:Images>
-        <bt:Image id="Icon.16x16" DefaultValue="https://localhost:3000/assets/icon-16.png"/>
-        <bt:Image id="Icon.32x32" DefaultValue="https://localhost:3000/assets/icon-32.png"/>
-        <bt:Image id="Icon.80x80" DefaultValue="https://localhost:3000/assets/icon-80.png"/>
+        <bt:Image id="Icon.16x16" DefaultValue="https://localhost:3000/assets/wence-16.png"/>
+        <bt:Image id="Icon.32x32" DefaultValue="https://localhost:3000/assets/wence-32.png"/>
+        <bt:Image id="Icon.80x80" DefaultValue="https://localhost:3000/assets/wence-80.png"/>
       </bt:Images>
       <bt:Urls>
         <bt:Url id="GetStarted.LearnMoreUrl" DefaultValue="https://github.com/visresearch/WordAgent"/>
@@ -83,11 +83,11 @@
       <bt:ShortStrings>
         <bt:String id="GetStarted.Title" DefaultValue="文策AI助手已就绪"/>
         <bt:String id="WenCeGroup.Label" DefaultValue="文策AI"/>
-        <bt:String id="TaskpaneButton.Label" DefaultValue="AI辅助协作助手"/>
+        <bt:String id="TaskpaneButton.Label" DefaultValue="AI辅助写作助手"/>
       </bt:ShortStrings>
       <bt:LongStrings>
-        <bt:String id="GetStarted.Description" DefaultValue="文策AI助手已加载成功。点击「开始」选项卡上的「AI辅助协作助手」按钮开始使用。"/>
-        <bt:String id="TaskpaneButton.Tooltip" DefaultValue="点击打开AI辅助协作助手面板"/>
+        <bt:String id="GetStarted.Description" DefaultValue="文策AI助手已加载成功。点击「开始」选项卡上的「AI辅助写作助手」按钮开始使用。"/>
+        <bt:String id="TaskpaneButton.Tooltip" DefaultValue="点击打开AI辅助写作助手面板"/>
       </bt:LongStrings>
     </Resources>
   </VersionOverrides>

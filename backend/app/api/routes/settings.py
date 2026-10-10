@@ -145,7 +145,9 @@ async def save_settings(settings: UserSettings):
                 ).model_dump()
 
         # Persist model parameters in SQLite, retaining JSON compatibility for other settings consumers.
-        await asyncio.to_thread(save_model_parameters, merged.get("providers", []), lambda: _write_settings_file(merged))
+        await asyncio.to_thread(
+            save_model_parameters, merged.get("providers", []), lambda: _write_settings_file(merged)
+        )
 
         # 清除 LLM 客户端缓存，使代理等配置变更生效
         try:

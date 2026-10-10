@@ -26,6 +26,7 @@
         :available-models="availableModels"
         :models-loading="modelsLoading"
         :is-loading="isLoading"
+        :settling-revisions="settlingRevisions"
         :selections="selections"
         :pending-question="pendingQuestions[currentSessionId] || null"
         :uploaded-files="uploadedFiles"
@@ -33,11 +34,9 @@
         :pending-edits="pendingEdits"
         :delete-revisions="deleteRevisions"
         :token-stats="tokenStats"
-        :enable-thinking="enableThinking"
         @update:mode="mode = $event"
         @update:selected-model="selectedModel = $event"
         @update:selected-model-provider="selectedModelProvider = $event"
-        @update:enable-thinking="enableThinking = $event"
         @send="handleSend"
         @stop="stopGeneration"
         @add-selection="addSelectionFromWord"
@@ -119,6 +118,7 @@ export default {
       deleteRevisions: [],  // 已立即执行、等待统一接受/拒绝的原生删除修订
       pendingEdits: [],  // 已立即执行、等待统一接受/拒绝的原生段落编辑修订
       pendingInsertions: [], // [{documentJson, docId, insertParaID, msg}] 待确认的文档插入列表
+      settlingRevisions: false,
       _streamInsertions: [], // [{insertParaID, count, docId}] 当前流式中已执行的插入操作
       hasHistory: false,
       historyLoaded: false,
@@ -128,7 +128,6 @@ export default {
       _sessionTokenStats: {},
       isWide: false,
       tokenStats: { current: 0, max: 258000, percentage: 0 },
-      enableThinking: true,  // 是否启用深度思考
       _insertQueue: Promise.resolve(),
       _initializing: false   // 是否正在初始化，防止 ensureSession 创建重复会话
     };
@@ -1019,7 +1018,6 @@ export default {
         documentRange: documentRange,
         selectionContext: selectionContext,
         files: files,
-        enableThinking: this.enableThinking,
         sessionId: streamSessionId,
         userResponse,
 
@@ -2110,44 +2108,53 @@ export default {
      * 接受本轮已经执行的原生增删修订。
      */
     async confirmPending() {
+      if (this.settlingRevisions) return;
+      this.settlingRevisions = true;
+      const queueStartedAt = performance.now();
       try {
-        await this._insertQueue;
-      } catch (e) {
-        console.warn("[AIChatPane] pending operation queue failed before confirm:", e);
-      }
-      const pendingItems = [
-        ...this.pendingInsertions,
-        ...this.pendingEdits,
-        ...this.deleteRevisions
-      ];
-      const batchIds = pendingItems
-        .map((item) => item?._revisionBatchId)
-        .filter((batchId) => hasRevisionBatch(batchId));
-      if (batchIds.length === 0) {
-        this._showPendingActionError('accept', '没有可结算的原生修订批次');
-        return;
-      }
+        try {
+          await this._insertQueue;
+        } catch (e) {
+          console.warn("[AIChatPane] pending operation queue failed before confirm:", e);
+        }
+        const pendingItems = [
+          ...this.pendingInsertions,
+          ...this.pendingEdits,
+          ...this.deleteRevisions
+        ];
+        const batchIds = pendingItems
+          .map((item) => item?._revisionBatchId)
+          .filter((batchId) => hasRevisionBatch(batchId));
+        if (batchIds.length === 0) {
+          this._showPendingActionError('accept', '没有可结算的原生修订批次');
+          return;
+        }
 
-      const settled = await settleRevisionBatches(batchIds, 'accept');
-      console.log('[AIChatPane] 已统一接受待确认修订:', settled);
-      const settledIds = new Set(settled.settledBatchIds || []);
-      for (const item of pendingItems) {
-        if (settledIds.has(item._revisionBatchId)) {
-          item._revisionBatchId = null;
-          if (item.msg) {
-            item.msg._revisionBatchId = null;
+        const queueWaitMs = performance.now() - queueStartedAt;
+        const settled = await settleRevisionBatches(batchIds, 'accept');
+        console.log('[AIChatPane] 已统一接受待确认修订:', { ...settled, timings: { queueWaitMs, ...settled.timings } });
+        const settledIds = new Set(settled.settledBatchIds || []);
+        for (const item of pendingItems) {
+          if (settledIds.has(item._revisionBatchId)) {
+            item._revisionBatchId = null;
+            if (item.msg) {
+              item.msg._revisionBatchId = null;
+            }
           }
         }
-      }
-      this.pendingInsertions = this.pendingInsertions.filter((item) => item._revisionBatchId);
-      this.pendingEdits = this.pendingEdits.filter((item) => item._revisionBatchId);
-      this.deleteRevisions = this.deleteRevisions.filter((item) => item._revisionBatchId);
-      this._refreshPendingDocumentSummary();
-      if (this.pendingInsertions.length === 0) {
-        this._streamInsertions = [];
-      }
-      if (!settled.success) {
-        this._showPendingActionError('accept', settled.error);
+        this.pendingInsertions = this.pendingInsertions.filter((item) => item._revisionBatchId);
+        this.pendingEdits = this.pendingEdits.filter((item) => item._revisionBatchId);
+        this.deleteRevisions = this.deleteRevisions.filter((item) => item._revisionBatchId);
+        this._refreshPendingDocumentSummary();
+        if (this.pendingInsertions.length === 0) {
+          this._streamInsertions = [];
+        }
+        if (!settled.success) {
+          this._showPendingActionError('accept', settled.error);
+        }
+        if (settledIds.size > 0) api.wsManager.clearDocumentCache();
+      } finally {
+        this.settlingRevisions = false;
       }
     },
 
@@ -2155,45 +2162,54 @@ export default {
      * 拒绝本轮已经执行的原生增删修订。
      */
     async cancelPending() {
+      if (this.settlingRevisions) return;
+      this.settlingRevisions = true;
+      const queueStartedAt = performance.now();
       try {
-        await this._insertQueue;
-      } catch (e) {
-        console.warn("[AIChatPane] pending operation queue failed before cancel:", e);
-      }
+        try {
+          await this._insertQueue;
+        } catch (e) {
+          console.warn("[AIChatPane] pending operation queue failed before cancel:", e);
+        }
 
-      const pendingItems = [
-        ...this.deleteRevisions,
-        ...this.pendingEdits,
-        ...[...this.pendingInsertions].reverse()
-      ];
-      const batchIds = pendingItems
-        .map((item) => item?._revisionBatchId)
-        .filter((batchId) => hasRevisionBatch(batchId));
-      if (batchIds.length === 0) {
-        this._showPendingActionError('reject', '没有可结算的原生修订批次');
-        return;
-      }
+        const pendingItems = [
+          ...this.deleteRevisions,
+          ...this.pendingEdits,
+          ...[...this.pendingInsertions].reverse()
+        ];
+        const batchIds = pendingItems
+          .map((item) => item?._revisionBatchId)
+          .filter((batchId) => hasRevisionBatch(batchId));
+        if (batchIds.length === 0) {
+          this._showPendingActionError('reject', '没有可结算的原生修订批次');
+          return;
+        }
 
-      const settled = await settleRevisionBatches(batchIds, 'reject');
-      console.log('[AIChatPane] 已统一拒绝待确认修订:', settled);
-      const settledIds = new Set(settled.settledBatchIds || []);
-      for (const item of pendingItems) {
-        if (settledIds.has(item._revisionBatchId)) {
-          item._revisionBatchId = null;
-          if (item.msg) {
-            item.msg._revisionBatchId = null;
+        const queueWaitMs = performance.now() - queueStartedAt;
+        const settled = await settleRevisionBatches(batchIds, 'reject');
+        console.log('[AIChatPane] 已统一拒绝待确认修订:', { ...settled, timings: { queueWaitMs, ...settled.timings } });
+        const settledIds = new Set(settled.settledBatchIds || []);
+        for (const item of pendingItems) {
+          if (settledIds.has(item._revisionBatchId)) {
+            item._revisionBatchId = null;
+            if (item.msg) {
+              item.msg._revisionBatchId = null;
+            }
           }
         }
-      }
-      this.pendingInsertions = this.pendingInsertions.filter((item) => item._revisionBatchId);
-      this.pendingEdits = this.pendingEdits.filter((item) => item._revisionBatchId);
-      this.deleteRevisions = this.deleteRevisions.filter((item) => item._revisionBatchId);
-      this._refreshPendingDocumentSummary();
-      if (this.pendingInsertions.length === 0) {
-        this._streamInsertions = [];
-      }
-      if (!settled.success) {
-        this._showPendingActionError('reject', settled.error);
+        this.pendingInsertions = this.pendingInsertions.filter((item) => item._revisionBatchId);
+        this.pendingEdits = this.pendingEdits.filter((item) => item._revisionBatchId);
+        this.deleteRevisions = this.deleteRevisions.filter((item) => item._revisionBatchId);
+        this._refreshPendingDocumentSummary();
+        if (this.pendingInsertions.length === 0) {
+          this._streamInsertions = [];
+        }
+        if (!settled.success) {
+          this._showPendingActionError('reject', settled.error);
+        }
+        if (settledIds.size > 0) api.wsManager.clearDocumentCache();
+      } finally {
+        this.settlingRevisions = false;
       }
     },
 

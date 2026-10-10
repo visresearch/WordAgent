@@ -14,7 +14,7 @@ def test_plugin_list_uses_the_agent_catalog_github_folder(monkeypatch):
     response = TestClient(app).get("/plugins")
     assert response.status_code == 200
     item = response.json()["plugins"][0]
-    assert item["id"] == "ocr"
+    assert item["id"] == plugins.manager.CATALOG[0]["id"]
     assert item["installed"] is False
     assert item["source"] == plugins.manager.CATALOG[0]["source"]
     assert "/backend/resources/plugins/wordagent-plugin-ocr" in item["source"]
@@ -24,14 +24,15 @@ def test_plugin_install_operation_exposes_logs_and_completion(monkeypatch):
     app = FastAPI()
     app.include_router(plugins.router)
     monkeypatch.setattr(plugins.manager, "installed_plugins", lambda: [])
-    monkeypatch.setattr(plugins.manager, "discover_plugins", lambda: [{"id": "ocr", "installed": False}])
+    catalog_id = plugins.manager.CATALOG[0]["id"]
+    monkeypatch.setattr(plugins.manager, "discover_plugins", lambda: [{"id": catalog_id, "installed": False}])
     monkeypatch.setattr(plugins.manager, "install_plugin", lambda source, log, package_file=None: log("models loaded"))
     with plugins._lock:
         plugins._operations.clear()
         plugins._busy.clear()
 
     client = TestClient(app)
-    response = client.post("/plugins/install", json={"source": "ocr"})
+    response = client.post("/plugins/install", json={"source": catalog_id})
     assert response.status_code == 200
     operation_id = response.json()["operationId"]
     for _ in range(100):
@@ -41,7 +42,7 @@ def test_plugin_install_operation_exposes_logs_and_completion(monkeypatch):
         time.sleep(0.01)
     assert operation["status"] == "completed"
     assert "models loaded" in operation["logs"]
-    assert client.get("/plugins").json()["plugins"][0]["id"] == "ocr"
+    assert client.get("/plugins").json()["plugins"][0]["id"] == catalog_id
 
 
 def test_custom_github_url_is_passed_to_installer(monkeypatch):

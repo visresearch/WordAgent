@@ -80,7 +80,8 @@ class InstallSkillZipTests(unittest.TestCase):
                 skills.install_skill_zip(archive)
 
             self.assertEqual(existing_skill.read_text(encoding="utf-8"), "existing content")
-            self.assertFalse((skills_root / "Writing-Helper").exists())
+            # Windows resolves case variants to the existing directory.
+            self.assertEqual(list(skills_root.iterdir()), [existing])
 
     def test_rejects_duplicate_frontmatter_name_with_different_folder(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir_str:

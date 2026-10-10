@@ -68,7 +68,7 @@ body:
         3. 输入 ...
         4. 观察到 ...
     validations:
-      required: true
+      required: false
 
   - type: textarea
     id: expected
@@ -77,7 +77,7 @@ body:
       description: 请说明你认为正确的结果应该是什么。
       placeholder: "例如：选中段落应被扩写，并保留原有标题和正文样式。"
     validations:
-      required: true
+      required: false
 
   - type: textarea
     id: screenshots

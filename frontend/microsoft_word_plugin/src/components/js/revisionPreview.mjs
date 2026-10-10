@@ -118,43 +118,15 @@ function restoreNativeRevisionView(view, filter, display) {
   }
 }
 
-async function restorePreviewDisplayIfIdle() {
-  if (!previewDisplayState || previewDisplayState.batchCount > 0) {
-    return;
-  }
-  const display = previewDisplayState;
-  previewDisplayState = null;
-  if (!display.desktopViewSupported) {
-    return;
-  }
-  try {
-    await Word.run(async (context) => {
-      const view = context.document.activeWindow.view;
-      const filter = view.revisionsFilter;
-      restoreNativeRevisionView(view, filter, display);
-      await context.sync();
-    });
-  } catch (error) {
-    console.warn('[revisionPreview] 恢复修订显示设置失败:', error);
-  }
-}
-
 function acquirePreviewDisplay(state) {
   if (!previewDisplayState) {
     previewDisplayState = {
       ...state.display,
+      before: state.before,
       batchCount: 0
     };
   }
   previewDisplayState.batchCount += 1;
-}
-
-async function releasePreviewDisplay() {
-  if (!previewDisplayState) {
-    return;
-  }
-  previewDisplayState.batchCount = Math.max(0, previewDisplayState.batchCount - 1);
-  await restorePreviewDisplayIfIdle();
 }
 
 export async function beginTrackedEdit() {
@@ -246,21 +218,12 @@ export async function finishTrackedEdit(state, kind) {
         return { batchId: null, revisionCount: 0 };
       }
 
-      changes.track();
-      for (const change of selected) {
-        change.track();
-      }
-      await context.sync();
-
       acquirePreviewDisplay(state);
       const batchId = `word-revision-${Date.now()}-${nextBatchId++}`;
       revisionBatches.set(batchId, {
         kind,
-        collection: changes,
-        changes: selected.map((change) => ({
-          change,
-          type: normalizeType(change.type)
-        }))
+        // 保存普通数据；不把旧 RequestContext 的代理对象带到下一次确认。
+        changes: snapshotChanges(selected)
       });
       return { batchId, revisionCount: selected.length };
     });
@@ -285,60 +248,21 @@ export async function finishTrackedEdit(state, kind) {
   }
 }
 
-async function settleTrackedRevisionBatch(batchId, action) {
-  if (action !== 'accept' && action !== 'reject') {
-    return { success: false, handled: 0, settledBatchIds: [], error: 'action 必须是 accept 或 reject' };
+function matchingChanges(current, snapshots) {
+  // 原有修订先从候选集合排除，即使其位置变化也不会被本轮接管。
+  const candidates = subtractExistingChanges(previewDisplayState?.before || [], current);
+  const counts = new Map();
+  for (const item of snapshots) {
+    const signature = changeSignature(item);
+    counts.set(signature, (counts.get(signature) || 0) + 1);
   }
-  const batch = revisionBatches.get(batchId);
-  if (!batch) {
-    return { success: false, handled: 0, settledBatchIds: [], error: '修订批次不存在或已处理' };
-  }
-
-  // 先处理格式修订，再处理文字增删。取消插入时，文字被拒绝后其格式
-  // Range 可能立即失效，因此不能把格式修订留到最后。
-  const ordered = [...batch.changes].sort((a, b) => {
-    const aFormat = a.type === FORMATTED_TYPE ? 0 : 1;
-    const bFormat = b.type === FORMATTED_TYPE ? 0 : 1;
-    return aFormat - bFormat;
+  return candidates.filter((item) => {
+    const signature = changeSignature(item);
+    const count = counts.get(signature) || 0;
+    if (count === 0) return false;
+    counts.set(signature, count - 1);
+    return true;
   });
-  const proxies = [
-    ...new Set([
-      batch.collection,
-      ...ordered.map((item) => item.change),
-    ].filter(Boolean)),
-  ];
-  let handled = 0;
-
-  try {
-    await Word.run(proxies, async (context) => {
-      for (const item of ordered) {
-        if (action === 'accept') {
-          item.change.accept();
-        } else {
-          item.change.reject();
-        }
-        item.change.untrack();
-        handled += 1;
-      }
-      batch.collection?.untrack();
-      await context.sync();
-    });
-    revisionBatches.delete(batchId);
-    await releasePreviewDisplay();
-    return {
-      success: true,
-      handled,
-      settledBatchIds: [batchId],
-    };
-  } catch (error) {
-    console.warn(`[revisionPreview] ${action === 'accept' ? '接受' : '拒绝'}修订失败:`, error);
-    return {
-      success: false,
-      handled: 0,
-      settledBatchIds: [],
-      error: error?.message || String(error),
-    };
-  }
 }
 
 export async function settleRevisionBatches(batchIds, action) {
@@ -349,27 +273,87 @@ export async function settleRevisionBatches(batchIds, action) {
   if (ids.length === 0) {
     return { success: false, handled: 0, settledBatchIds: [], error: '修订批次不存在或已处理' };
   }
+  const batches = ids.map((id) => revisionBatches.get(id));
+  if (batches.some((batch) => !batch)) {
+    return { success: false, handled: 0, settledBatchIds: [], error: '修订批次不存在或已处理' };
+  }
+  const startedAt = performance.now();
+  const timings = { readMs: 0, nativeMs: 0, totalMs: 0, syncCount: 0 };
+  try {
+    return await Word.run(async (context) => {
+      const doc = context.document;
+      const collection = doc.body.getTrackedChanges();
+      loadChanges(collection);
+      await context.sync();
+      timings.syncCount += 1;
+      timings.readMs = performance.now() - startedAt;
+      const selected = matchingChanges(collection.items, batches.flatMap((batch) => batch.changes));
+      const method = action === 'accept' ? 'acceptAll' : 'rejectAll';
+      const bulk = selected.length > 0 && selected.length === collection.items.length && typeof collection[method] === 'function';
+      const nativeStartedAt = performance.now();
+      if (bulk) {
+        // 当前正文的修订全部属于这些批次时，调用 Word 原生集合接口。
+        collection[method]();
+      } else {
+        // 存在用户原有修订/其它批次时只处理本轮，所有批次共用一次 sync。
+        // 格式优先，文字倒序，防止拒绝新增后格式范围失效。
+        const ordered = [...selected].reverse().sort((left, right) => (
+          Number(normalizeType(right.type) === FORMATTED_TYPE) - Number(normalizeType(left.type) === FORMATTED_TYPE)
+        ));
+        for (const change of ordered) {
+          if (action === 'accept') change.accept();
+          else change.reject();
+        }
+      }
+      const remaining = doc.body.getTrackedChanges();
+      loadChanges(remaining);
+      const display = previewDisplayState;
+      const restoreDisplay = ids.length === revisionBatches.size && display?.desktopViewSupported;
+      if (restoreDisplay) {
+        const view = doc.activeWindow.view;
+        restoreNativeRevisionView(view, view.revisionsFilter, display);
+      }
+      await context.sync();
+      timings.syncCount += 1;
+      timings.nativeMs = performance.now() - nativeStartedAt;
 
-  let handled = 0;
-  const settledBatchIds = [];
-  for (const batchId of ids) {
-    const result = await settleTrackedRevisionBatch(batchId, action);
-    if (!result.success) {
+      if (bulk && remaining.items.length > 0) {
+        // 集合接口部分成功后，重建的格式修订仍属于本轮，保留以便重试。
+        for (const batch of batches) batch.changes = snapshotChanges(remaining.items);
+      }
+      const settledBatchIds = ids.filter((id, index) => matchingChanges(remaining.items, batches[index].changes).length === 0);
+      const handled = Math.max(0, selected.length - matchingChanges(remaining.items, batches.flatMap((batch) => batch.changes)).length);
+      for (const id of settledBatchIds) revisionBatches.delete(id);
+      if (previewDisplayState) {
+        previewDisplayState.batchCount = Math.max(0, previewDisplayState.batchCount - settledBatchIds.length);
+        if (previewDisplayState.batchCount === 0) previewDisplayState = null;
+      }
+      const success = settledBatchIds.length === ids.length;
+      if (!success && restoreDisplay) {
+        const view = doc.activeWindow.view;
+        configureNativeRevisionView(view, view.revisionsFilter);
+        await context.sync();
+        timings.syncCount += 1;
+      }
       return {
-        success: false,
+        success,
         handled,
         settledBatchIds,
-        error: result.error,
+        bulk,
+        timings,
+        ...(!success ? { error: 'Word 未完整处理本轮修订，请重试' } : {})
       };
-    }
-    handled += result.handled;
-    settledBatchIds.push(batchId);
+    });
+  } catch (error) {
+    console.warn(`[revisionPreview] ${action === 'accept' ? '接受' : '拒绝'}修订失败:`, error);
+    return { success: false, handled: 0, settledBatchIds: [], error: error?.message || String(error), timings };
+  } finally {
+    timings.totalMs = performance.now() - startedAt;
   }
-  return { success: true, handled, settledBatchIds };
 }
 
 export async function settleRevisionBatch(batchId, action) {
-  return settleTrackedRevisionBatch(batchId, action);
+  return settleRevisionBatches([batchId], action);
 }
 
 export async function undoLastDocumentAction(times = 1) {

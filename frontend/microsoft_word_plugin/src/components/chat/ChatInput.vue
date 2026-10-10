@@ -57,11 +57,11 @@
         <div class="selection-bar-info">
           <span class="selection-bar-preview">{{ pendingSummary }}</span>
         </div>
-        <div v-if="!isLoading" class="pending-actions">
-          <button class="pending-btn confirm-btn" :class="{ 'delete-confirm-btn': deleteRevisions.length > 0 && !pendingDocument }" @click="$emit('confirm-pending')">
+        <div v-if="!isLoading" class="pending-actions" :aria-busy="settlingRevisions">
+          <button class="pending-btn confirm-btn" :disabled="settlingRevisions" :class="{ 'delete-confirm-btn': deleteRevisions.length > 0 && !pendingDocument }" @click="$emit('confirm-pending')">
             {{ $t('common.confirm') }}
           </button>
-          <button class="pending-btn cancel-btn" @click="$emit('cancel-pending')">
+          <button class="pending-btn cancel-btn" :disabled="settlingRevisions" @click="$emit('cancel-pending')">
             {{ $t('common.cancel') }}
           </button>
         </div>
@@ -127,16 +127,6 @@
               </div>
             </div>
 
-            <!-- 思考模式切换 -->
-            <label class="thinking-toggle" :aria-label="$t('chat.thinkingToggle')">
-              <input
-                :checked="enableThinking"
-                type="checkbox"
-                @change="$emit('update:enableThinking', $event.target.checked)"
-              />
-              <span class="thinking-slider"></span>
-              <span class="thinking-label">{{ enableThinking ? $t('chat.allowThinking') : $t('chat.disableThinking') }}</span>
-            </label>
           </div>
           <div class="toolbar-right">
             <div class="btn-wrapper token-ring-wrapper">
@@ -225,15 +215,15 @@ export default {
     availableModels: { type: Array, default: () => [] },
     modelsLoading: { type: Boolean, default: false },
     isLoading: { type: Boolean, default: false },
+    settlingRevisions: { type: Boolean, default: false },
     selections: { type: Array, default: () => [] },
     uploadedFiles: { type: Array, default: () => [] },
     pendingDocument: { type: Object, default: null },
     pendingEdits: { type: Array, default: () => [] },
     deleteRevisions: { type: Array, default: () => [] },
     tokenStats: { type: Object, default: () => ({ current: 0, max: 258000 }) },
-    enableThinking: { type: Boolean, default: true }
   },
-  emits: ['send', 'stop', 'add-selection', 'remove-selection', 'add-files', 'remove-file', 'update:mode', 'update:selectedModel', 'update:selectedModelProvider', 'update:enableThinking', 'refresh-models', 'confirm-pending', 'cancel-pending'],
+  emits: ['send', 'stop', 'add-selection', 'remove-selection', 'add-files', 'remove-file', 'update:mode', 'update:selectedModel', 'update:selectedModelProvider', 'refresh-models', 'confirm-pending', 'cancel-pending'],
   data() {
     return {
       inputText: '',
@@ -855,62 +845,4 @@ export default {
   margin-bottom: 4px;
 }
 
-/* 思考模式切换样式 */
-.thinking-toggle {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  cursor: pointer;
-  font-size: 8px;
-  color: #666;
-  user-select: none;
-}
-
-.thinking-toggle input {
-  opacity: 0;
-  width: 0;
-  height: 0;
-  position: absolute;
-}
-
-.thinking-slider {
-  position: relative;
-  display: inline-block;
-  width: 28px;
-  height: 16px;
-  background-color: #ccc;
-  transition: 0.3s;
-  border-radius: 16px;
-}
-
-.thinking-slider:before {
-  position: absolute;
-  content: "";
-  height: 12px;
-  width: 12px;
-  left: 2px;
-  bottom: 2px;
-  background-color: white;
-  transition: 0.3s;
-  border-radius: 50%;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
-}
-
-.thinking-toggle input:checked + .thinking-slider {
-  background-color: #667eea;
-}
-
-.thinking-toggle input:checked + .thinking-slider:before {
-  transform: translateX(12px);
-}
-
-.thinking-label {
-  font-size: 8px;
-  white-space: nowrap;
-}
-
-.thinking-toggle:hover .thinking-slider {
-  box-shadow: 0 0 4px rgba(102, 126, 234, 0.4);
-}
 </style>

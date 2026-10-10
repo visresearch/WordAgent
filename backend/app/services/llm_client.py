@@ -14,7 +14,12 @@ from langchain_openai import ChatOpenAI as _BaseChatOpenAI
 from langchain_core.outputs import ChatGenerationChunk
 
 from app.core.logging import get_logger
-from app.services.model_settings import enrich_providers, load_model_parameters, normalize_legacy_parameters, provider_key
+from app.services.model_settings import (
+    enrich_providers,
+    load_model_parameters,
+    normalize_legacy_parameters,
+    provider_key,
+)
 
 logger = get_logger(__name__)
 
@@ -667,7 +672,9 @@ def _apply_anthropic_parameters(kwargs: dict, model_name: str, effort: str, thin
     elif major >= 4 or "3-7-sonnet" in lowered:
         if thinking_enabled:
             if kwargs["max_tokens"] <= 1024:
-                raise ValueError("Anthropic 深度思考要求 Max Tokens 大于 1024，请调整模型设置或将 Reasoning Effort 设为 none")
+                raise ValueError(
+                    "Anthropic 深度思考要求 Max Tokens 大于 1024，请调整模型设置或将 Reasoning Effort 设为 none"
+                )
             budget = {"minimal": 1024, "low": 2048, "medium": 4096, "high": 8192, "xhigh": 16384}[effort]
             kwargs["thinking"] = {"type": "enabled", "budget_tokens": min(budget, kwargs["max_tokens"] - 1)}
         else:
@@ -742,7 +749,9 @@ def _resolve_llm_params(model_name: str, provider: str = "") -> tuple[dict, str]
         elif re.match(r"^(?:o\d(?:-|$)|gpt-[56])", lowered):
             supports_none = re.match(r"^gpt-5\.[1-9]", lowered) is not None and "pro" not in lowered
             if effort == "none" and not supports_none:
-                raise ValueError(f"模型 {actual_model_name} 不支持 Reasoning Effort=none，请选择其支持的推理程度或更换模型")
+                raise ValueError(
+                    f"模型 {actual_model_name} 不支持 Reasoning Effort=none，请选择其支持的推理程度或更换模型"
+                )
             kwargs["reasoning_effort"] = effort
             # GPT-5.1/5.2 accept sampling only with effort=none; older reasoning
             # models do not support these fields at all.

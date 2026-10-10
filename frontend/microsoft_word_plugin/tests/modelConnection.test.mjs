@@ -33,7 +33,7 @@ test('connection test rejects missing latency but accepts a valid zero', async (
 
 // Exercise the actual form behavior, including Office-friendly inline feedback.
 import { readFileSync } from 'node:fs';
-import { ref, watch, computed, effectScope, createSSRApp } from 'vue';
+import { ref, watch, computed, nextTick, effectScope, createSSRApp } from 'vue';
 import { renderToString } from 'vue/server-renderer';
 import { parse } from '@vue/compiler-sfc';
 
@@ -43,13 +43,30 @@ function modelForm(t, connectionTest, providers = [{
   name: 'Local', baseUrl: ' http://localhost:8000/v1 ', apiKey: ' local-key ',
   apiType: 'openai', models: [{ id: 'qwen3-4b', name: 'Qwen', enabled: true }]
 }]) {
-  const component = new Function('ref', 'watch', 'computed', 'api', 't', 'iconConnect', 'iconSetting', 'iconDelete',
-    modelScript.replace('export default', 'return'))(ref, watch, computed, { testModelConnection: connectionTest },
-      (key, params = {}) => `${key} ${JSON.stringify(params)}`, '', '', '');
+  const component = new Function('ref', 'watch', 'computed', 'nextTick', 'api', 't', 'iconConnect', 'iconSetting', 'iconDelete', 'ModelParameterDialog',
+    modelScript.replace('export default', 'return'))(ref, watch, computed, nextTick, { testModelConnection: connectionTest },
+      (key, params = {}) => `${key} ${JSON.stringify(params)}`, '', '', '', {});
   const scope = effectScope();
   t.after(() => scope.stop());
   return scope.run(() => component.setup({ providers }, { emit() {} }));
 }
+
+test('模型参数按 provider 和 model 保存，取消关闭保留原值', t => {
+  const vm = modelForm(t, () => {}, [
+    { name: 'A', models: [{ id: 'same-id', enabled: true, parameters: { temperature: 0.5 } }] },
+    { name: 'B', models: [{ id: 'same-id', enabled: true, parameters: { temperature: 0.8 } }] }
+  ]);
+  vm.openModelSettings(1, vm.localProviders.value[1].models[0]);
+  assert.equal(vm.editingModel.value.parameters.temperature, 0.8);
+  vm.editingTarget.value = null;
+  assert.equal(vm.localProviders.value[1].models[0].parameters.temperature, 0.8);
+  vm.openModelSettings(1, vm.localProviders.value[1].models[0]);
+  const parameters = { temperature: 0, topP: 0.9, maxTokens: 8192, reasoningEffort: 'none' };
+  vm.applyModelSettings(parameters);
+  assert.deepEqual(vm.localProviders.value[1].models[0].parameters, parameters);
+  assert.equal(vm.localProviders.value[0].models[0].parameters.temperature, 0.5);
+  assert.equal(vm.editingTarget.value, null);
+});
 
 test('model form tests unsaved settings, prevents duplicate requests and shows model and latency', async t => {
   let finish;

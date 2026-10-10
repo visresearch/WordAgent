@@ -22,7 +22,13 @@ def test_language_picker_updates_navigation(monkeypatch, compacted):
     monkeypatch.setattr(home_interface, "_read_local_version", lambda: "v1.0.0")
     monkeypatch.setattr(home_interface.HomeInterface, "_check_latest_release_async", lambda self: None)
     # Keep the real home page and navigation; other pages need no services here.
-    for name in ("DashboardInterface", "InstallInterface", "OfficeInstallInterface", "McpServerInterface", "ConsoleInterface"):
+    for name in (
+        "DashboardInterface",
+        "InstallInterface",
+        "OfficeInstallInterface",
+        "McpServerInterface",
+        "ConsoleInterface",
+    ):
         monkeypatch.setattr(main_window, name, QWidget)
 
     window = main_window.MainWindow()

@@ -9,6 +9,7 @@ import datetime
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor
@@ -28,6 +29,40 @@ from app.core.config import get_wence_data_dir
 from app.core.logging import get_logger
 
 logger = get_logger("gui.office_install")
+
+
+class OfficeStaticRequestHandler(SimpleHTTPRequestHandler):
+    extensions_map = {
+        **SimpleHTTPRequestHandler.extensions_map,
+        ".js": "application/javascript",
+        ".html": "text/html",
+        ".css": "text/css",
+        ".xml": "application/xml",
+        ".json": "application/json",
+        ".png": "image/png",
+        ".svg": "image/svg+xml",
+    }
+    image_extensions = frozenset({
+        ".png", ".svg", ".jpg", ".jpeg", ".gif", ".bmp", ".tif", ".tiff", ".webp", ".ico"
+    })
+
+    def end_headers(self):
+        extension = Path(unquote(urlsplit(self.path).path)).suffix.lower()
+        # Office substitutes its default icon if image responses set Cache-Control.
+        # https://learn.microsoft.com/en-us/javascript/api/manifest/image
+        if extension not in self.image_extensions:
+            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+            self.send_header("Pragma", "no-cache")
+            self.send_header("Expires", "0")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        super().end_headers()
+
+    def log_message(self, format, *args):
+        message = format % args
+        if " 200 " in f" {message} " or " 304 " in f" {message} ":
+            logger.debug("Office static server: %s - %s", self.address_string(), message)
+        else:
+            logger.warning("Office static server: %s - %s", self.address_string(), message)
 
 
 def _get_runtime_base() -> Path:
@@ -352,33 +387,7 @@ class OfficeInstallInterface(QWidget):
         try:
             cert_file, key_file = _get_cert_paths()
 
-            class LocalStaticHandler(SimpleHTTPRequestHandler):
-                extensions_map = {
-                    **SimpleHTTPRequestHandler.extensions_map,
-                    ".js": "application/javascript",
-                    ".html": "text/html",
-                    ".css": "text/css",
-                    ".xml": "application/xml",
-                    ".json": "application/json",
-                    ".png": "image/png",
-                    ".svg": "image/svg+xml",
-                }
-
-                def end_headers(self):
-                    self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
-                    self.send_header("Pragma", "no-cache")
-                    self.send_header("Expires", "0")
-                    self.send_header("Access-Control-Allow-Origin", "*")
-                    super().end_headers()
-
-                def log_message(self, format, *args):
-                    message = format % args
-                    if " 200 " in f" {message} " or " 304 " in f" {message} ":
-                        logger.debug("Office 静态服务: %s - %s", self.address_string(), message)
-                    else:
-                        logger.warning("Office 静态服务: %s - %s", self.address_string(), message)
-
-            handler = partial(LocalStaticHandler, directory=str(dist_dir))
+            handler = partial(OfficeStaticRequestHandler, directory=str(dist_dir))
 
             server = ThreadingHTTPServer((self._host, self._port), handler)
             ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)

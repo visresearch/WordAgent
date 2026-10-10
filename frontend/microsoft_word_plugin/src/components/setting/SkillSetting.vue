@@ -17,7 +17,7 @@
     </div>
 
     <div class="toolbar">
-      <button class="btn-add-server" :disabled="uploading" @click="openUploadDialog">
+      <button class="btn-add-server" :disabled="uploading || !!busyFolder" @click="openUploadDialog">
         <svg
           width="14"
           height="14"
@@ -68,14 +68,14 @@
               <input
                 :checked="skill.enabled !== false"
                 type="checkbox"
-                :disabled="busyFolder === skill.folder"
+                :disabled="!!busyFolder || uploading"
                 @change="toggleSkill(skill, $event)"
               />
               <span class="slider"></span>
             </label>
             <button
               class="action-btn"
-              :disabled="busyFolder === skill.folder"
+              :disabled="!!busyFolder || uploading"
               :title="$t('skill.openFolder')"
               @click="openSkillFolder(skill)"
             >
@@ -83,7 +83,7 @@
             </button>
             <button
               class="action-btn delete"
-              :disabled="skill.builtin || busyFolder === skill.folder"
+              :disabled="skill.builtin || !!busyFolder || uploading"
               :title="skill.builtin ? $t('skill.builtinDeleteDisabled') : $t('common.delete')"
               @click="removeSkillItem(skill)"
             >
@@ -140,7 +140,7 @@ export default {
     };
 
     const openUploadDialog = () => {
-      if (uploading.value) {
+      if (uploading.value || busyFolder.value) {
         return;
       }
       fileInputRef.value?.click();
@@ -173,6 +173,7 @@ export default {
     };
 
     const toggleSkill = async (skill, event) => {
+      if (busyFolder.value || uploading.value) return;
       const nextEnabled = !!event?.target?.checked;
       busyFolder.value = skill.folder;
       try {
@@ -188,12 +189,7 @@ export default {
     };
 
     const removeSkillItem = async (skill) => {
-      if (skill.builtin) {
-        return;
-      }
-
-      const confirmed = window.confirm(t('skill.deleteConfirm', { name: skill.name || skill.folder }));
-      if (!confirmed) {
+      if (skill.builtin || busyFolder.value || uploading.value) {
         return;
       }
 
@@ -211,6 +207,7 @@ export default {
     };
 
     const openSkillFolder = async (skill) => {
+      if (busyFolder.value || uploading.value) return;
       busyFolder.value = skill.folder;
       try {
         await api.openSkillFolder(skill.folder);
