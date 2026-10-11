@@ -11,8 +11,15 @@ import os
 import shutil
 import subprocess
 import sys
+from importlib import import_module
 
 from PyInstaller.utils.hooks import collect_submodules
+
+# Fail before creating an unusable bundle if the asyncio native dependency is absent.
+try:
+    import_module("greenlet._greenlet")
+except ImportError as exc:
+    raise RuntimeError("SQLAlchemy asyncio requires greenlet. Run uv sync --locked before packaging.") from exc
 
 block_cipher = None
 
@@ -111,6 +118,8 @@ hiddenimports = [
     "pydantic_settings",
     "sqlalchemy",
     "sqlalchemy.ext.asyncio",
+    "greenlet",
+    "greenlet._greenlet",
     "aiosqlite",
     "openai",
     "httpx",

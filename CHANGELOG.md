@@ -1,6 +1,8 @@
 # Changelog
 
-## [v0.6.3]
+## [v0.6.3-beta.1]
+
+(注意：此版本为beta测试版本)
 
 ### Changed
 - 更新py依赖

@@ -60,7 +60,7 @@ jobs:
       - name: Install Python dependencies
         working-directory: backend
         run: |
-          uv sync
+          uv sync --locked
           uv pip install pyinstaller pyside6
 
       - name: Build app directory with PyInstaller
@@ -233,7 +233,7 @@ jobs:
       - name: Install Python dependencies
         working-directory: backend
         run: |
-          uv sync
+          uv sync --locked
           uv pip install pyinstaller pyside6
 
       - name: Build app directory with PyInstaller
@@ -346,7 +346,7 @@ jobs:
       - name: Install Python dependencies
         working-directory: backend
         run: |
-          uv sync
+          uv sync --locked
           uv pip install pyinstaller pyside6
 
       - name: Build app directory with PyInstaller
