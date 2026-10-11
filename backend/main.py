@@ -10,9 +10,28 @@ import time
 import os
 from pathlib import Path
 
-# 必须在 console_interface 等 PySide6 模块导入前关闭 QWidget RHI，
-# 否则 OpenGL 上下文创建失败时主窗口可能只显示黑色。
-os.environ.setdefault("QT_WIDGETS_RHI", "0")
+
+def configure_gui_environment() -> None:
+    """在导入 Qt 前配置渲染，兼容 Linux 驱动和打包环境。"""
+    # QWidget RHI 与 Chromium 使用独立的渲染路径。
+    os.environ.setdefault("QT_WIDGETS_RHI", "0")
+    os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", "--disable-gpu")
+    if sys.platform != "linux":
+        return
+
+    # 仅关闭 Chromium GPU 仍会让 Qt Quick 初始化 OpenGL。
+    os.environ.setdefault("QT_XCB_GL_INTEGRATION", "none")
+    os.environ.setdefault("QT_QUICK_BACKEND", "software")
+
+    if getattr(sys, "frozen", False):
+        # 系统 GVfs 可能依赖更新的 GLib，仅加载包内的 GIO 模块。
+        bundle_dir = Path(sys._MEIPASS)
+        os.environ.setdefault("GIO_MODULE_DIR", str(bundle_dir / "gio" / "modules"))
+        os.environ.setdefault("GIO_EXTRA_MODULES", "")
+
+
+# console_interface 的包初始化也会导入 QtWebEngine，必须提前配置渲染。
+configure_gui_environment()
 
 
 def _load_runtime_env() -> list[Path]:

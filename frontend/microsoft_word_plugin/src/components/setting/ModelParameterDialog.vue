@@ -106,21 +106,71 @@
 
           <div class="parameter-field">
             <div class="parameter-description">
-              <label for="model-reasoning-effort">Reasoning Effort</label>
+              <label id="model-reasoning-label" for="model-reasoning-effort">Reasoning Effort</label>
               <p id="model-reasoning-hint" class="field-hint">
                 {{ $t('model.parameters.reasoningHint') }}
               </p>
             </div>
             <div class="parameter-control">
-              <select
+              <button
                 id="model-reasoning-effort"
-                v-model="draft.reasoningEffort"
+                ref="reasoningTrigger"
+                type="button"
+                class="reasoning-trigger"
+                role="combobox"
+                aria-haspopup="listbox"
+                :aria-expanded="reasoningOpen"
+                aria-controls="model-reasoning-options"
+                :aria-activedescendant="reasoningOpen ? `model-reasoning-option-${activeReasoningIndex}` : undefined"
+                aria-labelledby="model-reasoning-label"
                 aria-describedby="model-reasoning-hint"
+                @click="toggleReasoningMenu"
+                @keydown="onReasoningKeydown"
               >
-                <option v-for="effort in reasoningOptions" :key="effort" :value="effort">
-                  {{ effort }}
-                </option>
-              </select>
+                <span>{{ draft.reasoningEffort }}</span>
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  aria-hidden="true"
+                >
+                  <path d="m6 9 6 6 6-6" />
+                </svg>
+              </button>
+              <Teleport to="body">
+                <div
+                  v-if="reasoningOpen"
+                  id="model-reasoning-options"
+                  ref="reasoningMenu"
+                  class="reasoning-menu"
+                  role="listbox"
+                  aria-labelledby="model-reasoning-label"
+                  :style="reasoningMenuStyle"
+                  @pointerdown.stop
+                  @mousedown.stop.prevent
+                  @mouseup.stop
+                  @click.stop.prevent
+                >
+                  <div
+                    v-for="(effort, index) in reasoningOptions"
+                    :id="`model-reasoning-option-${index}`"
+                    :key="effort"
+                    class="reasoning-option"
+                    :class="{ 'is-active': index === activeReasoningIndex, 'is-selected': effort === draft.reasoningEffort }"
+                    role="option"
+                    :aria-selected="effort === draft.reasoningEffort"
+                    @mouseenter="activeReasoningIndex = index"
+                    @pointerdown.stop.prevent
+                    @click.stop.prevent="selectReasoning(index)"
+                  >
+                    {{ effort }}
+                    <span v-if="effort === draft.reasoningEffort" aria-hidden="true">✓</span>
+                  </div>
+                </div>
+              </Teleport>
             </div>
           </div>
         </div>
@@ -150,6 +200,11 @@ export default {
   emits: ['confirm', 'close'],
   setup(props, { emit }) {
     const dialog = ref(null);
+    const reasoningTrigger = ref(null);
+    const reasoningMenu = ref(null);
+    const reasoningOpen = ref(false);
+    const activeReasoningIndex = ref(0);
+    const reasoningMenuStyle = reactive({});
     const previousFocus = document.activeElement;
     const parameters = props.model.parameters || {};
     const maxSafeInteger = Number.MAX_SAFE_INTEGER;
@@ -175,6 +230,121 @@ export default {
       return Math.min(100, Math.max(0, (Number(draft[parameter.key]) || 0) / parameter.max * 100));
     };
 
+    const closeReasoningMenu = () => {
+      reasoningOpen.value = false;
+    };
+
+    const positionReasoningMenu = () => {
+      if (!reasoningOpen.value || !reasoningTrigger.value) {
+        return;
+      }
+      const anchor = reasoningTrigger.value.getBoundingClientRect();
+      const body = dialog.value.querySelector('.dialog-body').getBoundingClientRect();
+      if (anchor.bottom <= body.top || anchor.top >= body.bottom) {
+        closeReasoningMenu();
+        return;
+      }
+      // The teleported menu can escape the editor, but stays inside the settings viewport.
+      const margin = 8;
+      const gap = 4;
+      const viewportWidth = document.documentElement.clientWidth;
+      const viewportHeight = document.documentElement.clientHeight;
+      const belowTop = Math.max(margin, anchor.bottom + gap);
+      const aboveBottom = Math.min(viewportHeight - margin, anchor.top - gap);
+      const below = Math.max(0, viewportHeight - margin - belowTop);
+      const above = Math.max(0, aboveBottom - margin);
+      const opensBelow = below >= 120 || below >= above;
+      const width = Math.min(anchor.width, Math.max(0, viewportWidth - margin * 2));
+      Object.assign(reasoningMenuStyle, {
+        left: `${Math.max(margin, Math.min(anchor.left, viewportWidth - margin - width))}px`,
+        width: `${width}px`,
+        top: opensBelow ? `${belowTop}px` : undefined,
+        bottom: opensBelow ? undefined : `${viewportHeight - aboveBottom}px`,
+        maxHeight: `${Math.min(180, opensBelow ? below : above)}px`
+      });
+      nextTick(revealActiveReasoning);
+    };
+
+    const revealActiveReasoning = () => {
+      const menu = reasoningMenu.value;
+      const option = menu?.children[activeReasoningIndex.value];
+      if (!option) {
+        return;
+      }
+      // Scroll only the list; scrollIntoView would also move the editor/page.
+      const padding = 4;
+      if (option.offsetTop - padding < menu.scrollTop) {
+        menu.scrollTop = option.offsetTop - padding;
+      } else if (option.offsetTop + option.offsetHeight + padding > menu.scrollTop + menu.clientHeight) {
+        menu.scrollTop = option.offsetTop + option.offsetHeight + padding - menu.clientHeight;
+      }
+    };
+
+    const openReasoningMenu = () => {
+      activeReasoningIndex.value = reasoningOptions.indexOf(draft.reasoningEffort);
+      reasoningOpen.value = true;
+      positionReasoningMenu();
+    };
+
+    const toggleReasoningMenu = () => {
+      if (reasoningOpen.value) {
+        closeReasoningMenu();
+      } else {
+        openReasoningMenu();
+      }
+    };
+
+    const selectReasoning = (index) => {
+      draft.reasoningEffort = reasoningOptions[index];
+      closeReasoningMenu();
+    };
+
+    const onReasoningKeydown = (event) => {
+      if (event.key === 'Escape' && reasoningOpen.value) {
+        event.preventDefault();
+        event.stopPropagation();
+        closeReasoningMenu();
+        return;
+      }
+      if (!['ArrowDown', 'ArrowUp', 'Home', 'End', 'Enter', ' '].includes(event.key)) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      if (!reasoningOpen.value) {
+        openReasoningMenu();
+        if (event.key !== 'Home' && event.key !== 'End') {
+          return;
+        }
+      } else if (event.key === 'Enter' || event.key === ' ') {
+        selectReasoning(activeReasoningIndex.value);
+        return;
+      }
+      const last = reasoningOptions.length - 1;
+      if (event.key === 'Home') {
+        activeReasoningIndex.value = 0;
+      } else if (event.key === 'End') {
+        activeReasoningIndex.value = last;
+      } else {
+        activeReasoningIndex.value = Math.max(0, Math.min(last,
+          activeReasoningIndex.value + (event.key === 'ArrowDown' ? 1 : -1)));
+      }
+      nextTick(revealActiveReasoning);
+    };
+
+    // Host blur can precede an option click; only actual outside interactions dismiss the menu.
+    const onOutsideInteraction = (event) => {
+      if (!reasoningTrigger.value?.contains(event.target) && !reasoningMenu.value?.contains(event.target)) {
+        closeReasoningMenu();
+      }
+    };
+
+    const onViewportScroll = (event) => {
+      if (!reasoningMenu.value?.contains(event.target)) {
+        positionReasoningMenu();
+      }
+    };
+
     const confirmSettings = () => {
       if (!dialog.value?.reportValidity()) {
         return;
@@ -191,12 +361,17 @@ export default {
       if (event.key === 'Escape') {
         event.preventDefault();
         event.stopPropagation();
-        emit('close');
+        if (reasoningOpen.value) {
+          closeReasoningMenu();
+        } else {
+          emit('close');
+        }
       } else if (event.key === 'Enter' && event.target.matches('input[type="number"]')) {
         event.preventDefault();
         confirmSettings();
       } else if (event.key === 'Tab') {
-        const controls = [...dialog.value.querySelectorAll('button, input, select')];
+        closeReasoningMenu();
+        const controls = [...dialog.value.querySelectorAll('button, input')];
         const first = controls[0];
         const last = controls[controls.length - 1];
         if (event.shiftKey && document.activeElement === first) {
@@ -209,8 +384,18 @@ export default {
       }
     };
 
-    onMounted(() => dialog.value?.querySelector('input')?.focus());
+    onMounted(() => {
+      dialog.value?.querySelector('input')?.focus();
+      document.addEventListener('mousedown', onOutsideInteraction);
+      document.addEventListener('focusin', onOutsideInteraction);
+      window.addEventListener('resize', positionReasoningMenu);
+      document.addEventListener('scroll', onViewportScroll, true);
+    });
     onBeforeUnmount(() => {
+      document.removeEventListener('mousedown', onOutsideInteraction);
+      document.removeEventListener('focusin', onOutsideInteraction);
+      window.removeEventListener('resize', positionReasoningMenu);
+      document.removeEventListener('scroll', onViewportScroll, true);
       nextTick(() => {
         if (previousFocus?.isConnected) {
           previousFocus.focus();
@@ -218,7 +403,11 @@ export default {
       });
     });
 
-    return { dialog, draft, maxSafeInteger, samplingParameters, reasoningOptions, rangeProgress, confirmSettings, onKeydown };
+    return {
+      dialog, draft, maxSafeInteger, samplingParameters, reasoningOptions, rangeProgress, confirmSettings, onKeydown,
+      reasoningTrigger, reasoningMenu, reasoningOpen, activeReasoningIndex, reasoningMenuStyle,
+      toggleReasoningMenu, closeReasoningMenu, selectReasoning, onReasoningKeydown
+    };
   }
 };
 </script>
@@ -348,7 +537,7 @@ export default {
 }
 
 .token-input input,
-.parameter-field select,
+.reasoning-trigger,
 .sampling-value {
   width: 100%;
   height: 36px;
@@ -359,6 +548,69 @@ export default {
   color: #333;
   font-family: inherit;
   font-size: 13px;
+}
+
+.reasoning-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.reasoning-trigger svg {
+  flex-shrink: 0;
+}
+
+.reasoning-menu {
+  position: fixed;
+  z-index: 2001;
+  box-sizing: border-box;
+  padding: 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  background: #fff;
+  color: #333;
+  box-shadow: 0 6px 20px rgba(24, 30, 48, 0.16);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
+  scrollbar-width: thin;
+  scrollbar-color: #c7ccdc #f5f6fa;
+}
+
+.reasoning-menu::-webkit-scrollbar {
+  width: 6px;
+}
+
+.reasoning-menu::-webkit-scrollbar-track {
+  background: #f5f6fa;
+}
+
+.reasoning-menu::-webkit-scrollbar-thumb {
+  border-radius: 3px;
+  background: #c7ccdc;
+}
+
+.reasoning-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 34px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.reasoning-option.is-active {
+  background: #f0f2ff;
+}
+
+.reasoning-option.is-selected {
+  color: #596bda;
+  font-weight: 500;
 }
 
 .token-input input {
@@ -478,7 +730,7 @@ export default {
 }
 
 .token-input input:focus,
-.parameter-field select:focus,
+.reasoning-trigger:focus,
 .sampling-value:focus {
   outline: none;
   border-color: #667eea;

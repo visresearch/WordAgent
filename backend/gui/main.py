@@ -9,10 +9,16 @@ import socket
 import platform
 from pathlib import Path
 
-# QWidget 的 RHI/OpenGL 上下文在部分 Linux 驱动或远程桌面中无法创建，会导致整个窗口黑屏。
-# 只关闭 QWidget RHI；QtWebEngine (Chromium) 不兼容 QT_OPENGL=software。
+# 独立启动 GUI 时也必须在导入 Qt 前配置渲染。
 os.environ.setdefault("QT_WIDGETS_RHI", "0")
 os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", "--disable-gpu")
+if sys.platform == "linux":
+    os.environ.setdefault("QT_XCB_GL_INTEGRATION", "none")
+    os.environ.setdefault("QT_QUICK_BACKEND", "software")
+    if getattr(sys, "frozen", False):
+        bundle_dir = Path(sys._MEIPASS)
+        os.environ.setdefault("GIO_MODULE_DIR", str(bundle_dir / "gio" / "modules"))
+        os.environ.setdefault("GIO_EXTRA_MODULES", "")
 
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon

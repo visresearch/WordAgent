@@ -13,3 +13,16 @@ Release artifacts:
 - `backend/package/wence_ai-macos-arm64-app.zip`
 - `backend/package/wence_ai-macos-arm64.dmg`
 - `backend/package/wence_ai-windows-x86_64-full.zip`
+
+Linux runtime defaults are configured in `backend/main.py` before any Qt
+imports. Widgets and the embedded WPS installation page use software rendering
+so startup does not depend on a working GLX configuration. Frozen Linux builds
+also isolate GIO modules from the host's GVfs libraries to avoid mixing them with
+the bundled GLib. Explicit environment overrides are preserved.
+
+For an older installed build that exits with `Could not initialize GLX`, launch
+it with:
+
+```bash
+QT_XCB_GL_INTEGRATION=none QT_QUICK_BACKEND=software QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu wence-ai
+```
