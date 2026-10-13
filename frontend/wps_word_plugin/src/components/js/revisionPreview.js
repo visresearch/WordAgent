@@ -1,3 +1,4 @@
+// 调整revisionBatches.entries() 的删除逻辑,避免在for循环内一边删除一边遍历，且使用docid做同一文档判定 2026103 by volun_leung
 const revisionBatches = new Map();
 const documentPreviewStates = new Map();
 let nextBatchId = 1;
@@ -572,10 +573,17 @@ export function settleAllDocumentRevisions(doc, action) {
       timings.nativeMs = now() - nativeStartedAt;
     }
 
-    for (const [batchId, batch] of revisionBatches.entries()) {
-      if (batch.doc === doc) {
-        revisionBatches.delete(batchId);
+
+   //先筛选要删除的批次
+   const batchIdsToDelete = [];
+   for (const [batchId, batch] of revisionBatches.entries()) {
+      if (batch.doc.DocId === doc.DocId) {
+        batchIdsToDelete.push(batchId);
       }
+    }
+    // 再统一删除
+    for (const batchId of batchIdsToDelete) {
+     revisionBatches.delete(batchId);
     }
 
     const viewStartedAt = now();
