@@ -1,3 +1,6 @@
+// tskpane.Visible 先设置窗口可见再调整窗口大小,修复窗口大小设置无效的问题 20261013  by volun_leung
+// btnShowAIChat函数 修复二次点击时界面不消失的问题                      20261013  by volun_leung
+
 import Util from './js/util.js';
 import api from './js/api.js';
 import { t } from '../i18n/index.js';
@@ -37,8 +40,9 @@ async function checkAutoShowPanel() {
         let id = tskpane.ID;
         window.Application.PluginStorage.setItem('ai_taskpane_id', id);
         tskpane.DockPosition = window.Application.Enum.msoCTPDockPositionRight;
-        tskpane.Width = window.devicePixelRatio * 500;
         tskpane.Visible = true;
+        tskpane.Width = window.devicePixelRatio * 500;
+        
       } else {
         let tskpane = window.Application.GetTaskPane(tsId);
         tskpane.Visible = true;
@@ -63,12 +67,14 @@ function OnAction(control) {
           let id = tskpane.ID;
           window.Application.PluginStorage.setItem('ai_taskpane_id', id);
           tskpane.DockPosition = window.Application.Enum.msoCTPDockPositionRight;
-          tskpane.Width = window.devicePixelRatio * 500; // 不知道为啥无效
           tskpane.Visible = true;
+          tskpane.Width = window.devicePixelRatio * 500;
+          
         } else {
           let tskpane = window.Application.GetTaskPane(tsId);
-          tskpane.Width = window.devicePixelRatio * 500; // 不知道为啥无效
           tskpane.Visible = !tskpane.Visible;
+          tskpane.Width = window.devicePixelRatio * 500; 
+          
         }
       }
       break;
