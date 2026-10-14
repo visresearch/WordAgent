@@ -1,6 +1,6 @@
 // 调整revisionBatches.entries() 的删除逻辑,避免在for循环内一边删除一边遍历，且使用docid做同一文档判定 2026103 by volun_leung
 // 调整修订时作者为助手名称，修订完成后恢复原作者名称，且处理修订只处理助手的修订，不处理其他作者的修订 20261014 by volun_leung
-import { t } from '../i18n/index.js';
+import { t } from '@/i18n/index.js';
 const revisionBatches = new Map();
 const documentPreviewStates = new Map();
 let nextBatchId = 1;
@@ -44,6 +44,10 @@ function listRevisions(revisions) {
   for (let index = 1; index <= count; index++) {
     const revision = safeRead(() => revisions.Item(index));
     if (!revision) {
+      continue;
+    }
+     //只要AI助手的修订清单
+    if(revision.Author != APP_USER_NAME){
       continue;
     }
     const range = safeRead(() => revision.Range);
@@ -247,11 +251,10 @@ export function beginTrackedEdit(doc) {
     } catch (restoreError) {
       console.warn('[revisionPreview] 开启原生修订失败后恢复文档状态失败:', restoreError);
     }
-    throw error;
-  } finally {
-    //恢复原作者名称
+    // 出现异常则 恢复原作者名称
     window.Application.UserName = originalUserName;
-  }
+    throw error;
+  } 
   return state;
 }
 
