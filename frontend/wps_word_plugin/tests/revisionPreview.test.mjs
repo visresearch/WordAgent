@@ -733,10 +733,14 @@ const paneScript = paneSource.match(/<script>([\s\S]*?)<\/script>/)[1].replace(/
 function chatPane(doc, alert, documents = [doc], converters = {}) {
   doc.DocID ??= 1;
   let activeDoc = doc;
-  const window = { Application: { ...doc.Application, get ActiveDocument() { return activeDoc; } } };
+  const window = { Application: { ...doc.Application, get ActiveDocument() {
+    return activeDoc; 
+  } } };
   let cacheClears = 0;
   const responses = [];
-  const api = { wsManager: { async send(response) { responses.push(response); }, clearDocumentCache() {
+  const api = { wsManager: { async send(response) {
+    responses.push(response); 
+  }, clearDocumentCache() {
     cacheClears += 1;
   } } };
   const component = new Function('ChatMessages', 'ChatInput', 'SessionPane', 'hasRevisionBatch', 'rejectRevisionBatches', 'settleAllDocumentRevisions', 'getAIRevisionCount', 'beginTrackedEdit', 'finishTrackedEdit', 'abortTrackedEdit', 'getDocumentById', 'api', 'alert', 't', 'window', 'generateDocxFromJSON', 'editDocxParagraph', 'deleteDocxPara', 'getParagraphParaID', paneScript.replace('export default', 'return'))(
@@ -747,7 +751,9 @@ function chatPane(doc, alert, documents = [doc], converters = {}) {
   const vm = Object.assign(component.data(), component.methods);
   vm._refreshAIRevisionPreview();
   return { vm, responses, cacheClears: () => cacheClears, resolveTargetDoc: component.methods._resolveTargetDoc.bind(vm),
-    selectDocument(next) { activeDoc = next; } };
+    selectDocument(next) {
+      activeDoc = next; 
+    } };
 }
 
 for (const action of ['accept', 'reject']) {
@@ -1111,7 +1117,9 @@ test('inserting with docId zero binds the pending revision to the actual documen
 
 test('delete reports the real result without calling Undo when native tracking is unavailable', () => {
   const doc = Object.assign(documentWith(), { DocID: 61 });
-  const range = { Start: 10, End: 20, get Duplicate() { return this; }, Expand() {} };
+  const range = { Start: 10, End: 20, get Duplicate() {
+    return this; 
+  }, Expand() {} };
   doc.Paragraphs = { Count: 1, Item: () => ({ ID: 101, Range: range }) };
   doc.Application.Undo = () => assert.fail('Deletion must never automatically undo');
   const { vm, responses } = chatPane(doc, () => {}, [doc], {
@@ -1142,7 +1150,9 @@ test('manual formatted insertion records the actual DocID in its message and pen
 
 test('edit and delete requests with docId zero also retain a concrete document identity', () => {
   const doc = Object.assign(documentWith(), { DocID: 81 });
-  const range = { Start: 10, End: 20, get Duplicate() { return this; }, Expand() {} };
+  const range = { Start: 10, End: 20, get Duplicate() {
+    return this; 
+  }, Expand() {} };
   doc.Paragraphs = { Count: 1, Item: () => ({ ID: 101, Range: range }) };
   const { vm } = chatPane(doc, () => assert.fail('Should succeed'), [doc], {
     edit() {
@@ -1161,4 +1171,51 @@ test('edit and delete requests with docId zero also retain a concrete document i
   assert.equal(vm.deleteRevisions[0].docId, 81);
   vm.acceptPendingRevisions();
   assert.equal(vm.pendingEdits.length + vm.deleteRevisions.length, 0);
+});
+
+test('native edits suspend redraw and restore the original state on completion or abort', () => {
+  for (const initial of [true, false]) {
+    for (const abort of [true, false]) {
+      const doc = documentWith();
+      doc.Application.ScreenUpdating = initial;
+      const state = beginTrackedEdit(doc);
+      assert.equal(doc.Application.ScreenUpdating, false);
+      if (abort) {
+        abortTrackedEdit(state);
+      } else {
+        doc._items.push(revision({ type: 1, start: 10, end: 20, text: 'AI' }));
+        finishTrackedEdit(state, { start: 10, end: 20 }, 'edit');
+      }
+      assert.equal(doc.Application.ScreenUpdating, initial);
+      assert.equal(doc.Application.UserName, '当前用户');
+      assert.equal(doc.TrackRevisions, false);
+    }
+  }
+});
+
+test('redraw is also restored if collecting revisions fails after the edit', () => {
+  const doc = documentWith();
+  doc.Application.ScreenUpdating = true;
+  const state = beginTrackedEdit(doc);
+  Object.defineProperty(doc, 'Revisions', { get() {
+    throw new Error('WPS busy'); 
+  } });
+  assert.throws(() => finishTrackedEdit(state, { start: 10, end: 20 }, 'edit'), /WPS busy/);
+  assert.equal(doc.Application.ScreenUpdating, true);
+  assert.equal(doc.Application.UserName, '当前用户');
+});
+
+test('revision preview polling does not scan native revisions while the agent is generating', () => {
+  const doc = Object.assign(documentWith(), { DocID: 91 });
+  const { vm } = chatPane(doc, () => {});
+  vm.isLoading = true;
+  let reads = 0;
+  Object.defineProperty(doc, 'Revisions', { get() {
+    reads++; throw new Error('Should not read during generation'); 
+  } });
+  vm.pendingEdits.push({ docId: 91 });
+  vm._refreshAIRevisionPreview();
+  assert.equal(reads, 0);
+  assert.equal(vm.activeRevisionDocId, 91);
+  assert.equal(vm.pendingEdits.length, 1);
 });

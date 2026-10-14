@@ -38,10 +38,10 @@
       </div>
     </div>
 
-    <!-- 已执行的原生修订确认条（确认/取消只接受或拒绝修订，不触发正文操作） -->
-    <div v-if="deleteRevisions.length > 0 || pendingDocument || pendingEdits.length > 0" class="current-selection-bar pending-document-bar" :class="{ 'revision-delete-bar': deleteRevisions.length > 0 && !pendingDocument && pendingEdits.length === 0 }">
+    <!-- 原生修订的接受／拒绝操作栏 -->
+    <div v-if="pendingRevisionCount > 0 || deleteRevisions.length > 0 || pendingDocument || pendingEdits.length > 0" class="current-selection-bar pending-document-bar" :class="{ 'revision-delete-bar': deleteRevisions.length > 0 && !pendingDocument && pendingEdits.length === 0 }">
       <div class="selection-bar-content">
-        <div class="selection-bar-icon pending-icon" :class="{ 'revision-delete-icon': deleteRevisions.length > 0 && !pendingDocument && pendingEdits.length === 0 }">
+        <div class="selection-bar-icon">
           <svg
             width="14"
             height="14"
@@ -57,12 +57,12 @@
         <div class="selection-bar-info">
           <span class="selection-bar-preview">{{ pendingSummary }}</span>
         </div>
-        <div v-if="!isLoading" class="pending-actions" :aria-busy="settlingRevisions">
-          <button class="pending-btn confirm-btn" :disabled="settlingRevisions" :class="{ 'delete-confirm-btn': deleteRevisions.length > 0 && !pendingDocument }" @click="$emit('confirm-pending')">
-            {{ $t('common.confirm') }}
+        <div class="pending-actions" :aria-busy="settlingRevisions">
+          <button class="pending-btn accept-btn" :disabled="isLoading || settlingRevisions" @click="$emit('accept-revisions')">
+            {{ $t('chat.acceptRevision') }}
           </button>
-          <button class="pending-btn cancel-btn" :disabled="settlingRevisions" @click="$emit('cancel-pending')">
-            {{ $t('common.cancel') }}
+          <button class="pending-btn reject-btn" :disabled="isLoading || settlingRevisions" @click="$emit('reject-revisions')">
+            {{ $t('chat.rejectRevision') }}
           </button>
         </div>
       </div>
@@ -219,11 +219,12 @@ export default {
     selections: { type: Array, default: () => [] },
     uploadedFiles: { type: Array, default: () => [] },
     pendingDocument: { type: Object, default: null },
+    pendingRevisionCount: { type: Number, default: 0 },
     pendingEdits: { type: Array, default: () => [] },
     deleteRevisions: { type: Array, default: () => [] },
     tokenStats: { type: Object, default: () => ({ current: 0, max: 258000 }) },
   },
-  emits: ['send', 'stop', 'add-selection', 'remove-selection', 'add-files', 'remove-file', 'update:mode', 'update:selectedModel', 'update:selectedModelProvider', 'refresh-models', 'confirm-pending', 'cancel-pending'],
+  emits: ['send', 'stop', 'add-selection', 'remove-selection', 'add-files', 'remove-file', 'update:mode', 'update:selectedModel', 'update:selectedModelProvider', 'refresh-models', 'accept-revisions', 'reject-revisions'],
   data() {
     return {
       inputText: '',
@@ -291,6 +292,7 @@ export default {
       if (this.pendingEdits.length > 0) {
         parts.push(`编辑 ${this.pendingEdits.length} 个段落`);
       }
+      if (parts.length === 0) parts.push(t('chat.revisionCount', { count: this.pendingRevisionCount }));
       return t('chat.aiOperation', { actions: parts.join(t('chat.actionSeparator')) });
     },
     tokenRingOffset() {
@@ -500,14 +502,6 @@ export default {
   border-bottom-color: #ffcccc;
 }
 
-.pending-icon {
-  color: #e74c3c !important;
-}
-
-.revision-delete-icon {
-  color: #dc3545 !important;
-}
-
 .pending-actions {
   display: flex;
   gap: 6px;
@@ -524,37 +518,31 @@ export default {
   line-height: 1.4;
 }
 
-.confirm-btn {
-  background: #667eea;
+.accept-btn {
+  background: #16a34a;
   color: white;
-  border-color: #667eea;
+  border-color: #16a34a;
 }
 
-.confirm-btn:hover {
-  background: #5a6fd6;
-  border-color: #5a6fd6;
+.accept-btn:hover:not(:disabled) {
+  background: #15803d;
+  border-color: #15803d;
 }
 
-.delete-confirm-btn {
+.reject-btn {
   background: #dc3545;
+  color: white;
   border-color: #dc3545;
 }
 
-.delete-confirm-btn:hover {
+.reject-btn:hover:not(:disabled) {
   background: #c82333;
   border-color: #c82333;
 }
 
-.cancel-btn {
-  background: white;
-  color: #666;
-  border-color: #ddd;
-}
-
-.cancel-btn:hover {
-  background: #f5f5f5;
-  color: #333;
-  border-color: #ccc;
+.pending-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .chat-input-area {

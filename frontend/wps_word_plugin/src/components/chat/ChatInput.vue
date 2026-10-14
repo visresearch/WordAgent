@@ -58,7 +58,7 @@
     <!-- 已执行的原生修订确认条（确认/取消只接受或拒绝修订，不触发正文操作） -->
     <div v-if="deleteRevisions.length > 0 || pendingDocument || pendingEdits.length > 0 || pendingRevisionCount > 0" class="current-selection-bar pending-document-bar" :class="{ 'revision-delete-bar': deleteRevisions.length > 0 && !pendingDocument && pendingEdits.length === 0 }">
       <div class="selection-bar-content">
-        <div class="selection-bar-icon pending-icon" :class="{ 'revision-delete-icon': deleteRevisions.length > 0 && !pendingDocument && pendingEdits.length === 0 }">
+        <div class="selection-bar-icon">
           <svg
             width="14"
             height="14"
@@ -691,14 +691,6 @@ export default {
   background: #fff5f5;
   border-top-color: #ffcccc;
   border-bottom-color: #ffcccc;
-}
-
-.pending-icon {
-  color: #e74c3c !important;
-}
-
-.revision-delete-icon {
-  color: #dc3545 !important;
 }
 
 .pending-actions {

@@ -241,9 +241,15 @@ export default {
         const { doc, docId } = active;
         try {
           this.revisionDocumentName = String(doc.Name || '');
-          const count = getAIRevisionCount(doc);
-          if (count > 0) {
-            this.aiRevisionDocuments = [{ docId, count }];
+          // 生成时已通过 pendingEdits/Insertions 显示进度；避免每次编辑以及
+          // 定时轮询都扫描全文修订。结束流式处理后再读取原生修订数量。
+          if (this.isLoading) {
+            this.aiRevisionDocuments = previous.filter(item => item.docId === docId);
+          } else {
+            const count = getAIRevisionCount(doc);
+            if (count > 0) {
+              this.aiRevisionDocuments = [{ docId, count }];
+            }
           }
         } catch (error) {
           this.aiRevisionDocuments = previous.filter(item => item.docId === docId);
@@ -1442,6 +1448,7 @@ export default {
             aiMsg.content = failureMessage;
           }
           this.isLoading = false;
+          this._refreshAIRevisionPreview();
           if (userResponse) {
             this.refreshPendingQuestion(streamSessionId, pendingQuestion);
           }
@@ -1458,6 +1465,7 @@ export default {
 
         onComplete: () => {
           this.isLoading = false;
+          this._refreshAIRevisionPreview();
           if (userResponse && !this.pendingQuestions[streamSessionId]) {
             this.refreshPendingQuestion(streamSessionId);
           }
@@ -2172,6 +2180,10 @@ export default {
     },
 
     _applyImmediateEdit(payload) {
+      const startedAt = Date.now();
+      const progress = phase => api.wsManager.reportToolProgress?.({
+        type: 'edit_document', requestId: payload?.requestId, docId: payload?.docId, paraID: payload?.paraID
+      }, phase, Date.now() - startedAt);
       const sendResult = (result) => {
         if (!payload?.requestId) {
           return;
@@ -2186,6 +2198,7 @@ export default {
       const paraID = this._toIntOrNull(payload?.paraID);
       let docId = this._toIntOrDefault(payload?.docId, 0);
       const runs = Array.isArray(payload?.runs) ? payload.runs : [];
+      progress('resolve_document');
       const doc = this._resolveTargetDoc(docId);
       if (!doc) {
         sendResult({ success: false, paraID, docId, error: `无法获取文档 docId=${docId}` });
@@ -2214,7 +2227,9 @@ export default {
       let trackedEdit = null;
       let result = null;
       try {
+        progress('begin_tracking');
         trackedEdit = beginTrackedEdit(doc);
+        progress('edit_paragraph');
         result = editDocxParagraph(paraID, runs, doc);
         if (!result || !result.success) {
           abortTrackedEdit(trackedEdit);
@@ -2222,6 +2237,7 @@ export default {
           return false;
         }
 
+        progress('record_revisions');
         const revisionBatch = finishTrackedEdit(
           trackedEdit,
           { start: result.startPos, end: result.endPos },
@@ -2245,6 +2261,7 @@ export default {
           payload.msg._revisionBatchId = revisionBatch.batchId || null;
         }
         api.wsManager.clearDocumentCache();
+        progress('respond');
         sendResult({
           success: true,
           docId,

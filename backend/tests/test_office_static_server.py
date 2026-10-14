@@ -12,7 +12,16 @@ from gui.views.office_install_interface import OfficeStaticRequestHandler
 
 @pytest.fixture
 def static_server(tmp_path):
-    resources = ["icon.png", "icon.svg", "image.jpg", "taskpane.html", "dialog.js", "style.css", "manifest.xml", "settings.json"]
+    resources = [
+        "icon.png",
+        "icon.svg",
+        "image.jpg",
+        "taskpane.html",
+        "dialog.js",
+        "style.css",
+        "manifest.xml",
+        "settings.json",
+    ]
     for name in resources:
         (tmp_path / name).write_bytes(b"test resource")
     handler = partial(OfficeStaticRequestHandler, directory=str(tmp_path))
@@ -27,12 +36,15 @@ def static_server(tmp_path):
         thread.join(timeout=2)
 
 
-@pytest.mark.parametrize("path, content_type", [
-    ("icon.png", "image/png"),
-    ("icon.png?v=2", "image/png"),
-    ("icon.svg", "image/svg+xml"),
-    ("image.jpg", "image/jpeg"),
-])
+@pytest.mark.parametrize(
+    "path, content_type",
+    [
+        ("icon.png", "image/png"),
+        ("icon.png?v=2", "image/png"),
+        ("icon.svg", "image/svg+xml"),
+        ("image.jpg", "image/jpeg"),
+    ],
+)
 @pytest.mark.parametrize("method", ["GET", "HEAD"])
 def test_image_responses_allow_office_caching(static_server, path, content_type, method):
     with urlopen(Request(f"{static_server}/{path}", method=method), timeout=2) as response:

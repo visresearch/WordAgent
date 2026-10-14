@@ -10,7 +10,7 @@
           {{ $t('about.product') }}
         </h1>
         <p class="project-subtitle">
-          WenCe AI Assistant
+          文策AI
         </p>
       </div>
 

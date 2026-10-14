@@ -51,6 +51,17 @@ class EditDocumentToolTests(unittest.TestCase):
         self.assertFalse(result["success"])
         get_writer.assert_not_called()
 
+    @patch("app.services.tools.document_tools._wait_for_frontend_mutation", return_value=None)
+    @patch("app.services.tools.document_tools.get_stream_writer")
+    def test_timeout_is_an_unconfirmed_result_instead_of_a_confirmed_edit_failure(self, get_writer, wait_for_result):
+        writer = Mock()
+        get_writer.return_value = writer
+        result = _edit_document_impl(101, [Run(text="新内容")], 9)
+        self.assertIsNone(result["success"])
+        self.assertTrue(result["requiresRead"])
+        self.assertEqual(result["errorCode"], "frontend_confirmation_missing")
+        self.assertIn("尚未收到前端确认", writer.call_args_list[-1].args[0]["content"])
+
 
 if __name__ == "__main__":
     unittest.main()

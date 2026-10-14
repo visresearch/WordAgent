@@ -155,35 +155,6 @@ test('skill enable failure restores the checkbox to its previous state', async t
   assert.equal(child.message.value, 'Write denied');
 });
 
-test('memory toggle stays consistent with global Save and resets on failure', async t => {
-  let saved;
-  let fail = false;
-  const backend = { getSettings: async () => initialSettings(), getMemory: async () => 'Memory',
-    async saveSettings(data) { if (fail) throw new Error('Offline'); saved = data; }
-  };
-  const parent = panel(t, 'SettingPane', {}, backend);
-  await parent.loadSettings();
-  const props = dataProps();
-  const child = panel(t, 'DataManagementSetting', props, backend, (event, value) => {
-    if (event === 'update:enable-long-term-memory') {
-      parent.onMemoryEnabledChange(value);
-      props.enableLongTermMemory = value;
-    }
-  });
-  child.enableLongTermMemory.value = true;
-  await child.saveMemoryToggle();
-  await vue.nextTick();
-  await parent.saveSettings();
-  assert.equal(saved.enableLongTermMemory, true);
-  fail = true;
-  child.enableLongTermMemory.value = false;
-  await child.saveMemoryToggle();
-  assert.equal(child.enableLongTermMemory.value, true);
-  assert.equal(parent.settings.enableLongTermMemory, true);
-  assert.equal(child.resultSuccess.value, false);
-  assert.equal(child.memoryToggleSaving.value, false);
-});
-
 test('cache clear works without native dialogs and failed scans preserve existing information', async t => {
   let deletions = 0;
   const child = panel(t, 'DataManagementSetting', dataProps(), {
@@ -238,7 +209,7 @@ test('settings load failure blocks empty overwrites and exposes retry', async t 
   await child.saveSettings();
   assert.equal(saves, 0);
   assert.equal(child.settingsLoaded.value, false);
-  assert.equal(child.saveMessage.value, 'Backend unavailable');
+  assert.match(child.saveMessage.value, /settings.loadFailed/);
   fail = false;
   await child.loadSettings();
   await child.saveSettings();

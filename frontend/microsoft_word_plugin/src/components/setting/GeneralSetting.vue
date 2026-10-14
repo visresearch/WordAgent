@@ -1,184 +1,185 @@
 <template>
   <div class="general-setting-container">
-    <!-- 标题区 -->
-    <div class="section-header">
-      <svg
-        class="section-icon"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-      >
-        <circle cx="12" cy="12" r="3" />
-        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-      </svg>
-      <div class="section-title-group">
-        <h2 class="section-title">
-          {{ $t('general.title') }}
-        </h2>
-        <p class="section-subtitle">
-          {{ $t('general.subtitle') }}
-        </p>
-      </div>
-    </div>
-
-    <div class="setting-row">
-      <span class="setting-label">{{ $t('general.language') }}</span>
-      <div
-        ref="languagePicker"
-        class="language-picker"
-        @keydown.esc="closeLanguageMenu"
-      >
-        <button
-          type="button"
-          class="language-trigger"
-          :class="{ open: languageMenuOpen }"
-          aria-haspopup="listbox"
-          :aria-expanded="languageMenuOpen"
-          @click="toggleLanguageMenu"
+    <section class="setting-section">
+      <!-- 标题区 -->
+      <div class="section-header">
+        <svg
+          class="section-icon"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
         >
-          <span>{{ selectedLanguageLabel }}</span>
-          <span class="language-chevron" aria-hidden="true"></span>
-        </button>
-        <div v-if="languageMenuOpen" class="language-menu" role="listbox">
-          <button
-            type="button"
-            class="language-option"
-            :class="{ selected: localSettings.language === 'zh-CN' }"
-            role="option"
-            :aria-selected="localSettings.language === 'zh-CN'"
-            @click="selectLanguage('zh-CN')"
-          >
-            {{ $t('general.simplifiedChinese') }}
-          </button>
-          <button
-            type="button"
-            class="language-option"
-            :class="{ selected: localSettings.language === 'id-ID' }"
-            role="option"
-            :aria-selected="localSettings.language === 'id-ID'"
-            @click="selectLanguage('id-ID')"
-          >
-            {{ $t('general.indonesian') }}
-          </button>
-          <button
-            type="button"
-            class="language-option"
-            :class="{ selected: localSettings.language === 'en-US' }"
-            role="option"
-            :aria-selected="localSettings.language === 'en-US'"
-            @click="selectLanguage('en-US')"
-          >
-            {{ $t('general.english') }}
-          </button>
-          <button
-            type="button"
-            class="language-option"
-            :class="{ selected: localSettings.language === 'ja-JP' }"
-            role="option"
-            :aria-selected="localSettings.language === 'ja-JP'"
-            @click="selectLanguage('ja-JP')"
-          >
-            {{ $t('general.japanese') }}
-          </button>
-          <button
-            type="button"
-            class="language-option"
-            :class="{ selected: localSettings.language === 'ko-KR' }"
-            role="option"
-            :aria-selected="localSettings.language === 'ko-KR'"
-            @click="selectLanguage('ko-KR')"
-          >
-            {{ $t('general.korean') }}
-          </button>
-          <button
-            type="button"
-            class="language-option"
-            :class="{ selected: localSettings.language === 'vi-VN' }"
-            role="option"
-            :aria-selected="localSettings.language === 'vi-VN'"
-            @click="selectLanguage('vi-VN')"
-          >
-            {{ $t('general.vietnamese') }}
-          </button>
+          <circle cx="12" cy="12" r="3" />
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+        </svg>
+        <div class="section-title-group">
+          <h2 class="section-title">
+            {{ $t('general.title') }}
+          </h2>
+          <p class="section-subtitle">
+            {{ $t('general.subtitle') }}
+          </p>
         </div>
       </div>
-    </div>
 
-    <!-- 启动时显示AI面板 -->
-    <div class="setting-row">
-      <span class="setting-label">{{ $t('general.showPanel') }}</span>
-      <label class="switch">
-        <input v-model="localSettings.showPanelOnStart" type="checkbox" @change="emitChange" />
-        <span class="slider"></span>
-      </label>
-    </div>
-
-    <!-- 网络代理 独立 section -->
-    <div class="section-divider"></div>
-
-    <div class="section-header">
-      <svg
-        class="section-icon"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-      >
-        <circle cx="12" cy="12" r="10" />
-        <path d="M2 12h20" />
-        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-      </svg>
-      <div class="section-title-group">
-        <h2 class="section-title">
-          {{ $t('general.proxyTitle') }}
-        </h2>
-        <p class="section-subtitle">
-          {{ $t('general.proxySubtitle') }}
-        </p>
+      <div class="setting-row">
+        <span class="setting-label">{{ $t('general.language') }}</span>
+        <div
+          ref="languagePicker"
+          class="language-picker"
+          @keydown.esc="closeLanguageMenu"
+        >
+          <button
+            type="button"
+            class="language-trigger"
+            :class="{ open: languageMenuOpen }"
+            aria-haspopup="listbox"
+            :aria-expanded="languageMenuOpen"
+            @click="toggleLanguageMenu"
+          >
+            <span>{{ selectedLanguageLabel }}</span>
+            <span class="language-chevron" aria-hidden="true"></span>
+          </button>
+          <div v-if="languageMenuOpen" class="language-menu" role="listbox">
+            <button
+              type="button"
+              class="language-option"
+              :class="{ selected: localSettings.language === 'zh-CN' }"
+              role="option"
+              :aria-selected="localSettings.language === 'zh-CN'"
+              @click="selectLanguage('zh-CN')"
+            >
+              {{ $t('general.simplifiedChinese') }}
+            </button>
+            <button
+              type="button"
+              class="language-option"
+              :class="{ selected: localSettings.language === 'id-ID' }"
+              role="option"
+              :aria-selected="localSettings.language === 'id-ID'"
+              @click="selectLanguage('id-ID')"
+            >
+              {{ $t('general.indonesian') }}
+            </button>
+            <button
+              type="button"
+              class="language-option"
+              :class="{ selected: localSettings.language === 'en-US' }"
+              role="option"
+              :aria-selected="localSettings.language === 'en-US'"
+              @click="selectLanguage('en-US')"
+            >
+              {{ $t('general.english') }}
+            </button>
+            <button
+              type="button"
+              class="language-option"
+              :class="{ selected: localSettings.language === 'ja-JP' }"
+              role="option"
+              :aria-selected="localSettings.language === 'ja-JP'"
+              @click="selectLanguage('ja-JP')"
+            >
+              {{ $t('general.japanese') }}
+            </button>
+            <button
+              type="button"
+              class="language-option"
+              :class="{ selected: localSettings.language === 'ko-KR' }"
+              role="option"
+              :aria-selected="localSettings.language === 'ko-KR'"
+              @click="selectLanguage('ko-KR')"
+            >
+              {{ $t('general.korean') }}
+            </button>
+            <button
+              type="button"
+              class="language-option"
+              :class="{ selected: localSettings.language === 'vi-VN' }"
+              role="option"
+              :aria-selected="localSettings.language === 'vi-VN'"
+              @click="selectLanguage('vi-VN')"
+            >
+              {{ $t('general.vietnamese') }}
+            </button>
+          </div>
+        </div>
       </div>
-    </div>
 
-    <div class="proxy-section">
-      <div class="setting-row" style="border-bottom: none; padding-bottom: 8px;">
-        <span class="setting-label">{{ $t('general.enableProxy') }}</span>
+      <!-- 启动时显示AI面板 -->
+      <div class="setting-row">
+        <span class="setting-label">{{ $t('general.showPanel') }}</span>
         <label class="switch">
-          <input v-model="localSettings.proxy.enabled" type="checkbox" @change="emitChange" />
+          <input v-model="localSettings.showPanelOnStart" type="checkbox" @change="emitChange" />
           <span class="slider"></span>
         </label>
       </div>
-      <div class="proxy-inputs" :class="{ disabled: !localSettings.proxy.enabled }">
-        <div class="proxy-row">
-          <div class="input-group flex-grow">
-            <label class="input-label">{{ $t('general.proxyHost') }}</label>
-            <input
-              v-model="localSettings.proxy.host"
-              type="text"
-              class="text-input"
-              placeholder="127.0.0.1"
-              :disabled="!localSettings.proxy.enabled"
-              @input="emitChange"
-            />
-          </div>
-          <div class="input-group port-input">
-            <label class="input-label">{{ $t('general.port') }}</label>
-            <input
-              v-model.number="localSettings.proxy.port"
-              type="number"
-              class="text-input"
-              placeholder="7897"
-              min="1"
-              max="65535"
-              :disabled="!localSettings.proxy.enabled"
-              @input="emitChange"
-            />
-          </div>
+    </section>
+
+    <section class="setting-section">
+      <div class="section-header">
+        <svg
+          class="section-icon"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+        >
+          <circle cx="12" cy="12" r="10" />
+          <path d="M2 12h20" />
+          <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+        </svg>
+        <div class="section-title-group">
+          <h2 class="section-title">
+            {{ $t('general.proxyTitle') }}
+          </h2>
+          <p class="section-subtitle">
+            {{ $t('general.proxySubtitle') }}
+          </p>
         </div>
-        <p class="proxy-hint">
-          {{ $t('general.proxyHint') }}
-        </p>
       </div>
-    </div>
+
+      <div class="proxy-section">
+        <div class="setting-row" style="border-bottom: none; padding-bottom: 8px;">
+          <span class="setting-label">{{ $t('general.enableProxy') }}</span>
+          <label class="switch">
+            <input v-model="localSettings.proxy.enabled" type="checkbox" @change="emitChange" />
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="proxy-inputs" :class="{ disabled: !localSettings.proxy.enabled }">
+          <div class="proxy-row">
+            <div class="input-group flex-grow">
+              <label class="input-label">{{ $t('general.proxyHost') }}</label>
+              <input
+                v-model="localSettings.proxy.host"
+                type="text"
+                class="text-input"
+                placeholder="127.0.0.1"
+                :disabled="!localSettings.proxy.enabled"
+                @input="emitChange"
+              />
+            </div>
+            <div class="input-group port-input">
+              <label class="input-label">{{ $t('general.port') }}</label>
+              <input
+                v-model.number="localSettings.proxy.port"
+                type="number"
+                class="text-input"
+                placeholder="7897"
+                min="1"
+                max="65535"
+                :disabled="!localSettings.proxy.enabled"
+                @input="emitChange"
+              />
+            </div>
+          </div>
+          <p class="proxy-hint">
+            {{ $t('general.proxyHint') }}
+          </p>
+        </div>
+      </div>
+    </section>
   </div>
 </template>
 
@@ -276,6 +277,10 @@ export default {
 <style scoped>
 .general-setting-container {
   padding: 0;
+}
+
+.general-setting-container > .setting-section:last-child {
+  margin-bottom: 0;
 }
 
 .setting-row {
@@ -514,10 +519,7 @@ export default {
 
 /* 代理设置 */
 .proxy-section {
-  background: white;
-  border: 1px solid #e8e8e8;
-  border-radius: 8px;
-  padding: 12px 16px;
+  padding: 0;
 }
 
 .proxy-inputs {

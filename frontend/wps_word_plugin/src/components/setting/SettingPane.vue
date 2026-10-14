@@ -26,12 +26,10 @@
             {{ $t('settings.generalDesc') }}
           </p>
         </div>
-        <div class="setting-section">
-          <GeneralSetting 
-            :settings="generalSettings" 
-            @update:settings="onGeneralSettingsChange"
-          />
-        </div>
+        <GeneralSetting
+          :settings="generalSettings"
+          @update:settings="onGeneralSettingsChange"
+        />
       </div>
 
       <!-- 大模型设置 -->
@@ -111,10 +109,16 @@
 
       <div v-if="currentTab === 'plugin'" class="tab-content">
         <div class="tab-header">
-          <h2 class="tab-title">{{ $t('settings.pluginTitle') }}</h2>
-          <p class="tab-desc">{{ $t('settings.pluginDesc') }}</p>
+          <h2 class="tab-title">
+            {{ $t('settings.pluginTitle') }}
+          </h2>
+          <p class="tab-desc">
+            {{ $t('settings.pluginDesc') }}
+          </p>
         </div>
-        <div class="setting-section"><PluginSetting /></div>
+        <div class="setting-section">
+          <PluginSetting />
+        </div>
       </div>
 
       <!-- 底部保存按钮（通用、模型和个性化设置需要） -->

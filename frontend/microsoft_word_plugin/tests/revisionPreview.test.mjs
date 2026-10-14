@@ -3,10 +3,14 @@ import test from 'node:test';
 
 import {
   beginTrackedEdit,
+  abortTrackedEdit,
   finishTrackedEdit,
   hasRevisionBatch,
   settleRevisionBatch,
-  settleRevisionBatches
+  settleRevisionBatches,
+  getPendingRevisionCount,
+  settleDocumentRevisions,
+  AI_REVISION_AUTHOR
 } from '../src/components/js/revisionPreview.mjs';
 
 function trackedChange({ type, text, author = 'Word User', date = '2026-07-28T00:00:00.000Z' }) {
@@ -85,6 +89,7 @@ function createWordMock(initialChanges = [], initialMode = 'Off', desktopViewSup
 
   globalThis.Office = {
     context: {
+      document: {},
       requirements: {
         isSetSupported(name, version) {
           return (name === 'WordApi' && version === '1.6') ||
@@ -339,4 +344,137 @@ test('sync 失败时保留批次；已成功的部分不会在重试中重复接
   context.sync = sync;
   assert.equal((await settleRevisionBatch(batch.batchId, 'accept')).success, true);
   assert.equal(added.accepted, 1);
+});
+
+test('接受和拒绝均隔离两个文档的相同修订，保留其他作者的修改', async () => {
+  for (const action of ['accept', 'reject']) {
+    const first = createWordMock();
+    const firstOffice = globalThis.Office;
+    const firstWord = globalThis.Word;
+    const stateA = await beginTrackedEdit();
+    const changeA = trackedChange({ type: 'Added', text: 'identical' });
+    first.document.changes.push(changeA);
+    const batchA = await finishTrackedEdit(stateA, 'insert');
+
+    const otherAuthor = trackedChange({ type: 'Added', text: 'identical', author: 'Another author' });
+    const second = createWordMock([otherAuthor]);
+    const stateB = await beginTrackedEdit();
+    const changeB = trackedChange({ type: 'Added', text: 'identical' });
+    second.document.changes.push(changeB);
+    await finishTrackedEdit(stateB, 'insert');
+    const runCount = second.metrics.runs;
+    assert.equal((await settleRevisionBatch(batchA.batchId, action)).success, false);
+    assert.equal(second.metrics.runs, runCount);
+    assert.equal((await settleDocumentRevisions(action)).success, true);
+    assert.deepEqual(second.document.changes, [otherAuthor]);
+    assert.equal(changeA.accepted + changeA.rejected, 0);
+    assert.equal(changeB[action === 'accept' ? 'accepted' : 'rejected'], 1);
+
+    globalThis.Office = firstOffice;
+    globalThis.Word = firstWord;
+    assert.equal(await getPendingRevisionCount(), 1);
+    assert.equal((await settleDocumentRevisions(action)).success, true);
+    assert.equal(first.document.changes.length, 0);
+  }
+});
+
+test('重开面板可发现文策AI修订，只按固定作者名称处理，不兼容旧名称', async () => {
+  for (const action of ['accept', 'reject']) {
+    const ai = trackedChange({ type: 'Added', text: 'saved', author: AI_REVISION_AUTHOR });
+    const human = trackedChange({ type: 'Deleted', text: 'saved', author: 'Author' });
+    const legacy = trackedChange({ type: 'Added', text: 'saved', author: 'WenCe AI Assistant' });
+    const { document: doc } = createWordMock([ai, human, legacy]);
+    assert.equal(await getPendingRevisionCount(), 1);
+    const result = await settleDocumentRevisions(action);
+    assert.equal(result.success, true);
+    assert.equal(result.handled, 1);
+    assert.deepEqual(doc.changes, [human, legacy]);
+    assert.equal(await getPendingRevisionCount(), 0);
+  }
+});
+
+test('用户在原生审阅栏处理修订后清理批次并恢复显示设置', async () => {
+  const { document: doc, view } = createWordMock([], 'Off', true);
+  const state = await beginTrackedEdit();
+  doc.changes.push(trackedChange({ type: 'Added', text: 'new' }));
+  const batch = await finishTrackedEdit(state, 'insert');
+  doc.changes = [];
+  assert.equal(await getPendingRevisionCount(), 0);
+  assert.equal(hasRevisionBatch(batch.batchId), false);
+  assert.equal(view.areFormatChangesDisplayed, true);
+});
+
+test('非当前加载项的docId不能开启修订；文档变化不能恢复另一文档设置', async () => {
+  const first = createWordMock();
+  await assert.rejects(beginTrackedEdit(8), /docId=0/);
+  assert.equal(first.document.changeTrackingMode, 'Off');
+  const firstOffice = globalThis.Office;
+  const firstWord = globalThis.Word;
+  const state = await beginTrackedEdit();
+  const second = createWordMock([], 'TrackMineOnly');
+  await assert.rejects(finishTrackedEdit(state, 'insert'), /文档/);
+  await assert.rejects(abortTrackedEdit(state), /文档/);
+  assert.equal(second.document.changeTrackingMode, 'TrackMineOnly');
+  globalThis.Office = firstOffice;
+  globalThis.Word = firstWord;
+  await abortTrackedEdit(state);
+  assert.equal(first.document.changeTrackingMode, 'Off');
+});
+
+test('Word原生用户名下的AI批次保存到所属文档，刷新面板后仍可拒绝且保留原有修订', async () => {
+  const existing = trackedChange({ type: 'Added', text: 'identical' });
+  const { document: doc } = createWordMock([existing]);
+  const stored = new Map();
+  doc.settings = {
+    add(key, value) { stored.set(key, value); },
+    getItemOrNullObject(key) {
+      return { isNullObject: !stored.has(key), value: stored.get(key), load() {} };
+    }
+  };
+  const state = await beginTrackedEdit();
+  const inserted = trackedChange({ type: 'Added', text: 'identical' });
+  doc.changes.push(inserted);
+  const batch = await finishTrackedEdit(state, 'insert');
+  assert.equal(stored.size, 1);
+  // A fresh module has no previous in-memory revision registry.
+  const reopened = await import(`../src/components/js/revisionPreview.mjs?reopened=${Date.now()}`);
+  globalThis.Office.context.document = {};
+  assert.equal(await reopened.getPendingRevisionCount(), 1);
+  assert.equal(reopened.hasRevisionBatch(batch.batchId), true);
+  assert.equal((await reopened.settleDocumentRevisions('reject')).success, true);
+  assert.deepEqual(doc.changes, [existing]);
+  assert.equal(inserted.rejected, 1);
+  assert.equal(existing.rejected, 0);
+  assert.equal(JSON.parse([...stored.values()][0]).batches.length, 0);
+});
+
+test('写入过程中另一个作者同时修改时，不猜测归属，也不撤销已写入内容', async () => {
+  const { document: doc } = createWordMock();
+  const state = await beginTrackedEdit();
+  const own = trackedChange({ type: 'Added', text: 'plugin insertion' });
+  const human = trackedChange({ type: 'Added', text: 'collaborator insertion', author: 'Other Author' });
+  doc.changes.push(own, human);
+  await assert.rejects(finishTrackedEdit(state, 'insert'), /多个修订作者/);
+  assert.deepEqual(doc.changes, [own, human]);
+  assert.equal(doc.changeTrackingMode, 'Off');
+  assert.equal(await getPendingRevisionCount(), 0);
+});
+
+test('批量处理后新出现的其他作者修订不会归入失败重试批次', async () => {
+  const { document: doc } = createWordMock();
+  const state = await beginTrackedEdit();
+  const own = trackedChange({ type: 'Added', text: 'plugin insertion' });
+  doc.changes.push(own);
+  const batch = await finishTrackedEdit(state, 'insert');
+  const getChanges = doc.body.getTrackedChanges;
+  const human = trackedChange({ type: 'Added', text: 'new human change', author: 'Other Author' });
+  doc.body.getTrackedChanges = () => {
+    const collection = getChanges();
+    collection.acceptAll = () => { own.accept(); doc.changes.push(human); };
+    return collection;
+  };
+  assert.equal((await settleRevisionBatch(batch.batchId, 'accept')).success, true);
+  assert.deepEqual(doc.changes, [human]);
+  assert.equal(human.accepted, 0);
+  assert.equal(hasRevisionBatch(batch.batchId), false);
 });

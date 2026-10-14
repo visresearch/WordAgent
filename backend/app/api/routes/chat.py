@@ -344,7 +344,17 @@ async def chat_websocket(websocket: WebSocket):
                                 pass
                             return
                         incoming_type = incoming.get("type", "")
-                        if incoming_type == "document_response":
+                        if incoming_type == "frontend_tool_progress":
+                            logger.info(
+                                "[Frontend Tool] tool=%s phase=%s requestId=%s docId=%s paraID=%s elapsedMs=%s",
+                                incoming.get("tool"),
+                                incoming.get("phase"),
+                                incoming.get("requestId"),
+                                incoming.get("docId"),
+                                incoming.get("paraID"),
+                                incoming.get("elapsedMs"),
+                            )
+                        elif incoming_type == "document_response":
                             logger.info("[WebSocket] 收到前端回传文档")
                             await submit_tool_response(chat_id, incoming)
                         elif incoming_type == "query_response":

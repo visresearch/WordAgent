@@ -7,8 +7,12 @@
         aria-hidden="true"
       ></span>
       <div class="section-title-group">
-        <h2 class="section-title">{{ $t('plugin.managementTitle') }}</h2>
-        <p class="section-subtitle">{{ $t('plugin.subtitle') }}</p>
+        <h2 class="section-title">
+          {{ $t('plugin.managementTitle') }}
+        </h2>
+        <p class="section-subtitle">
+          {{ $t('plugin.subtitle') }}
+        </p>
       </div>
     </div>
 

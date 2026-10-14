@@ -1115,13 +1115,16 @@ def _edit_document_impl(
             "Frontend response timed out or is unavailable. Do not repeat edit_document blindly; "
             "use read_document to verify the paragraph content."
         )
+        result["errorCode"] = "frontend_confirmation_missing"
+        result["requiresRead"] = True
 
     if writer:
-        content = (
-            f"✏️ 文档已修改（段落 {normalized_para_id}）"
-            if result["success"] is True
-            else f"⚠️ 段落 {normalized_para_id} 更新失败"
-        )
+        if result["success"] is True:
+            content = f"✏️ 文档已修改（段落 {normalized_para_id}）"
+        elif result["success"] is None:
+            content = f"⚠️ 段落 {normalized_para_id} 尚未收到前端确认，修改结果需要核实"
+        else:
+            content = f"⚠️ 段落 {normalized_para_id} 更新失败"
         writer(
             {
                 "type": "edit_complete",

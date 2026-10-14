@@ -8,7 +8,7 @@
   <Version>1.0.0.1</Version>
   <ProviderName>WenCe Team</ProviderName>
   <DefaultLocale>zh-CN</DefaultLocale>
-  <DisplayName DefaultValue="文策AI助手"/>
+  <DisplayName DefaultValue="文策AI"/>
   <Description DefaultValue="WenCe AI Writing Assistant - 智能写作助手"/>
   <IconUrl DefaultValue="https://localhost:3000/assets/wence-32.png"/>
   <HighResolutionIconUrl DefaultValue="https://localhost:3000/assets/wence-64.png"/>
@@ -81,13 +81,13 @@
         <bt:Url id="Taskpane.Url" DefaultValue="https://localhost:3000/taskpane.html"/>
       </bt:Urls>
       <bt:ShortStrings>
-        <bt:String id="GetStarted.Title" DefaultValue="文策AI助手已就绪"/>
+        <bt:String id="GetStarted.Title" DefaultValue="文策AI已就绪"/>
         <bt:String id="WenCeGroup.Label" DefaultValue="文策AI"/>
-        <bt:String id="TaskpaneButton.Label" DefaultValue="AI辅助写作助手"/>
+        <bt:String id="TaskpaneButton.Label" DefaultValue="文策AI"/>
       </bt:ShortStrings>
       <bt:LongStrings>
-        <bt:String id="GetStarted.Description" DefaultValue="文策AI助手已加载成功。点击「开始」选项卡上的「AI辅助写作助手」按钮开始使用。"/>
-        <bt:String id="TaskpaneButton.Tooltip" DefaultValue="点击打开AI辅助写作助手面板"/>
+        <bt:String id="GetStarted.Description" DefaultValue="文策AI已加载成功。点击「开始」选项卡上的「文策AI」按钮开始使用。"/>
+        <bt:String id="TaskpaneButton.Tooltip" DefaultValue="点击打开文策AI面板"/>
       </bt:LongStrings>
     </Resources>
   </VersionOverrides>

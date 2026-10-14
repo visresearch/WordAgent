@@ -3861,14 +3861,13 @@ async function editDocxParagraph(paraID, runs) {
       }
       await context.sync();
 
+      // 不逐个单元格选择正文；写入已经完成，页码读取失败不能把修改报成失败。
+      let pageRanges = new Map();
       try {
-        paragraph.getRange("Content").select();
-        await context.sync();
+        pageRanges = await loadParagraphPageRanges(context, [paragraph]);
       } catch (error) {
-        void error;
+        console.warn('[editDocxParagraph] 更新后的页码读取失败:', error);
       }
-
-      const pageRanges = await loadParagraphPageRanges(context, [paragraph]);
 
       return {
         success: true,

@@ -17,7 +17,9 @@ let workQueue = Promise.resolve();
 
 function targetDocument(docId = 0) {
   const doc = getDocumentById(docId);
-  if (!doc) throw new Error('没有打开的 WPS 文档');
+  if (!doc) {
+    throw new Error('没有打开的 WPS 文档');
+  }
   // getDocumentById falls back to ActiveDocument. Reject that fallback for a
   // specified ID so an agent never edits a different document by accident.
   if (Number(docId) !== 0 && Number(doc.DocID) !== Number(docId)) {
@@ -77,22 +79,30 @@ async function executeTool(tool, args) {
 }
 
 function connect() {
-  if (stopped || socket) return;
+  if (stopped || socket) {
+    return;
+  }
   const ws = new WebSocket(BRIDGE_URL);
   socket = ws;
-  ws.onopen = () => { delay = 1000; };
+  ws.onopen = () => {
+    delay = 1000; 
+  };
   ws.onmessage = (event) => {
     let request;
     try {
       request = JSON.parse(event.data);
-      if (!request?.requestId || !request?.tool) return;
+      if (!request?.requestId || !request?.tool) {
+        return;
+      }
     } catch (error) {
       console.warn('[WPS MCP] 无法解析工具请求:', error);
       return;
     }
     // Document reads and edits must observe a single ordering across MCP calls.
     workQueue = workQueue.then(async () => {
-      if (ws.readyState !== WebSocket.OPEN) return;
+      if (ws.readyState !== WebSocket.OPEN) {
+        return;
+      }
       try {
         const result = await executeTool(request.tool, request.arguments || {});
         if (ws.readyState === WebSocket.OPEN) {
@@ -107,7 +117,9 @@ function connect() {
     });
   };
   ws.onclose = () => {
-    if (socket !== ws) return;
+    if (socket !== ws) {
+      return;
+    }
     socket = null;
     if (!stopped) {
       reconnectTimer = setTimeout(connect, delay);
@@ -128,7 +140,9 @@ export function startMcpBridge() {
 
 export function stopMcpBridge() {
   stopped = true;
-  if (reconnectTimer) clearTimeout(reconnectTimer);
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+  }
   reconnectTimer = null;
   socket?.close();
   socket = null;

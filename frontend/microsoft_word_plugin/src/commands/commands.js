@@ -15,7 +15,7 @@ Office.onReady(() => {
 function action(event) {
   const message = {
     type: Office.MailboxEnums.ItemNotificationMessageType.InformationalMessage,
-    message: "文策AI助手已执行操作。",
+    message: "文策AI已执行操作。",
     icon: "Icon.80x80",
     persistent: true,
   };

@@ -26,12 +26,10 @@
             {{ $t('settings.generalDesc') }}
           </p>
         </div>
-        <div class="setting-section">
-          <GeneralSetting
-            :settings="generalSettings"
-            @update:settings="onGeneralSettingsChange"
-          />
-        </div>
+        <GeneralSetting
+          :settings="generalSettings"
+          @update:settings="onGeneralSettingsChange"
+        />
       </div>
 
       <!-- 大模型设置 -->
@@ -62,12 +60,10 @@
             {{ $t('settings.personalizationDesc') }}
           </p>
         </div>
-        <div class="setting-section">
-          <PersonalizationPane
-            :settings="personalizationSettings"
-            @update:settings="onPersonalizationChange"
-          />
-        </div>
+        <PersonalizationPane
+          :settings="personalizationSettings"
+          @update:settings="onPersonalizationChange"
+        />
       </div>
 
       <!-- MCP 服务器管理 -->
@@ -92,9 +88,7 @@
       <div v-if="currentTab === 'data'" class="tab-content full-height">
         <DataManagementPane
           :cache-info="cacheInfo"
-          :enable-long-term-memory="settings.enableLongTermMemory"
           @update:cache-info="onCacheUpdate"
-          @update:enable-long-term-memory="onMemoryEnabledChange"
         />
       </div>
 
@@ -248,7 +242,8 @@ export default {
     }));
 
     const personalizationSettings = computed(() => ({
-      customPrompt: settings.customPrompt
+      customPrompt: settings.customPrompt,
+      enableLongTermMemory: settings.enableLongTermMemory
     }));
 
     const loadCacheInfo = async () => {
@@ -277,6 +272,7 @@ export default {
     const loadSettings = async () => {
       if (loadingSettings.value) return;
       loadingSettings.value = true;
+      settingsLoaded.value = false;
       saveMessage.value = '';
       try {
         const data = await api.getSettings();
@@ -317,11 +313,11 @@ export default {
               };
             });
           }
-          settingsLoaded.value = true;
+          settingsLoaded.value = typeof data.enableLongTermMemory === 'boolean';
         }
       } catch (error) {
         console.error('加载设置失败:', error);
-        saveMessage.value = error.message || t('common.unknownError');
+        saveMessage.value = t('settings.loadFailed');
         saveSuccess.value = false;
       } finally {
         loadingSettings.value = false;
@@ -402,10 +398,7 @@ export default {
 
     const onPersonalizationChange = (newSettings) => {
       settings.customPrompt = newSettings.customPrompt;
-    };
-
-    const onMemoryEnabledChange = (enabled) => {
-      settings.enableLongTermMemory = !!enabled;
+      settings.enableLongTermMemory = newSettings.enableLongTermMemory;
     };
 
     const onProvidersChange = (newProviders) => {
@@ -455,8 +448,7 @@ export default {
       onPersonalizationChange,
       onProvidersChange,
       onMcpServersChange,
-      onCacheUpdate,
-      onMemoryEnabledChange
+      onCacheUpdate
     };
   }
 };

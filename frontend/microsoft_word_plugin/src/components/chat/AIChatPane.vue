@@ -31,6 +31,7 @@
         :pending-question="pendingQuestions[currentSessionId] || null"
         :uploaded-files="uploadedFiles"
         :pending-document="pendingDocument"
+        :pending-revision-count="pendingRevisionCount"
         :pending-edits="pendingEdits"
         :delete-revisions="deleteRevisions"
         :token-stats="tokenStats"
@@ -44,8 +45,8 @@
         @add-files="addFiles"
         @remove-file="removeFile"
         @refresh-models="loadModels"
-        @confirm-pending="confirmPending"
-        @cancel-pending="cancelPending"
+        @accept-revisions="acceptPendingRevisions"
+        @reject-revisions="rejectPendingRevisions"
       />
     </div>
     <transition name="slide-session">
@@ -71,13 +72,14 @@ import {
   getParagraphLocationByParaID
 } from '../js/docxJsonConverter.js';
 import {
+  assertRevisionDocumentTarget,
   abortTrackedEdit,
   beginTrackedEdit,
   finishTrackedEdit,
   hasRevisionBatch,
   settleRevisionBatch,
-  settleRevisionBatches,
-  undoLastDocumentAction
+  getPendingRevisionCount,
+  settleDocumentRevisions
 } from '../js/revisionPreview.mjs';
 import api from '../js/api.js';
 import ChatMessages from './ChatMessages.vue';
@@ -117,6 +119,7 @@ export default {
       pendingDocumentMsg: null,
       deleteRevisions: [],  // 已立即执行、等待统一接受/拒绝的原生删除修订
       pendingEdits: [],  // 已立即执行、等待统一接受/拒绝的原生段落编辑修订
+      pendingRevisionCount: 0,
       pendingInsertions: [], // [{documentJson, docId, insertParaID, msg}] 待确认的文档插入列表
       settlingRevisions: false,
       _streamInsertions: [], // [{insertParaID, count, docId}] 当前流式中已执行的插入操作
@@ -155,6 +158,8 @@ export default {
     this.loadModels();
     this.initSessionAndLoadHistory();
     this._loadWenceTempDir();
+    this._refreshRevisionPreview();
+    this._revisionPreviewTimer = setInterval(() => this._refreshRevisionPreview(), 1500);
 
     this._onResize = () => {
       this.isWide = window.innerWidth >= 600;
@@ -164,12 +169,28 @@ export default {
     sessionState.visible = this.sessionVisible;
   },
   beforeUnmount() {
+    clearInterval(this._revisionPreviewTimer);
     chatState.aiBusy = false;
     if (this._onResize) {
       window.removeEventListener('resize', this._onResize);
     }
   },
   methods: {
+    async _refreshRevisionPreview() {
+      if (this.isLoading || this.settlingRevisions || this._refreshingRevisionPreview) return;
+      this._refreshingRevisionPreview = true;
+      try {
+        this.pendingRevisionCount = await getPendingRevisionCount();
+        this.pendingInsertions = this.pendingInsertions.filter(item => hasRevisionBatch(item._revisionBatchId));
+        this.pendingEdits = this.pendingEdits.filter(item => hasRevisionBatch(item._revisionBatchId));
+        this.deleteRevisions = this.deleteRevisions.filter(item => hasRevisionBatch(item._revisionBatchId));
+        this._refreshPendingDocumentSummary();
+      } catch (error) {
+        console.warn('[AIChatPane] Reading Word revisions failed:', error);
+      } finally {
+        this._refreshingRevisionPreview = false;
+      }
+    },
     async refreshPendingQuestion(sessionId, fallback = null) {
       const version = this.questionVersions[sessionId] || 0;
       this.refreshingQuestion = true;
@@ -409,7 +430,7 @@ export default {
       }
       targetMessage.contentParts.push({
         type: 'status',
-        content: `${action === 'accept' ? '确认' : '取消'}修订失败：${error || 'Word 未返回具体错误'}`,
+        content: `${t(action === 'accept' ? 'chat.acceptRevision' : 'chat.rejectRevision')}修订失败：${error || 'Word 未返回具体错误'}`,
         loading: false
       });
       this.scrollToBottom();
@@ -1022,7 +1043,7 @@ export default {
         userResponse,
 
         onMessage: (data) => {
-          this._handleStreamMessage(data, aiMsg, streamSessionId);
+          return this._handleStreamMessage(data, aiMsg, streamSessionId);
         },
 
         onError: (error) => {
@@ -1039,6 +1060,7 @@ export default {
           aiMsg.contentParts.push({ type: 'status', content: failureMessage });
           if (!aiMsg.content) aiMsg.content = failureMessage;
           this.isLoading = false;
+          this._refreshRevisionPreview();
           if (userResponse) this.refreshPendingQuestion(streamSessionId, pendingQuestion);
           this._streamingSessionId = null;
           this.currentStreamCtrl = null;
@@ -1051,6 +1073,7 @@ export default {
 
         onComplete: () => {
           this.isLoading = false;
+          this._refreshRevisionPreview();
           if (userResponse && !this.pendingQuestions[streamSessionId]) this.refreshPendingQuestion(streamSessionId);
           this._streamingSessionId = null;
 
@@ -1074,6 +1097,9 @@ export default {
      */
     _handleStreamMessage(data, aiMsg, streamSessionId) {
       const msg = aiMsg;
+      if (['read_document', 'search_document', 'edit_document', 'delete_document', 'insert_break', 'json'].includes(data.type)) {
+        assertRevisionDocumentTarget(data.docId);
+      }
 
       if (data.type === 'ask_user') {
         const container = this.currentSessionId === streamSessionId
@@ -1172,15 +1198,15 @@ export default {
           loading: true
         });
         this.scrollToBottom();
-        api.wsManager._handleDocumentRequest({
+        return api.wsManager._handleDocumentRequest({
           startParaIndex: this._toIntOrNull(data.startParaIndex),
           endParaIndex: this._toIntOrNull(data.endParaIndex),
           startParaID: this._toParaIdOrNull(data.startParaID),
           endParaID: this._toParaIdOrNull(data.endParaID),
           docId: this._toIntOrDefault(data.docId, 0),
-          mode: data.mode === 'lightweight' ? 'lightweight' : 'full'
+          mode: data.mode === 'lightweight' ? 'lightweight' : 'full',
+          requestId: data.requestId
         });
-        return;
       }
 
       // 后端请求查询文档
@@ -1263,7 +1289,8 @@ export default {
                 type: 'delete_response',
                 requestId: data.requestId,
                 success: false,
-                deletedCount: 0,
+                deletedCount: null,
+                requiresRead: true,
                 error: e?.message || String(e)
               }).catch((sendError) => console.warn('[AIChatPane] 回传删除异常失败:', sendError));
             }
@@ -1779,7 +1806,7 @@ export default {
       let trackedEdit = null;
       let deleteResult = null;
       try {
-        trackedEdit = await beginTrackedEdit();
+        trackedEdit = await beginTrackedEdit(docId);
         deleteResult = await deleteDocxPara(paraIDs);
         if (!deleteResult?.success) {
           await abortTrackedEdit(trackedEdit);
@@ -1796,11 +1823,11 @@ export default {
 
         const revisionBatch = await finishTrackedEdit(trackedEdit, 'delete');
         if (!revisionBatch.batchId) {
-          await undoLastDocumentAction();
-          const error = 'Microsoft Word 未创建原生删除修订，已撤销本次删除';
+          const error = 'Microsoft Word 未创建原生删除修订，请重新读取文档核实结果';
           await sendResult({
             success: false,
-            deletedCount: 0,
+            deletedCount: deleteResult?.deletedCount ?? null,
+            requiresRead: true,
             missingParaIDs: [],
             replacementInsertParaID: deleteResult?.replacementInsertParaID ?? null,
             error
@@ -1813,9 +1840,7 @@ export default {
           docId,
           replacementInsertParaID: deleteResult.replacementInsertParaID ?? '0',
           preview: t('chat.deletePreview', { ids: paraIDs.join(', ') }),
-          _revisionCreated: true,
           _revisionBatchId: revisionBatch.batchId,
-          _markingMode: 'revision'
         });
         api.wsManager.clearDocumentCache();
 
@@ -1834,14 +1859,13 @@ export default {
         await abortTrackedEdit(trackedEdit);
         if (deleteResult?.success) {
           try {
-            await undoLastDocumentAction();
           } catch (undoError) {
             console.error('[AIChatPane] Word 删除异常后撤销失败:', undoError);
           }
         }
         const message = error?.message || String(error);
         console.warn('[AIChatPane] 创建 Microsoft Word 原生删除修订失败:', message);
-        await sendResult({ success: false, deletedCount: 0, missingParaIDs: [], error: message });
+        await sendResult({ success: false, deletedCount: deleteResult?.deletedCount ?? null, requiresRead: true, missingParaIDs: [], error: message });
         return false;
       }
     },
@@ -1877,14 +1901,20 @@ export default {
       );
       if (conflictingDelete) {
         const error = `paraID ${paraID} 正处于待删除修订中，请重新读取文档后使用仍存在的段落 ID`;
-        await sendResult({ success: false, paraID, docId, error });
+        await sendResult({ success: false, paraID, docId, requiresRead: true, error });
         return false;
       }
 
+      const startedAt = Date.now();
+      const progress = phase => api.wsManager.reportToolProgress(
+        { ...payload, type: 'edit_document' }, phase, Date.now() - startedAt
+      );
       let trackedEdit = null;
       let editResult = null;
       try {
-        trackedEdit = await beginTrackedEdit();
+        progress("begin_tracking");
+        trackedEdit = await beginTrackedEdit(docId);
+        progress("edit_paragraph");
         editResult = await editDocxParagraph(paraID, runs);
         if (!editResult?.success) {
           await abortTrackedEdit(trackedEdit);
@@ -1897,11 +1927,11 @@ export default {
           return false;
         }
 
+        progress("record_revisions");
         const revisionBatch = await finishTrackedEdit(trackedEdit, 'edit');
         if (!revisionBatch.batchId) {
-          await undoLastDocumentAction();
-          const error = 'Microsoft Word 未创建原生编辑修订，已撤销本次编辑';
-          await sendResult({ success: false, paraID, docId, error });
+          const error = 'Microsoft Word 未创建原生编辑修订，请重新读取文档核实结果';
+          await sendResult({ success: false, paraID, docId, requiresRead: true, error });
           return false;
         }
 
@@ -1910,7 +1940,6 @@ export default {
           paraID,
           originalText: editResult.originalText || '',
           _revisionBatchId: revisionBatch.batchId,
-          _markingMode: 'revision',
           msg: payload.msg || null
         };
         this.pendingEdits.push(editItem);
@@ -1920,6 +1949,7 @@ export default {
           payload.msg._revisionBatchId = revisionBatch.batchId;
         }
         api.wsManager.clearDocumentCache();
+        progress("respond");
         await sendResult({
           success: true,
           docId,
@@ -1932,12 +1962,11 @@ export default {
         await abortTrackedEdit(trackedEdit);
         if (editResult?.success) {
           try {
-            await undoLastDocumentAction();
           } catch (undoError) {
             console.error('[AIChatPane] Word 编辑异常后撤销失败:', undoError);
           }
         }
-        await sendResult({ success: false, paraID, docId, error: error?.message || String(error) });
+        await sendResult({ success: false, paraID, docId, requiresRead: true, error: error?.message || String(error) });
         return false;
       }
     },
@@ -1980,7 +2009,7 @@ export default {
       let trackedEdit = null;
       let result = null;
       try {
-        trackedEdit = await beginTrackedEdit();
+        trackedEdit = await beginTrackedEdit(normalizedDocId);
         result = await generateDocxFromJSON(docPayload, "selection", requestedInsertParaID);
         if (!result || !result.success) {
           await abortTrackedEdit(trackedEdit);
@@ -1991,7 +2020,7 @@ export default {
       } catch (error) {
         await abortTrackedEdit(trackedEdit);
         console.error('[AIChatPane] 创建 Microsoft Word 原生新增修订失败:', error);
-        await sendResult({ success: false, error: error?.message || String(error) });
+        await sendResult({ success: false, requiresRead: true, error: error?.message || String(error) });
         return false;
       }
       if (result.warning && insItem.msg && Array.isArray(insItem.msg.contentParts)) {
@@ -2028,29 +2057,21 @@ export default {
         insertStartParaIndex,
         insertEndParaIndex,
         insertedParaIDs,
-        _alreadyInserted: true,
-        _markingMode: null
+        _alreadyInserted: true
       };
 
       try {
         const revisionBatch = await finishTrackedEdit(trackedEdit, 'insert');
         pendingItem._revisionBatchId = revisionBatch.batchId;
-        pendingItem._markingMode = revisionBatch.batchId ? 'revision' : 'revision-unavailable';
         if (!revisionBatch.batchId) {
-          console.warn('[AIChatPane] Word 未返回本次插入产生的原生修订，正在撤销插入');
-          await undoLastDocumentAction();
-          await sendResult({ success: false, error: 'Word 未返回本次插入产生的原生修订' });
+          console.warn('[AIChatPane] Word 未返回本次插入产生的原生修订');
+          await sendResult({ success: false, requiresRead: true, error: 'Word 未返回本次插入产生的原生修订' });
           return false;
         }
       } catch (error) {
         await abortTrackedEdit(trackedEdit);
-        console.error('[AIChatPane] 读取本次新增修订失败，正在撤销插入:', error);
-        try {
-          await undoLastDocumentAction();
-        } catch (undoError) {
-          console.error('[AIChatPane] 撤销无修订插入失败:', undoError);
-        }
-        await sendResult({ success: false, error: error?.message || String(error) });
+        console.error('[AIChatPane] 读取本次新增修订失败:', error);
+        await sendResult({ success: false, requiresRead: true, error: error?.message || String(error) });
         return false;
       }
 
@@ -2107,115 +2128,43 @@ export default {
     /**
      * 接受本轮已经执行的原生增删修订。
      */
-    async confirmPending() {
-      if (this.settlingRevisions) return;
-      this.settlingRevisions = true;
-      const queueStartedAt = performance.now();
-      try {
-        try {
-          await this._insertQueue;
-        } catch (e) {
-          console.warn("[AIChatPane] pending operation queue failed before confirm:", e);
-        }
-        const pendingItems = [
-          ...this.pendingInsertions,
-          ...this.pendingEdits,
-          ...this.deleteRevisions
-        ];
-        const batchIds = pendingItems
-          .map((item) => item?._revisionBatchId)
-          .filter((batchId) => hasRevisionBatch(batchId));
-        if (batchIds.length === 0) {
-          this._showPendingActionError('accept', '没有可结算的原生修订批次');
-          return;
-        }
+    acceptPendingRevisions() {
+      return this._settlePendingRevisions('accept');
+    },
 
-        const queueWaitMs = performance.now() - queueStartedAt;
-        const settled = await settleRevisionBatches(batchIds, 'accept');
-        console.log('[AIChatPane] 已统一接受待确认修订:', { ...settled, timings: { queueWaitMs, ...settled.timings } });
+    rejectPendingRevisions() {
+      return this._settlePendingRevisions('reject');
+    },
+
+    async _settlePendingRevisions(action) {
+      if (this.isLoading || this.settlingRevisions) return;
+      this.settlingRevisions = true;
+      try {
+        await this._insertQueue;
+        const settled = await settleDocumentRevisions(action);
         const settledIds = new Set(settled.settledBatchIds || []);
-        for (const item of pendingItems) {
+        for (const item of [...this.pendingInsertions, ...this.pendingEdits, ...this.deleteRevisions]) {
           if (settledIds.has(item._revisionBatchId)) {
             item._revisionBatchId = null;
-            if (item.msg) {
-              item.msg._revisionBatchId = null;
-            }
+            if (item.msg) item.msg._revisionBatchId = null;
           }
         }
-        this.pendingInsertions = this.pendingInsertions.filter((item) => item._revisionBatchId);
-        this.pendingEdits = this.pendingEdits.filter((item) => item._revisionBatchId);
-        this.deleteRevisions = this.deleteRevisions.filter((item) => item._revisionBatchId);
+        this.pendingInsertions = this.pendingInsertions.filter(item => item._revisionBatchId);
+        this.pendingEdits = this.pendingEdits.filter(item => item._revisionBatchId);
+        this.deleteRevisions = this.deleteRevisions.filter(item => item._revisionBatchId);
         this._refreshPendingDocumentSummary();
-        if (this.pendingInsertions.length === 0) {
-          this._streamInsertions = [];
-        }
-        if (!settled.success) {
-          this._showPendingActionError('accept', settled.error);
-        }
-        if (settledIds.size > 0) api.wsManager.clearDocumentCache();
+        if (!this.pendingInsertions.length) this._streamInsertions = [];
+        if (!settled.success) this._showPendingActionError(action, settled.error);
+        if (settled.handled > 0) api.wsManager.clearDocumentCache();
+      } catch (error) {
+        this._showPendingActionError(action, error?.message || String(error));
       } finally {
         this.settlingRevisions = false;
+        await this._refreshRevisionPreview();
       }
     },
 
-    /**
-     * 拒绝本轮已经执行的原生增删修订。
-     */
-    async cancelPending() {
-      if (this.settlingRevisions) return;
-      this.settlingRevisions = true;
-      const queueStartedAt = performance.now();
-      try {
-        try {
-          await this._insertQueue;
-        } catch (e) {
-          console.warn("[AIChatPane] pending operation queue failed before cancel:", e);
-        }
-
-        const pendingItems = [
-          ...this.deleteRevisions,
-          ...this.pendingEdits,
-          ...[...this.pendingInsertions].reverse()
-        ];
-        const batchIds = pendingItems
-          .map((item) => item?._revisionBatchId)
-          .filter((batchId) => hasRevisionBatch(batchId));
-        if (batchIds.length === 0) {
-          this._showPendingActionError('reject', '没有可结算的原生修订批次');
-          return;
-        }
-
-        const queueWaitMs = performance.now() - queueStartedAt;
-        const settled = await settleRevisionBatches(batchIds, 'reject');
-        console.log('[AIChatPane] 已统一拒绝待确认修订:', { ...settled, timings: { queueWaitMs, ...settled.timings } });
-        const settledIds = new Set(settled.settledBatchIds || []);
-        for (const item of pendingItems) {
-          if (settledIds.has(item._revisionBatchId)) {
-            item._revisionBatchId = null;
-            if (item.msg) {
-              item.msg._revisionBatchId = null;
-            }
-          }
-        }
-        this.pendingInsertions = this.pendingInsertions.filter((item) => item._revisionBatchId);
-        this.pendingEdits = this.pendingEdits.filter((item) => item._revisionBatchId);
-        this.deleteRevisions = this.deleteRevisions.filter((item) => item._revisionBatchId);
-        this._refreshPendingDocumentSummary();
-        if (this.pendingInsertions.length === 0) {
-          this._streamInsertions = [];
-        }
-        if (!settled.success) {
-          this._showPendingActionError('reject', settled.error);
-        }
-        if (settledIds.size > 0) api.wsManager.clearDocumentCache();
-      } finally {
-        this.settlingRevisions = false;
-      }
-    },
-
-    /**
-     * 还原到某条消息（优先按隐藏书签 paraID 回滚）
-     */
+    /** Restore the content generated by the selected chat message. */
     async revertToMessage(messageIndex) {
       if (this.isLoading) return;
       const msg = this.messages[messageIndex];
@@ -2258,69 +2207,24 @@ export default {
     // ============== 文档操作 ==============
 
     async insertToWord(msg) {
-      try {
-        let jsonData = msg.documentJson || null;
+      if (this.isLoading || this.settlingRevisions) return;
+      this._insertQueue = this._insertQueue.then(async () => {
         const content = msg.content || '';
-
+        let jsonData = msg.documentJson || null;
         if (!jsonData) {
-          if (content.includes('```json')) {
-            const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
-            if (jsonMatch) {
-              try { jsonData = JSON.parse(jsonMatch[1]); } catch (e) { /* ignore */ }
-            }
-          } else if (content.trim().startsWith('{') && content.trim().endsWith('}')) {
-            try { jsonData = JSON.parse(content); } catch (e) { /* ignore */ }
-          }
+          const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
+          const candidate = jsonMatch?.[1] || content.trim();
+          try { jsonData = JSON.parse(candidate); } catch (error) { /* Plain text. */ }
         }
-
         if (jsonData && (jsonData.paragraphs || jsonData.tables)) {
           const insertParaID = this._toParaIdOrNull(jsonData.insertParaID);
-          if (insertParaID === null) {
-            console.error('生成文档失败: 缺少必填 insertParaID');
-            await this._insertPlainText(content);
-            return;
-          }
-          const result = await generateDocxFromJSON(jsonData, 'selection', insertParaID);
-          msg.insertedParaIDs = this._normalizeParaIdList(result?.insertedParaIDs || []);
-          if (result?.error) {
-            console.error('生成文档失败:', result.error);
-            await this._insertPlainText(content);
-          } else {
-            // 计算插入范围并记录到 msg（用于撤销）
-            const newParaCount = this._countDocumentContent(jsonData).paragraphCount;
-            if (newParaCount > 0) {
-              try {
-                await Word.run(async (context) => {
-                  const paras = context.document.body.paragraphs;
-                  paras.load('items');
-                  await context.sync();
-
-                  const totalParas = paras.items.length;
-                  let startIdx, endIdx;
-                  if (insertParaID === '0') {
-                    startIdx = 0;
-                    endIdx = newParaCount - 1;
-                  } else {
-                    const indices = await this._resolveParaIDsToIndices([insertParaID]);
-                    if (indices.length > 0) {
-                      startIdx = indices[0] + 1;
-                      endIdx = startIdx + newParaCount - 1;
-                    }
-                  }
-                  if (startIdx >= 0 && endIdx < totalParas) {
-                    msg.insertStartParaIndex = startIdx;
-                    msg.insertEndParaIndex = endIdx;
-                  }
-                });
-              } catch (e) { /* ignore */ }
-            }
-          }
-        } else {
-          await this._insertPlainText(content);
+          if (insertParaID === null) throw new Error('generate_document requires insertParaID');
+          return this._applyImmediateInsertion({ documentJson: jsonData, docId: 0, insertParaID, msg });
         }
-      } catch (error) {
-        console.error('插入文档失败:', error);
-      }
+        return this._insertPlainText(content, msg);
+      }).catch(error => this._showPendingActionError('accept', error?.message || String(error)));
+      await this._insertQueue;
+      await this._refreshRevisionPreview();
     },
 
     async _loadWenceTempDir() {
@@ -2339,19 +2243,31 @@ export default {
       }
     },
 
-    async _insertPlainText(content) {
+    async _insertPlainText(content, msg) {
+      let trackedEdit = null;
       try {
-        await Word.run(async (context) => {
-          const body = context.document.body;
-          let cleanContent = content;
-          if (content.includes('```json')) {
-            cleanContent = content.replace(/```json\s*/g, '').replace(/```/g, '');
-          }
-          body.insertText(cleanContent, Word.InsertLocation.end);
+        trackedEdit = await beginTrackedEdit(0);
+        const cleanContent = String(content || '').replace(/```json\s*/g, '').replace(/```/g, '');
+        await Word.run(async context => {
+          context.document.body.insertText(cleanContent, Word.InsertLocation.end);
           await context.sync();
         });
+        const revisionBatch = await finishTrackedEdit(trackedEdit, 'insert');
+        if (!revisionBatch.batchId) throw new Error('Word did not return the inserted native revisions; read the document to verify the result');
+        this.pendingInsertions.push({
+          documentJson: { paragraphs: cleanContent.split(/\r?\n/).map(text => ({ text })) },
+          docId: 0,
+          msg,
+          _revisionBatchId: revisionBatch.batchId,
+          _alreadyInserted: true
+        });
+        if (msg) msg._revisionBatchId = revisionBatch.batchId;
+        this._refreshPendingDocumentSummary();
+        api.wsManager.clearDocumentCache();
+        return true;
       } catch (error) {
-        console.error('插入纯文本失败:', error);
+        await abortTrackedEdit(trackedEdit);
+        throw error;
       }
     }
   }

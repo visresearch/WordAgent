@@ -3372,12 +3372,14 @@ function editDocxParagraph(paraID, runs, docOverride) {
   }
 
   let paragraph = null;
+  let paragraphIndex = null;
   const totalParas = Number(doc.Paragraphs?.Count || 0);
   for (let index = 1; index <= totalParas; index++) {
     try {
       const candidate = doc.Paragraphs.Item(index);
       if (Number(getParagraphParaID(candidate)) === normalizedParaID) {
         paragraph = candidate;
+        paragraphIndex = index - 1;
         break;
       }
     } catch (error) {
@@ -3416,13 +3418,21 @@ function editDocxParagraph(paraID, runs, docOverride) {
       return { success: false, paraID: normalizedParaID, error: '目标段落没有有效的 Range' };
     }
 
-    // Paragraph.Range.End includes the paragraph mark. Never delete that mark:
-    // deleting it would merge paragraphs and lose the original pStyle boundary.
-    const contentEnd = Math.max(startPos, rawEndPos - 1);
+    // Range.Text may expose a cell's ending as \r\u0007, while native Range
+    // positions can count the cell ending differently. Inspect the shortened
+    // range instead of deriving its length from the JavaScript text length.
+    let contentEnd = Math.max(startPos, rawEndPos - 1);
+    let contentRange = doc.Range(startPos, contentEnd);
+    let contentText = String(contentRange.Text || '');
+    while (contentEnd > startPos && (contentText.endsWith('\r') || contentText.endsWith('\u0007'))) {
+      contentEnd -= 1;
+      contentRange = doc.Range(startPos, contentEnd);
+      contentText = String(contentRange.Text || '');
+    }
     const replacedTextLength = Math.max(0, contentEnd - startPos);
     const originalText = String(paraRange.Text || '').replace(/[\r\n\u0007]+$/, '');
     if (contentEnd > startPos) {
-      doc.Range(startPos, contentEnd).Delete();
+      contentRange.Delete();
     }
 
     let currentPos = startPos;
@@ -3466,7 +3476,16 @@ function editDocxParagraph(paraID, runs, docOverride) {
       currentPos += run.text.length;
     }
 
-    revealInsertedRange(doc, startPos, Math.max(startPos, currentPos));
+    // No paragraph marks were inserted/deleted, so the index is unchanged.
+    // Avoid selecting the cell and scanning/page-probing all earlier paragraphs
+    // after every edit in a large table.
+    let location = null;
+    try {
+      const editedParagraph = doc.Paragraphs.Item(paragraphIndex + 1);
+      location = getParagraphLocation(doc, editedParagraph, paragraphIndex);
+    } catch (error) {
+      console.warn('[editDocxParagraph] 段落已更新，但无法读取位置元信息:', error);
+    }
     return {
       success: true,
       paraID: normalizedParaID,
@@ -3474,7 +3493,7 @@ function editDocxParagraph(paraID, runs, docOverride) {
       endPos: currentPos,
       replacedTextLength,
       originalText,
-      paragraph: getParagraphLocationAtPosition(doc, startPos)
+      paragraph: location
     };
   } catch (error) {
     return { success: false, paraID: normalizedParaID, error: error?.message || String(error) };

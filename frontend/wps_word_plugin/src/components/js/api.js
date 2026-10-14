@@ -221,6 +221,16 @@ function getCurrentDocumentMeta() {
  * WebSocket 连接管理器
  * 维护一个持久的 WebSocket 连接，支持自动重连
  */
+const DOCUMENT_TOOL_RESPONSES = {
+  read_document: 'document_response',
+  search_document: 'query_response',
+  edit_document: 'edit_document_response',
+  delete_document: 'delete_response',
+  insert_break: 'insert_break_response',
+  create_document: 'create_document_response',
+  json: 'generate_document_response'
+};
+
 const wsManager = {
   /** @type {WebSocket|null} */
   ws: null,
@@ -354,8 +364,9 @@ const wsManager = {
       };
 
       ws.onmessage = (event) => {
+        let data;
         try {
-          const data = JSON.parse(event.data);
+          data = JSON.parse(event.data);
 
           // 收到任何消息（包括后端 keepalive 的 ping）都重置空闲超时计时
           if (this._requestTimeoutTimer) {
@@ -400,10 +411,17 @@ const wsManager = {
 
           // 所有消息类型（text, json, status, read_document 等）都透传给上层
           if (this.onMessage) {
-            this.onMessage(data);
+            this.reportToolProgress(data, 'received');
+            const handling = this.onMessage(data);
+            if (handling?.then) {
+              Promise.resolve(handling).catch(error => this._reportToolFailure(data, error));
+            }
+          } else if (DOCUMENT_TOOL_RESPONSES[data.type]) {
+            this._reportToolFailure(data, new Error('聊天页面未注册工具处理器'));
           }
         } catch (e) {
-          console.error('[WebSocket] 解析消息失败:', e, event.data);
+          console.error('[WebSocket] 处理消息失败:', e, { type: data?.type, requestId: data?.requestId });
+          this._reportToolFailure(data, e);
         }
       };
 
@@ -463,6 +481,26 @@ const wsManager = {
     this.ws.send(JSON.stringify(data));
   },
 
+  reportToolProgress(data, phase, elapsedMs = 0) {
+    if (!DOCUMENT_TOOL_RESPONSES[data?.type] || (data.type === 'json' && !data.requestId)) {
+      return;
+    }
+    this.send({ type: 'frontend_tool_progress', tool: data.type, phase,
+      requestId: data.requestId || null, docId: data.docId, paraID: data.paraID,
+      elapsedMs: Math.round(elapsedMs) }).catch(error => console.warn('[WebSocket] 回传工具进度失败:', error));
+  },
+
+  _reportToolFailure(data, error) {
+    const type = DOCUMENT_TOOL_RESPONSES[data?.type];
+    if (!type || (data.type === 'json' && !data.requestId)) {
+      return;
+    }
+    this.send({ type, requestId: data.requestId || null, docId: data.docId, paraID: data.paraID,
+      success: false, requiresRead: true, documentJson: {}, matches: [], matchCount: 0,
+      error: `前端处理 ${data.type} 失败: ${error?.message || String(error)}`
+    }).catch(sendError => console.error('[WebSocket] 回传工具失败结果失败:', sendError));
+  },
+
   /**
    * 关闭连接
    */
@@ -484,6 +522,8 @@ const wsManager = {
    */
   async _handleDocumentRequest(params = {}) {
     // 注意：不在这里发送 loading 状态，AIChatPane 在收到 read_document 时已经推入了 loading 状态
+    const startedAt = Date.now();
+    const progress = phase => this.reportToolProgress({ ...params, type: 'read_document' }, phase, Date.now() - startedAt);
     try {
       const {
         startParaIndex = null,
@@ -502,7 +542,9 @@ const wsManager = {
         docId
       });
 
+      progress('parse_start');
       const docData = await parseDocumentRange(startParaIndex, endParaIndex, docId, startParaID, endParaID, mode);
+      progress('parse_finish');
 
       if (docData.error) {
         throw new Error(docData.error);
@@ -519,6 +561,7 @@ const wsManager = {
         type: 'document_response',
         documentJson: docData
       });
+      progress('response_sent');
 
       const tableCount = (docData.paragraphs || []).reduce(
         (count, block) => count + (Array.isArray(block?.tables) ? block.tables.length : 0),
@@ -1507,25 +1550,33 @@ async function deleteSkill(folder) {
 
 async function getPlugins() {
   const response = await request('/api/plugins');
-  if (!response.success) throw new Error(response.data?.detail || response.error);
+  if (!response.success) {
+    throw new Error(response.data?.detail || response.error);
+  }
   return response.data;
 }
 
 async function installPlugin(source) {
   const response = await request('/api/plugins/install', { method: 'POST', body: { source } });
-  if (!response.success) throw new Error(response.data?.detail || response.error);
+  if (!response.success) {
+    throw new Error(response.data?.detail || response.error);
+  }
   return response.data;
 }
 
 async function removePlugin(pluginId) {
   const response = await request(`/api/plugins/${encodeURIComponent(pluginId)}`, { method: 'DELETE' });
-  if (!response.success) throw new Error(response.data?.detail || response.error);
+  if (!response.success) {
+    throw new Error(response.data?.detail || response.error);
+  }
   return response.data;
 }
 
 async function getPluginOperation(operationId) {
   const response = await request(`/api/plugins/operations/${encodeURIComponent(operationId)}`);
-  if (!response.success) throw new Error(response.data?.detail || response.error);
+  if (!response.success) {
+    throw new Error(response.data?.detail || response.error);
+  }
   return response.data;
 }
 

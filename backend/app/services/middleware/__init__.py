@@ -16,6 +16,7 @@ from .notifying_summarization import (
     get_summarization_limits,
 )
 from .todo_list import TODO_LIST_MIDDLEWARE
+from .tool_history import TOOL_HISTORY_MIDDLEWARE, ToolHistoryMiddleware
 from .tool_normalization_and_logging import (
     _BUILTIN_TOOL_NAMES,
     TOOL_NORMALIZATION_AND_LOGGING_MIDDLEWARE,

@@ -16,6 +16,8 @@
 
 /* global Word */
 
+import { assertRevisionDocumentTarget } from "./revisionPreview.mjs";
+
 import {
   parseDocxToJSON,
   parseDocxToJSONLightweight,
@@ -187,7 +189,7 @@ async function getCurrentDocumentMeta() {
         }
       }
 
-      // Microsoft Word 只会有一个活动文档，固定使用 0 作为当前文档ID
+      // Office.js binds this task pane to its own document; docId=0 refers to that document.
       return {
         documentId: 0,
         documentName: documentName || "current_document",
@@ -216,6 +218,16 @@ async function getCurrentDocumentMeta() {
  * WebSocket 连接管理器
  * 维护一个持久的 WebSocket 连接，支持自动重连
  */
+const DOCUMENT_TOOL_RESPONSES = {
+  read_document: 'document_response',
+  search_document: 'query_response',
+  edit_document: 'edit_document_response',
+  delete_document: 'delete_response',
+  insert_break: 'insert_break_response',
+  create_document: 'create_document_response',
+  json: 'generate_document_response'
+};
+
 const wsManager = {
   /** @type {WebSocket|null} */
   ws: null,
@@ -324,16 +336,20 @@ const wsManager = {
       };
 
       ws.onmessage = (event) => {
+        let data;
         try {
-          const data = JSON.parse(event.data);
+          data = JSON.parse(event.data);
 
+          // 收到任何消息（包括后端 keepalive 的 ping）都重置空闲超时计时
           if (this._requestTimeoutTimer) {
             this._armIdleTimeout();
           }
 
-          if (data.type === "done") {
+          if (data.type === 'done') {
+            // 防重复调用 onComplete
             if (!this._completeCalled) {
               this._completeCalled = true;
+              // 清除超时定时器
               if (this._requestTimeoutTimer) {
                 clearTimeout(this._requestTimeoutTimer);
                 this._requestTimeoutTimer = null;
@@ -345,27 +361,39 @@ const wsManager = {
             return;
           }
 
-          if (data.type === "error") {
+          if (data.type === 'error') {
+            // 清除超时定时器
             if (this._requestTimeoutTimer) {
               clearTimeout(this._requestTimeoutTimer);
               this._requestTimeoutTimer = null;
             }
-            if (this.onError) {
-              this.onError(new Error(data.content || "未知错误"));
+            if (!this._completeCalled) {
+              this._completeCalled = true;
+              if (this.onError) {
+                this.onError(new Error(data.content || '未知错误'));
+              }
             }
             return;
           }
 
           // 后端 keepalive ping：仅用于保活和重置空闲超时，不上抛
-          if (data.type === "ping") {
+          if (data.type === 'ping') {
             return;
           }
 
+          // 所有消息类型（text, json, status, read_document 等）都透传给上层
           if (this.onMessage) {
-            this.onMessage(data);
+            this.reportToolProgress(data, 'received');
+            const handling = this.onMessage(data);
+            if (handling?.then) {
+              Promise.resolve(handling).catch(error => this._reportToolFailure(data, error));
+            }
+          } else if (DOCUMENT_TOOL_RESPONSES[data.type]) {
+            this._reportToolFailure(data, new Error('聊天页面未注册工具处理器'));
           }
         } catch (e) {
-          console.error("[WebSocket] 解析消息失败:", e, event.data);
+          console.error('[WebSocket] 处理消息失败:', e, { type: data?.type, requestId: data?.requestId });
+          this._reportToolFailure(data, e);
         }
       };
 
@@ -378,7 +406,7 @@ const wsManager = {
       };
 
       ws.onclose = (event) => {
-        console.log("[WebSocket] 连接关闭:", event.code, event.reason);
+        console.log('[WebSocket] 连接关闭:', event.code, event.reason);
         this.connected = false;
         this.ws = null;
         this._connectPromise = null;
@@ -387,15 +415,25 @@ const wsManager = {
           this._requestTimeoutTimer = null;
         }
 
-        const isIdleTimeoutClose = event.code === 1011 && event.reason === "idle-timeout";
-        if (!this._completeCalled && isIdleTimeoutClose) {
+        const willReconnect =
+          event.code !== 1000 && this._reconnectAttempts < this._maxReconnectAttempts;
+
+        // 断线后的自动重连只恢复连接，不会重放已经中断的请求。
+        const isIdleTimeoutClose = event.code === 1011 && event.reason === 'idle-timeout';
+        if (!this._completeCalled) {
           this._completeCalled = true;
           if (this.onError) {
-            this.onError(new Error("⛔ 网络超时连接，自动断开"));
+            const error = new Error(
+              isIdleTimeoutClose
+                ? '⛔ 网络超时连接，自动断开'
+                : 'WebSocket 连接意外中断，本次请求已失败'
+            );
+            error.reconnecting = willReconnect;
+            this.onError(error);
           }
         }
 
-        if (event.code !== 1000 && this._reconnectAttempts < this._maxReconnectAttempts) {
+        if (willReconnect) {
           this._scheduleReconnect();
         }
       };
@@ -409,6 +447,26 @@ const wsManager = {
       await this.connect();
     }
     this.ws.send(JSON.stringify(data));
+  },
+
+  reportToolProgress(data, phase, elapsedMs = 0) {
+    if (!DOCUMENT_TOOL_RESPONSES[data?.type] || (data.type === 'json' && !data.requestId)) {
+      return;
+    }
+    this.send({ type: 'frontend_tool_progress', tool: data.type, phase,
+      requestId: data.requestId || null, docId: data.docId, paraID: data.paraID,
+      elapsedMs: Math.round(elapsedMs) }).catch(error => console.warn('[WebSocket] 回传工具进度失败:', error));
+  },
+
+  _reportToolFailure(data, error) {
+    const type = DOCUMENT_TOOL_RESPONSES[data?.type];
+    if (!type || (data.type === 'json' && !data.requestId)) {
+      return;
+    }
+    this.send({ type, requestId: data.requestId || null, docId: data.docId, paraID: data.paraID,
+      success: false, requiresRead: true, documentJson: {}, matches: [], matchCount: 0,
+      error: `前端处理 ${data.type} 失败: ${error?.message || String(error)}`
+    }).catch(sendError => console.error('[WebSocket] 回传工具失败结果失败:', sendError));
   },
 
   close() {
@@ -431,6 +489,9 @@ const wsManager = {
    * 处理后端的文档读取请求：使用 Office.js 解析文档并通过 WebSocket 回传
    */
   async _handleDocumentRequest(startParaIndexOrParams = 0, endParaIndexArg = -1) {
+    const startedAt = Date.now();
+    const request = { ...(typeof startParaIndexOrParams === "object" ? startParaIndexOrParams : {}), type: "read_document" };
+    const progress = phase => this.reportToolProgress(request, phase, Date.now() - startedAt);
     try {
       let startParaIndex = null;
       let endParaIndex = null;
@@ -472,6 +533,7 @@ const wsManager = {
           endParaIndexArg === undefined || endParaIndexArg === null ? -1 : endParaIndexArg;
       }
 
+      progress("parse_start");
       const docData = await parseDocumentRange(
         startParaIndex,
         endParaIndex,
@@ -481,6 +543,7 @@ const wsManager = {
         mode
       );
 
+      progress("parse_finish");
       if (docData.error) {
         throw new Error(docData.error);
       }
@@ -496,8 +559,11 @@ const wsManager = {
 
       await this.send({
         type: "document_response",
+        requestId: request.requestId || null,
+        docId,
         documentJson: docData,
       });
+      progress("response_sent");
 
       const tableCount = (docData.paragraphs || []).reduce(
         (count, block) => count + (Array.isArray(block?.tables) ? block.tables.length : 0),
@@ -513,6 +579,9 @@ const wsManager = {
       console.error("[WebSocket] 解析/回传文档失败:", err);
       await this.send({
         type: "document_response",
+        requestId: request.requestId || null,
+        success: false,
+        requiresRead: true,
         documentJson: {},
         error: err?.message || String(err),
       });
@@ -710,7 +779,7 @@ async function parseDocumentRange(
   mode = "full"
 ) {
   try {
-    void docId;
+    assertRevisionDocumentTarget(docId);
     const useParaIDMode = startParaID !== null && startParaID !== undefined;
     let resolvedStartIndex = startParaIndex;
     let resolvedEndIndex = endParaIndex;

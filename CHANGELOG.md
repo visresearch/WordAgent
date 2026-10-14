@@ -1,5 +1,17 @@
 # Changelog
 
+## [v0.6.3]
+
+### Added
+- 修订username改为文策AI
+- 添加tool_history中间件，记录工具调用历史，修复停止工具调用后接入新问题消息不合法的bug
+
+
+### Changed
+- 更新py依赖
+- 删除冗余i18n文件
+- 优化系统提示词
+
 ## [v0.6.3-beta.2]
 
 (注意：此版本为beta测试版本)

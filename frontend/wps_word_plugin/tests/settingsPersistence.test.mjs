@@ -8,10 +8,14 @@ function panel(t, file, props, backend, emit = () => {}) {
   const source = readFileSync(new URL(`../src/components/setting/${file}.vue`, import.meta.url), 'utf8');
   const script = source.match(/<script>([\s\S]*?)<\/script>/)[1];
   const locale = vue.ref('zh-CN');
-  const context = { ...vue, api: backend, locale, setLocale(value) { locale.value = value; },
-    t: key => key, onMounted() {}, setTimeout() {}, console: { error() {} } };
+  const context = { ...vue, api: backend, locale, setLocale(value) {
+    locale.value = value; 
+  },
+  t: key => key, onMounted() {}, setTimeout() {}, console: { error() {} } };
   for (const match of script.matchAll(/^import (\w+) from /gm)) {
-    if (!(match[1] in context)) context[match[1]] = {};
+    if (!(match[1] in context)) {
+      context[match[1]] = {};
+    }
   }
   vm.runInContext(script.replace(/import[\s\S]*?from\s+['"][^'"]+['"];?/g, '')
     .replace('export default', 'globalThis.component ='), vm.createContext(context));
@@ -24,7 +28,9 @@ test('memory switch loads from settings, submits only on Save, and survives reop
   let stored = { language: 'ja-JP', enableLongTermMemory: true, customPrompt: 'Original', providers: [] };
   const writes = [];
   const backend = { getSettings: async () => structuredClone(stored),
-    saveSettings: async data => { writes.push(data); stored = JSON.parse(JSON.stringify(data)); } };
+    saveSettings: async data => {
+      writes.push(data); stored = JSON.parse(JSON.stringify(data)); 
+    } };
   const parent = panel(t, 'SettingPane', {}, backend);
   assert.equal(parent.settings.enableLongTermMemory, undefined);
   await parent.loadSettings();
@@ -49,8 +55,14 @@ test('a failed settings read cannot submit a default disabled memory switch', as
   let writes = 0;
   let online = false;
   const parent = panel(t, 'SettingPane', {}, {
-    getSettings: async () => { if (!online) throw new Error('offline'); return { enableLongTermMemory: true }; },
-    saveSettings: async () => { writes++; }
+    getSettings: async () => {
+      if (!online) {
+        throw new Error('offline');
+      } return { enableLongTermMemory: true }; 
+    },
+    saveSettings: async () => {
+      writes++; 
+    }
   });
   await parent.loadSettings();
   await parent.saveSettings();
@@ -70,7 +82,11 @@ test('failed Save retains the edited memory switch for retry', async t => {
   let stored = { enableLongTermMemory: true, providers: [] };
   const parent = panel(t, 'SettingPane', {}, {
     getSettings: async () => structuredClone(stored),
-    saveSettings: async data => { if (fail) throw new Error('offline'); stored = JSON.parse(JSON.stringify(data)); }
+    saveSettings: async data => {
+      if (fail) {
+        throw new Error('offline');
+      } stored = JSON.parse(JSON.stringify(data)); 
+    }
   });
   await parent.loadSettings();
   parent.onPersonalizationChange({ customPrompt: '', enableLongTermMemory: false });
@@ -87,7 +103,9 @@ test('failed Save retains the edited memory switch for retry', async t => {
 test('memory content still loads and saves through the memory API independently', async t => {
   let saved;
   const child = panel(t, 'LongTermMemorySetting', { enabled: true }, {
-    getMemory: async () => 'Known preferences', saveMemory: async content => { saved = content; }
+    getMemory: async () => 'Known preferences', saveMemory: async content => {
+      saved = content; 
+    }
   });
   await child.loadMemory();
   assert.equal(child.memoryContent.value, 'Known preferences');

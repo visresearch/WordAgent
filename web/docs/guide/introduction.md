@@ -42,7 +42,7 @@
 
 ## 使用示例
 
-**单智能体（Single Agent）模式**：用户输入“帮我把实习目的修改成 5 点”。智能体按“定位 → 读取 → 理解 → 编辑”的流程完成任务：先调用 `search_document` 定位段落，再调用 `read_document` 读取内容；分析理解后调用 `delete_document` 删除原内容，最后调用 `generate_document` 生成修改后的内容。WPS 加载项通过原生修订显示内容变更，并在修订批注中展示修改信息，方便用户确认或取消。
+**单智能体（Single Agent）模式**：用户输入“帮我把实习目的修改成 5 点”。智能体按“定位 → 读取 → 理解 → 编辑”的流程完成任务：先调用 `search_document` 定位段落，再调用 `read_document` 读取内容；分析理解后调用 `delete_document` 删除原内容，最后调用 `generate_document` 生成修改后的内容。WPS 加载项通过原生修订显示内容变更，并在修订批注中展示修改信息，方便用户接受或拒绝。
 
 ![文档生成与原生修订示例](/generate_document_2x.gif)
 
@@ -63,14 +63,6 @@
 ![Skill示例](/skill-example.png)
 
 3）**Python 插件示例**：在 **设置 → 插件** 中安装 `wordagent-plugin-ocr`，可为无法直接接收图片的模型提供图片文字识别能力。插件使用独立运行环境，支持安装、删除和通过 GitHub 链接添加自定义插件，详见 [插件管理](/guide/plugins)。
-
-## 模型参数设置
-
-在 **设置 → 大模型** 中点击已添加模型右侧的齿轮，在当前页面编辑 **Temperature**、**Top-p**、**Max Tokens** 和 **Reasoning Effort**。参数按模型保存，对话使用当前所选模型的配置。
-
-![模型参数编辑面板](/model_config.png)
-
-默认最大输出为 `8192` Tokens，Reasoning Effort 默认为 `medium`。个性化页面的温度设置与聊天输入区的思考开关已移除，统一在 [模型参数面板](/guide/api-config#编辑-llm-模型参数) 中调整。
 
 ## 外部 Agent 接入
 

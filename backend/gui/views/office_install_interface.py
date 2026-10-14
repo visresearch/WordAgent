@@ -42,9 +42,7 @@ class OfficeStaticRequestHandler(SimpleHTTPRequestHandler):
         ".png": "image/png",
         ".svg": "image/svg+xml",
     }
-    image_extensions = frozenset({
-        ".png", ".svg", ".jpg", ".jpeg", ".gif", ".bmp", ".tif", ".tiff", ".webp", ".ico"
-    })
+    image_extensions = frozenset({".png", ".svg", ".jpg", ".jpeg", ".gif", ".bmp", ".tif", ".tiff", ".webp", ".ico"})
 
     def end_headers(self):
         extension = Path(unquote(urlsplit(self.path).path)).suffix.lower()

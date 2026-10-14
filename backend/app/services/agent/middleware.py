@@ -6,6 +6,7 @@ from app.services.middleware import (
     MAX_CONTEXT_TOKENS,
     MODEL_CALL_LIMIT_MIDDLEWARE,
     TODO_LIST_MIDDLEWARE,
+    TOOL_HISTORY_MIDDLEWARE,
     TOOL_NORMALIZATION_AND_LOGGING_MIDDLEWARE,
     TOOL_RETRY_MIDDLEWARE,
     NotifyingSummarizationMiddleware,
@@ -18,6 +19,7 @@ def build_agent_middleware(*, summary_model, system_prompt: str = "", tools: lis
     """按当前模型构造单智能体中间件链。"""
     trigger_tokens, keep_tokens = get_summarization_limits()
     return [
+        TOOL_HISTORY_MIDDLEWARE,
         TODO_LIST_MIDDLEWARE,
         MODEL_CALL_LIMIT_MIDDLEWARE,
         INVALID_TOOL_CALL_MIDDLEWARE,

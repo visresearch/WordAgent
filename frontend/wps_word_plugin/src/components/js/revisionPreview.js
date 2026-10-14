@@ -46,7 +46,11 @@ function suspendScreenUpdating(doc) {
     return () => {};
   }
   return () => {
-    application.ScreenUpdating = true;
+    try {
+      application.ScreenUpdating = true;
+    } catch (error) {
+      console.warn('[revisionPreview] 恢复屏幕更新失败:', error);
+    }
   };
 }
 
@@ -268,7 +272,8 @@ export function beginTrackedEdit(doc) {
     before: readDocumentRevisions(doc),
     finished: false,
     application,
-    originalUserName
+    originalUserName,
+    resumeScreenUpdating: suspendScreenUpdating(doc)
   };
   try {
     application.UserName = AI_REVISION_AUTHOR;
@@ -287,7 +292,11 @@ export function beginTrackedEdit(doc) {
     } catch (restoreError) {
       console.warn('[revisionPreview] 开启原生修订失败后恢复文档状态失败:', restoreError);
     }
-    restoreDocumentPreview(doc, state);
+    try {
+      restoreDocumentPreview(doc, state);
+    } finally {
+      state.resumeScreenUpdating();
+    }
     throw error;
   }
   return state;
@@ -301,7 +310,11 @@ export function abortTrackedEdit(state) {
   try {
     restoreEditSettings(state);
   } finally {
-    restoreDocumentPreview(state.doc, state);
+    try {
+      restoreDocumentPreview(state.doc, state);
+    } finally {
+      state.resumeScreenUpdating();
+    }
   }
 }
 
@@ -310,6 +323,14 @@ export function finishTrackedEdit(state, target, kind) {
     return { batchId: null, revisionCount: 0 };
   }
   state.finished = true;
+  try {
+    return completeTrackedEdit(state, target, kind);
+  } finally {
+    state.resumeScreenUpdating();
+  }
+}
+
+function completeTrackedEdit(state, target, kind) {
   const { doc } = state;
   let after;
   try {
