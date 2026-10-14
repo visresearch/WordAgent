@@ -32,6 +32,7 @@
         :pending-document="pendingDocument"
         :pending-edits="pendingEdits"
         :delete-revisions="deleteRevisions"
+        :pending-revision-count="aiRevisionDocuments.reduce((sum, doc) => sum + doc.count, 0)"
         :token-stats="tokenStats"
         @update:mode="mode = $event"
         @update:selected-model="selectedModel = $event"
@@ -43,8 +44,8 @@
         @add-files="addFiles"
         @remove-file="removeFile"
         @refresh-models="loadModels"
-        @confirm-pending="confirmPending"
-        @cancel-pending="cancelPending"
+        @accept-revisions="acceptPendingRevisions"
+        @reject-revisions="rejectPendingRevisions"
       />
     </div>
     <transition name="slide-session">
@@ -65,8 +66,8 @@ import {
   abortTrackedEdit,
   beginTrackedEdit,
   finishTrackedEdit,
+  getAIRevisionCount,
   hasRevisionBatch,
-  rejectRevisionBatches,
   settleRevisionBatch,
   settleAllDocumentRevisions
 } from '../js/revisionPreview.js';
@@ -107,6 +108,7 @@ export default {
       pendingDocument: null,
       pendingDocumentMsg: null,
       deleteRevisions: [],  // 已立即执行、等待统一接受/拒绝的原生删除修订
+      aiRevisionDocuments: [], // 从文档读取，聊天页面重新打开后也能显示确认栏
       pendingEdits: [],  // 已立即执行、等待统一接受/拒绝的原生段落编辑修订
       pendingInsertions: [],  // [{documentJson, docId, insertParaID, msg}] 待确认的文档插入列表
       _streamInsertions: [], // [{insertParaID, count, docId}] 当前流式中已执行的插入操作
@@ -141,6 +143,8 @@ export default {
     this.loadModels();
     this.initSessionAndLoadHistory();
     this._loadWenceTempDir();
+    this._refreshAIRevisionPreview();
+    this.revisionPreviewTimer = setInterval(() => this._refreshAIRevisionPreview(), 1500);
 
     // 监听窗口宽度变化（600px 阈值）
     this._onResize = () => {
@@ -167,6 +171,7 @@ export default {
     }, 200);
   },
   beforeUnmount() {
+    clearInterval(this.revisionPreviewTimer);
     if (this._onResize) {
       window.removeEventListener('resize', this._onResize);
     }
@@ -175,6 +180,70 @@ export default {
     }
   },
   methods: {
+    _pendingRevisionItems() {
+      return [...this.pendingInsertions, ...this.pendingEdits, ...this.deleteRevisions, ...this.aiRevisionDocuments];
+    },
+
+    _clearSettledRevisionItems(isSettled) {
+      for (const key of ['pendingInsertions', 'pendingEdits', 'deleteRevisions', 'aiRevisionDocuments']) {
+        this[key] = this[key].filter((item) => {
+          if (!isSettled(item)) {
+            return true;
+          }
+          item._revisionBatchId = null;
+          if (item.msg) {
+            item.msg._revisionBatchId = null;
+          }
+          return false;
+        });
+      }
+      this._syncPendingDocumentPreview();
+    },
+
+    _refreshAIRevisionPreview(activeDoc = null) {
+      const previous = this.aiRevisionDocuments;
+      const documents = new Map();
+      try {
+        const doc = activeDoc || window.Application?.ActiveDocument;
+        if (doc) {
+          documents.set(this._toIntOrDefault(doc.DocID, 0), doc);
+        }
+      } catch (error) {
+        // WPS 正在切换/关闭文档时，仍检查已经记录的目标文档。
+        void error;
+      }
+      const ids = new Set(this._pendingRevisionItems()
+        .map((item) => this._toIntOrDefault(item.docId, 0)));
+      for (const docId of ids) {
+        if (documents.has(docId)) {
+          continue;
+        }
+        try {
+          const doc = this._resolveTargetDoc(docId);
+          if (doc) {
+            documents.set(this._toIntOrDefault(doc.DocID, docId), doc);
+          }
+        } catch (error) {
+          void error;
+        }
+      }
+      const pending = [];
+      for (const [docId, doc] of documents) {
+        try {
+          const count = getAIRevisionCount(doc);
+          if (count > 0) {
+            pending.push({ docId, count });
+          }
+        } catch (error) {
+          const cached = previous.find((item) => item.docId === docId);
+          if (cached) {
+            pending.push(cached); // 临时读取失败时保留确认入口。
+          }
+        }
+      }
+      this.aiRevisionDocuments = pending;
+    },
+
     async refreshPendingQuestion(sessionId, fallback = null) {
       const version = this.questionVersions[sessionId] || 0;
       this.refreshingQuestion = true;
@@ -1934,7 +2003,10 @@ export default {
     },
 
     _resolveTargetDoc(docId = 0) {
-      return getDocumentById(this._toIntOrDefault(docId, 0));
+      const id = this._toIntOrDefault(docId, 0);
+      const doc = getDocumentById(id);
+      // getDocumentById 未找到时会回退到活动文档，修订操作不能使用这个回退。
+      return id === 0 || this._toIntOrNull(doc?.DocID) === id ? doc : null;
     },
 
     _applyImmediateDelete(payload) {
@@ -2296,15 +2368,15 @@ export default {
     },
 
     /**
-     * 接受本轮已经执行的原生增删修订。
+     * 接受目标文档中文策AI的修订，保留其他作者的修订。
      */
-    confirmPending() {
-      // 与 WPS“审阅 → 接受对文档的所有修订”使用同一集合级接口。
-      // 不再逐条处理缓存的 Revision 对象，因为每次 Accept() 都可能使
-      // WPS 重排/合并集合，导致后续对象引用错位并误删新增内容。
+    acceptPendingRevisions() {
+      if (this.isLoading) {
+        return;
+      }
+      // 每个文档只处理一次，由修订模块筛选固定 AI 作者并重新读取集合。
       const documentResults = new Map();
-      const pendingItems = [...this.pendingInsertions, ...this.pendingEdits, ...this.deleteRevisions];
-      for (const item of pendingItems) {
+      for (const item of this._pendingRevisionItems()) {
         const documentKey = this._toIntOrDefault(item.docId, 0);
         // 去重必须在访问 WPS 前完成，每个批次重复遍历文档会增加跨进程调用。
         if (documentResults.has(documentKey)) {
@@ -2319,30 +2391,16 @@ export default {
         }
         const settled = settleAllDocumentRevisions(doc, 'accept');
         documentResults.set(documentKey, settled);
-        console.log('[AIChatPane] WPS 原生接受文档全部修订:', {
+        console.log('[AIChatPane] WPS 原生接受文策AI修订:', {
           ...settled,
           timings: { documentLookupMs: lookupMs, ...settled.timings }
         });
       }
 
-      const operationSettled = (item) => {
+      this._clearSettledRevisionItems((item) => {
         const documentKey = this._toIntOrDefault(item.docId, 0);
         return Boolean(documentResults.get(documentKey)?.success);
-      };
-      for (const ins of this.pendingInsertions) {
-        if (operationSettled(ins) && ins.msg) {
-          ins.msg._revisionBatchId = null;
-        }
-      }
-      for (const edit of this.pendingEdits) {
-        if (operationSettled(edit) && edit.msg) {
-          edit.msg._revisionBatchId = null;
-        }
-      }
-      this.pendingInsertions = this.pendingInsertions.filter((item) => !operationSettled(item));
-      this.pendingEdits = this.pendingEdits.filter((item) => !operationSettled(item));
-      this.deleteRevisions = this.deleteRevisions.filter((item) => !operationSettled(item));
-      this._syncPendingDocumentPreview();
+      });
       this._streamInsertions = [];
       if ([...documentResults.values()].some((result) => result.success)) {
         api.wsManager.clearDocumentCache();
@@ -2350,10 +2408,14 @@ export default {
     },
 
     /**
-     * 拒绝本轮已经执行的原生增删修订。
+     * 拒绝目标文档中文策AI的修订，保留其他作者的修订。
      */
-    cancelPending() {
+    rejectPendingRevisions() {
+      if (this.isLoading) {
+        return;
+      }
       const groups = new Map();
+      const documentResults = new Map();
       const completed = new Set();
       const errors = [];
       for (const item of [...this.deleteRevisions, ...this.pendingEdits, ...this.pendingInsertions]) {
@@ -2363,25 +2425,35 @@ export default {
         }
         groups.get(key).items.push(item);
       }
-      for (const { doc, items } of groups.values()) {
+      for (const item of this.aiRevisionDocuments) {
+        const key = this._toIntOrDefault(item.docId, 0);
+        if (!groups.has(key)) {
+          groups.set(key, { doc: this._resolveTargetDoc(item.docId), items: [] });
+        }
+        groups.get(key).hasAIRevisions = true;
+      }
+      for (const [key, { doc, items, hasAIRevisions }] of groups) {
         if (!doc) {
           errors.push('无法获取目标文档');
           continue;
         }
         const tracked = items.filter((item) => hasRevisionBatch(item._revisionBatchId));
-        if (tracked.length > 0) {
-          const result = rejectRevisionBatches(doc, tracked.map((item) => item._revisionBatchId));
-          for (const item of tracked) {
-            if (result.settledBatchIds.includes(item._revisionBatchId)) {
+        const nativeAction = tracked.length > 0 || hasAIRevisions;
+        if (nativeAction) {
+          const result = settleAllDocumentRevisions(doc, 'reject');
+          documentResults.set(key, result);
+          if (result.success) {
+            for (const item of items) {
               completed.add(item);
             }
           }
           if (!result.success) {
-            errors.push(result.error || '无法完整拒绝本轮修订，请重试');
+            errors.push(result.error || '无法完整拒绝文策AI的修订，请重试');
           }
         }
         // 极少数版本不产生 Revision 时，回写/删除不得再生成新的修订。
-        const fallback = items.filter((item) => !tracked.includes(item)).sort(
+        // 页面内批次可能已经丢失，但文档仍有原生修订；不能再次删除旧 Range。
+        const fallback = (nativeAction ? [] : items).sort(
           (left, right) => (right.insertStartPos ?? right.startPos ?? -1) - (left.insertStartPos ?? left.startPos ?? -1)
         );
         for (const item of fallback) {
@@ -2407,16 +2479,9 @@ export default {
           }
         }
       }
-      for (const item of completed) {
-        item._revisionBatchId = null;
-        if (item.msg) {
-          item.msg._revisionBatchId = null;
-        }
-      }
-      this.deleteRevisions = this.deleteRevisions.filter((item) => !completed.has(item));
-      this.pendingEdits = this.pendingEdits.filter((item) => !completed.has(item));
-      this.pendingInsertions = this.pendingInsertions.filter((item) => !completed.has(item));
-      this._syncPendingDocumentPreview();
+      const summaries = new Set(this.aiRevisionDocuments);
+      this._clearSettledRevisionItems((item) => completed.has(item)
+        || (summaries.has(item) && documentResults.get(item.docId)?.success));
       if (errors.length === 0) {
         this._streamInsertions = [];
       } else {
@@ -2435,7 +2500,7 @@ export default {
         console.log('[AIChatPane] 处理插入 ', i + 1, '/', this.pendingInsertions.length, ', docId:', ins.docId);
 
         // 获取正确的文档对象
-        const doc = Number.isInteger(ins.docId) ? getDocumentById(ins.docId) : window.Application.ActiveDocument;
+        const doc = this._resolveTargetDoc(ins.docId);
         if (!doc) {
           console.warn('[AIChatPane] 无法获取文档对象, docId:', ins.docId);
           continue;
@@ -2443,23 +2508,27 @@ export default {
 
         // 执行文档插入
         let trackedEdit = null;
-        trackedEdit = beginTrackedEdit(doc);
-        const result = generateDocxFromJSON(ins.documentJson, doc, ins.insertParaID);
-        if (result.success) {
-          console.log('[AIChatPane] 文档已插入, docId:', ins.docId, ', 范围:', result.startPos, '-', result.endPos);
-          ins.insertStartPos = result.startPos;
-          ins.insertEndPos = result.endPos;
+        try {
+          trackedEdit = beginTrackedEdit(doc);
+          const result = generateDocxFromJSON(ins.documentJson, doc, ins.insertParaID);
+          if (result.success) {
+            console.log('[AIChatPane] 文档已插入, docId:', ins.docId, ', 范围:', result.startPos, '-', result.endPos);
+            ins.insertStartPos = result.startPos;
+            ins.insertEndPos = result.endPos;
 
-          const revisionBatch = finishTrackedEdit(
-            trackedEdit,
-            { start: result.startPos, end: result.endPos },
-            'insert'
-          );
-          ins._revisionBatchId = revisionBatch.batchId;
-          ins._markingMode = revisionBatch.batchId ? 'revision' : 'revision-unavailable';
-        } else {
+            const revisionBatch = finishTrackedEdit(
+              trackedEdit,
+              { start: result.startPos, end: result.endPos },
+              'insert'
+            );
+            ins._revisionBatchId = revisionBatch.batchId;
+            ins._markingMode = revisionBatch.batchId ? 'revision' : 'revision-unavailable';
+            this._refreshAIRevisionPreview(doc);
+          } else {
+            console.error('[AIChatPane] 文档插入失败:', result.error);
+          }
+        } finally {
           abortTrackedEdit(trackedEdit);
-          console.error('[AIChatPane] 文档插入失败:', result.error);
         }
       }
 
@@ -2607,7 +2676,7 @@ export default {
           } else {
             abortTrackedEdit(trackedEdit);
             console.error('生成文档失败:', result.error);
-            this.insertPlainText(content);
+            this.insertPlainText(content, msg);
           }
         } else {
           this.insertPlainText(content, msg);
@@ -2622,6 +2691,7 @@ export default {
      * 插入纯文本（作为后备方案）
      */
     insertPlainText(content, msg = null) {
+      let trackedEdit = null;
       try {
         const doc = window.Application.ActiveDocument;
         const selection = window.Application.Selection;
@@ -2636,12 +2706,40 @@ export default {
           cleanContent = content.replace(/```json\s*/g, '').replace(/```/g, '');
         }
 
+        const startPos = Number(selection.Range.Start);
+        if (!Number.isFinite(startPos)) {
+          throw new Error('无法读取纯文本插入位置');
+        }
+        trackedEdit = beginTrackedEdit(doc);
         selection.TypeText(cleanContent);
         selection.TypeParagraph();
+        const endPos = Number(selection.Range.End);
+        if (!Number.isFinite(endPos)) {
+          throw new Error('无法读取纯文本插入后的范围，请重新读取文档');
+        }
+        const revisionBatch = finishTrackedEdit(trackedEdit, { start: startPos, end: endPos }, 'insert');
+        const docId = this._toIntOrDefault(doc.DocID, 0);
+        if (msg) {
+          msg.insertStartPos = startPos;
+          msg.insertEndPos = endPos;
+          msg._docId = docId;
+          msg._revisionBatchId = revisionBatch.batchId;
+        }
+        this.pendingInsertions.push({
+          docId, msg, documentJson: { paragraphs: cleanContent.split(/\r?\n/).map((text) => ({ runs: [{ text }] })) },
+          insertStartPos: startPos, insertEndPos: endPos, _alreadyInserted: true,
+          _revisionBatchId: revisionBatch.batchId,
+          _markingMode: revisionBatch.batchId ? 'revision' : 'revision-unavailable'
+        });
+        this._syncPendingDocumentPreview();
+        this._refreshAIRevisionPreview(doc);
+        api.wsManager.clearDocumentCache();
 
         console.log('纯文本已成功插入到Word文档');
       } catch (error) {
         console.error('插入纯文本失败:', error);
+      } finally {
+        abortTrackedEdit(trackedEdit);
       }
     },
 

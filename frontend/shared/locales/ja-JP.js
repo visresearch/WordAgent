@@ -8,7 +8,7 @@ export default {
   language: {
     label: 'インターフェース言語', chinese: '简体中文', english: 'English', indonesian: 'Bahasa Indonesia', japanese: '日本語', korean: '韓国語', vietnamese: 'ベトナム語'
   },
-  windows: { assistant: 'WenCe AI アシスタント', settings: '設定', about: 'About', debug: 'デバッグパネル' },
+  windows: { assistant: '文策AI', settings: '設定', about: 'About', debug: 'デバッグパネル' },
   nav: { chat: 'AIチャット', history: 'チャット履歴', settings: '設定', about: 'About', debug: 'デバッグ' },
   settings: {
     tabs: { general: '一般', model: 'モデル', personalization: 'パーソナライズ', mcp: 'MCP', skill: 'スキル', data: 'データ' },
@@ -106,7 +106,8 @@ export default {
     allowThinking: '深い考える', disableThinking: '深い考えるオフ', thinkingToggle: '深い考えるを有効/無効化',
     addFile: 'ファイルを追加', addSelection: '選択を追加', send: '送信', stop: '停止',
     agentPlaceholder: '次に構築するものを説明', askPlaceholder: '質問を入力',
-    chooseModel: 'モデルを選択', deleteParagraphs: '{count} 段落を削除', aiOperation: 'AI改訂: {actions} (保留中の確認)',
+    chooseModel: 'モデルを選択', deleteParagraphs: '{count} 段落を削除', aiOperation: 'AI改訂: {actions} (保留中の確認)', revisionCount: '{count} 件の変更',
+    acceptRevision: '採用', rejectRevision: '却下',
     context: 'コンテキスト: {current}k / {max}k トークン ({percentage}%)', unnamedFile: '名前なしのファイル',
     unsupportedFiles: 'サポートされていないファイル: {files}。サポート形式: png, jpg, jpeg, pdf, docx, txt, md。',
     paragraphRange: '段落 {start} - {end}', showHistory: 'チャット履歴を表示', whatCanIDo: '何をできる？',
@@ -155,7 +156,7 @@ export default {
     }
   },
   about: {
-    name: 'WenCe AI Assistant', product: 'WenCe AI Assistant', version: 'Version', pluginType: 'Add-in type', wpsPlugin: 'WPS Writer add-in', wordPlugin: 'Microsoft Word add-in',
+    name: '文策AI', product: '文策AI', version: 'Version', pluginType: 'Add-in type', wpsPlugin: 'WPS Writer add-in', wordPlugin: 'Microsoft Word add-in',
     developer: 'Developer', developerName: 'Riyue Xingchen', links: 'Links', repository: 'GitHub repository', website: 'Project website',
     docs: 'Documentation', issues: 'Report an issue', sponsor: 'Sponsor the author', github: 'GitHub repository', unknownVersion: 'Unknown version'
   },

@@ -8,7 +8,7 @@ export default {
   language: {
     label: '인터페이스 언어', chinese: '简体中文', english: 'English', indonesian: 'Bahasa Indonesia', japanese: '일본어', korean: '한국어', vietnamese: '베트남어'
   },
-  windows: { assistant: 'WenCe AI 어시스턴트', settings: '설정', about: 'About', debug: '디버그 패널' },
+  windows: { assistant: '文策AI', settings: '설정', about: 'About', debug: '디버그 패널' },
   nav: { chat: 'AI 채팅', history: '채팅 기록', settings: '설정', about: 'About', debug: '디버그' },
   settings: {
     tabs: { general: '일반', model: '모델', personalization: '개인화', mcp: 'MCP', skill: '스킬', data: '데이터' },
@@ -106,7 +106,8 @@ export default {
     allowThinking: '생각하기 켜짐', disableThinking: '생각하기 꺼짐', thinkingToggle: '생각하기 켜기/끄기',
     addFile: '파일 추가', addSelection: '선택 추가', send: '전송', stop: '중지',
     agentPlaceholder: '다음에 구축할 것을 설명', askPlaceholder: '질문 입력',
-    chooseModel: '모델 선택', deleteParagraphs: '{count} 문단 삭제', aiOperation: 'AI 수정: {actions} (보류 중 확인)',
+    chooseModel: '모델 선택', deleteParagraphs: '{count} 문단 삭제', aiOperation: 'AI 수정: {actions} (보류 중 확인)', revisionCount: '{count}개 변경 사항',
+    acceptRevision: '수락', rejectRevision: '거부',
     context: '컨텍스트: {current}k / {max}k 토큰 ({percentage}%)', unnamedFile: '이름 없는 파일',
     unsupportedFiles: '지원하지 않는 파일: {files}. 지원 형식: png, jpg, jpeg, pdf, docx, txt, md.',
     paragraphRange: '문단 {start} - {end}', showHistory: '채팅 기록 표시', whatCanIDo: '무엇을 할 수 있나요?',
@@ -155,7 +156,7 @@ export default {
     }
   },
   about: {
-    name: 'WenCe AI Assistant', product: 'WenCe AI Assistant', version: 'Version', pluginType: 'Add-in type', wpsPlugin: 'WPS Writer add-in', wordPlugin: 'Microsoft Word add-in',
+    name: '文策AI', product: '文策AI', version: 'Version', pluginType: 'Add-in type', wpsPlugin: 'WPS Writer add-in', wordPlugin: 'Microsoft Word add-in',
     developer: 'Developer', developerName: 'Riyue Xingchen', links: 'Links', repository: 'GitHub repository', website: 'Project website',
     docs: 'Documentation', issues: 'Report an issue', sponsor: 'Sponsor the author', github: 'GitHub repository', unknownVersion: 'Unknown version'
   },

@@ -8,7 +8,7 @@ export default {
   language: {
     label: 'Bahasa antarmuka', chinese: '简体中文', english: 'English', indonesian: 'Bahasa Indonesia'
   },
-  windows: { assistant: 'Asisten WenCe AI', settings: 'Pengaturan', about: 'Tentang', debug: 'Panel debug' },
+  windows: { assistant: '文策AI', settings: 'Pengaturan', about: 'Tentang', debug: 'Panel debug' },
   nav: { chat: 'Obrolan AI', history: 'Riwayat obrolan', settings: 'Pengaturan', about: 'Tentang', debug: 'Debug' },
   settings: {
     tabs: { general: 'Umum', model: 'Model', personalization: 'Personalisasi', mcp: 'MCP', skill: 'Skill', data: 'Data' },
@@ -106,7 +106,8 @@ export default {
     allowThinking: 'Pemikiran aktif', disableThinking: 'Pemikiran nonaktif', thinkingToggle: 'Aktifkan atau nonaktifkan pemikiran mendalam',
     addFile: 'Tambah file', addSelection: 'Tambah pilihan', send: 'Kirim', stop: 'Berhenti',
     agentPlaceholder: 'Jelaskan apa yang ingin dibuat selanjutnya', askPlaceholder: 'Masukkan pertanyaan',
-    chooseModel: 'Pilih model', deleteParagraphs: 'menghapus {count} paragraf', aiOperation: 'Revisi AI: {actions} (menunggu konfirmasi)',
+    chooseModel: 'Pilih model', deleteParagraphs: 'menghapus {count} paragraf', aiOperation: 'Revisi AI: {actions} (menunggu konfirmasi)', revisionCount: '{count} perubahan',
+    acceptRevision: 'Terima', rejectRevision: 'Tolak',
     context: 'Konteks: {current}k / {max}k token ({percentage}%)', unnamedFile: 'File tanpa nama',
     unsupportedFiles: 'File tidak didukung: {files}. Format yang didukung: png, jpg, jpeg, pdf, docx, txt, md.',
     paragraphRange: 'Paragraf {start} - {end}', showHistory: 'Tampilkan riwayat obrolan', whatCanIDo: 'Apa yang bisa saya lakukan?',
@@ -154,7 +155,7 @@ export default {
     }
   },
   about: {
-    name: 'Asisten WenCe AI', product: 'Asisten WenCe AI', version: 'Versi', pluginType: 'Jenis add-in', wpsPlugin: 'Add-in WPS Writer', wordPlugin: 'Add-in Microsoft Word',
+    name: '文策AI', product: '文策AI', version: 'Versi', pluginType: 'Jenis add-in', wpsPlugin: 'WPS Writer add-in', wordPlugin: 'Microsoft Word add-in',
     developer: 'Pengembang', developerName: 'Riyue Xingchen', links: 'Tautan', repository: 'Repositori GitHub', website: 'Situs proyek',
     docs: 'Dokumentasi', issues: 'Laporkan masalah', sponsor: 'Sponsor pengembang', github: 'Repositori GitHub', unknownVersion: 'Versi tidak diketahui'
   },

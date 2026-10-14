@@ -8,7 +8,7 @@ export default {
   language: {
     label: '界面语言', chinese: '简体中文', english: 'English', indonesian: 'Bahasa Indonesia'
   },
-  windows: { assistant: '文策 AI 助手', settings: '设置', about: '关于', debug: '调试面板' },
+  windows: { assistant: '文策AI', settings: '设置', about: '关于', debug: '调试面板' },
   nav: { chat: 'AI 对话', history: '历史会话', settings: '设置', about: '关于', debug: '调试' },
   settings: {
     tabs: { general: '通用', model: '大模型', personalization: '个性化', mcp: 'MCP', skill: 'Skill', data: '数据管理' },
@@ -122,7 +122,8 @@ export default {
     allowThinking: '允许思考', disableThinking: '禁止思考', thinkingToggle: '启用或禁用深度思考',
     addFile: '添加文件', addSelection: '添加选区', send: '发送', stop: '终止',
     agentPlaceholder: '描述下一步要构建的内容', askPlaceholder: '输入要咨询的问题',
-    chooseModel: '请选择模型', deleteParagraphs: '删除 {count} 个段落', aiOperation: 'AI 修订：{actions}（待确认）',
+    chooseModel: '请选择模型', deleteParagraphs: '删除 {count} 个段落', aiOperation: 'AI 修订：{actions}（待确认）', revisionCount: '{count} 处修改',
+    acceptRevision: '接受', rejectRevision: '拒绝',
     context: '上下文：{current}k / {max}k tokens（{percentage}%）', unnamedFile: '未命名文件',
     unsupportedFiles: '以下文件格式不支持：{files}。仅支持 png、jpg、jpeg、pdf、docx、txt、md。',
     paragraphRange: '段落 {start} - {end}', showHistory: '显示历史聊天记录', whatCanIDo: '我能做什么',
@@ -170,7 +171,7 @@ export default {
     }
   },
   about: {
-    name: '文策 AI 助手', product: '文策 AI 助手', version: '版本号', pluginType: '插件类型', wpsPlugin: 'WPS 文字加载项', wordPlugin: 'Microsoft Word 加载项',
+    name: '文策AI', product: '文策AI', version: '版本号', pluginType: '插件类型', wpsPlugin: 'WPS 文字加载项', wordPlugin: 'Microsoft Word 加载项',
     developer: '开发者', developerName: '日月星辰', links: '相关链接', repository: 'GitHub 仓库', website: '项目官网',
     docs: '使用文档', issues: '问题反馈', sponsor: '赞助作者', github: 'GitHub 仓库', unknownVersion: '未知版本'
   },

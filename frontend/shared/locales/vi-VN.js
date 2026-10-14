@@ -8,7 +8,7 @@ export default {
   language: {
     label: 'Ngôn ngữ giao diện', chinese: '简体中文', english: 'English', indonesian: 'Bahasa Indonesia', japanese: '日本語', korean: '한국어', vietnamese: 'Tiếng Việt'
   },
-  windows: { assistant: 'WenCe AI Trợ lý', settings: 'Cài đặt', about: 'About', debug: 'Bảng điều khiển gỡ lỗi' },
+  windows: { assistant: '文策AI', settings: 'Cài đặt', about: 'About', debug: 'Bảng điều khiển gỡ lỗi' },
   nav: { chat: 'Trò chuyện AI', history: 'Lịch sử trò chuyện', settings: 'Cài đặt', about: 'About', debug: 'Gỡ lỗi' },
   settings: {
     tabs: { general: 'Chung', model: 'Mô hình', personalization: 'Cá nhân hóa', mcp: 'MCP', skill: 'Kỹ năng', data: 'Dữ liệu' },
@@ -106,7 +106,8 @@ export default {
     allowThinking: 'Suy nghĩ bật', disableThinking: 'Suy nghĩ tắt', thinkingToggle: 'Bật hoặc tắt suy nghĩ sâu',
     addFile: 'Thêm tệp tin', addSelection: 'Thêm chọn', send: 'Gửi', stop: 'Dừng',
     agentPlaceholder: 'Mô tả những gì cần xây dựng tiếp theo', askPlaceholder: 'Nhập câu hỏi',
-    chooseModel: 'Chọn mô hình', deleteParagraphs: 'đã xóa {count} đoạn', aiOperation: 'Chỉnh sửa AI: {actions} (đang chờ xác nhận)',
+    chooseModel: 'Chọn mô hình', deleteParagraphs: 'đã xóa {count} đoạn', aiOperation: 'Chỉnh sửa AI: {actions} (đang chờ xác nhận)', revisionCount: '{count} thay đổi',
+    acceptRevision: 'Chấp nhận', rejectRevision: 'Từ chối',
     context: 'Ngữ cảnh: {current}k / {max}k token ({percentage}%)', unnamedFile: 'Tệp tin không tên',
     unsupportedFiles: 'Tệp tin không được hỗ trợ: {files}. Định dạng hỗ trợ: png, jpg, jpeg, pdf, docx, txt, md.',
     paragraphRange: 'Đoạn {start} - {end}', showHistory: 'Hiển thị lịch sử trò chuyện', whatCanIDo: 'Tôi có thể làm gì?',
@@ -155,7 +156,7 @@ export default {
     }
   },
   about: {
-    name: 'WenCe AI Assistant', product: 'WenCe AI Assistant', version: 'Version', pluginType: 'Add-in type', wpsPlugin: 'WPS Writer add-in', wordPlugin: 'Microsoft Word add-in',
+    name: '文策AI', product: '文策AI', version: 'Version', pluginType: 'Add-in type', wpsPlugin: 'WPS Writer add-in', wordPlugin: 'Microsoft Word add-in',
     developer: 'Developer', developerName: 'Riyue Xingchen', links: 'Links', repository: 'GitHub repository', website: 'Project website',
     docs: 'Documentation', issues: 'Report an issue', sponsor: 'Sponsor the author', github: 'GitHub repository', unknownVersion: 'Unknown version'
   },

@@ -1,6 +1,5 @@
-// 调整revisionBatches.entries() 的删除逻辑,避免在for循环内一边删除一边遍历，且使用docid做同一文档判定 2026103 by volun_leung
-// 调整修订时作者为助手名称，修订完成后恢复原作者名称，且处理修订只处理助手的修订，不处理其他作者的修订 20261014 by volun_leung
-import { t } from '@/i18n/index.js';
+// AI 修订用户名固定为文策AI，与界面语言无关。
+export const AI_REVISION_AUTHOR = '文策AI';
 const revisionBatches = new Map();
 const documentPreviewStates = new Map();
 let nextBatchId = 1;
@@ -16,6 +15,19 @@ function safeRead(read, fallback = null) {
   } catch (error) {
     return fallback;
   }
+}
+
+function sameDocument(left, right) {
+  if (left === right) {
+    return true;
+  }
+  const leftId = safeRead(() => left.DocID);
+  const rightId = safeRead(() => right.DocID);
+  return leftId !== null && rightId !== null && Number.isSafeInteger(Number(leftId)) && Number(leftId) === Number(rightId);
+}
+
+function documentPreviewEntry(doc) {
+  return [...documentPreviewStates.entries()].find(([other]) => sameDocument(doc, other));
 }
 
 function now() {
@@ -38,18 +50,23 @@ function suspendScreenUpdating(doc) {
   };
 }
 
-function listRevisions(revisions) {
+function readRevisionCount(revisions) {
+  const count = Number(revisions?.Count);
+  if (!Number.isInteger(count) || count < 0) {
+    throw new Error('无法读取 WPS 修订集合');
+  }
+  return count;
+}
+
+function readRevisions(revisions) {
   const items = [];
-  const count = Number(safeRead(() => revisions.Count, 0)) || 0;
+  const count = readRevisionCount(revisions);
   for (let index = 1; index <= count; index++) {
     const revision = safeRead(() => revisions.Item(index));
     if (!revision) {
-      continue;
+      throw new Error('无法完整读取 WPS 修订集合');
     }
-     //只要AI助手的修订清单
-    if(revision.Author != APP_USER_NAME){
-      continue;
-    }
+    // 保留所有作者，才能判断集合/范围中的批量操作是否会影响他人。
     const range = safeRead(() => revision.Range);
     const text = String(safeRead(() => range.Text, '') || '');
     items.push({
@@ -65,6 +82,26 @@ function listRevisions(revisions) {
     });
   }
   return items;
+}
+
+function readDocumentRevisions(doc) {
+  return readRevisions(doc.Revisions);
+}
+
+export function getAIRevisionCount(doc) {
+  const revisions = doc.Revisions;
+  const count = readRevisionCount(revisions);
+  let aiCount = 0;
+  for (let index = 1; index <= count; index++) {
+    const author = revisions.Item(index)?.Author;
+    if (typeof author !== 'string') {
+      throw new Error('无法读取 WPS 修订作者');
+    }
+    if (author === AI_REVISION_AUTHOR) {
+      aiCount += 1;
+    }
+  }
+  return aiCount;
 }
 
 function revisionSignature(item) {
@@ -119,28 +156,17 @@ function expectedType(item, kind) {
   return true;
 }
 
-// WdRevisionsView.wdRevisionsViewFinal. WPS may keep a document in the
-// original-revisions view, where newly inserted text is hidden until Accept().
-const WPS_REVISIONS_VIEW_FINAL = 0;
-
 function showFinalRevisionPreview(view) {
   if (!view) {
     return;
   }
-  try {
-    view.RevisionsView = WPS_REVISIONS_VIEW_FINAL;
-  } catch (error) {
-    void error;
-  }
-  try {
-    view.ShowInsertionsAndDeletions = true;
-  } catch (error) {
-    void error;
-  }
-  try {
-    view.ShowFormatChanges = false;
-  } catch (error) {
-    void error;
+  const settings = { RevisionsView: 0, ShowInsertionsAndDeletions: true, ShowFormatChanges: false };
+  for (const [property, value] of Object.entries(settings)) {
+    try {
+      view[property] = value;
+    } catch (error) {
+      void error; // 兼容不支持部分显示属性的 WPS 版本。
+    }
   }
 }
 
@@ -148,31 +174,45 @@ function restoreRevisionView(state) {
   if (!state?.view) {
     return;
   }
-  if (state.previousRevisionsView !== null) {
-    try {
-      state.view.RevisionsView = state.previousRevisionsView;
-    } catch (error) {
-      void error;
+  const settings = {
+    RevisionsView: state.previousRevisionsView,
+    ShowInsertionsAndDeletions: state.previousShowInsertionsAndDeletions,
+    ShowFormatChanges: state.previousShowFormatChanges
+  };
+  for (const [property, value] of Object.entries(settings)) {
+    if (value === null) {
+      continue;
     }
-  }
-  if (state.previousShowInsertionsAndDeletions !== null) {
     try {
-      state.view.ShowInsertionsAndDeletions = state.previousShowInsertionsAndDeletions;
-    } catch (error) {
-      void error;
-    }
-  }
-  if (state.previousShowFormatChanges !== null) {
-    try {
-      state.view.ShowFormatChanges = state.previousShowFormatChanges;
+      state.view[property] = value;
     } catch (error) {
       void error;
     }
   }
 }
 
+function restoreDocumentPreview(doc, state) {
+  try {
+    doc.ShowRevisions = state.previousShowRevisions;
+  } catch (error) {
+    console.warn('[revisionPreview] 恢复修订显示失败:', error);
+  }
+  restoreRevisionView(state);
+}
+
+function restoreEditSettings(state) {
+  try {
+    state.doc.TrackRevisions = state.previousTrackRevisions;
+    if (state.previousTrackFormatting !== null) {
+      state.doc.TrackFormatting = state.previousTrackFormatting;
+    }
+  } finally {
+    state.application.UserName = state.originalUserName;
+  }
+}
+
 function acquireDocumentPreviewState(doc, editState) {
-  let state = documentPreviewStates.get(doc);
+  let state = documentPreviewEntry(doc)?.[1];
   if (!state) {
     state = {
       previousShowRevisions: Boolean(editState.previousShowRevisions),
@@ -191,7 +231,7 @@ function acquireDocumentPreviewState(doc, editState) {
 }
 
 function releaseDocumentPreviewState(doc) {
-  const state = documentPreviewStates.get(doc);
+  const [previewDoc, state] = documentPreviewEntry(doc) || [];
   if (!state) {
     return;
   }
@@ -199,23 +239,21 @@ function releaseDocumentPreviewState(doc) {
   if (state.batches > 0) {
     return;
   }
-  try {
-    doc.ShowRevisions = state.previousShowRevisions;
-    restoreRevisionView(state);
-  } catch (error) {
-    console.warn('[revisionPreview] 恢复 ShowRevisions 失败:', error);
-  }
-  documentPreviewStates.delete(doc);
+  restoreDocumentPreview(previewDoc, state);
+  documentPreviewStates.delete(previewDoc);
 }
 
 export function beginTrackedEdit(doc) {
   if (!doc) {
     throw new Error('缺少 WPS Document 对象');
   }
-  // 保留原作者名称 volun_leung
-  const originalUserName = window.Application.UserName;
+  const application = safeRead(() => doc.Application) || safeRead(() => window.Application);
+  const originalUserName = application?.UserName;
+  if (typeof originalUserName !== 'string') {
+    throw new Error('无法读取 WPS 用户名，未执行 AI 修订');
+  }
 
-  const view = safeRead(() => doc.ActiveWindow.View) || safeRead(() => window.Application.ActiveWindow.View);
+  const view = safeRead(() => doc.ActiveWindow.View) || safeRead(() => application.ActiveWindow.View);
   const state = {
     doc,
     previousTrackRevisions: Boolean(safeRead(() => doc.TrackRevisions, false)),
@@ -227,13 +265,16 @@ export function beginTrackedEdit(doc) {
       ? safeRead(() => view.ShowInsertionsAndDeletions, null)
       : null,
     previousShowFormatChanges: view ? Boolean(safeRead(() => view.ShowFormatChanges, true)) : null,
-    before: listRevisions(doc.Revisions),
+    before: readDocumentRevisions(doc),
     finished: false,
-    originalUserName,//保留原作者名称
+    application,
+    originalUserName
   };
-   //开始处理前先调整名称
-  window.Application.UserName = t('windows.assistant');
   try {
+    application.UserName = AI_REVISION_AUTHOR;
+    if (application.UserName !== AI_REVISION_AUTHOR) {
+      throw new Error(`无法将修订作者设为${AI_REVISION_AUTHOR}，未执行 AI 修订`);
+    }
     if (state.previousTrackFormatting !== null) {
       doc.TrackFormatting = false;
     }
@@ -242,19 +283,13 @@ export function beginTrackedEdit(doc) {
     showFinalRevisionPreview(view);
   } catch (error) {
     try {
-      doc.TrackRevisions = state.previousTrackRevisions;
-      if (state.previousTrackFormatting !== null) {
-        doc.TrackFormatting = state.previousTrackFormatting;
-      }
-      doc.ShowRevisions = state.previousShowRevisions;
-      restoreRevisionView(state);
+      restoreEditSettings(state);
     } catch (restoreError) {
       console.warn('[revisionPreview] 开启原生修订失败后恢复文档状态失败:', restoreError);
     }
-    // 出现异常则 恢复原作者名称
-    window.Application.UserName = originalUserName;
+    restoreDocumentPreview(doc, state);
     throw error;
-  } 
+  }
   return state;
 }
 
@@ -264,17 +299,9 @@ export function abortTrackedEdit(state) {
   }
   state.finished = true;
   try {
-    state.doc.TrackRevisions = state.previousTrackRevisions;
-    if (state.previousTrackFormatting !== null) {
-      state.doc.TrackFormatting = state.previousTrackFormatting;
-    }
+    restoreEditSettings(state);
   } finally {
-    // 恢复原始作者信息
-    if (state.originalUserName !== undefined){
-      window.Application.UserName = state.originalUserName;
-    }
-    state.doc.ShowRevisions = state.previousShowRevisions;
-    restoreRevisionView(state);
+    restoreDocumentPreview(state.doc, state);
   }
 }
 
@@ -286,45 +313,26 @@ export function finishTrackedEdit(state, target, kind) {
   const { doc } = state;
   let after;
   try {
-    doc.TrackRevisions = state.previousTrackRevisions;
-    if (state.previousTrackFormatting !== null) {
-      doc.TrackFormatting = state.previousTrackFormatting;
-    }
-    after = listRevisions(doc.Revisions);
+    restoreEditSettings(state);
+    after = readDocumentRevisions(doc);
   } catch (error) {
-    try {
-      doc.ShowRevisions = state.previousShowRevisions;
-      restoreRevisionView(state);
-    } catch (restoreError) {
-      console.warn('[revisionPreview] 读取修订失败后恢复 ShowRevisions 失败:', restoreError);
-    }
+    restoreDocumentPreview(doc, state);
     throw error;
-  }finally {
-    // 恢复原始作者信息
-    if (state.originalUserName !== undefined){
-      window.Application.UserName = state.originalUserName;
-    }
   }
-  // Capture every revision produced by this edit, including table/property
-  // and formatting revisions. Confirming a batch must not leave those behind.
+  // 同时记录文字、格式和结构修订，避免接受后留下附属标记。
   let created = subtractExistingRevisions(state.before, after);
 
-  // Some WPS builds update the positions of existing revisions after an edit.
-  // If the signature diff is inconclusive, restrict the fallback to the target
-  // range and the revision types produced by this operation.
+  // WPS 可能重建修订对象；差异不明确时只在目标范围内补充新增标记。
   if (created.length === 0 && after.length > state.before.length) {
     const addedCount = after.length - state.before.length;
     const targetCandidates = after.filter((item) => overlapsTarget(item, target));
     created = targetCandidates.slice(Math.max(0, targetCandidates.length - addedCount));
   }
 
+  created = created.filter((item) => item.author === AI_REVISION_AUTHOR);
+
   if (kind === 'delete') {
-    // WPS may recreate or merge an already-pending insertion Revision when a
-    // nearby paragraph is deleted. Such an insertion can look "new" to the
-    // before/after snapshot, but it does not belong to the delete batch.
-    // Accepting it again after the insertion batch has been settled can make
-    // the newly generated paragraph disappear. Keep delete/replace revisions
-    // and structural/format revisions, but never adopt a pure insertion here.
+    // 邻近删除可能重建已有插入标记；删除批次不能接管纯插入修订。
     created = created.filter(
       (item) => !INSERT_REVISION_TYPES.has(item.type) || DELETE_REVISION_TYPES.has(item.type)
     );
@@ -335,8 +343,7 @@ export function finishTrackedEdit(state, target, kind) {
   }
 
   if (created.length === 0) {
-    doc.ShowRevisions = state.previousShowRevisions;
-    restoreRevisionView(state);
+    restoreDocumentPreview(doc, state);
     return { batchId: null, revisionCount: 0 };
   }
 
@@ -377,7 +384,16 @@ export function settleRevisionBatch(batchId, action) {
 
   for (const item of revisions) {
     try {
-      item.revision.Accept();
+      // WPS 可能重建 COM 对象，每次处理前重新定位并核对作者。
+      const current = readDocumentRevisions(batch.doc).filter((candidate) => candidate.author === AI_REVISION_AUTHOR);
+      const matched = matchRevisions([item], current)[0];
+      if (!matched) {
+        continue; // 已在 WPS 审阅栏手动处理，或已不属于 AI 作者。
+      }
+      if (safeRead(() => matched.revision.Author) !== AI_REVISION_AUTHOR) {
+        throw new Error('修订作者已变化，未接受该修订');
+      }
+      matched.revision.Accept();
       handled += 1;
     } catch (error) {
       failed += 1;
@@ -423,17 +439,48 @@ function matchRevisions(expected, current, exactRange = false) {
   return matched;
 }
 
-function readDocumentRevisions(doc) {
-  const revisions = doc.Revisions;
-  const count = Number(revisions?.Count);
-  if (!Number.isInteger(count) || count < 0) {
-    throw new Error('无法读取 WPS 修订集合');
+// 只有集合中的每条修订都属于选中的 AI 修订时，才允许集合级操作。
+function applyRevisionAction(doc, revisions, current, owned, action) {
+  if (owned.some((item) => item.author !== AI_REVISION_AUTHOR)) {
+    throw new Error(`只能处理${AI_REVISION_AUTHOR}的修订`);
   }
-  const items = listRevisions(revisions);
-  if (items.length !== count) {
-    throw new Error('无法完整读取 WPS 修订集合');
+  if (owned.length === current.length) {
+    const method = action === 'accept' ? 'AcceptAll' : 'RejectAll';
+    const documentMethod = action === 'accept' ? 'AcceptAllRevisions' : 'RejectAllRevisions';
+    if (typeof revisions[method] === 'function') {
+      revisions[method]();
+      return;
+    }
+    if (doc && typeof doc[documentMethod] === 'function') {
+      doc[documentMethod]();
+      return;
+    }
   }
-  return items;
+
+  owned.sort((left, right) => (
+    (action === 'reject'
+      ? Number(FORMAT_REVISION_TYPES.has(right.type)) - Number(FORMAT_REVISION_TYPES.has(left.type))
+      : 0) || right.index - left.index
+  ));
+  const item = owned[0];
+  if (safeRead(() => item.revision.Author) !== AI_REVISION_AUTHOR) {
+    throw new Error('修订作者已变化，未处理该修订');
+  }
+  if (action === 'reject') {
+    const rangeRevisions = doc?.Range?.(item.start, item.end)?.Revisions;
+    const inRange = rangeRevisions ? readRevisions(rangeRevisions) : [];
+    const rangeOwned = matchRevisions(owned, inRange, true);
+    if (inRange.length > 0 && rangeOwned.length === inRange.length && typeof rangeRevisions.RejectAll === 'function') {
+      rangeRevisions.RejectAll();
+      return;
+    }
+    if (FORMAT_REVISION_TYPES.has(item.type)) {
+      throw new Error('格式修订范围包含其他修订或不支持单独拒绝，操作保留以便重试');
+    }
+    item.revision.Reject();
+  } else {
+    item.revision.Accept();
+  }
 }
 
 /**
@@ -443,19 +490,15 @@ function readDocumentRevisions(doc) {
 export function rejectRevisionBatches(doc, batchIds) {
   const ids = [...new Set(batchIds)];
   const batches = ids.map((id) => revisionBatches.get(id));
-  const sameDocument = (other) => other === doc || (
-    doc?.DocID !== undefined && doc?.DocID !== null &&
-    other?.DocID !== undefined && other?.DocID !== null && Number(other.DocID) === Number(doc.DocID)
-  );
-  if (!doc || batches.some((batch) => !batch || !sameDocument(batch.doc))) {
+  if (!doc || batches.some((batch) => !batch || !sameDocument(doc, batch.doc))) {
     return { success: false, handled: 0, failed: 1, settledBatchIds: [], error: '修订批次不存在或文档不匹配' };
   }
   doc = batches[0]?.doc || doc;
-  const expected = batches.flatMap((batch) => batch.revisions);
-  const baseline = documentPreviewStates.get(doc)?.before || [];
+  const expected = batches.flatMap((batch) => batch.revisions).filter((item) => item.author === AI_REVISION_AUTHOR);
+  const baseline = documentPreviewEntry(doc)?.[1].before || [];
   const ownedRevisions = (current, snapshots = expected) => {
     const protectedItems = new Set(matchRevisions(baseline, current));
-    return matchRevisions(snapshots, current.filter((item) => !protectedItems.has(item)));
+    return matchRevisions(snapshots, current.filter((item) => item.author === AI_REVISION_AUTHOR && !protectedItems.has(item)));
   };
   let handled = 0;
   let error = null;
@@ -465,9 +508,10 @@ export function rejectRevisionBatches(doc, batchIds) {
     if (rejectingWholeDocument && current?.length > 0) {
       // 原集合全部属于选中的批次，RejectAll 部分成功后新建/重排的标记
       // 仍属于本轮操作。保留新快照，防止签名变化后误报撤销成功。
-      expected.splice(0, expected.length, ...current);
+      const remaining = current.filter((item) => item.author === AI_REVISION_AUTHOR);
+      expected.splice(0, expected.length, ...remaining);
       for (const batch of batches) {
-        batch.revisions = [...current];
+        batch.revisions = [...remaining];
       }
     }
   };
@@ -476,35 +520,8 @@ export function rejectRevisionBatches(doc, batchIds) {
     let owned = ownedRevisions(current);
     while (owned.length > 0) {
       const beforeCount = current.length;
-      if (owned.length === current.length) {
-        rejectingWholeDocument = true;
-        // 包括插入、删除、样式和段落格式，一次交给 WPS 内核处理。
-        if (typeof doc.Revisions.RejectAll === 'function') {
-          doc.Revisions.RejectAll();
-        } else if (typeof doc.RejectAllRevisions === 'function') {
-          doc.RejectAllRevisions();
-        } else {
-          throw new Error('当前 WPS 版本不支持拒绝全部修订');
-        }
-      } else {
-        // 格式必须先处理，避免拒绝文字后其 Range/签名失效。
-        owned.sort((left, right) => (
-          Number(FORMAT_REVISION_TYPES.has(right.type)) - Number(FORMAT_REVISION_TYPES.has(left.type)) ||
-          right.index - left.index
-        ));
-        const item = owned[0];
-        const rangeRevisions = doc.Range?.(item.start, item.end)?.Revisions;
-        const inRange = rangeRevisions ? listRevisions(rangeRevisions) : [];
-        const rangeOwned = matchRevisions(owned, inRange, true);
-        if (inRange.length > 0 && rangeOwned.length === inRange.length && typeof rangeRevisions.RejectAll === 'function') {
-          // WPS 的 Revision.Reject() 不支持格式修订，使用范围集合接口。
-          rangeRevisions.RejectAll();
-        } else if (!FORMAT_REVISION_TYPES.has(item.type)) {
-          item.revision.Reject();
-        } else {
-          throw new Error('无法单独拒绝本轮格式修订，操作保留以便重试');
-        }
-      }
+      rejectingWholeDocument = owned.length === current.length;
+      applyRevisionAction(doc, doc.Revisions, current, owned, 'reject');
       current = readDocumentRevisions(doc);
       retainRemainingRevisions();
       if (current.length >= beforeCount) {
@@ -538,53 +555,31 @@ export function rejectRevisionBatches(doc, batchIds) {
   return { success: failed === 0, handled, failed, settledBatchIds, ...(error ? { error } : {}) };
 }
 
-/**
- * 接受或拒绝指定用户的修订  by volun_leung
- * @param {Revisions} revisions - WPS Revisions 集合
- * @param {string} targetAuthor - 目标用户名称
- * @param {string} action - 'accept' 或 'reject'
- * @returns {{handled: number, skipped: number}}
- */
-export function settleRevisionsByAuthor(revisions, targetAuthor, action) {
+// 每次操作后重新读取，避免 WPS 重排或合并集合后操作到其他作者。
+function settleAIRevisions(doc, action) {
   let handled = 0;
-  let skipped = 0;
-  
-  const count = Number(safeRead(() => revisions.Count, 0)) || 0;
-  
-  // 从后向前遍历，避免索引变化问题
-  for (let index = count; index >= 1; index--) {
-    const revision = safeRead(() => revisions.Item(index));
-    if (!revision) {
-      continue;
-    }
-    
-    const author = String(safeRead(() => revision.Author, '') || '');
-    
-    // 只处理目标用户的修订
-    if (author !== targetAuthor) {
-      skipped++;
-      continue;
-    }
-    
-    try {
-      if (action === 'accept') {
-        revision.Accept();
-      } else {
-        revision.Reject();
+  try {
+    let current = readDocumentRevisions(doc);
+    let owned = current.filter((item) => item.author === AI_REVISION_AUTHOR);
+    while (owned.length > 0) {
+      const beforeCount = owned.length;
+      applyRevisionAction(doc, doc.Revisions, current, owned, action);
+      current = readDocumentRevisions(doc);
+      owned = current.filter((item) => item.author === AI_REVISION_AUTHOR);
+      if (owned.length >= beforeCount) {
+        throw new Error(`WPS 未完整处理${AI_REVISION_AUTHOR}的修订，请重试`);
       }
-      handled++;
-    } catch (error) {
-      console.warn(`[revisionPreview] 处理用户 "${targetAuthor}" 的修订失败:`, error);
+      handled += beforeCount - owned.length;
     }
+    return { success: true, handled };
+  } catch (error) {
+    return { success: false, handled, error: error?.message || String(error) };
   }
-  
-  return { handled, skipped };
 }
 
 /**
- * 使用 WPS 集合级原生接口处理全部修订，与“审阅 → 接受/拒绝所有修订”一致。
- * 不能循环处理缓存的 Revision 对象：每次 Accept()/Reject() 后 WPS 都可能
- * 重排或合并集合，使后续批次保存的 COM 对象引用指向错误范围。
+ * 仅处理目标文档中作者为文策AI的修订。若 AI 修订仍有
+ * 残留，则保留批次和确认入口。只有全文都是 AI 修订时才使用全文接口。
  */
 export function settleAllDocumentRevisions(doc, action) {
   if (!doc) {
@@ -597,15 +592,12 @@ export function settleAllDocumentRevisions(doc, action) {
   const startedAt = now();
   const timings = { readMs: 0, nativeMs: 0, restoreViewMs: 0, screenUpdateMs: 0, totalMs: 0 };
   let resumeScreenUpdating = () => {};
+  let handled = 0;
   try {
-    const revisions = doc.Revisions;
-    const handled = Number(revisions?.Count);
-    if (!Number.isInteger(handled) || handled < 0) {
-      throw new Error('无法读取 WPS 文档的 Revisions 集合');
-    }
+    const aiCount = getAIRevisionCount(doc);
     timings.readMs = now() - startedAt;
-    const previewState = documentPreviewStates.get(doc);
-    if (handled > 0 || previewState) {
+    const [previewDoc, previewState] = documentPreviewEntry(doc) || [];
+    if (aiCount > 0 || previewState) {
       // 接受修订和恢复显示设置期间暂停重绘，结束后统一刷新。
       const screenStartedAt = now();
       resumeScreenUpdating = suspendScreenUpdating(doc);
@@ -613,63 +605,35 @@ export function settleAllDocumentRevisions(doc, action) {
     }
     const nativeStartedAt = now();
     try {
-      // 用户已在审阅栏处理完时，无需再让 WPS 扫描整篇文档。
-      if (handled > 0) {
-        if (action === 'accept') {
-          if (typeof revisions.AcceptAll === 'function') {
-            // revisions.AcceptAll(); 只处理助手的修订。
-            settleRevisionsByAuthor(revisions,t('windows.assistant'),action);
-          } else if (typeof doc.AcceptAllRevisions === 'function') {
-            // doc.AcceptAllRevisions(); 只处理助手的修订。
-            settleRevisionsByAuthor(revisions,t('windows.assistant'),action);
-          } else {
-            throw new Error('当前 WPS 版本不支持 Revisions.AcceptAll()');
-          }
-        } else if (typeof revisions.RejectAll === 'function') {
-          // revisions.RejectAll();只处理助手的修订。
-            settleRevisionsByAuthor(revisions,t('windows.assistant'),action);
-        } else if (typeof doc.RejectAllRevisions === 'function') {
-          // doc.RejectAllRevisions();只处理助手的修订。
-            settleRevisionsByAuthor(revisions,t('windows.assistant'),action);
-        } else {
-          throw new Error('当前 WPS 版本不支持 Revisions.RejectAll()');
-        }
-        // 保留未完成的批次，避免接口返回后仍残留标记却丢失确认入口。
-        if (Number(doc.Revisions.Count) !== 0) {
-          throw new Error('WPS 未完整处理文档修订，请重试');
+      if (aiCount > 0) {
+        const result = settleAIRevisions(doc, action);
+        handled = result.handled;
+        if (!result.success) {
+          throw new Error(result.error);
         }
       }
     } finally {
       timings.nativeMs = now() - nativeStartedAt;
     }
-
-
-   //先筛选要删除的批次
-   const batchIdsToDelete = [];
-   for (const [batchId, batch] of revisionBatches.entries()) {
-      if (batch.doc.DocId === doc.DocId) {
+    const batchIdsToDelete = [];
+    for (const [batchId, batch] of revisionBatches.entries()) {
+      if (sameDocument(batch.doc, doc)) {
         batchIdsToDelete.push(batchId);
       }
     }
-    // 再统一删除
     for (const batchId of batchIdsToDelete) {
-     revisionBatches.delete(batchId);
+      revisionBatches.delete(batchId);
     }
 
     const viewStartedAt = now();
     if (previewState) {
-      try {
-        doc.ShowRevisions = previewState.previousShowRevisions;
-        restoreRevisionView(previewState);
-      } catch (error) {
-        console.warn('[revisionPreview] 整体处理修订后恢复显示设置失败:', error);
-      }
-      documentPreviewStates.delete(doc);
+      restoreDocumentPreview(previewDoc, previewState);
+      documentPreviewStates.delete(previewDoc);
     }
     timings.restoreViewMs = now() - viewStartedAt;
     return { success: true, handled, timings };
   } catch (error) {
-    return { success: false, handled: 0, error: error?.message || String(error), timings };
+    return { success: false, handled, error: error?.message || String(error), timings };
   } finally {
     const screenStartedAt = now();
     try {

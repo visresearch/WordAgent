@@ -3,7 +3,7 @@
   <ApiVersion>1.0.0</ApiVersion>
   <Name>WenceAI</Name>
   <Version>1.0.0</Version>
-  <Description>文策 AI 写作助手 - 智能写作、润色、翻译</Description>
+  <Description>文策AI - 智能写作、润色、翻译</Description>
   <Author>WenCe Team</Author>
   <Url></Url>
   <HelpUrl></HelpUrl>
@@ -14,7 +14,7 @@
     <Application Name="wps">
       <RibbonXml>ribbon.xml</RibbonXml>
       <TaskPanes>
-        <TaskPane Label="文策AI助手" Url="index.html" Width="380" Visible="false" />
+        <TaskPane Label="文策AI" Url="index.html" Width="380" Visible="false" />
       </TaskPanes>
     </Application>
   </Applications>

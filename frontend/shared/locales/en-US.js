@@ -8,7 +8,7 @@ export default {
   language: {
     label: 'Interface language', chinese: '简体中文', english: 'English', indonesian: 'Bahasa Indonesia'
   },
-  windows: { assistant: 'WenCe AI Assistant', settings: 'Settings', about: 'About', debug: 'Debug panel' },
+  windows: { assistant: '文策AI', settings: 'Settings', about: 'About', debug: 'Debug panel' },
   nav: { chat: 'AI chat', history: 'Chat history', settings: 'Settings', about: 'About', debug: 'Debug' },
   settings: {
     tabs: { general: 'General', model: 'Models', personalization: 'Personalization', mcp: 'MCP', skill: 'Skills', data: 'Data' },
@@ -120,7 +120,8 @@ export default {
     allowThinking: 'Thinking on', disableThinking: 'Thinking off', thinkingToggle: 'Enable or disable deep thinking',
     addFile: 'Add files', addSelection: 'Add selection', send: 'Send', stop: 'Stop',
     agentPlaceholder: 'Describe what to build next', askPlaceholder: 'Enter a question',
-    chooseModel: 'Select a model', deleteParagraphs: 'deleted {count} paragraphs', aiOperation: 'AI revisions: {actions} (pending confirmation)',
+    chooseModel: 'Select a model', deleteParagraphs: 'deleted {count} paragraphs', aiOperation: 'AI revisions: {actions} (pending confirmation)', revisionCount: '{count} changes',
+    acceptRevision: 'Accept', rejectRevision: 'Reject',
     context: 'Context: {current}k / {max}k tokens ({percentage}%)', unnamedFile: 'Unnamed file',
     unsupportedFiles: 'Unsupported files: {files}. Supported formats: png, jpg, jpeg, pdf, docx, txt, md.',
     paragraphRange: 'Paragraphs {start} - {end}', showHistory: 'Show chat history', whatCanIDo: 'What can I do?',
@@ -169,7 +170,7 @@ export default {
     }
   },
   about: {
-    name: 'WenCe AI Assistant', product: 'WenCe AI Assistant', version: 'Version', pluginType: 'Add-in type', wpsPlugin: 'WPS Writer add-in', wordPlugin: 'Microsoft Word add-in',
+    name: '文策AI', product: '文策AI', version: 'Version', pluginType: 'Add-in type', wpsPlugin: 'WPS Writer add-in', wordPlugin: 'Microsoft Word add-in',
     developer: 'Developer', developerName: 'Riyue Xingchen', links: 'Links', repository: 'GitHub repository', website: 'Project website',
     docs: 'Documentation', issues: 'Report an issue', sponsor: 'Sponsor the author', github: 'GitHub repository', unknownVersion: 'Unknown version'
   },

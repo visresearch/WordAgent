@@ -56,7 +56,7 @@
     </div>
 
     <!-- 已执行的原生修订确认条（确认/取消只接受或拒绝修订，不触发正文操作） -->
-    <div v-if="deleteRevisions.length > 0 || pendingDocument || pendingEdits.length > 0" class="current-selection-bar pending-document-bar" :class="{ 'revision-delete-bar': deleteRevisions.length > 0 && !pendingDocument && pendingEdits.length === 0 }">
+    <div v-if="deleteRevisions.length > 0 || pendingDocument || pendingEdits.length > 0 || pendingRevisionCount > 0" class="current-selection-bar pending-document-bar" :class="{ 'revision-delete-bar': deleteRevisions.length > 0 && !pendingDocument && pendingEdits.length === 0 }">
       <div class="selection-bar-content">
         <div class="selection-bar-icon pending-icon" :class="{ 'revision-delete-icon': deleteRevisions.length > 0 && !pendingDocument && pendingEdits.length === 0 }">
           <svg
@@ -74,12 +74,16 @@
         <div class="selection-bar-info">
           <span class="selection-bar-preview">{{ pendingSummary }}</span>
         </div>
-        <div v-if="!isLoading" class="pending-actions">
-          <button class="pending-btn confirm-btn" :class="{ 'delete-confirm-btn': deleteRevisions.length > 0 && !pendingDocument }" @click="$emit('confirm-pending')">
-            {{ $t('common.confirm') }}
+        <div class="pending-actions">
+          <button
+            class="pending-btn accept-revision-btn"
+            :disabled="isLoading"
+            @click="$emit('accept-revisions')"
+          >
+            {{ $t('chat.acceptRevision') }}
           </button>
-          <button class="pending-btn cancel-btn" @click="$emit('cancel-pending')">
-            {{ $t('common.cancel') }}
+          <button class="pending-btn reject-revision-btn" :disabled="isLoading" @click="$emit('reject-revisions')">
+            {{ $t('chat.rejectRevision') }}
           </button>
         </div>
       </div>
@@ -346,12 +350,13 @@ export default {
       type: Array,
       default: () => []
     },
+    pendingRevisionCount: { type: Number, default: 0 },
     tokenStats: {
       type: Object,
       default: () => ({ current: 0, max: 258000 })
     }
   },
-  emits: ['send', 'stop', 'answer-question', 'add-selection', 'remove-selection', 'add-files', 'remove-file', 'update:mode', 'update:selectedModel', 'update:selectedModelProvider', 'refresh-models', 'confirm-pending', 'cancel-pending'],
+  emits: ['send', 'stop', 'answer-question', 'add-selection', 'remove-selection', 'add-files', 'remove-file', 'update:mode', 'update:selectedModel', 'update:selectedModelProvider', 'refresh-models', 'accept-revisions', 'reject-revisions'],
   data() {
     return {
       inputText: '',
@@ -428,6 +433,9 @@ export default {
       }
       if (this.pendingEdits.length > 0) {
         parts.push(`编辑 ${this.pendingEdits.length} 个段落`);
+      }
+      if (parts.length === 0 && this.pendingRevisionCount > 0) {
+        parts.push(t('chat.revisionCount', { count: this.pendingRevisionCount }));
       }
       return t('chat.aiOperation', { actions: parts.join(t('chat.actionSeparator')) });
     },
@@ -707,37 +715,31 @@ export default {
   line-height: 1.4;
 }
 
-.confirm-btn {
-  background: #667eea;
+.pending-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.accept-revision-btn {
+  background: #16a34a;
   color: white;
-  border-color: #667eea;
+  border-color: #16a34a;
 }
 
-.confirm-btn:hover {
-  background: #5a6fd6;
-  border-color: #5a6fd6;
+.accept-revision-btn:hover:not(:disabled) {
+  background: #15803d;
+  border-color: #15803d;
 }
 
-.delete-confirm-btn {
-  background: #dc3545;
-  border-color: #dc3545;
+.reject-revision-btn {
+  background: #dc2626;
+  color: white;
+  border-color: #dc2626;
 }
 
-.delete-confirm-btn:hover {
-  background: #c82333;
-  border-color: #c82333;
-}
-
-.cancel-btn {
-  background: white;
-  color: #666;
-  border-color: #ddd;
-}
-
-.cancel-btn:hover {
-  background: #f5f5f5;
-  color: #333;
-  border-color: #ccc;
+.reject-revision-btn:hover:not(:disabled) {
+  background: #b91c1c;
+  border-color: #b91c1c;
 }
 
 /* 输入区域 */

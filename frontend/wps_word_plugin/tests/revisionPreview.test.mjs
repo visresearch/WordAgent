@@ -1,17 +1,23 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { createSSRApp } from 'vue';
+import { renderToString } from 'vue/server-renderer';
+import zhCN from '../src/locales/zh-CN.js';
 
 import {
+  AI_REVISION_AUTHOR,
+  abortTrackedEdit,
   beginTrackedEdit,
   finishTrackedEdit,
+  getAIRevisionCount,
   hasRevisionBatch,
   rejectRevisionBatches,
   settleRevisionBatch,
   settleAllDocumentRevisions
 } from '../src/components/js/revisionPreview.js';
 
-function revision({ type, start, end, text, author = 'tester', date = '2026-07-28', acceptFailures = 0 }) {
+function revision({ type, start, end, text, author = AI_REVISION_AUTHOR, date = '2026-07-28', acceptFailures = 0 }) {
   return {
     Type: type,
     Author: author,
@@ -35,6 +41,7 @@ function revision({ type, start, end, text, author = 'tester', date = '2026-07-2
 
 function documentWith(revisions = []) {
   const doc = {
+    Application: { UserName: '当前用户' },
     TrackRevisions: false,
     TrackFormatting: true,
     ShowRevisions: false,
@@ -90,9 +97,7 @@ function documentWith(revisions = []) {
                 }
                 original.call(this);
                 doc._items.splice(doc._items.indexOf(this), 1);
-                if (method === 'Reject') {
-                  this.onReject?.();
-                }
+                this[method === 'Reject' ? 'onReject' : 'onAccept']?.();
               };
             }
           }
@@ -118,6 +123,183 @@ function documentWith(revisions = []) {
   };
   return doc;
 }
+
+test('AI 编辑使用文策AI作者，完成后恢复用户名且不接管协作者的修订', () => {
+  const existing = revision({ type: 1, start: 1, end: 3, text: '已有内容', author: '张三' });
+  const doc = documentWith([existing]);
+  const state = beginTrackedEdit(doc);
+  assert.equal(doc.Application.UserName, '文策AI');
+  const inserted = revision({ type: 1, start: 10, end: 20, text: 'AI内容', author: doc.Application.UserName });
+  const collaborator = revision({ type: 1, start: 10, end: 20, text: '协作者内容', author: '李四' });
+  doc._items.push(inserted, collaborator);
+  const batch = finishTrackedEdit(state, { start: 10, end: 20 }, 'insert');
+  assert.equal(doc.Application.UserName, '当前用户');
+  assert.equal(batch.revisionCount, 1);
+  assert.equal(hasRevisionBatch(batch.batchId), true);
+  assert.equal(settleRevisionBatch(batch.batchId, 'accept').success, true);
+  assert.deepEqual(doc._items, [existing, collaborator]);
+  assert.equal(inserted.accepted, 1);
+});
+
+test('中止 AI 编辑恢复原用户名和修订设置', () => {
+  const doc = documentWith();
+  doc.TrackRevisions = true;
+  const state = beginTrackedEdit(doc);
+  assert.equal(doc.Application.UserName, '文策AI');
+  abortTrackedEdit(state);
+  abortTrackedEdit(state);
+  assert.equal(doc.Application.UserName, '当前用户');
+  assert.equal(doc.TrackRevisions, true);
+  assert.equal(doc.TrackFormatting, true);
+  assert.equal(doc.ShowRevisions, false);
+  assert.equal(doc.ActiveWindow.View.RevisionsView, 1);
+});
+
+test('无法设置 AI 作者时停止编辑，开启追踪失败时恢复原用户名', () => {
+  const locked = documentWith();
+  Object.defineProperty(locked.Application, 'UserName', {
+    get: () => '当前用户',
+    set: () => {}
+  });
+  assert.throws(() => beginTrackedEdit(locked), /无法将修订作者设为文策AI/);
+  assert.equal(locked.TrackRevisions, false);
+  assert.equal(locked.TrackFormatting, true);
+
+  const doc = documentWith();
+  Object.defineProperty(doc, 'TrackRevisions', {
+    get: () => false,
+    set(value) {
+      if (value) {
+        throw new Error('tracking unavailable');
+      }
+    }
+  });
+  assert.throws(() => beginTrackedEdit(doc), /tracking unavailable/);
+  assert.equal(doc.Application.UserName, '当前用户');
+  assert.equal(doc.TrackFormatting, true);
+  assert.equal(doc.ShowRevisions, false);
+});
+
+test('完成编辑时读取修订失败也恢复原用户名和显示设置', () => {
+  const doc = documentWith();
+  const state = beginTrackedEdit(doc);
+  Object.defineProperty(doc, 'Revisions', { get: () => ({ Count: 1, Item() {
+    throw new Error('read failure');
+  } }) });
+  assert.throws(() => finishTrackedEdit(state, { start: 0, end: 10 }, 'edit'), /无法完整读取/);
+  assert.equal(doc.Application.UserName, '当前用户');
+  assert.equal(doc.TrackRevisions, false);
+  assert.equal(doc.TrackFormatting, true);
+  assert.equal(doc.ShowRevisions, false);
+});
+
+for (const action of ['accept', 'reject']) {
+  test(`${action} 只处理文策AI的增删和格式修订，允许其他作者继续保留`, () => {
+    const human = revision({ type: 1, start: 10, end: 20, text: '重叠用户内容', author: '张三' });
+    const humanFormat = revision({ type: 8, start: 70, end: 80, text: '用户格式', author: '李四' });
+    const translatedAuthor = revision({ type: 1, start: 90, end: 100, text: '其他作者', author: '其他 AI 助手' });
+    const oldAI = revision({ type: 1, start: 1, end: 5, text: '之前的AI修订' });
+    const doc = documentWith([human, humanFormat, translatedAuthor, oldAI]);
+    doc.Comments = [{ Text: '用户批注' }];
+    const state = beginTrackedEdit(doc);
+    const created = [
+      revision({ type: 1, start: 10, end: 20, text: 'AI插入' }),
+      revision({ type: 8, start: 30, end: 40, text: 'AI格式' }),
+      revision({ type: 2, start: 50, end: 60, text: 'AI删除' })
+    ];
+    if (action === 'reject') {
+      created[1].Reject = () => assert.fail('格式修订应使用安全的范围集合接口');
+    }
+    doc._items.push(...created);
+    const batch = finishTrackedEdit(state, { start: 10, end: 60 }, 'edit');
+    const result = settleAllDocumentRevisions(doc, action);
+    assert.equal(result.success, true);
+    assert.equal(result.handled, 4);
+    assert.deepEqual(doc._items, [human, humanFormat, translatedAuthor]);
+    for (const item of [oldAI, ...created]) {
+      assert.equal(item[action === 'accept' ? 'accepted' : 'rejected'], 1);
+    }
+    assert.equal(doc.acceptAllCalls, 0);
+    assert.equal(doc.rejectAllCalls, 0);
+    assert.equal(hasRevisionBatch(batch.batchId), false);
+    assert.deepEqual(doc.Comments, [{ Text: '用户批注' }]);
+  });
+
+  test(`${action} 没有 AI 修订时不处理其他作者，也不调用全文接口`, () => {
+    const human = revision({ type: 2, start: 10, end: 20, text: '用户内容', author: '张三' });
+    const doc = documentWith([human]);
+    const result = settleAllDocumentRevisions(doc, action);
+    assert.equal(result.success, true);
+    assert.equal(result.handled, 0);
+    assert.deepEqual(doc._items, [human]);
+    assert.equal(doc.acceptAllCalls + doc.rejectAllCalls + doc.rangeRejectAllCalls, 0);
+  });
+}
+
+test('无效修订动作不会处理文档内容', () => {
+  const human = revision({ type: 1, start: 10, end: 20, text: '用户内容', author: '张三' });
+  const doc = documentWith([human]);
+  assert.equal(settleAllDocumentRevisions(doc, 'invalid').success, false);
+  assert.deepEqual(doc._items, [human]);
+});
+
+for (const action of ['accept', 'reject']) {
+  test(`${action} 逐条处理时重新读取重建的 COM 对象并保留其他作者`, () => {
+    const doc = documentWith([
+      revision({ type: 1, start: 10, end: 20, text: '用户内容', author: '张三' }),
+      revision({ type: 1, start: 10, end: 20, text: 'AI内容1' }),
+      revision({ type: 1, start: 30, end: 40, text: 'AI内容2' })
+    ]);
+    doc.Range = () => ({});
+    const rebuild = () => {
+      doc._items = doc._items.map((item) => {
+        const replacement = revision({ type: item.Type, start: item.Range.Start, end: item.Range.End,
+          text: item.Range.Text, date: item.Date, author: item.Author });
+        replacement[action === 'accept' ? 'onAccept' : 'onReject'] = rebuild;
+        return replacement;
+      });
+    };
+    for (const item of doc._items) {
+      item[action === 'accept' ? 'onAccept' : 'onReject'] = rebuild;
+    }
+    const result = settleAllDocumentRevisions(doc, action);
+    assert.equal(result.success, true);
+    assert.equal(result.handled, 2);
+    assert.equal(doc._items.length, 1);
+    assert.equal(doc._items[0].Author, '张三');
+    assert.equal(doc._items[0].accepted + doc._items[0].rejected, 0);
+    assert.equal(doc.acceptAllCalls + doc.rejectAllCalls, 0);
+  });
+}
+
+test('处理一个文档不清理其他文档批次，且正确识别同一 DocID 的 COM 包装对象', () => {
+  for (const withIds of [false, true]) {
+    const firstDoc = documentWith();
+    const secondDoc = documentWith();
+    if (withIds) {
+      firstDoc.DocID = 101;
+      secondDoc.DocID = 102;
+    }
+    const firstState = beginTrackedEdit(firstDoc);
+    firstDoc._items.push(revision({ type: 1, start: 10, end: 20, text: '第一篇' }));
+    const first = finishTrackedEdit(firstState, { start: 10, end: 20 }, 'insert');
+    const secondState = beginTrackedEdit(secondDoc);
+    secondDoc._items.push(revision({ type: 1, start: 10, end: 20, text: '第二篇' }));
+    const second = finishTrackedEdit(secondState, { start: 10, end: 20 }, 'insert');
+    const target = withIds
+      ? { DocID: '101', Application: firstDoc.Application, get Revisions() {
+        return firstDoc.Revisions;
+      } }
+      : firstDoc;
+    assert.equal(settleAllDocumentRevisions(target, 'accept').success, true);
+    assert.equal(hasRevisionBatch(first.batchId), false);
+    assert.equal(firstDoc.ShowRevisions, false);
+    assert.equal(hasRevisionBatch(second.batchId), true);
+    assert.equal(secondDoc.ShowRevisions, true);
+    assert.equal(secondDoc._items.length, 1);
+    assert.equal(settleAllDocumentRevisions(secondDoc, 'reject').success, true);
+  }
+});
 
 test('只接受本次跟踪编辑产生的修订', () => {
   const existing = revision({ type: 1, start: 1, end: 3, text: 'old', date: '2026-07-27' });
@@ -532,7 +714,7 @@ test('逐次拒绝后 WPS 重建 COM 对象时重新定位，不操作失效的�
   doc.Range = () => ({}); // 退回逐条拒绝，模拟每次操作都会重建剩余 Revision。
   const rebuild = () => {
     doc._items = doc._items.map((item) => {
-      const replacement = revision({ type: item.Type, start: item.Range.Start, end: item.Range.End, text: item.Range.Text, date: item.Date });
+      const replacement = revision({ type: item.Type, start: item.Range.Start, end: item.Range.End, text: item.Range.Text, date: item.Date, author: item.Author });
       replacement.onReject = rebuild;
       return replacement;
     });
@@ -553,13 +735,222 @@ function chatPane(doc, alert) {
   const api = { wsManager: { clearDocumentCache() {
     cacheClears += 1;
   } } };
-  const component = new Function('ChatMessages', 'ChatInput', 'SessionPane', 'hasRevisionBatch', 'rejectRevisionBatches', 'settleAllDocumentRevisions', 'api', 'alert', 't', paneScript.replace('export default', 'return'))(
-    {}, {}, {}, hasRevisionBatch, rejectRevisionBatches, settleAllDocumentRevisions, api, alert, (_key, values) => values?.error
+  const component = new Function('ChatMessages', 'ChatInput', 'SessionPane', 'hasRevisionBatch', 'rejectRevisionBatches', 'settleAllDocumentRevisions', 'getAIRevisionCount', 'beginTrackedEdit', 'finishTrackedEdit', 'abortTrackedEdit', 'getDocumentById', 'api', 'alert', 't', paneScript.replace('export default', 'return'))(
+    {}, {}, {}, hasRevisionBatch, rejectRevisionBatches, settleAllDocumentRevisions, getAIRevisionCount, beginTrackedEdit, finishTrackedEdit, abortTrackedEdit, () => doc, api, alert, (_key, values) => values?.error
   );
-  const vm = { pendingInsertions: [], pendingEdits: [], deleteRevisions: [], _streamInsertions: [] };
+  const vm = { pendingInsertions: [], pendingEdits: [], deleteRevisions: [], aiRevisionDocuments: [], _streamInsertions: [] };
   Object.assign(vm, component.methods, { _resolveTargetDoc: () => doc });
-  return { vm, cacheClears: () => cacheClears };
+  return { vm, cacheClears: () => cacheClears, resolveTargetDoc: component.methods._resolveTargetDoc.bind(vm) };
 }
+
+for (const action of ['accept', 'reject']) {
+  test(`聊天页重新打开后 ${action} 只处理文策AI，旧名称和大小写/空格变体均保留`, () => {
+    const protectedAuthors = [
+      '张三', 'WordAgent', 'wordagent', '文策Ai', ' 文策AI', '文策AI ', '文策 AI 助手',
+      'WenCe AI Assistant', 'Asisten WenCe AI', 'WenCe AI アシスタント', 'WenCe AI 어시스턴트', 'WenCe AI Trợ lý'
+    ].map((author, index) => revision({ type: 1, start: 90 + index * 20, end: 100 + index * 20, text: '其他作者内容', author }));
+    const owned = [1, 8].map((type, index) => revision({
+      type, start: index * 20, end: index * 20 + 10, text: 'AI内容', author: '文策AI'
+    }));
+    const doc = documentWith([...protectedAuthors, ...owned]);
+    doc.DocID = 23;
+    const { vm, cacheClears } = chatPane(doc, () => assert.fail('处理应成功'));
+    assert.equal(getAIRevisionCount(doc), 2);
+    assert.equal(vm.pendingInsertions.length + vm.pendingEdits.length + vm.deleteRevisions.length, 0);
+    vm._refreshAIRevisionPreview(doc);
+    assert.deepEqual(vm.aiRevisionDocuments, [{ docId: 23, count: 2 }]);
+    vm[action === 'accept' ? 'acceptPendingRevisions' : 'rejectPendingRevisions']();
+    assert.deepEqual(doc._items, protectedAuthors);
+    assert.deepEqual(vm.aiRevisionDocuments, []);
+    assert.equal(cacheClears(), 1);
+    for (const item of owned) {
+      assert.equal(item[action === 'accept' ? 'accepted' : 'rejected'], 1);
+    }
+    assert.equal(doc.acceptAllCalls + doc.rejectAllCalls, 0);
+  });
+}
+
+test('临时读取修订失败保留入口，修订已手动处理后移除入口', () => {
+  const doc = documentWith([revision({ type: 1, start: 10, end: 20, text: 'AI内容' })]);
+  doc.DocID = 23;
+  const { vm } = chatPane(doc, () => {});
+  vm._refreshAIRevisionPreview(doc);
+  const read = Object.getOwnPropertyDescriptor(doc, 'Revisions');
+  Object.defineProperty(doc, 'Revisions', { get() {
+    throw new Error('WPS busy');
+  } });
+  vm._refreshAIRevisionPreview(doc);
+  assert.deepEqual(vm.aiRevisionDocuments, [{ docId: 23, count: 1 }]);
+  Object.defineProperty(doc, 'Revisions', read);
+  doc._items = [];
+  vm._refreshAIRevisionPreview(doc);
+  assert.deepEqual(vm.aiRevisionDocuments, []);
+});
+
+test('生成期间不处理修订，已有其他 AI 作者字样不会被模糊识别', () => {
+  const human = revision({ type: 1, start: 30, end: 40, text: '用户内容', author: '其他 AI 助手' });
+  const doc = documentWith([revision({ type: 1, start: 10, end: 20, text: 'AI内容' }), human]);
+  doc.DocID = 23;
+  const { vm } = chatPane(doc, () => {});
+  vm._refreshAIRevisionPreview(doc);
+  vm.isLoading = true;
+  vm.acceptPendingRevisions();
+  vm.rejectPendingRevisions();
+  assert.deepEqual(vm.aiRevisionDocuments, [{ docId: 23, count: 1 }]);
+  assert.equal(doc._items.length, 2);
+  assert.equal(doc.acceptAllCalls + doc.rejectAllCalls + doc.rangeRejectAllCalls, 0);
+});
+
+test('文档里已有原生 AI 修订时，取消不再按旧 Range 重复删除正文', () => {
+  const human = revision({ type: 1, start: 10, end: 20, text: '用户内容', author: '张三' });
+  const inserted = revision({ type: 1, start: 10, end: 20, text: 'AI内容' });
+  const doc = documentWith([human, inserted]);
+  doc.DocID = 23;
+  doc.Range = () => ({ Delete() {
+    assert.fail('不能按旧范围再次删除正文');
+  } });
+  const { vm } = chatPane(doc, () => assert.fail('取消应成功'));
+  vm.pendingInsertions.push({ docId: 23, _markingMode: 'revision-unavailable', insertStartPos: 10, insertEndPos: 20 });
+  vm._refreshAIRevisionPreview(doc);
+  vm.rejectPendingRevisions();
+  assert.equal(vm.pendingInsertions.length, 0);
+  assert.deepEqual(vm.aiRevisionDocuments, []);
+  assert.deepEqual(doc._items, [human]);
+  assert.equal(inserted.rejected, 1);
+});
+
+test('指定文档已经关闭时，不回退到另一个活动文档处理修订', () => {
+  const doc = documentWith();
+  doc.DocID = 24;
+  const { resolveTargetDoc } = chatPane(doc, () => {});
+  assert.equal(resolveTargetDoc(23), null);
+  assert.equal(resolveTargetDoc(24), doc);
+  assert.equal(resolveTargetDoc(0), doc);
+});
+
+test('纯文本插入也使用文策AI修订并立即登记确认栏', (t) => {
+  const human = revision({ type: 1, start: 50, end: 60, text: '用户内容', author: '张三' });
+  const doc = documentWith([human]);
+  doc.DocID = 25;
+  doc.Content = { End: 60 };
+  const range = { Start: 10, End: 10 };
+  doc.Application.ActiveDocument = doc;
+  doc.Application.Selection = {
+    Range: range,
+    TypeText(text) {
+      assert.equal(doc.Application.UserName, '文策AI');
+      assert.equal(doc.TrackRevisions, true);
+      range.End += text.length;
+      doc._items.push(revision({ type: 1, start: range.Start, end: range.End, text, author: doc.Application.UserName }));
+    },
+    TypeParagraph() {
+      range.End += 1;
+    }
+  };
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: { Application: doc.Application } });
+  t.after(() => {
+    if (previousWindow) {
+      Object.defineProperty(globalThis, 'window', previousWindow);
+    } else {
+      delete globalThis.window;
+    }
+  });
+  const { vm } = chatPane(doc, () => {});
+  const msg = {};
+  vm.insertPlainText('纯文本内容', msg);
+  assert.equal(doc.Application.UserName, '当前用户');
+  assert.equal(doc.TrackRevisions, false);
+  assert.equal(vm.pendingInsertions.length, 1);
+  assert.ok(vm.pendingDocument);
+  assert.equal(hasRevisionBatch(msg._revisionBatchId), true);
+  assert.deepEqual(vm.aiRevisionDocuments, [{ docId: 25, count: 1 }]);
+  vm.acceptPendingRevisions();
+  assert.deepEqual(doc._items, [human]);
+  assert.equal(vm.pendingDocument, null);
+  assert.deepEqual(vm.aiRevisionDocuments, []);
+});
+
+const inputSource = readFileSync(new URL('../src/components/chat/ChatInput.vue', import.meta.url), 'utf8');
+const inputScript = inputSource.match(/<script>([\s\S]*?)<\/script>/)[1].replace(/import[\s\S]*?from\s+['"][^'"]+['"];?/g, '');
+const translate = (key, params = {}) => String(key.split('.').reduce((value, part) => value?.[part], zhCN) ?? key)
+  .replace(/\{(\w+)\}/g, (_, name) => String(params[name] ?? `{${name}}`));
+const inputComponent = new Function('addIcon', 'agentIcon', 'askIcon', 'fileIcon', 'sendIcon', 't', inputScript.replace('export default', 'return'))(
+  '', '', '', '', '', translate
+);
+async function renderInput(props) {
+  const app = createSSRApp({ ...inputComponent, template: inputSource.match(/<template>([\s\S]*?)<\/template>/)[1] }, props);
+  app.config.globalProperties.$t = translate;
+  return renderToString(app);
+}
+
+test('实际 Vue 模板显示接受/拒绝栏，生成期间显示禁用按钮', async () => {
+  const html = await renderInput({ pendingRevisionCount: 2 });
+  assert.match(html, /pending-document-bar/);
+  assert.match(html, /2 处修改/);
+  const actions = html.match(/<div class="pending-actions">([\s\S]*?)<\/div>/)[1];
+  assert.match(actions, /class="pending-btn accept-revision-btn">接受<\/button>/);
+  assert.match(actions, /class="pending-btn reject-revision-btn">拒绝<\/button>/);
+  assert.doesNotMatch(actions, /disabled/);
+  const loading = await renderInput({ pendingRevisionCount: 2, isLoading: true });
+  const loadingActions = loading.match(/<div class="pending-actions">([\s\S]*?)<\/div>/)[1];
+  assert.equal(loadingActions.match(/<button\b[^>]*\bdisabled\b/g).length, 2);
+  const empty = await renderInput({});
+  assert.doesNotMatch(empty, /pending-document-bar/);
+  assert.equal(zhCN.windows.assistant, '文策AI');
+});
+
+for (const action of ['accept', 'reject']) {
+  test(`Vue ${action} 按作者处理后清理确认栏，保留同范围的其他作者修订`, () => {
+    const human = revision({ type: 1, start: 10, end: 20, text: '用户内容', author: '张三' });
+    const doc = documentWith([human]);
+    const state = beginTrackedEdit(doc);
+    const inserted = revision({ type: 1, start: 10, end: 20, text: 'AI内容' });
+    doc._items.push(inserted);
+    const batch = finishTrackedEdit(state, { start: 10, end: 20 }, 'insert');
+    const { vm } = chatPane(doc, () => assert.fail('处理应成功'));
+    const msg = { _revisionBatchId: batch.batchId };
+    vm.pendingInsertions.push({ docId: 1, _markingMode: 'revision', _revisionBatchId: batch.batchId,
+      documentJson: { paragraphs: [{}] }, msg });
+    vm._syncPendingDocumentPreview();
+    assert.ok(vm.pendingDocument, '处理前应有确认栏');
+    vm[action === 'accept' ? 'acceptPendingRevisions' : 'rejectPendingRevisions']();
+    assert.equal(vm.pendingInsertions.length, 0);
+    assert.equal(vm.pendingDocument, null);
+    assert.equal(msg._revisionBatchId, null);
+    assert.equal(hasRevisionBatch(batch.batchId), false);
+    assert.deepEqual(doc._items, [human]);
+    assert.equal(inserted[action === 'accept' ? 'accepted' : 'rejected'], 1);
+    assert.equal(doc.acceptAllCalls + doc.rejectAllCalls + doc.rangeRejectAllCalls, 0);
+  });
+}
+
+test('Vue 取消遇到与其他作者重叠的格式修订时保留确认栏和重试入口', () => {
+  const human = revision({ type: 3, start: 21, end: 35, text: '用户格式', author: '张三' });
+  const doc = documentWith([human]);
+  const state = beginTrackedEdit(doc);
+  const formatting = revision({ type: 8, start: 21, end: 35, text: 'AI格式' });
+  doc._items.push(revision({ type: 1, start: 10, end: 20, text: 'AI内容' }), formatting);
+  const batch = finishTrackedEdit(state, { start: 10, end: 20 }, 'insert');
+  const alerts = [];
+  const { vm } = chatPane(doc, (message) => alerts.push(message));
+  const msg = { _revisionBatchId: batch.batchId };
+  vm.pendingInsertions.push({ docId: 1, _markingMode: 'revision', _revisionBatchId: batch.batchId,
+    documentJson: { paragraphs: [{}] }, msg });
+  vm.rejectPendingRevisions();
+  assert.equal(vm.pendingInsertions.length, 1);
+  assert.ok(vm.pendingDocument);
+  assert.equal(msg._revisionBatchId, batch.batchId);
+  assert.equal(hasRevisionBatch(batch.batchId), true);
+  assert.match(alerts[0], /格式修订范围包含其他修订/);
+  assert.equal(human.rejected, 0);
+  assert.equal(formatting.rejected, 0);
+  assert.equal(doc.rangeRejectAllCalls + doc.rejectAllCalls, 0);
+  doc._items.splice(doc._items.indexOf(human), 1);
+  vm.rejectPendingRevisions();
+  assert.equal(vm.pendingInsertions.length, 0);
+  assert.equal(vm.pendingDocument, null);
+});
 
 test('确认多个插入、编辑、删除批次时每个文档只查找一次且只 AcceptAll 一次', () => {
   const doc = documentWith([revision({ type: 1, start: 10, end: 20, text: '新增' })]);
@@ -573,7 +964,7 @@ test('确认多个插入、编辑、删除批次时每个文档只查找一次�
     list.push({ docId: 1, msg: { _revisionBatchId: 'batch' } });
     list.push({ docId: 1, msg: { _revisionBatchId: 'batch' } });
   }
-  vm.confirmPending();
+  vm.acceptPendingRevisions();
   assert.equal(lookups, 1);
   assert.equal(doc.acceptAllCalls, 1);
   assert.equal(vm.pendingInsertions.length + vm.pendingEdits.length + vm.deleteRevisions.length, 0);
@@ -596,13 +987,13 @@ test('取消失败保留 Vue 待确认项，重试成功后才清除并刷新文
   const msg = { _revisionBatchId: batch.batchId };
   const item = { docId: 1, _markingMode: 'revision', _revisionBatchId: batch.batchId, documentJson: { paragraphs: [{}] }, msg };
   vm.pendingInsertions.push(item);
-  vm.cancelPending();
+  vm.rejectPendingRevisions();
   assert.equal(vm.pendingInsertions.length, 1);
   assert.equal(item._revisionBatchId, batch.batchId);
   assert.equal(msg._revisionBatchId, batch.batchId);
   assert.match(alerts[0], /WPS busy/);
   collection.RejectAll = reject;
-  vm.cancelPending();
+  vm.rejectPendingRevisions();
   assert.equal(vm.pendingInsertions.length, 0);
   assert.equal(msg._revisionBatchId, null);
   assert.equal(vm.pendingDocument, null);
@@ -619,7 +1010,7 @@ test('没有原生修订的回写路径暂时关闭修订追踪，避免取消�
   } });
   const { vm } = chatPane(doc, () => assert.fail('取消应成功'));
   vm.pendingEdits.push({ _markingMode: 'revision-unavailable', startPos: 10, endPos: 20, originalText: '原文' });
-  vm.cancelPending();
+  vm.rejectPendingRevisions();
   assert.equal(restored, '原文');
   assert.equal(doc.TrackRevisions, true);
   assert.equal(vm.pendingEdits.length, 0);
