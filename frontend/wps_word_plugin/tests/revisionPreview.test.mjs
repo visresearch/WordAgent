@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createSSRApp } from 'vue';
 import { renderToString } from 'vue/server-renderer';
-import zhCN from '../src/locales/zh-CN.js';
+import zhCN from '../../shared/locales/zh-CN.js';
 
 import {
   AI_REVISION_AUTHOR,
@@ -730,17 +730,24 @@ test('逐次拒绝后 WPS 重建 COM 对象时重新定位，不操作失效的�
 // 在 Node 中执行实际 Vue Options API，验证取消失败不会让按钮失去重试入口。
 const paneSource = readFileSync(new URL('../src/components/chat/AIChatPane.vue', import.meta.url), 'utf8');
 const paneScript = paneSource.match(/<script>([\s\S]*?)<\/script>/)[1].replace(/import[\s\S]*?from\s+['"][^'"]+['"];?/g, '');
-function chatPane(doc, alert) {
+function chatPane(doc, alert, documents = [doc], converters = {}) {
+  doc.DocID ??= 1;
+  let activeDoc = doc;
+  const window = { Application: { ...doc.Application, get ActiveDocument() { return activeDoc; } } };
   let cacheClears = 0;
-  const api = { wsManager: { clearDocumentCache() {
+  const responses = [];
+  const api = { wsManager: { async send(response) { responses.push(response); }, clearDocumentCache() {
     cacheClears += 1;
   } } };
-  const component = new Function('ChatMessages', 'ChatInput', 'SessionPane', 'hasRevisionBatch', 'rejectRevisionBatches', 'settleAllDocumentRevisions', 'getAIRevisionCount', 'beginTrackedEdit', 'finishTrackedEdit', 'abortTrackedEdit', 'getDocumentById', 'api', 'alert', 't', paneScript.replace('export default', 'return'))(
-    {}, {}, {}, hasRevisionBatch, rejectRevisionBatches, settleAllDocumentRevisions, getAIRevisionCount, beginTrackedEdit, finishTrackedEdit, abortTrackedEdit, () => doc, api, alert, (_key, values) => values?.error
+  const component = new Function('ChatMessages', 'ChatInput', 'SessionPane', 'hasRevisionBatch', 'rejectRevisionBatches', 'settleAllDocumentRevisions', 'getAIRevisionCount', 'beginTrackedEdit', 'finishTrackedEdit', 'abortTrackedEdit', 'getDocumentById', 'api', 'alert', 't', 'window', 'generateDocxFromJSON', 'editDocxParagraph', 'deleteDocxPara', 'getParagraphParaID', paneScript.replace('export default', 'return'))(
+    {}, {}, {}, hasRevisionBatch, rejectRevisionBatches, settleAllDocumentRevisions, getAIRevisionCount, beginTrackedEdit, finishTrackedEdit, abortTrackedEdit,
+    id => documents.find(item => item.DocID === Number(id)) || activeDoc, api, alert, (_key, values) => values?.error, window,
+    converters.generate, converters.edit, converters.delete, converters.paraID
   );
-  const vm = { pendingInsertions: [], pendingEdits: [], deleteRevisions: [], aiRevisionDocuments: [], _streamInsertions: [] };
-  Object.assign(vm, component.methods, { _resolveTargetDoc: () => doc });
-  return { vm, cacheClears: () => cacheClears, resolveTargetDoc: component.methods._resolveTargetDoc.bind(vm) };
+  const vm = Object.assign(component.data(), component.methods);
+  vm._refreshAIRevisionPreview();
+  return { vm, responses, cacheClears: () => cacheClears, resolveTargetDoc: component.methods._resolveTargetDoc.bind(vm),
+    selectDocument(next) { activeDoc = next; } };
 }
 
 for (const action of ['accept', 'reject']) {
@@ -810,7 +817,7 @@ test('文档里已有原生 AI 修订时，取消不再按旧 Range 重复删除
     assert.fail('不能按旧范围再次删除正文');
   } });
   const { vm } = chatPane(doc, () => assert.fail('取消应成功'));
-  vm.pendingInsertions.push({ docId: 23, _markingMode: 'revision-unavailable', insertStartPos: 10, insertEndPos: 20 });
+  vm.pendingInsertions.push({ docId: 23, insertStartPos: 10, insertEndPos: 20 });
   vm._refreshAIRevisionPreview(doc);
   vm.rejectPendingRevisions();
   assert.equal(vm.pendingInsertions.length, 0);
@@ -1000,7 +1007,7 @@ test('取消失败保留 Vue 待确认项，重试成功后才清除并刷新文
   assert.equal(cacheClears(), 2);
 });
 
-test('没有原生修订的回写路径暂时关闭修订追踪，避免取消再产生修订', () => {
+test('原生修订已手动处理时拒绝不回写正文', () => {
   const doc = documentWith();
   doc.TrackRevisions = true;
   let restored = '';
@@ -1009,9 +1016,149 @@ test('没有原生修订的回写路径暂时关闭修订追踪，避免取消�
     restored = value;
   } });
   const { vm } = chatPane(doc, () => assert.fail('取消应成功'));
-  vm.pendingEdits.push({ _markingMode: 'revision-unavailable', startPos: 10, endPos: 20, originalText: '原文' });
+  vm.pendingEdits.push({ docId: doc.DocID, startPos: 10, endPos: 20, originalText: '原文' });
   vm.rejectPendingRevisions();
-  assert.equal(restored, '原文');
+  assert.equal(restored, '');
   assert.equal(doc.TrackRevisions, true);
   assert.equal(vm.pendingEdits.length, 0);
+});
+
+for (const action of ['accept', 'reject']) {
+  test(`${action} only affects the active DocID and retains the other document's batches`, () => {
+    const docs = [31, 32].map(DocID => {
+      const human = revision({ type: 1, start: 10, end: 20, text: 'Human', author: '张三' });
+      const doc = Object.assign(documentWith([human]), { DocID, Name: `${DocID}.docx` });
+      const state = beginTrackedEdit(doc);
+      const ai = revision({ type: 1, start: 10, end: 20, text: 'AI' });
+      doc._items.push(ai);
+      const batch = finishTrackedEdit(state, { start: 10, end: 20 }, 'insert');
+      return { doc, human, ai, batch };
+    });
+    const { vm, selectDocument } = chatPane(docs[0].doc, () => assert.fail('Should succeed'), docs.map(item => item.doc));
+    for (const { doc, batch } of docs) {
+      for (const key of ['pendingInsertions', 'pendingEdits', 'deleteRevisions']) {
+        vm[key].push({ docId: doc.DocID, _revisionBatchId: batch.batchId,
+          documentJson: { paragraphs: [{}] }, msg: { _revisionBatchId: batch.batchId } });
+      }
+      vm._streamInsertions.push({ docId: doc.DocID });
+    }
+    vm._refreshAIRevisionPreview();
+    assert.deepEqual(vm.aiRevisionDocuments, [{ docId: 31, count: 1 }]);
+    assert.equal(vm.revisionDocumentName, '31.docx');
+    const handler = action === 'accept' ? 'acceptPendingRevisions' : 'rejectPendingRevisions';
+    vm[handler]();
+    assert.deepEqual(docs[0].doc._items, [docs[0].human]);
+    assert.deepEqual(docs[1].doc._items, [docs[1].human, docs[1].ai]);
+    assert.equal(hasRevisionBatch(docs[1].batch.batchId), true);
+    for (const key of ['pendingInsertions', 'pendingEdits', 'deleteRevisions']) {
+      assert.deepEqual(vm[key].map(item => item.docId), [32]);
+      assert.equal(vm[key][0].msg._revisionBatchId, docs[1].batch.batchId);
+    }
+    assert.deepEqual(vm._streamInsertions, [{ docId: 32 }]);
+    assert.equal(vm.pendingDocument, null);
+    selectDocument(docs[1].doc);
+    vm[handler](); // A's stale button must only refresh the panel.
+    assert.equal(docs[1].ai.accepted + docs[1].ai.rejected, 0);
+    assert.equal(vm.revisionDocumentName, '32.docx');
+    assert.deepEqual(vm.aiRevisionDocuments, [{ docId: 32, count: 1 }]);
+    vm[handler]();
+    assert.deepEqual(docs[1].doc._items, [docs[1].human]);
+    assert.equal(hasRevisionBatch(docs[1].batch.batchId), false);
+    assert.equal(vm.pendingInsertions.length + vm.pendingEdits.length + vm.deleteRevisions.length, 0);
+  });
+}
+
+test('closing a document, missing DocID, or lookup fallback cannot settle another document', () => {
+  const a = Object.assign(documentWith([revision({ type: 1, start: 10, end: 20, text: 'A' })]), { DocID: 41 });
+  const b = Object.assign(documentWith([revision({ type: 1, start: 10, end: 20, text: 'B' })]), { DocID: 42 });
+  const { vm, selectDocument } = chatPane(a, () => assert.fail('No mutation'), [a, b]);
+  vm._resolveTargetDoc = () => b;
+  vm.acceptPendingRevisions();
+  vm.rejectPendingRevisions();
+  assert.equal(a._items.length, 1);
+  assert.equal(b._items.length, 1);
+  selectDocument(null);
+  vm.rejectPendingRevisions();
+  assert.equal(vm.activeRevisionDocId, null);
+  selectDocument({ ...b, DocID: 0 });
+  vm.acceptPendingRevisions();
+  assert.deepEqual(vm.aiRevisionDocuments, []);
+  assert.equal(b._items.length, 1);
+  for (const action of ['accept', 'reject']) {
+    assert.equal(settleAllDocumentRevisions(b, action, a.DocID).success, false);
+  }
+  assert.equal(b.acceptAllCalls + b.rejectAllCalls, 0);
+});
+
+test('inserting with docId zero binds the pending revision to the actual document immediately', () => {
+  const doc = Object.assign(documentWith(), { DocID: 51 });
+  const { vm } = chatPane(doc, () => assert.fail('Should succeed'), [doc], {
+    generate(json, target) {
+      assert.equal(target, doc);
+      doc._items.push(revision({ type: 1, start: 10, end: 20, text: 'Generated' }));
+      return { success: true, startPos: 10, endPos: 20 };
+    }
+  });
+  const msg = {};
+  const item = { docId: 0, documentJson: { paragraphs: [{}] }, msg };
+  assert.equal(vm._applyImmediateInsertion(item), true);
+  assert.equal(item.docId, 51);
+  assert.equal(msg._docId, 51);
+  assert.deepEqual(vm.aiRevisionDocuments, [{ docId: 51, count: 1 }]);
+  vm.rejectPendingRevisions();
+  assert.equal(doc._items.length, 0);
+});
+
+test('delete reports the real result without calling Undo when native tracking is unavailable', () => {
+  const doc = Object.assign(documentWith(), { DocID: 61 });
+  const range = { Start: 10, End: 20, get Duplicate() { return this; }, Expand() {} };
+  doc.Paragraphs = { Count: 1, Item: () => ({ ID: 101, Range: range }) };
+  doc.Application.Undo = () => assert.fail('Deletion must never automatically undo');
+  const { vm, responses } = chatPane(doc, () => {}, [doc], {
+    paraID: para => para.ID, delete: () => ({ deletedCount: 1 })
+  });
+  assert.equal(vm._applyImmediateDelete({ docId: 0, paraIDs: [101], requestId: 'delete' }), false);
+  assert.equal(responses[0].deletedCount, 1);
+  assert.equal(responses[0].requiresRead, true);
+  assert.equal('rollbackVerified' in responses[0], false);
+});
+
+test('manual formatted insertion records the actual DocID in its message and pending item', () => {
+  const doc = Object.assign(documentWith(), { DocID: 71, Content: { End: 20 } });
+  const { vm } = chatPane(doc, () => assert.fail('Should succeed'), [doc], {
+    generate() {
+      doc._items.push(revision({ type: 1, start: 10, end: 20, text: 'Formatted' }));
+      return { success: true, startPos: 10, endPos: 20 };
+    }
+  });
+  const msg = { documentJson: { paragraphs: [{}] } };
+  vm.insertToWord(msg);
+  assert.equal(vm.pendingInsertions[0].docId, 71);
+  assert.equal(msg._docId, 71);
+  vm.acceptPendingRevisions();
+  assert.equal(vm.pendingInsertions.length, 0);
+  assert.equal(doc._items.length, 0);
+});
+
+test('edit and delete requests with docId zero also retain a concrete document identity', () => {
+  const doc = Object.assign(documentWith(), { DocID: 81 });
+  const range = { Start: 10, End: 20, get Duplicate() { return this; }, Expand() {} };
+  doc.Paragraphs = { Count: 1, Item: () => ({ ID: 101, Range: range }) };
+  const { vm } = chatPane(doc, () => assert.fail('Should succeed'), [doc], {
+    edit() {
+      doc._items.push(revision({ type: 1, start: 10, end: 20, text: 'Edited' }));
+      return { success: true, startPos: 10, endPos: 20 };
+    },
+    paraID: para => para.ID,
+    delete() {
+      doc._items.push(revision({ type: 2, start: 10, end: 20, text: 'Deleted' }));
+      return { deletedCount: 1 };
+    }
+  });
+  assert.equal(vm._applyImmediateEdit({ docId: 0, paraID: 101, runs: [] }), true);
+  assert.equal(vm.pendingEdits[0].docId, 81);
+  assert.equal(vm._applyImmediateDelete({ docId: 0, paraIDs: [101] }), true);
+  assert.equal(vm.deleteRevisions[0].docId, 81);
+  vm.acceptPendingRevisions();
+  assert.equal(vm.pendingEdits.length + vm.deleteRevisions.length, 0);
 });

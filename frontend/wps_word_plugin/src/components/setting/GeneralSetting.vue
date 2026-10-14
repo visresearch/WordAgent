@@ -201,7 +201,6 @@ export default {
     const localSettings = ref({
       language: props.settings.language ?? 'zh-CN',
       showPanelOnStart: props.settings.showPanelOnStart ?? true,
-      proofreadMode: props.settings.proofreadMode ?? 'revision',
       proxy: {
         enabled: props.settings.proxy?.enabled ?? false,
         host: props.settings.proxy?.host ?? '',
@@ -212,7 +211,6 @@ export default {
     watch(() => props.settings, (newVal) => {
       localSettings.value.language = newVal.language ?? 'zh-CN';
       localSettings.value.showPanelOnStart = newVal.showPanelOnStart ?? true;
-      localSettings.value.proofreadMode = newVal.proofreadMode ?? 'revision';
       localSettings.value.proxy.enabled = newVal.proxy?.enabled ?? false;
       localSettings.value.proxy.host = newVal.proxy?.host ?? '';
       localSettings.value.proxy.port = newVal.proxy?.port ?? 7897;
@@ -222,7 +220,6 @@ export default {
       emit('update:settings', {
         language: localSettings.value.language,
         showPanelOnStart: localSettings.value.showPanelOnStart,
-        proofreadMode: localSettings.value.proofreadMode,
         proxy: { ...localSettings.value.proxy }
       });
     };

@@ -1,7 +1,7 @@
 <template>
   <div class="personalization-container">
     <!-- 自定义指令 -->
-    <section>
+    <section class="setting-section">
       <div class="section-header">
         <svg
           class="section-icon"
@@ -80,15 +80,18 @@
         </div>
       </div>
     </section>
+    <LongTermMemorySetting :enabled="localSettings.enableLongTermMemory" @update:enabled="onMemoryEnabledChange" />
   </div>
 </template>
 
 <script>
 import { computed, ref, watch } from 'vue';
+import LongTermMemorySetting from './LongTermMemorySetting.vue';
 import { t } from '../../i18n/index.js';
 
 export default {
   name: 'PersonalizationPane',
+  components: { LongTermMemorySetting },
   props: {
     settings: {
       type: Object,
@@ -98,11 +101,13 @@ export default {
   emits: ['update:settings'],
   setup(props, { emit }) {
     const localSettings = ref({
-      customPrompt: props.settings.customPrompt ?? ''
+      customPrompt: props.settings.customPrompt ?? '',
+      enableLongTermMemory: props.settings.enableLongTermMemory
     });
 
     watch(() => props.settings, (newVal) => {
       localSettings.value.customPrompt = newVal.customPrompt ?? '';
+      localSettings.value.enableLongTermMemory = newVal.enableLongTermMemory;
     }, { deep: true });
 
     const promptTemplates = computed(() => [
@@ -138,8 +143,14 @@ export default {
 
     const emitChange = () => {
       emit('update:settings', {
-        customPrompt: localSettings.value.customPrompt
+        customPrompt: localSettings.value.customPrompt,
+        enableLongTermMemory: localSettings.value.enableLongTermMemory
       });
+    };
+
+    const onMemoryEnabledChange = (enabled) => {
+      localSettings.value.enableLongTermMemory = enabled;
+      emitChange();
     };
 
     const onSettingChange = () => {
@@ -165,6 +176,7 @@ export default {
       localSettings,
       promptTemplates,
       onSettingChange,
+      onMemoryEnabledChange,
       clearCustomPrompt,
       applyTemplate
     };

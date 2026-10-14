@@ -4,7 +4,7 @@ import test from 'node:test';
 import vm from 'node:vm';
 import { parse, compileScript } from 'vue/compiler-sfc';
 import { computed, ref } from 'vue';
-import locales from '../src/i18n/plugin-locales.js';
+import enUS from '../../shared/locales/en-US.js';
 import api from '../src/components/js/api.js';
 
 const source = readFileSync(new URL('../src/components/setting/PluginSetting.vue', import.meta.url), 'utf8');
@@ -16,7 +16,7 @@ function settings(api) {
     computed, ref, URL, api,
     onMounted() {}, onUnmounted() {},
     confirm() { assert.fail('Word deletion must not depend on a native browser dialog'); },
-    t: key => locales['en-US'][key.replace('plugin.', '')]
+    t: key => enUS.plugin[key.replace('plugin.', '')]
   });
   const script = compiled.replace(/^import .*;\s*$/gm, '').replace('export default ', 'globalThis.component = ');
   vm.runInContext(script, context);

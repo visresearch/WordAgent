@@ -12,7 +12,7 @@ function panel(t, file, props = {}, backend = {}, emit = () => {}) {
   const script = source.match(/<script>([\s\S]*?)<\/script>/)[1];
   const locale = vue.ref('en-US');
   const context = {
-    ...vue, api: backend, locale, settingsState: {},
+    ...vue, api: backend, locale,
     setLocale(value) { locale.value = value; },
     t: (key, values = {}) => `${key} ${JSON.stringify(values)}`,
     onMounted() {}, onBeforeUnmount() {}, setTimeout() {},

@@ -72,7 +72,6 @@ class UserSettings(BaseModel):
     providers: list[ProviderConfig] = []
     # 基础设置
     showPanelOnStart: bool = True
-    proofreadMode: str = "revision"
     language: str = "zh-CN"
     # 代理设置
     proxy: ProxyConfig = ProxyConfig()
@@ -125,6 +124,7 @@ async def save_settings(settings: UserSettings):
         # 合并：只用实际传入的字段覆盖，未传入的保留原值
         updates = settings.model_dump(exclude_unset=True)
         merged = {**existing_data, **updates}
+        merged.pop("proofreadMode", None)
         merged["temperature"] = _clamp_temperature(merged.get("temperature", 0.5))
 
         stored = await asyncio.to_thread(load_model_parameters)

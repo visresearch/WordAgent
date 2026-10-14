@@ -925,16 +925,14 @@ def _delete_document_impl(paraIDs: list[int | str], docId: DocIdInput) -> dict:
         "docId": resolved_doc_id,
         "paraIDs": deduped_para_ids,
         "requestedCount": len(deduped_para_ids),
-        "deletedCount": None
-        if isinstance(frontend_result, dict) and frontend_result.get("rollbackVerified") is False
-        else max(0, deleted_count or 0),
+        "deletedCount": max(0, deleted_count) if deleted_count is not None else None,
         "missingParaIDs": missing_para_ids,
         "failedParaIDs": failed_para_ids,
         "replacementInsertParaID": replacement_insert_para_id,
         "requestId": request_id,
     }
     if isinstance(frontend_result, dict):
-        for key in ("rollbackVerified", "requiresRead", "unrestoredParaIDs", "rollbackError", "paragraph"):
+        for key in ("requiresRead", "paragraph"):
             if key in frontend_result:
                 result[key] = frontend_result[key]
     if stopped:
@@ -1105,7 +1103,7 @@ def _edit_document_impl(
         "requestId": request_id,
     }
     if isinstance(frontend_result, dict):
-        for key in ("rollbackVerified", "requiresRead", "unrestoredParaIDs", "rollbackError", "paragraph"):
+        for key in ("requiresRead", "paragraph"):
             if key in frontend_result:
                 result[key] = frontend_result[key]
     if stopped:

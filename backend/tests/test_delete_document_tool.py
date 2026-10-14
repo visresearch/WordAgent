@@ -66,23 +66,19 @@ if __name__ == "__main__":
     unittest.main()
 
 
-def test_failed_rollback_is_not_reported_as_zero_deletions():
+def test_unknown_delete_result_is_not_reported_as_zero_deletions():
     with (
         patch("app.services.tools.document_tools.get_stream_writer", return_value=Mock()),
         patch(
             "app.services.tools.document_tools._wait_for_frontend_mutation",
             return_value={
                 "success": False,
-                "rollbackVerified": False,
                 "requiresRead": True,
-                "unrestoredParaIDs": [101],
                 "deletedCount": None,
-                "error": "恢复未确认",
+                "error": "删除结果未确认",
             },
         ),
     ):
         result = _delete_document_impl([101], 9)
     assert result["deletedCount"] is None
-    assert result["rollbackVerified"] is False
     assert result["requiresRead"] is True
-    assert result["unrestoredParaIDs"] == [101]

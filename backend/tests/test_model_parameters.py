@@ -90,6 +90,26 @@ def test_defaults_and_zero_values_are_preserved(model_store):
     assert kwargs["max_tokens"] == 8192 and kwargs["reasoning_effort"] == "medium"
 
 
+def test_memory_switch_persists_without_overwriting_other_settings(model_store):
+    _, path = model_store
+    save([provider(parameters={"maxTokens": 4096})])
+    before = json.loads(path.read_text(encoding="utf-8"))
+    before.update(enableLongTermMemory=True, customPrompt="Keep my instructions", proofreadMode="revision")
+    path.write_text(json.dumps(before), encoding="utf-8")
+    response = asyncio.run(api_request("GET"))
+    assert response.json()["enableLongTermMemory"] is True
+    assert "proofreadMode" not in response.json()
+    for enabled in (False, True):
+        response = asyncio.run(api_request("POST", {"enableLongTermMemory": enabled}))
+        assert response.status_code == 200, response.text
+        saved = json.loads(path.read_text(encoding="utf-8"))
+        assert saved["enableLongTermMemory"] is enabled
+        assert saved["customPrompt"] == "Keep my instructions"
+        assert saved["providers"] == before["providers"]
+        assert "proofreadMode" not in saved
+        assert asyncio.run(api_request("GET")).json()["enableLongTermMemory"] is enabled
+
+
 @pytest.mark.parametrize(
     "parameters",
     [

@@ -72,6 +72,7 @@
           </svg>
         </div>
         <div class="selection-bar-info">
+          <span v-if="revisionDocumentName" class="selection-bar-docname">{{ revisionDocumentName }}</span>
           <span class="selection-bar-preview">{{ pendingSummary }}</span>
         </div>
         <div class="pending-actions">
@@ -351,6 +352,7 @@ export default {
       default: () => []
     },
     pendingRevisionCount: { type: Number, default: 0 },
+    revisionDocumentName: { type: String, default: '' },
     tokenStats: {
       type: Object,
       default: () => ({ current: 0, max: 258000 })

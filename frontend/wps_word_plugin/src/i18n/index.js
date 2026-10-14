@@ -1,20 +1,13 @@
 import { inject, ref } from 'vue';
-import enUS from '../locales/en-US.js';
-import idID from '../locales/id-ID.js';
-import zhCN from '../locales/zh-CN.js';
-import jaJP from '../locales/ja-JP.js';
-import koKR from '../locales/ko-KR.js';
-import viVN from '../locales/vi-VN.js';
-import pluginLocales from './plugin-locales.js';
+import enUS from '../../../shared/locales/en-US.js';
+import idID from '../../../shared/locales/id-ID.js';
+import zhCN from '../../../shared/locales/zh-CN.js';
+import jaJP from '../../../shared/locales/ja-JP.js';
+import koKR from '../../../shared/locales/ko-KR.js';
+import viVN from '../../../shared/locales/vi-VN.js';
 
 const STORAGE_KEY = 'wence-interface-language';
 const messages = { 'en-US': enUS, 'id-ID': idID, 'zh-CN': zhCN, 'ja-JP': jaJP, 'ko-KR': koKR, 'vi-VN': viVN };
-for (const [code, strings] of Object.entries(pluginLocales)) {
-  messages[code].settings.tabs.plugin = strings.title;
-  messages[code].settings.pluginTitle = strings.title;
-  messages[code].settings.pluginDesc = strings.desc;
-  messages[code].plugin = strings;
-}
 const I18N_KEY = Symbol('wence-i18n');
 
 function normalizeLocale(value) {

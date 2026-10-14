@@ -62,12 +62,10 @@
             {{ $t('settings.personalizationDesc') }}
           </p>
         </div>
-        <div class="setting-section">
-          <PersonalizationPane
-            :settings="personalizationSettings"
-            @update:settings="onPersonalizationChange"
-          />
-        </div>
+        <PersonalizationPane
+          :settings="personalizationSettings"
+          @update:settings="onPersonalizationChange"
+        />
       </div>
 
       <!-- MCP 服务器管理 -->
@@ -124,11 +122,18 @@
         <button
           v-if="currentTab !== 'data' && currentTab !== 'skill' && currentTab !== 'plugin'"
           class="btn btn-save"
-          :disabled="saving"
+          :disabled="saving || !settingsLoaded"
           @click="saveSettings"
         >
           <span v-if="saving" class="loading-spinner"></span>
           {{ saving ? $t('common.saving') : $t('settings.save') }}
+        </button>
+        <button
+          v-if="!settingsLoaded && saveMessage"
+          class="btn btn-save"
+          @click="loadSettings"
+        >
+          {{ $t('common.retry') }}
         </button>
         <transition name="fade">
           <span v-if="saveMessage" :class="['save-msg', saveSuccess ? 'success' : 'error']">
@@ -143,7 +148,6 @@
 <script>
 import { ref, reactive, computed, onMounted } from 'vue';
 import api from '../js/api.js';
-import { settingsState } from '../../settingsState.js';
 import GeneralSetting from './GeneralSetting.vue';
 import ModelSetting from './ModelSetting.vue';
 import MCPserverSetting from './MCPserverSetting.vue';
@@ -215,11 +219,10 @@ export default {
       }
     ]);
 
+    const settingsLoaded = ref(false);
     const settings = reactive({
       language: locale.value,
       showPanelOnStart: true,
-      proofreadMode: 'revision',
-      enableLongTermMemory: false,
       proxy: {
         enabled: false,
         host: '',
@@ -240,12 +243,12 @@ export default {
     const generalSettings = computed(() => ({
       language: settings.language,
       showPanelOnStart: settings.showPanelOnStart,
-      proofreadMode: settings.proofreadMode,
       proxy: { ...settings.proxy }
     }));
 
     const personalizationSettings = computed(() => ({
-      customPrompt: settings.customPrompt
+      customPrompt: settings.customPrompt,
+      enableLongTermMemory: settings.enableLongTermMemory
     }));
 
     const loadCacheInfo = async () => {
@@ -274,25 +277,20 @@ export default {
     };
 
     const loadSettings = async () => {
+      settingsLoaded.value = false;
+      saveMessage.value = '';
       try {
         const data = await api.getSettings();
+        if (!data) {
+          throw new Error('未读取到设置');
+        }
         if (data) {
-          settings.language = ['en-US', 'id-ID'].includes(data.language) ? data.language : 'zh-CN';
+          settings.language = ['zh-CN', 'en-US', 'id-ID', 'ja-JP', 'ko-KR', 'vi-VN'].includes(data.language) ? data.language : 'zh-CN';
           setLocale(settings.language);
           if (data.showPanelOnStart !== undefined) {
             settings.showPanelOnStart = data.showPanelOnStart;
           }
-          if (data.proofreadMode !== undefined) {
-            settings.proofreadMode = data.proofreadMode;
-            settingsState.proofreadMode = data.proofreadMode;
-          }
-          if (data.enableLongTermMemory !== undefined) {
-            settings.enableLongTermMemory = !!data.enableLongTermMemory;
-            settingsState.enableLongTermMemory = !!data.enableLongTermMemory;
-          } else {
-            settings.enableLongTermMemory = false;
-            settingsState.enableLongTermMemory = false;
-          }
+          settings.enableLongTermMemory = data.enableLongTermMemory;
           if (data.providers) {
             settings.providers = data.providers.map(p => ({
               ...p,
@@ -324,12 +322,18 @@ export default {
             });
           }
         }
+        settingsLoaded.value = typeof settings.enableLongTermMemory === 'boolean';
       } catch (error) {
         console.error('加载设置失败:', error);
+        saveSuccess.value = false;
+        saveMessage.value = t('settings.loadFailed');
       }
     };
 
     const saveSettings = async () => {
+      if (!settingsLoaded.value || saving.value) {
+        return;
+      }
       saving.value = true;
       saveMessage.value = '';
 
@@ -337,7 +341,6 @@ export default {
         const settingsToSave = {
           language: settings.language,
           showPanelOnStart: settings.showPanelOnStart,
-          proofreadMode: settings.proofreadMode,
           enableLongTermMemory: settings.enableLongTermMemory,
           proxy: { ...settings.proxy },
           providers: settings.providers.map(p => ({
@@ -381,12 +384,6 @@ export default {
       settings.language = newSettings.language;
       setLocale(newSettings.language);
       settings.showPanelOnStart = newSettings.showPanelOnStart;
-      settings.proofreadMode = newSettings.proofreadMode;
-      settingsState.proofreadMode = newSettings.proofreadMode;
-      if (newSettings.enableLongTermMemory !== undefined) {
-        settings.enableLongTermMemory = !!newSettings.enableLongTermMemory;
-        settingsState.enableLongTermMemory = !!newSettings.enableLongTermMemory;
-      }
       if (newSettings.proxy) {
         settings.proxy.enabled = newSettings.proxy.enabled;
         settings.proxy.host = newSettings.proxy.host;
@@ -396,6 +393,7 @@ export default {
 
     const onPersonalizationChange = (newSettings) => {
       settings.customPrompt = newSettings.customPrompt;
+      settings.enableLongTermMemory = newSettings.enableLongTermMemory;
     };
 
     const onProvidersChange = (newProviders) => {
@@ -438,6 +436,8 @@ export default {
       saveSuccess,
       cacheInfo,
       saveSettings,
+      loadSettings,
+      settingsLoaded,
       onGeneralSettingsChange,
       onPersonalizationChange,
       onProvidersChange,

@@ -581,12 +581,21 @@ function settleAIRevisions(doc, action) {
  * 仅处理目标文档中作者为文策AI的修订。若 AI 修订仍有
  * 残留，则保留批次和确认入口。只有全文都是 AI 修订时才使用全文接口。
  */
-export function settleAllDocumentRevisions(doc, action) {
+export function settleAllDocumentRevisions(doc, action, expectedDocId = null) {
   if (!doc) {
     return { success: false, handled: 0, error: '缺少 WPS Document 对象' };
   }
   if (action !== 'accept' && action !== 'reject') {
     return { success: false, handled: 0, error: 'action 必须是 accept 或 reject' };
+  }
+  if (expectedDocId !== null) {
+    try {
+      if (!Number.isSafeInteger(expectedDocId) || expectedDocId === 0 || Number(doc.DocID) !== expectedDocId) {
+        return { success: false, handled: 0, error: '目标文档 DocID 不匹配' };
+      }
+    } catch (error) {
+      return { success: false, handled: 0, error: '目标文档已经关闭或 DocID 不可读取' };
+    }
   }
 
   const startedAt = now();
