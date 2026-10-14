@@ -1,4 +1,6 @@
 // 调整revisionBatches.entries() 的删除逻辑,避免在for循环内一边删除一边遍历，且使用docid做同一文档判定 2026103 by volun_leung
+// 调整修订时作者为助手名称，修订完成后恢复原作者名称，且处理修订只处理助手的修订，不处理其他作者的修订 20261014 by volun_leung
+import { t } from '../i18n/index.js';
 const revisionBatches = new Map();
 const documentPreviewStates = new Map();
 let nextBatchId = 1;
@@ -206,6 +208,9 @@ export function beginTrackedEdit(doc) {
   if (!doc) {
     throw new Error('缺少 WPS Document 对象');
   }
+  // 保留原作者名称 volun_leung
+  const originalUserName = window.Application.UserName;
+
   const view = safeRead(() => doc.ActiveWindow.View) || safeRead(() => window.Application.ActiveWindow.View);
   const state = {
     doc,
@@ -219,8 +224,11 @@ export function beginTrackedEdit(doc) {
       : null,
     previousShowFormatChanges: view ? Boolean(safeRead(() => view.ShowFormatChanges, true)) : null,
     before: listRevisions(doc.Revisions),
-    finished: false
+    finished: false,
+    originalUserName,//保留原作者名称
   };
+   //开始处理前先调整名称
+  window.Application.UserName = t('windows.assistant');
   try {
     if (state.previousTrackFormatting !== null) {
       doc.TrackFormatting = false;
@@ -240,6 +248,9 @@ export function beginTrackedEdit(doc) {
       console.warn('[revisionPreview] 开启原生修订失败后恢复文档状态失败:', restoreError);
     }
     throw error;
+  } finally {
+    //恢复原作者名称
+    window.Application.UserName = originalUserName;
   }
   return state;
 }
@@ -255,6 +266,10 @@ export function abortTrackedEdit(state) {
       state.doc.TrackFormatting = state.previousTrackFormatting;
     }
   } finally {
+    // 恢复原始作者信息
+    if (state.originalUserName !== undefined){
+      window.Application.UserName = state.originalUserName;
+    }
     state.doc.ShowRevisions = state.previousShowRevisions;
     restoreRevisionView(state);
   }
@@ -281,6 +296,11 @@ export function finishTrackedEdit(state, target, kind) {
       console.warn('[revisionPreview] 读取修订失败后恢复 ShowRevisions 失败:', restoreError);
     }
     throw error;
+  }finally {
+    // 恢复原始作者信息
+    if (state.originalUserName !== undefined){
+      window.Application.UserName = state.originalUserName;
+    }
   }
   // Capture every revision produced by this edit, including table/property
   // and formatting revisions. Confirming a batch must not leave those behind.
@@ -516,6 +536,49 @@ export function rejectRevisionBatches(doc, batchIds) {
 }
 
 /**
+ * 接受或拒绝指定用户的修订  by volun_leung
+ * @param {Revisions} revisions - WPS Revisions 集合
+ * @param {string} targetAuthor - 目标用户名称
+ * @param {string} action - 'accept' 或 'reject'
+ * @returns {{handled: number, skipped: number}}
+ */
+export function settleRevisionsByAuthor(revisions, targetAuthor, action) {
+  let handled = 0;
+  let skipped = 0;
+  
+  const count = Number(safeRead(() => revisions.Count, 0)) || 0;
+  
+  // 从后向前遍历，避免索引变化问题
+  for (let index = count; index >= 1; index--) {
+    const revision = safeRead(() => revisions.Item(index));
+    if (!revision) {
+      continue;
+    }
+    
+    const author = String(safeRead(() => revision.Author, '') || '');
+    
+    // 只处理目标用户的修订
+    if (author !== targetAuthor) {
+      skipped++;
+      continue;
+    }
+    
+    try {
+      if (action === 'accept') {
+        revision.Accept();
+      } else {
+        revision.Reject();
+      }
+      handled++;
+    } catch (error) {
+      console.warn(`[revisionPreview] 处理用户 "${targetAuthor}" 的修订失败:`, error);
+    }
+  }
+  
+  return { handled, skipped };
+}
+
+/**
  * 使用 WPS 集合级原生接口处理全部修订，与“审阅 → 接受/拒绝所有修订”一致。
  * 不能循环处理缓存的 Revision 对象：每次 Accept()/Reject() 后 WPS 都可能
  * 重排或合并集合，使后续批次保存的 COM 对象引用指向错误范围。
@@ -551,16 +614,20 @@ export function settleAllDocumentRevisions(doc, action) {
       if (handled > 0) {
         if (action === 'accept') {
           if (typeof revisions.AcceptAll === 'function') {
-            revisions.AcceptAll();
+            // revisions.AcceptAll(); 只处理助手的修订。
+            settleRevisionsByAuthor(revisions,t('windows.assistant'),action);
           } else if (typeof doc.AcceptAllRevisions === 'function') {
-            doc.AcceptAllRevisions();
+            // doc.AcceptAllRevisions(); 只处理助手的修订。
+            settleRevisionsByAuthor(revisions,t('windows.assistant'),action);
           } else {
             throw new Error('当前 WPS 版本不支持 Revisions.AcceptAll()');
           }
         } else if (typeof revisions.RejectAll === 'function') {
-          revisions.RejectAll();
+          // revisions.RejectAll();只处理助手的修订。
+            settleRevisionsByAuthor(revisions,t('windows.assistant'),action);
         } else if (typeof doc.RejectAllRevisions === 'function') {
-          doc.RejectAllRevisions();
+          // doc.RejectAllRevisions();只处理助手的修订。
+            settleRevisionsByAuthor(revisions,t('windows.assistant'),action);
         } else {
           throw new Error('当前 WPS 版本不支持 Revisions.RejectAll()');
         }
