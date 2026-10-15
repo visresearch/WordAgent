@@ -11,14 +11,12 @@
 - 修复Microsoft Word加载项发送停止信号后仍然不停止的问题
 - 修复Microsoft Word加载项在聊天时chat面板会强制滚动到最底部的问题（无效）
 - 修复Microsoft Word加载项图片读取的bug
+- 修复linux系统下wps前端加载项修订bug
 
 ### Changed
 - 更新py依赖
 - 删除冗余i18n文件
 - 优化系统提示词
-
-### Todo
-- 允许多个对话session同时运行
 
 ## [v0.6.3-beta.2]
 

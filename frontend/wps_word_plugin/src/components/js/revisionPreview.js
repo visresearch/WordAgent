@@ -17,6 +17,10 @@ function safeRead(read, fallback = null) {
   }
 }
 
+function isLinuxWPS() {
+  return /linux/i.test(String(safeRead(() => navigator.platform || navigator.userAgent, '')));
+}
+
 function sameDocument(left, right) {
   if (left === right) {
     return true;
@@ -93,19 +97,35 @@ function readDocumentRevisions(doc) {
 }
 
 export function getAIRevisionCount(doc) {
-  const revisions = doc.Revisions;
-  const count = readRevisionCount(revisions);
-  let aiCount = 0;
-  for (let index = 1; index <= count; index++) {
-    const author = revisions.Item(index)?.Author;
-    if (typeof author !== 'string') {
-      throw new Error('无法读取 WPS 修订作者');
+  const expected = isLinuxWPS()
+    ? [...revisionBatches.values()]
+      .filter((batch) => sameDocument(batch.doc, doc))
+      .flatMap((batch) => batch.revisions)
+      .filter((item) => item.author !== AI_REVISION_AUTHOR)
+    : [];
+  if (expected.length === 0) {
+    const revisions = doc.Revisions;
+    const count = readRevisionCount(revisions);
+    let aiCount = 0;
+    for (let index = 1; index <= count; index++) {
+      const author = revisions.Item(index)?.Author;
+      if (typeof author !== 'string') {
+        throw new Error('无法读取 WPS 修订作者');
+      }
+      if (author === AI_REVISION_AUTHOR) {
+        aiCount += 1;
+      }
     }
-    if (author === AI_REVISION_AUTHOR) {
-      aiCount += 1;
-    }
+    return aiCount;
   }
-  return aiCount;
+  const current = readDocumentRevisions(doc);
+  const aiCount = current.filter((item) => item.author === AI_REVISION_AUTHOR).length;
+  const baseline = documentPreviewEntry(doc)?.[1].before || [];
+  const protectedItems = new Set(matchRevisions(baseline, current));
+  const fallback = matchRevisions(expected, current.filter((item) =>
+    item.author !== AI_REVISION_AUTHOR && !protectedItems.has(item)
+  ));
+  return aiCount + fallback.length;
 }
 
 function revisionSignature(item) {
@@ -211,7 +231,15 @@ function restoreEditSettings(state) {
       state.doc.TrackFormatting = state.previousTrackFormatting;
     }
   } finally {
-    state.application.UserName = state.originalUserName;
+    try {
+      if (state.originalUserName !== null) {
+        state.application.UserName = state.originalUserName;
+      }
+    } finally {
+      if (state.useLocalUserInfoChanged) {
+        state.options.UseLocalUserInfo = state.previousUseLocalUserInfo;
+      }
+    }
   }
 }
 
@@ -252,9 +280,15 @@ export function beginTrackedEdit(doc) {
     throw new Error('缺少 WPS Document 对象');
   }
   const application = safeRead(() => doc.Application) || safeRead(() => window.Application);
-  const originalUserName = application?.UserName;
-  if (typeof originalUserName !== 'string') {
+  const accountUserName = application?.UserName;
+  if (typeof accountUserName !== 'string') {
     throw new Error('无法读取 WPS 用户名，未执行 AI 修订');
+  }
+  const linux = isLinuxWPS();
+  const options = linux ? safeRead(() => application.Options) : null;
+  const previousUseLocalUserInfo = linux ? safeRead(() => options.UseLocalUserInfo) : null;
+  if (linux && typeof previousUseLocalUserInfo !== 'boolean') {
+    throw new Error('Linux WPS 无法读取本地用户信息设置，未执行 AI 修订');
   }
 
   const view = safeRead(() => doc.ActiveWindow.View) || safeRead(() => application.ActiveWindow.View);
@@ -272,10 +306,27 @@ export function beginTrackedEdit(doc) {
     before: readDocumentRevisions(doc),
     finished: false,
     application,
-    originalUserName,
+    options,
+    linux,
+    accountUserName,
+    originalUserName: null,
+    previousUseLocalUserInfo,
+    useLocalUserInfoChanged: false,
     resumeScreenUpdating: suspendScreenUpdating(doc)
   };
   try {
+    if (linux) {
+      // 登录账户模式会忽略 Application.UserName，修订仍署登录用户的名字。
+      state.useLocalUserInfoChanged = true;
+      options.UseLocalUserInfo = true;
+      if (options.UseLocalUserInfo !== true) {
+        throw new Error('Linux WPS 无法启用本地用户信息，未执行 AI 修订');
+      }
+    }
+    state.originalUserName = application.UserName;
+    if (typeof state.originalUserName !== 'string') {
+      throw new Error('无法读取 WPS 本地用户名，未执行 AI 修订');
+    }
     application.UserName = AI_REVISION_AUTHOR;
     if (application.UserName !== AI_REVISION_AUTHOR) {
       throw new Error(`无法将修订作者设为${AI_REVISION_AUTHOR}，未执行 AI 修订`);
@@ -334,8 +385,17 @@ function completeTrackedEdit(state, target, kind) {
   const { doc } = state;
   let after;
   try {
-    restoreEditSettings(state);
-    after = readDocumentRevisions(doc);
+    if (state.linux) {
+      // 在恢复账户身份前读取，促使 Linux WPS 以本地用户身份生成修订。
+      try {
+        after = readDocumentRevisions(doc);
+      } finally {
+        restoreEditSettings(state);
+      }
+    } else {
+      restoreEditSettings(state);
+      after = readDocumentRevisions(doc);
+    }
   } catch (error) {
     restoreDocumentPreview(doc, state);
     throw error;
@@ -350,7 +410,10 @@ function completeTrackedEdit(state, target, kind) {
     created = targetCandidates.slice(Math.max(0, targetCandidates.length - addedCount));
   }
 
-  created = created.filter((item) => item.author === AI_REVISION_AUTHOR);
+  created = created.filter((item) => item.author === AI_REVISION_AUTHOR || (
+    state.linux && item.author &&
+    (item.author === state.accountUserName || item.author === state.originalUserName)
+  ));
 
   if (kind === 'delete') {
     // 邻近删除可能重建已有插入标记；删除批次不能接管纯插入修订。
@@ -406,12 +469,12 @@ export function settleRevisionBatch(batchId, action) {
   for (const item of revisions) {
     try {
       // WPS 可能重建 COM 对象，每次处理前重新定位并核对作者。
-      const current = readDocumentRevisions(batch.doc).filter((candidate) => candidate.author === AI_REVISION_AUTHOR);
+      const current = readDocumentRevisions(batch.doc).filter((candidate) => candidate.author === item.author);
       const matched = matchRevisions([item], current)[0];
       if (!matched) {
         continue; // 已在 WPS 审阅栏手动处理，或已不属于 AI 作者。
       }
-      if (safeRead(() => matched.revision.Author) !== AI_REVISION_AUTHOR) {
+      if (safeRead(() => matched.revision.Author) !== item.author) {
         throw new Error('修订作者已变化，未接受该修订');
       }
       matched.revision.Accept();
@@ -461,8 +524,8 @@ function matchRevisions(expected, current, exactRange = false) {
 }
 
 // 只有集合中的每条修订都属于选中的 AI 修订时，才允许集合级操作。
-function applyRevisionAction(doc, revisions, current, owned, action) {
-  if (owned.some((item) => item.author !== AI_REVISION_AUTHOR)) {
+function applyRevisionAction(doc, revisions, current, owned, action, allowedAuthors = new Set([AI_REVISION_AUTHOR])) {
+  if (owned.some((item) => !allowedAuthors.has(item.author))) {
     throw new Error(`只能处理${AI_REVISION_AUTHOR}的修订`);
   }
   if (owned.length === current.length) {
@@ -484,7 +547,7 @@ function applyRevisionAction(doc, revisions, current, owned, action) {
       : 0) || right.index - left.index
   ));
   const item = owned[0];
-  if (safeRead(() => item.revision.Author) !== AI_REVISION_AUTHOR) {
+  if (!allowedAuthors.has(safeRead(() => item.revision.Author))) {
     throw new Error('修订作者已变化，未处理该修订');
   }
   if (action === 'reject') {
@@ -515,11 +578,12 @@ export function rejectRevisionBatches(doc, batchIds) {
     return { success: false, handled: 0, failed: 1, settledBatchIds: [], error: '修订批次不存在或文档不匹配' };
   }
   doc = batches[0]?.doc || doc;
-  const expected = batches.flatMap((batch) => batch.revisions).filter((item) => item.author === AI_REVISION_AUTHOR);
+  const expected = batches.flatMap((batch) => batch.revisions);
+  const allowedAuthors = new Set(expected.map((item) => item.author));
   const baseline = documentPreviewEntry(doc)?.[1].before || [];
   const ownedRevisions = (current, snapshots = expected) => {
     const protectedItems = new Set(matchRevisions(baseline, current));
-    return matchRevisions(snapshots, current.filter((item) => item.author === AI_REVISION_AUTHOR && !protectedItems.has(item)));
+    return matchRevisions(snapshots, current.filter((item) => allowedAuthors.has(item.author) && !protectedItems.has(item)));
   };
   let handled = 0;
   let error = null;
@@ -529,7 +593,7 @@ export function rejectRevisionBatches(doc, batchIds) {
     if (rejectingWholeDocument && current?.length > 0) {
       // 原集合全部属于选中的批次，RejectAll 部分成功后新建/重排的标记
       // 仍属于本轮操作。保留新快照，防止签名变化后误报撤销成功。
-      const remaining = current.filter((item) => item.author === AI_REVISION_AUTHOR);
+      const remaining = current.filter((item) => allowedAuthors.has(item.author));
       expected.splice(0, expected.length, ...remaining);
       for (const batch of batches) {
         batch.revisions = [...remaining];
@@ -542,7 +606,7 @@ export function rejectRevisionBatches(doc, batchIds) {
     while (owned.length > 0) {
       const beforeCount = current.length;
       rejectingWholeDocument = owned.length === current.length;
-      applyRevisionAction(doc, doc.Revisions, current, owned, 'reject');
+      applyRevisionAction(doc, doc.Revisions, current, owned, 'reject', allowedAuthors);
       current = readDocumentRevisions(doc);
       retainRemainingRevisions();
       if (current.length >= beforeCount) {
@@ -598,6 +662,52 @@ function settleAIRevisions(doc, action) {
   }
 }
 
+// Linux WPS 在账户模式下可能把刚生成的修订署为登录用户。
+// 仅凭作者名无法区分用户手动修改，因此只处理本次编辑前后差异记录的批次。
+function settleAttributedBatchRevisions(doc, action) {
+  const batches = [...revisionBatches.values()].filter((batch) => sameDocument(batch.doc, doc));
+  const expected = batches.flatMap((batch) => batch.revisions)
+    .filter((item) => item.author !== AI_REVISION_AUTHOR);
+  if (expected.length === 0) {
+    return { success: true, handled: 0 };
+  }
+  const allowedAuthors = new Set(expected.map((item) => item.author));
+  const baseline = documentPreviewEntry(doc)?.[1].before || [];
+  const ownedRevisions = (current) => {
+    const protectedItems = new Set(matchRevisions(baseline, current));
+    return matchRevisions(expected, current.filter((item) =>
+      allowedAuthors.has(item.author) && !protectedItems.has(item)
+    ));
+  };
+  let handled = 0;
+  try {
+    let current = readDocumentRevisions(doc);
+    let owned = ownedRevisions(current);
+    while (owned.length > 0) {
+      const beforeCount = current.length;
+      applyRevisionAction(doc, doc.Revisions, current, owned, action, allowedAuthors);
+      current = readDocumentRevisions(doc);
+      if (current.length >= beforeCount) {
+        throw new Error('WPS 未完整处理本轮 AI 修订，请重试');
+      }
+      handled += beforeCount - current.length;
+      owned = ownedRevisions(current);
+    }
+    const protectedItems = new Set(matchRevisions(baseline, current));
+    const unresolved = current.some((item) => !protectedItems.has(item)
+      && expected.some((snapshot) => item.author === snapshot.author
+        && item.type === snapshot.type
+        && item.date === snapshot.date
+        && Math.abs(item.start - snapshot.start) <= Math.max(1, snapshot.end - snapshot.start)));
+    if (unresolved) {
+      throw new Error('WPS 改写了本轮修订标记，无法安全确认；请在 WPS 审阅中核对');
+    }
+    return { success: true, handled };
+  } catch (error) {
+    return { success: false, handled, error: error?.message || String(error) };
+  }
+}
+
 /**
  * 仅处理目标文档中作者为文策AI的修订。若 AI 修订仍有
  * 残留，则保留批次和确认入口。只有全文都是 AI 修订时才使用全文接口。
@@ -625,9 +735,13 @@ export function settleAllDocumentRevisions(doc, action, expectedDocId = null) {
   let handled = 0;
   try {
     const aiCount = getAIRevisionCount(doc);
+    const hasAttributedBatch = isLinuxWPS() && [...revisionBatches.values()].some((batch) =>
+      sameDocument(batch.doc, doc)
+      && batch.revisions.some((item) => item.author !== AI_REVISION_AUTHOR)
+    );
     timings.readMs = now() - startedAt;
     const [previewDoc, previewState] = documentPreviewEntry(doc) || [];
-    if (aiCount > 0 || previewState) {
+    if (aiCount > 0 || hasAttributedBatch || previewState) {
       // 接受修订和恢复显示设置期间暂停重绘，结束后统一刷新。
       const screenStartedAt = now();
       resumeScreenUpdating = suspendScreenUpdating(doc);
@@ -635,11 +749,18 @@ export function settleAllDocumentRevisions(doc, action, expectedDocId = null) {
     }
     const nativeStartedAt = now();
     try {
-      if (aiCount > 0) {
+      if (aiCount > 0 || hasAttributedBatch) {
         const result = settleAIRevisions(doc, action);
         handled = result.handled;
         if (!result.success) {
           throw new Error(result.error);
+        }
+        if (hasAttributedBatch) {
+          const attributed = settleAttributedBatchRevisions(doc, action);
+          handled += attributed.handled;
+          if (!attributed.success) {
+            throw new Error(attributed.error);
+          }
         }
       }
     } finally {

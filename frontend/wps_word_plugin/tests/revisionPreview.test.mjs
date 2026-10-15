@@ -41,7 +41,7 @@ function revision({ type, start, end, text, author = AI_REVISION_AUTHOR, date = 
 
 function documentWith(revisions = []) {
   const doc = {
-    Application: { UserName: '当前用户' },
+    Application: { UserName: '当前用户', Options: { UseLocalUserInfo: false } },
     TrackRevisions: false,
     TrackFormatting: true,
     ShowRevisions: false,
@@ -129,16 +129,123 @@ test('AI 编辑使用文策AI作者，完成后恢复用户名且不接管协作
   const doc = documentWith([existing]);
   const state = beginTrackedEdit(doc);
   assert.equal(doc.Application.UserName, '文策AI');
+  assert.equal(doc.Application.Options.UseLocalUserInfo, true);
   const inserted = revision({ type: 1, start: 10, end: 20, text: 'AI内容', author: doc.Application.UserName });
   const collaborator = revision({ type: 1, start: 10, end: 20, text: '协作者内容', author: '李四' });
   doc._items.push(inserted, collaborator);
   const batch = finishTrackedEdit(state, { start: 10, end: 20 }, 'insert');
   assert.equal(doc.Application.UserName, '当前用户');
+  assert.equal(doc.Application.Options.UseLocalUserInfo, false);
   assert.equal(batch.revisionCount, 1);
   assert.equal(hasRevisionBatch(batch.batchId), true);
   assert.equal(settleRevisionBatch(batch.batchId, 'accept').success, true);
   assert.deepEqual(doc._items, [existing, collaborator]);
   assert.equal(inserted.accepted, 1);
+});
+
+for (const action of ['accept', 'reject']) {
+  test(`Linux WPS 把修订署为账户用户时仍只${action}本轮 AI 修订`, () => {
+    const human = revision({ type: 2, start: 2, end: 6, text: '用户旧修订', author: '登录用户', date: '2026-07-27' });
+    const doc = Object.assign(documentWith([human]), { DocID: 26 });
+    let localMode = false;
+    let localName = '本地用户';
+    doc.Application = {
+      Options: {
+        get UseLocalUserInfo() { return localMode; },
+        set UseLocalUserInfo(value) { localMode = value; }
+      },
+      get UserName() { return localMode ? localName : '登录用户'; },
+      set UserName(value) { localName = value; }
+    };
+    const revisions = Object.getOwnPropertyDescriptor(doc, 'Revisions');
+    let revisionReads = 0;
+    Object.defineProperty(doc, 'Revisions', { get() {
+      revisionReads += 1;
+      if (revisionReads === 2) {
+        assert.equal(localMode, true);
+        assert.equal(doc.Application.UserName, AI_REVISION_AUTHOR);
+      }
+      return revisions.get.call(doc);
+    } });
+    const state = beginTrackedEdit(doc);
+    assert.equal(localMode, true);
+    assert.equal(doc.Application.UserName, AI_REVISION_AUTHOR);
+    const created = revision({ type: 2, start: 20, end: 24, text: 'AI删除', author: '登录用户' });
+    doc._items.push(created);
+    const batch = finishTrackedEdit(state, { start: 20, end: 24 }, 'delete');
+    assert.ok(batch.batchId);
+    assert.equal(localMode, false);
+    assert.equal(localName, '本地用户');
+    assert.equal(getAIRevisionCount(doc), 1);
+
+    const { vm } = chatPane(doc, () => assert.fail('处理本轮修订应成功'));
+    vm.deleteRevisions.push({ docId: 26, _revisionBatchId: batch.batchId });
+    vm._refreshAIRevisionPreview();
+    assert.deepEqual(vm.aiRevisionDocuments, [{ docId: 26, count: 1 }]);
+    vm[action === 'accept' ? 'acceptPendingRevisions' : 'rejectPendingRevisions']();
+    assert.deepEqual(doc._items, [human]);
+    assert.equal(created[action === 'accept' ? 'accepted' : 'rejected'], 1);
+    assert.equal(human.accepted + human.rejected, 0);
+    assert.equal(vm.deleteRevisions.length, 0);
+  });
+}
+
+test('Linux WPS 改写同名修订后拒绝静默清除确认入口', () => {
+  const doc = Object.assign(documentWith(), { DocID: 27 });
+  doc.Application.UserName = '登录用户';
+  const state = beginTrackedEdit(doc);
+  doc._items.push(revision({ type: 2, start: 20, end: 24, text: 'AI删除', author: '登录用户' }));
+  const batch = finishTrackedEdit(state, { start: 20, end: 24 }, 'delete');
+  doc._items = [revision({ type: 2, start: 20, end: 24, text: 'WPS合并后的文本', author: '登录用户' })];
+  const alerts = [];
+  const { vm } = chatPane(doc, (message) => alerts.push(message));
+  vm.deleteRevisions.push({ docId: 27, _revisionBatchId: batch.batchId });
+  vm.rejectPendingRevisions();
+  assert.equal(vm.deleteRevisions.length, 1);
+  assert.equal(doc._items.length, 1);
+  assert.equal(doc._items[0].rejected, 0);
+  assert.match(alerts[0], /无法安全确认/);
+});
+
+test('Linux 旧版未记录归属的用户署名修订不会被按钮静默跳过', () => {
+  const oldRevision = revision({ type: 2, start: 20, end: 24, text: '旧 AI 删除', author: '登录用户' });
+  const doc = Object.assign(documentWith([oldRevision]), { DocID: 28 });
+  const alerts = [];
+  const { vm } = chatPane(doc, (message) => alerts.push(message));
+  vm.pendingEdits.push({ docId: 28, _revisionBatchId: null });
+  vm.acceptPendingRevisions();
+  assert.equal(vm.pendingEdits.length, 1);
+  assert.equal(oldRevision.accepted, 0);
+  assert.match(alerts[0], /无法安全地自动接受或拒绝/);
+});
+
+test('Windows WPS 保持原有用户名切换路径', (t) => {
+  const previousNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { platform: 'Win32' } });
+  t.after(() => {
+    if (previousNavigator) {
+      Object.defineProperty(globalThis, 'navigator', previousNavigator);
+    } else {
+      delete globalThis.navigator;
+    }
+  });
+  const doc = documentWith();
+  Object.defineProperty(doc.Application, 'Options', { get() { assert.fail('Windows 不应访问本地用户信息设置'); } });
+  const revisions = Object.getOwnPropertyDescriptor(doc, 'Revisions');
+  let revisionReads = 0;
+  Object.defineProperty(doc, 'Revisions', { get() {
+    revisionReads += 1;
+    if (revisionReads === 2) {
+      assert.equal(doc.Application.UserName, '当前用户', 'Windows 保持先恢复用户名再读取修订的顺序');
+    }
+    return revisions.get.call(doc);
+  } });
+  const state = beginTrackedEdit(doc);
+  doc._items.push(revision({ type: 1, start: 10, end: 20, text: '新增' }));
+  const batch = finishTrackedEdit(state, { start: 10, end: 20 }, 'insert');
+  assert.ok(batch.batchId);
+  assert.equal(doc.Application.UserName, '当前用户');
+  assert.equal(settleAllDocumentRevisions(doc, 'accept').success, true);
 });
 
 test('中止 AI 编辑恢复原用户名和修订设置', () => {
@@ -1115,7 +1222,7 @@ test('inserting with docId zero binds the pending revision to the actual documen
   assert.equal(doc._items.length, 0);
 });
 
-test('delete reports the real result without calling Undo when native tracking is unavailable', () => {
+test('删除成功但 WPS 未返回独立删除修订时仍回报成功，并要求重新读取', () => {
   const doc = Object.assign(documentWith(), { DocID: 61 });
   const range = { Start: 10, End: 20, get Duplicate() {
     return this; 
@@ -1125,10 +1232,28 @@ test('delete reports the real result without calling Undo when native tracking i
   const { vm, responses } = chatPane(doc, () => {}, [doc], {
     paraID: para => para.ID, delete: () => ({ deletedCount: 1 })
   });
-  assert.equal(vm._applyImmediateDelete({ docId: 0, paraIDs: [101], requestId: 'delete' }), false);
+  assert.equal(vm._applyImmediateDelete({ docId: 0, paraIDs: [101], requestId: 'delete' }), true);
+  assert.equal(responses[0].success, true);
   assert.equal(responses[0].deletedCount, 1);
+  assert.equal(responses[0].revisionCount, 0);
   assert.equal(responses[0].requiresRead, true);
+  assert.equal(vm.deleteRevisions.length, 0);
   assert.equal('rollbackVerified' in responses[0], false);
+});
+
+test('部分删除且没有新增修订时仍报告未完成的段落', () => {
+  const doc = Object.assign(documentWith(), { DocID: 62 });
+  const range = { Start: 10, End: 20, get Duplicate() { return this; }, Expand() {} };
+  doc.Paragraphs = { Count: 2, Item: index => ({ ID: index === 1 ? 101 : 202, Range: range }) };
+  const { vm, responses } = chatPane(doc, () => {}, [doc], {
+    paraID: para => para.ID,
+    delete: () => ({ deletedCount: 1, failedParaIDs: [202] })
+  });
+  assert.equal(vm._applyImmediateDelete({ docId: 62, paraIDs: [101, 202], requestId: 'partial' }), false);
+  assert.equal(responses[0].success, false);
+  assert.equal(responses[0].deletedCount, 1);
+  assert.deepEqual(responses[0].failedParaIDs, [202]);
+  assert.equal(responses[0].requiresRead, true);
 });
 
 test('manual formatted insertion records the actual DocID in its message and pending item', () => {

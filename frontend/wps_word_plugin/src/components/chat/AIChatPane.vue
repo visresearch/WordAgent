@@ -2127,31 +2127,29 @@ export default {
           return false;
         }
 
-        const revisionBatch = finishTrackedEdit(trackedEdit, targetRange, 'delete');
-        if (!revisionBatch.batchId) {
-          api.wsManager.clearDocumentCache();
-          sendResult({ success: false, deletedCount: Number(deleteResult.deletedCount),
-            missingParaIDs, replacementInsertParaID, requiresRead: true,
-            error: 'WPS 未创建原生删除修订，请重新读取文档' });
-          return false;
-        }
-
-        this.deleteRevisions.push({
-          paraIDs: [...matchedIds],
-          docId,
-          replacementInsertParaID,
-          preview: t('chat.deletePreview', { ids: [...matchedIds].join(', ') }),
-          _revisionBatchId: revisionBatch.batchId
-        });
-        this._refreshAIRevisionPreview();
-        api.wsManager.clearDocumentCache();
-
         const failedParaIDs = Array.isArray(deleteResult.failedParaIDs)
           ? deleteResult.failedParaIDs
           : [];
         const fullyDeleted = missingParaIDs.length === 0
           && failedParaIDs.length === 0
           && Number(deleteResult.deletedCount) === matchedIds.size;
+        const revisionBatch = finishTrackedEdit(trackedEdit, targetRange, 'delete');
+        // 删除已有的插入修订等操作可能不会生成独立的删除标记。
+        // Range.Delete() 已成功执行，不能仅因未识别到新标记而向后端报删除失败。
+        if (revisionBatch.batchId) {
+          this.deleteRevisions.push({
+            paraIDs: [...matchedIds],
+            docId,
+            replacementInsertParaID,
+            preview: t('chat.deletePreview', { ids: [...matchedIds].join(', ') }),
+            _revisionBatchId: revisionBatch.batchId
+          });
+        } else {
+          console.info('[AIChatPane] 段落已删除，WPS 未返回可归属的独立删除修订');
+        }
+        this._refreshAIRevisionPreview();
+        api.wsManager.clearDocumentCache();
+
         sendResult({
           success: fullyDeleted,
           deletedCount: Number(deleteResult.deletedCount) || 0,
@@ -2159,6 +2157,7 @@ export default {
           failedParaIDs,
           replacementInsertParaID,
           revisionCount: revisionBatch.revisionCount,
+          ...(!revisionBatch.batchId ? { requiresRead: true } : {}),
           ...(fullyDeleted ? {} : { error: '部分段落未删除；请重新读取文档后仅重试仍存在的 paraID' })
         });
         return fullyDeleted;
@@ -2407,6 +2406,18 @@ export default {
         return;
       }
       const { doc, docId } = target;
+      const hasUntrackedPending = [...this.pendingInsertions, ...this.pendingEdits, ...this.deleteRevisions]
+        .some((item) => item.docId === docId && !hasRevisionBatch(item._revisionBatchId));
+      if (/linux/i.test(String(navigator.platform || navigator.userAgent)) && hasUntrackedPending) {
+        try {
+          if (getAIRevisionCount(doc) === 0 && Number(doc.Revisions.Count) > 0) {
+            alert('文档中仍有修订，但旧版加载项没有记录它们的归属，无法安全地自动接受或拒绝；请在 WPS 审阅中核对这些旧修订。');
+            return;
+          }
+        } catch (error) {
+          // 由下方的修订处理器报告读取错误。
+        }
+      }
       const result = settleAllDocumentRevisions(doc, action, docId);
       if (result.success) {
         this._clearSettledRevisionItems(item => item.docId === docId);
