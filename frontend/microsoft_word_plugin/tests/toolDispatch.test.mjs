@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseDocumentRange, wsManager } from '../src/components/js/api.js';
+import { chatStream, parseDocumentRange, wsManager } from '../src/components/js/api.js';
 
 async function socket(t, handler) {
   t.mock.method(console, 'log', () => {});
@@ -10,6 +10,7 @@ async function socket(t, handler) {
   globalThis.WebSocket = class {
     constructor() { ws = this; this.sent = []; }
     send(data) { this.sent.push(JSON.parse(data)); }
+    close() { this.closed = true; this.onclose?.({ code: 1000, reason: 'test close' }); }
   };
   wsManager.ws = null;
   wsManager.connected = false;
@@ -66,4 +67,62 @@ test('a nonzero document ID cannot be read through the current Word task pane', 
   t.after(() => { globalThis.Word = previous; });
   const result = await parseDocumentRange(0, -1, 12);
   assert.match(result.error, /docId=0/);
+});
+
+test('stopping retires the active socket so buffered output cannot enter the next request', async t => {
+  const ws = await socket(t, () => {});
+  const previousWord = globalThis.Word;
+  globalThis.Word = { run: async callback => callback({
+    document: { body: { paragraphs: { items: [], load() {} } } }, sync: async () => {}
+  }) };
+  t.after(() => { globalThis.Word = previousWord; wsManager.onComplete = null; wsManager.onError = null; });
+  t.mock.method(wsManager, '_armIdleTimeout', () => {});
+  let completions = 0;
+  const control = chatStream('edit document', { onComplete: () => completions++ });
+  await new Promise(resolve => setImmediate(resolve));
+  control.abort();
+  assert.deepEqual(ws.sent.map(body => body.type), ['chat', 'stop']);
+  assert.equal(ws.closed, true);
+  assert.equal(wsManager.ws, null);
+  assert.equal(completions, 1);
+});
+
+test('late events from a retired socket cannot dispatch content or close its replacement', async t => {
+  const old = await socket(t, () => {});
+  const lateMessage = old.onmessage;
+  const lateClose = old.onclose;
+  wsManager.close();
+  const messages = [];
+  const replacement = await socket(t, data => messages.push(data));
+  lateMessage({ data: JSON.stringify({ type: 'thinking', content: 'old output' }) });
+  lateMessage({ data: JSON.stringify({ type: 'done' }) });
+  lateClose({ code: 1000, reason: 'old close' });
+  assert.deepEqual(messages, []);
+  assert.equal(wsManager.ws, replacement);
+  assert.equal(wsManager.connected, true);
+});
+
+test('a document read finishing after stop cannot answer or replace the next connection cache', async t => {
+  for (const method of ['_handleDocumentRequest', '_handleQueryRequest']) {
+    await t.test(method, async t => {
+      await socket(t, () => {});
+      let finishRead;
+      const previousWord = globalThis.Word;
+      globalThis.Word = { run: () => new Promise(resolve => { finishRead = resolve; }) };
+      t.after(() => { globalThis.Word = previousWord; });
+      t.mock.method(wsManager, 'getCachedDocument', () => null);
+      const cached = [];
+      t.mock.method(wsManager, 'setCachedDocument', data => cached.push(data));
+      const reading = method === '_handleDocumentRequest'
+        ? wsManager[method]({ startParaIndex: 0, endParaIndex: -1, docId: 0 })
+        : wsManager[method]({}, 0);
+      assert.equal(typeof finishRead, 'function');
+      wsManager.close();
+      const replacement = await socket(t, () => {});
+      finishRead({ paragraphs: [] });
+      await reading;
+      assert.deepEqual(replacement.sent, []);
+      assert.deepEqual(cached, []);
+    });
+  }
 });

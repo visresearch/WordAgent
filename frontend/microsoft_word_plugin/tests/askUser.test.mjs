@@ -155,7 +155,7 @@ test('stopping while Office.js reads document metadata prevents a delayed chat r
   vm.stopGeneration();
   finishRead();
   await new Promise(resolve => setImmediate(resolve));
-  assert.deepEqual(sent.map(body => body.type), ['stop']);
+  assert.deepEqual(sent.map(body => body.type), []);
   assert.equal(vm.isLoading, false);
 });
 

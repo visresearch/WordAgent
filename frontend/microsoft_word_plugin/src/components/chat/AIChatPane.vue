@@ -410,10 +410,6 @@ export default {
       }
     },
 
-    scrollToBottom() {
-      this.$refs.chatMessages?.scrollToBottom();
-    },
-
     _showPendingActionError(action, error) {
       const pendingItems = [
         ...this.pendingInsertions,
@@ -433,7 +429,6 @@ export default {
         content: `${t(action === 'accept' ? 'chat.acceptRevision' : 'chat.rejectRevision')}修订失败：${error || 'Word 未返回具体错误'}`,
         loading: false
       });
-      this.scrollToBottom();
     },
 
     async copyToClipboard(content) {
@@ -517,7 +512,6 @@ export default {
 
             this.hasHistory = this.messages.length > 0;
             this.historyLoaded = true;
-            this.$nextTick(() => this.scrollToBottom());
           } else {
             this.hasHistory = false;
             this.historyLoaded = false;
@@ -565,7 +559,6 @@ export default {
         try {
           localStorage.setItem('wence_current_session_id', String(sessionId));
         } catch (e) { /* ignore */ }
-        this.$nextTick(() => this.scrollToBottom());
         return;
       }
 
@@ -649,7 +642,6 @@ export default {
 
           this.hasHistory = this.messages.length > 0;
           this.historyLoaded = true;
-          this.scrollToBottom();
         } else if (result && result.success === false) {
           this.currentSessionId = null;
           this.currentSessionTitle = null;
@@ -1016,7 +1008,6 @@ export default {
       const streamSessionId = this.currentSessionId;
       this._streamingSessionId = streamSessionId;
       this._streamInsertions = [];
-      this.scrollToBottom();
 
       this.messages.push({
         role: 'assistant',
@@ -1047,6 +1038,7 @@ export default {
         },
 
         onError: (error) => {
+          if (aiMsg._streamStopped) return;
           console.error('请求失败:', error);
           const errMsg = String(error?.message || '');
           let failureMessage;
@@ -1068,7 +1060,6 @@ export default {
             aiMsg.thinkingDone = true;
           }
           if (!this.pendingQuestions[streamSessionId] && !pendingQuestion) delete this._streamingCache[streamSessionId];
-          this.scrollToBottom();
         },
 
         onComplete: () => {
@@ -1084,7 +1075,6 @@ export default {
             aiMsg.thinkingDone = true;
           }
 
-          if (!this.pendingQuestions[streamSessionId]) this.scrollToBottom();
           window.dispatchEvent(new CustomEvent('session-created'));
 
           // 清理缓存
@@ -1092,7 +1082,19 @@ export default {
         }
       });
 
-      this.currentStreamCtrl = streamCtrl;
+      this.currentStreamCtrl = {
+        abort: () => {
+          if (aiMsg._streamStopped) return;
+          // Word 操作可能仍在等待 Office.js；取消状态跟随这轮消息，供队列检查。
+          aiMsg._streamStopped = true;
+          aiMsg.thinkingDone = true;
+          aiMsg.statusText = '';
+          for (const part of aiMsg.contentParts) {
+            if (part.loading) part.loading = false;
+          }
+          streamCtrl.abort();
+        }
+      };
     },
 
     /**
@@ -1100,6 +1102,7 @@ export default {
      */
     _handleStreamMessage(data, aiMsg, streamSessionId) {
       const msg = aiMsg;
+      if (msg._streamStopped) return;
       if (['read_document', 'search_document', 'edit_document', 'delete_document', 'insert_break', 'json'].includes(data.type)) {
         assertRevisionDocumentTarget(data.docId);
       }
@@ -1183,7 +1186,6 @@ export default {
         } else {
           parts.push(nextPart);
         }
-        this.scrollToBottom();
         return;
       }
 
@@ -1200,7 +1202,6 @@ export default {
           ),
           loading: true
         });
-        this.scrollToBottom();
         return api.wsManager._handleDocumentRequest({
           startParaIndex: this._toIntOrNull(data.startParaIndex),
           endParaIndex: this._toIntOrNull(data.endParaIndex),
@@ -1219,7 +1220,6 @@ export default {
           content: data.content || t('chat.searchingDocument'),
           loading: true
         });
-        this.scrollToBottom();
         api.wsManager._handleQueryRequest(data.query, this._toIntOrDefault(data.docId, 0));
         return;
       }
@@ -1242,7 +1242,6 @@ export default {
         if (!found) {
           parts.push({ type: 'status', content: data.content || t('chat.searchComplete'), loading: false });
         }
-        this.scrollToBottom();
         return;
       }
 
@@ -1265,7 +1264,6 @@ export default {
         if (!found) {
           parts.push({ type: 'status', content: data.content || t('chat.documentReadComplete'), loading: false });
         }
-        this.scrollToBottom();
         return;
       }
 
@@ -1278,14 +1276,15 @@ export default {
           content: data.content || t('chat.prepareDelete', { ids: paraIDs.join(', ') }),
           loading: true
         });
-        this.scrollToBottom();
         this._insertQueue = this._insertQueue
-          .then(() => this._applyImmediateDelete({
+          .then(() => !msg._streamStopped && this._applyImmediateDelete({
             paraIDs,
             docId: this._toIntOrDefault(data.docId, 0),
-            requestId: data.requestId || null
+            requestId: data.requestId || null,
+            msg
           }))
           .catch((e) => {
+            if (msg._streamStopped) return;
             console.warn("[AIChatPane] apply immediate delete failed:", e);
             if (data.requestId) {
               api.wsManager.send({
@@ -1319,7 +1318,6 @@ export default {
         if (!found) {
           parts.push({ type: 'status', content: data.content || t('chat.deleteComplete'), loading: false });
         }
-        this.scrollToBottom();
         return;
       }
 
@@ -1332,9 +1330,8 @@ export default {
           content: data.content || `正在更新段落 ${paraID ?? ''}`,
           loading: true
         });
-        this.scrollToBottom();
         this._insertQueue = this._insertQueue
-          .then(() => this._applyImmediateEdit({
+          .then(() => !msg._streamStopped && this._applyImmediateEdit({
             paraID,
             runs,
             docId: this._toIntOrDefault(data.docId, 0),
@@ -1342,6 +1339,7 @@ export default {
             msg
           }))
           .catch((error) => {
+            if (msg._streamStopped) return;
             console.warn('[AIChatPane] apply immediate edit failed:', error);
             if (data.requestId) {
               api.wsManager.send({
@@ -1377,7 +1375,6 @@ export default {
             loading: false
           });
         }
-        this.scrollToBottom();
         return;
       }
 
@@ -1387,7 +1384,9 @@ export default {
         const breakType = data.breakType;
         this._insertQueue = this._insertQueue
           .then(async () => {
+            if (msg._streamStopped) return;
             const result = await insertBreakAfterParagraph(paraID, breakType);
+            if (msg._streamStopped) return;
             if (requestId) {
               await api.wsManager.send({
                 type: 'insert_break_response',
@@ -1405,10 +1404,10 @@ export default {
                 : t('chat.insertBreakFailed', { error: result?.error || t('common.unknownError') }),
               loading: false
             });
-            this.scrollToBottom();
             return result;
           })
           .catch(async (error) => {
+            if (msg._streamStopped) return;
             if (requestId) {
               try {
                 await api.wsManager.send({
@@ -1436,6 +1435,7 @@ export default {
         msg.contentParts.push(pendingPart);
         api.createDocument()
           .then((result) => {
+            if (msg._streamStopped) return;
             if (!result?.success) {
               throw new Error(result?.error || 'Word 未返回新文档对象');
             }
@@ -1449,6 +1449,7 @@ export default {
             }).catch((sendError) => console.warn('[AIChatPane] 回传新文档创建结果失败:', sendError));
           })
           .catch((error) => {
+            if (msg._streamStopped) return;
             pendingPart.content = t('chat.createDocumentFailed', { error: error?.message || error });
             pendingPart.loading = false;
             console.error('[AIChatPane] 创建 Word 空白 DOCX 失败:', error);
@@ -1457,9 +1458,7 @@ export default {
               success: false,
               error: error?.message || String(error)
             }).catch((sendError) => console.warn('[AIChatPane] 回传新文档创建错误失败:', sendError));
-          })
-          .finally(() => this.scrollToBottom());
-        this.scrollToBottom();
+          });
         return;
       }
 
@@ -1470,7 +1469,6 @@ export default {
           content: data.content || t('chat.generatingDocument'),
           loading: true
         });
-        this.scrollToBottom();
         return;
       }
 
@@ -1494,19 +1492,16 @@ export default {
         }
         msg._docId = this._toIntOrDefault(data.docId, 0);
         msg._insertParaID = this._toParaIdOrNull(data.insertParaID);
-        this.scrollToBottom();
         return;
       }
 
       if (data.type === "mcp_tool_call") {
         this._upsertMcpCallPart(msg, data.toolName, data.args);
-        this.scrollToBottom();
         return;
       }
 
       if (data.type === "mcp_tool_result") {
         this._attachMcpResultPart(msg, data.toolName, data.outputPreview, data.isError);
-        this.scrollToBottom();
         return;
       }
 
@@ -1518,7 +1513,6 @@ export default {
         // 同一轮对话可能在“已结束”后继续返回思考片段，收到新 thinking 时恢复进行中状态
         msg.thinkingDone = false;
         msg.thinking += data.content;
-        this.scrollToBottom();
         return;
       }
 
@@ -1537,12 +1531,10 @@ export default {
             }
           }
           this._upsertMcpCallPart(msg, toolName, argsPayload || null);
-          this.scrollToBottom();
           return;
         }
 
         msg.contentParts.push({ type: 'status', content: data.content, loading: !!data.loading });
-        this.scrollToBottom();
         return;
       }
 
@@ -1553,7 +1545,6 @@ export default {
           content: data.content,
           detail: data.detail || {},
         });
-        this.scrollToBottom();
         return;
       }
 
@@ -1568,31 +1559,31 @@ export default {
           parts.push({ type: 'text', content });
         }
 
-        this.scrollToBottom();
       } else if (data.type === 'json' && data.content) {
         const insItem = {
           documentJson: data.content,
           docId: this._toIntOrDefault(data.docId, this._toIntOrDefault(data.content.docId, 0)),
           insertParaID: this._toParaIdOrNull(data.content.insertParaID),
           msg: msg,
+          streamMessage: msg,
           requestId: data.requestId || null
         };
         this._insertQueue = this._insertQueue
-          .then(() => this._applyImmediateInsertion(insItem))
+          .then(() => !msg._streamStopped && this._applyImmediateInsertion(insItem))
           .then((inserted) => {
+            if (msg._streamStopped) return;
             if (!inserted) {
               msg.contentParts.push({
                 type: 'status',
                 content: t('chat.documentInsertFailed'),
                 loading: false
               });
-              this.scrollToBottom();
             }
           })
           .catch((e) => {
+            if (msg._streamStopped) return;
             console.error('[AIChatPane] 插入队列执行失败:', e);
           });
-        this.scrollToBottom();
       } else if (data.error) {
         msg.content += `\n\n${t('chat.errorLabel', { error: data.error })}`;
       }
@@ -1786,7 +1777,7 @@ export default {
 
     async _applyImmediateDelete(payload) {
       const sendResult = async (result) => {
-        if (!payload?.requestId) {
+        if (!payload?.requestId || payload.msg?._streamStopped) {
           return;
         }
         try {
@@ -1809,7 +1800,12 @@ export default {
       let trackedEdit = null;
       let deleteResult = null;
       try {
+        if (payload.msg?._streamStopped) return false;
         trackedEdit = await beginTrackedEdit(docId);
+        if (payload.msg?._streamStopped) {
+          await abortTrackedEdit(trackedEdit);
+          return false;
+        }
         deleteResult = await deleteDocxPara(paraIDs);
         if (!deleteResult?.success) {
           await abortTrackedEdit(trackedEdit);
@@ -1875,7 +1871,7 @@ export default {
 
     async _applyImmediateEdit(payload) {
       const sendResult = async (result) => {
-        if (!payload?.requestId) {
+        if (!payload?.requestId || payload.msg?._streamStopped) {
           return;
         }
         try {
@@ -1909,14 +1905,21 @@ export default {
       }
 
       const startedAt = Date.now();
-      const progress = phase => api.wsManager.reportToolProgress(
-        { ...payload, type: 'edit_document' }, phase, Date.now() - startedAt
-      );
+      const progress = phase => {
+        if (!payload.msg?._streamStopped) api.wsManager.reportToolProgress(
+          { ...payload, type: 'edit_document' }, phase, Date.now() - startedAt
+        );
+      };
       let trackedEdit = null;
       let editResult = null;
       try {
+        if (payload.msg?._streamStopped) return false;
         progress("begin_tracking");
         trackedEdit = await beginTrackedEdit(docId);
+        if (payload.msg?._streamStopped) {
+          await abortTrackedEdit(trackedEdit);
+          return false;
+        }
         progress("edit_paragraph");
         editResult = await editDocxParagraph(paraID, runs);
         if (!editResult?.success) {
@@ -1976,7 +1979,7 @@ export default {
 
     async _applyImmediateInsertion(insItem) {
       const sendResult = async (payload) => {
-        if (!insItem?.requestId) {
+        if (!insItem?.requestId || insItem.streamMessage?._streamStopped) {
           return;
         }
         try {
@@ -2012,7 +2015,12 @@ export default {
       let trackedEdit = null;
       let result = null;
       try {
+        if (insItem.streamMessage?._streamStopped) return false;
         trackedEdit = await beginTrackedEdit(normalizedDocId);
+        if (insItem.streamMessage?._streamStopped) {
+          await abortTrackedEdit(trackedEdit);
+          return false;
+        }
         result = await generateDocxFromJSON(docPayload, "selection", requestedInsertParaID);
         if (!result || !result.success) {
           await abortTrackedEdit(trackedEdit);
@@ -2026,7 +2034,7 @@ export default {
         await sendResult({ success: false, requiresRead: true, error: error?.message || String(error) });
         return false;
       }
-      if (result.warning && insItem.msg && Array.isArray(insItem.msg.contentParts)) {
+      if (result.warning && insItem.msg && !insItem.streamMessage?._streamStopped && Array.isArray(insItem.msg.contentParts)) {
         insItem.msg.contentParts.push({
           type: 'status',
           content: `⚠️ ${result.warning}`,

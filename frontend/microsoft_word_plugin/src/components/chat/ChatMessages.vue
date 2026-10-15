@@ -376,14 +376,6 @@ export default {
     toggleMcpExpand(msgIndex, partIndex) {
       const key = this._mcpKey(msgIndex, partIndex);
       this.mcpExpandedMap[key] = !this.mcpExpandedMap[key];
-    },
-    scrollToBottom() {
-      this.$nextTick(() => {
-        const container = this.$refs.messagesContainer;
-        if (container) {
-          container.scrollTop = container.scrollHeight;
-        }
-      });
     }
   }
 };

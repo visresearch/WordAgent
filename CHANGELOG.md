@@ -9,6 +9,7 @@
 - 添加tool_history中间件，记录工具调用历史，修复停止工具调用后接入新问题消息不合法的bug
 - 修复前端加载项警告图标bug
 - 修复Microsoft Word加载项发送停止信号后仍然不停止的问题
+- 修复Microsoft Word加载项在聊天时chat面板会强制滚动到最底部的问题（无效）
 
 ### Changed
 - 更新py依赖

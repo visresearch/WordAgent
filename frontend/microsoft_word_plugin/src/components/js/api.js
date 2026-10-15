@@ -336,6 +336,7 @@ const wsManager = {
       };
 
       ws.onmessage = (event) => {
+        if (this.ws !== ws) return;
         let data;
         try {
           data = JSON.parse(event.data);
@@ -406,6 +407,7 @@ const wsManager = {
       };
 
       ws.onclose = (event) => {
+        if (this.ws !== ws) return;
         console.log('[WebSocket] 连接关闭:', event.code, event.reason);
         this.connected = false;
         this.ws = null;
@@ -478,10 +480,13 @@ const wsManager = {
       clearTimeout(this._requestTimeoutTimer);
       this._requestTimeoutTimer = null;
     }
-    if (this.ws) {
-      this.ws.close(1000, "主动关闭");
-      this.ws = null;
-      this.connected = false;
+    const socket = this.ws;
+    this.ws = null;
+    this.connected = false;
+    this._connectPromise = null;
+    if (socket) {
+      socket.onmessage = socket.onerror = socket.onclose = null;
+      socket.close(1000, "主动关闭");
     }
   },
 
@@ -489,6 +494,7 @@ const wsManager = {
    * 处理后端的文档读取请求：使用 Office.js 解析文档并通过 WebSocket 回传
    */
   async _handleDocumentRequest(startParaIndexOrParams = 0, endParaIndexArg = -1) {
+    const socket = this.ws;
     const startedAt = Date.now();
     const request = { ...(typeof startParaIndexOrParams === "object" ? startParaIndexOrParams : {}), type: "read_document" };
     const progress = phase => this.reportToolProgress(request, phase, Date.now() - startedAt);
@@ -543,6 +549,7 @@ const wsManager = {
         mode
       );
 
+      if (socket && this.ws !== socket) return;
       progress("parse_finish");
       if (docData.error) {
         throw new Error(docData.error);
@@ -576,6 +583,7 @@ const wsManager = {
         tableCount
       );
     } catch (err) {
+      if (socket && this.ws !== socket) return;
       console.error("[WebSocket] 解析/回传文档失败:", err);
       await this.send({
         type: "document_response",
@@ -594,6 +602,7 @@ const wsManager = {
    * @param {Object} query - Query DSL 对象
    */
   async _handleQueryRequest(query, docId = 0) {
+    const socket = this.ws;
     try {
       // 仅活动文档使用缓存（Microsoft Word 当前为单文档，但保持兼容）
       let docData = null;
@@ -607,6 +616,7 @@ const wsManager = {
           docId ? `docId=${docId}` : "(active)"
         );
         docData = await parseDocumentRange(0, -1, docId);
+        if (socket && this.ws !== socket) return;
 
         if (docData.error) {
           throw new Error(docData.error);
@@ -646,6 +656,7 @@ const wsManager = {
       console.log("[WebSocket] 匹配段落索引:", matchedParaIndices);
       console.log("[WebSocket] 匹配段落ID:", matchedParaIds);
     } catch (err) {
+      if (socket && this.ws !== socket) return;
       console.error("[WebSocket] 查询文档失败:", err);
       await this.send({
         type: "query_response",
@@ -700,6 +711,7 @@ function chatStream(message, options = {}) {
   } = options;
 
   let stopped = false;
+  let requestSent = false;
   wsManager._completeCalled = false;
   if (wsManager._requestTimeoutTimer) {
     clearTimeout(wsManager._requestTimeoutTimer);
@@ -727,6 +739,7 @@ function chatStream(message, options = {}) {
       // Office.js 读取是异步的，停止后不能继续发送这轮聊天请求。
       if (stopped) return;
 
+      requestSent = true;
       await wsManager.send({
         type: "chat",
         message: message.trim(),
@@ -764,8 +777,11 @@ function chatStream(message, options = {}) {
         clearTimeout(wsManager._requestTimeoutTimer);
         wsManager._requestTimeoutTimer = null;
       }
-      wsManager.send({ type: "stop" }).catch(() => {});
-      // 沿用 WPS 的停止消息，本地立即收尾，忽略随后到达的流片段。
+      if (requestSent) {
+        wsManager.send({ type: "stop" }).catch(() => {});
+        // 停止后的缓冲帧留在旧连接，下一轮对话使用新连接。
+        wsManager.close();
+      }
       onComplete?.();
     },
   };

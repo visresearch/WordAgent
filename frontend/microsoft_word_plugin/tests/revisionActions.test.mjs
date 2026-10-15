@@ -86,3 +86,85 @@ test('只有文档中的AI修订也显示接受和拒绝；生成过程中按钮
   assert.match(html, /chat.acceptRevision/);
   assert.match(html, /chat.rejectRevision/);
 });
+
+test('停止会跳过尚未开始的 Word 文档操作，并冻结该轮聊天内容', async t => {
+  for (const type of ['edit_document', 'delete_document', 'insert_break', 'json']) {
+    await t.test(type, async () => {
+      let events;
+      let releaseQueue;
+      let writes = 0;
+      const { instance } = component('AIChatPane', {
+        api: { chatStream(message, options) { events = options; return { abort() {} }; } },
+        assertRevisionDocumentTarget() {},
+        insertBreakAfterParagraph: async () => { writes++; return { success: true }; }
+      });
+      instance._refreshRevisionPreview = async () => {};
+      for (const method of ['_applyImmediateEdit', '_applyImmediateDelete', '_applyImmediateInsertion']) {
+        instance[method] = async () => { writes++; return true; };
+      }
+      instance.currentSessionId = 'session-a';
+      instance._insertQueue = new Promise(resolve => { releaseQueue = resolve; });
+      instance._sendStreamRequest('edit', null);
+      events.onMessage({ type: 'thinking', content: 'original thinking' });
+      events.onMessage({ type, docId: 0, paraID: '12', paraIDs: ['12'],
+        runs: [], content: type === 'json' ? { insertParaID: '12', paragraphs: [] } : undefined });
+      instance.stopGeneration();
+      const assistant = instance.messages[0];
+      const snapshot = JSON.stringify(assistant);
+      events.onMessage({ type: 'thinking', content: 'late thinking' });
+      events.onMessage({ type: 'text', content: 'late answer' });
+      releaseQueue();
+      await instance._insertQueue;
+      assert.equal(writes, 0);
+      assert.equal(JSON.stringify(assistant), snapshot);
+      assert.equal(assistant.thinkingDone, true);
+      assert.equal(assistant.contentParts.some(part => part.loading), false);
+    });
+  }
+});
+
+test('等待 Office.js 开启修订期间停止，不再提交文档写入或回传旧结果', async t => {
+  for (const method of ['_applyImmediateDelete', '_applyImmediateEdit', '_applyImmediateInsertion']) {
+    await t.test(method, async () => {
+      let finishTracking;
+      let writes = 0;
+      let aborted = 0;
+      const sent = [];
+      const write = async () => {
+        writes++;
+        return { success: true, deletedCount: 1, deletedParaIDs: ['12'], missingParaIDs: [], insertedParaIDs: [] };
+      };
+      const { instance } = component('AIChatPane', {
+        api: { wsManager: { send: async data => sent.push(data), clearDocumentCache() {}, reportToolProgress() {} } },
+        beginTrackedEdit: () => new Promise(resolve => { finishTracking = resolve; }),
+        abortTrackedEdit: async () => { aborted++; },
+        finishTrackedEdit: async () => ({ batchId: 'batch-1', revisionCount: 1 }),
+        editDocxParagraph: write, deleteDocxPara: write, generateDocxFromJSON: write
+      });
+      const msg = { contentParts: [] };
+      const operation = instance[method]({ docId: 0, paraID: '12', paraIDs: ['12'], runs: [],
+        insertParaID: '12', documentJson: { paragraphs: [] }, requestId: 'operation-1', msg, streamMessage: msg });
+      assert.equal(typeof finishTracking, 'function');
+      msg._streamStopped = true;
+      finishTracking({});
+      await operation;
+      assert.equal(writes, 0);
+      assert.equal(aborted, 1);
+      assert.deepEqual(sent, []);
+    });
+  }
+});
+
+test('停止后仍可主动将已生成的内容插入 Word', async () => {
+  let writes = 0;
+  const { instance } = component('AIChatPane', {
+    api: { wsManager: { clearDocumentCache() {} } },
+    beginTrackedEdit: async () => ({}),
+    finishTrackedEdit: async () => ({ batchId: 'manual-insert', revisionCount: 1 }),
+    generateDocxFromJSON: async () => { writes++; return { success: true, insertedParaIDs: [] }; }
+  });
+  const msg = { _streamStopped: true, contentParts: [] };
+  assert.equal(await instance._applyImmediateInsertion({ documentJson: { paragraphs: [] }, docId: 0, insertParaID: '0', msg }), true);
+  assert.equal(writes, 1);
+  assert.equal(instance.pendingInsertions.length, 1);
+});
