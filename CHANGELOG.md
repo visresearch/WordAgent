@@ -10,6 +10,7 @@
 - 修复前端加载项警告图标bug
 - 修复Microsoft Word加载项发送停止信号后仍然不停止的问题
 - 修复Microsoft Word加载项在聊天时chat面板会强制滚动到最底部的问题（无效）
+- 修复Microsoft Word加载项图片读取的bug
 
 ### Changed
 - 更新py依赖

@@ -16,7 +16,6 @@ def runtime(monkeypatch):
         custom_prompt="用中文回答我的问题",
         memory="Prefer concise writing.",
         now=datetime(2026, 9, 16, 12, 46, tzinfo=timezone(timedelta(hours=8))),
-        reject_images=False,
         inputs=[],
         systems=[],
         middleware_systems=[],
@@ -26,8 +25,6 @@ def runtime(monkeypatch):
         def stream(self, **kwargs):
             messages = kwargs["input"]["messages"]
             state.inputs.append(messages)
-            if state.reject_images and isinstance(messages[-1].content, list):
-                raise RuntimeError("does not support image input")
             yield "messages", (AIMessage(content="完成"), {"langgraph_node": "model"})
 
     def create_agent(**kwargs):
@@ -166,11 +163,7 @@ def test_document_context_and_attachment_references_are_preserved(runtime, mode)
     assert runtime.memory not in conversation["user"]
 
 
-def test_image_fallback_retains_runtime_context_and_message_identity(runtime, monkeypatch):
-    from app.api.routes import files
-
-    monkeypatch.setattr(files, "read_file_as_base64", lambda _file_id: "aW1hZ2U=")
-    runtime.reject_images = True
+def test_image_attachments_use_paths_and_retain_runtime_context(runtime):
     collect(
         message="分析图片",
         attached_files=[
@@ -184,33 +177,22 @@ def test_image_fallback_retains_runtime_context_and_message_identity(runtime, mo
             }
         ],
     )
-    assert len(runtime.inputs) == 2
-    original = runtime.inputs[0][-1]
-    fallback = runtime.inputs[1][-1]
-    assert original.id == fallback.id
-    assert original.content[1]["type"] == "image_url"
-    original_text = original.content[0]["text"]
-    assert isinstance(fallback.content, str)
-    for content in (original_text, fallback.content):
-        assert content.count("Current time:") == 1
-        assert runtime.custom_prompt in content
-        assert runtime.memory in content
-        assert "project_path=uploads/image" in content
-        assert content.endswith("[User Request]\n分析图片")
-    assert "provided as direct model image inputs" in original_text
-    assert "Direct image input is unavailable" in fallback.content
-    assert "read_file(path)" in fallback.content
-    assert original_text.split("[Image Input]")[0] == fallback.content.split("[Image Input]")[0]
+    assert len(runtime.inputs) == 1
+    content = runtime.inputs[0][-1].content
+    assert isinstance(content, str)
+    assert content.count("Current time:") == 1
+    assert runtime.custom_prompt in content
+    assert runtime.memory in content
+    assert "project_path=uploads/image" in content
+    assert content.endswith("[User Request]\n分析图片")
+    assert "read_file(path)" in content
+    assert "data:image" not in content
 
 
-def test_image_fallback_includes_downloaded_ocr_text(runtime, monkeypatch):
-    from app.api.routes import files
-
-    monkeypatch.setattr(files, "read_file_as_base64", lambda _file_id: "aW1hZ2U=")
+def test_image_paths_can_include_ocr_text_without_embedding_images(runtime, monkeypatch):
     monkeypatch.setattr(
         agent, "_ocr_attachment_context", lambda paths: f"[OCR text from attached images]\n{paths[0]}: 发票金额 120 元"
     )
-    runtime.reject_images = True
     collect(
         message="读取这张图片",
         attached_files=[
@@ -224,7 +206,7 @@ def test_image_fallback_includes_downloaded_ocr_text(runtime, monkeypatch):
             }
         ],
     )
-    fallback = runtime.inputs[1][-1]
-    assert isinstance(fallback.content, str)
-    assert "uploads/receipt.png: 发票金额 120 元" in fallback.content
-    assert runtime.inputs[0][-1].id == fallback.id
+    assert len(runtime.inputs) == 1
+    content = runtime.inputs[0][-1].content
+    assert isinstance(content, str)
+    assert "uploads/receipt.png: 发票金额 120 元" in content

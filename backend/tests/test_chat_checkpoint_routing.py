@@ -230,7 +230,7 @@ def test_lifespan_finishes_memory_tasks_before_closing_storage(monkeypatch, pend
     assert [call.args[0] for call in main.mcp_runtime.set_ready.call_args_list] == [True, False]
 
 
-def test_single_agent_large_image_is_not_saved_in_checkpoint_input(monkeypatch) -> None:
+def test_single_agent_image_is_not_saved_in_checkpoint_input(monkeypatch) -> None:
     captured_inputs: list[dict] = []
 
     class FakeGraph:
@@ -255,7 +255,7 @@ def test_single_agent_large_image_is_not_saved_in_checkpoint_input(monkeypatch) 
     from app.api.routes import files
     from app.services import llm_client, memory
 
-    monkeypatch.setattr(files, "read_file_as_base64", fail_if_base64_is_read)
+    monkeypatch.setattr(files, "get_file_path", fail_if_base64_is_read)
     monkeypatch.setattr(memory, "is_long_term_memory_enabled", lambda: False)
     monkeypatch.setattr(llm_client, "get_custom_prompt", lambda: "")
 
@@ -269,7 +269,7 @@ def test_single_agent_large_image_is_not_saved_in_checkpoint_input(monkeypatch) 
                     "filename": "large.png",
                     "content_type": "image/png",
                     "is_image": True,
-                    "size": single_agent.MAX_CHECKPOINT_IMAGE_BYTES + 1,
+                    "size": 5,
                     "project_path": "uploads/large-image",
                 }
             ],

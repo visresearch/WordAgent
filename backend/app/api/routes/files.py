@@ -5,7 +5,7 @@
 上传的文件保存在 wence_data/project/uploads/ 目录下，以 UUID 命名防止冲突。
 """
 
-import base64
+import asyncio
 import mimetypes
 import uuid
 from pathlib import Path
@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from app.core.config import get_upload_dir, get_wence_project_dir
+from app.services.image_storage import MAX_IMAGE_BYTES, save_image_bytes
 
 router = APIRouter()
 
@@ -101,16 +102,18 @@ def get_file_project_path(file_id: str) -> str | None:
         return None
 
 
-def read_file_as_base64(file_id: str) -> str | None:
-    """读取文件并返回 base64 编码"""
-    file_path = get_file_path(file_id)
-    if not file_path:
-        return None
-    with open(file_path, "rb") as f:
-        return base64.b64encode(f.read()).decode("utf-8")
-
-
 # ============== 路由 ==============
+
+
+@router.post("/image")
+async def save_document_image(file: UploadFile = File(...)):
+    """Office.js transfers image bytes here; only the saved path enters document JSON."""
+    content = await file.read(MAX_IMAGE_BYTES + 1)
+    try:
+        path = await asyncio.to_thread(save_image_bytes, content, file.content_type or "")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"url": str(path), "project_path": f"temp/{path.name}", "saved": True}
 
 
 @router.post("/upload", response_model=UploadResponse)

@@ -28,7 +28,7 @@
         </div>
         <div class="selection-bar-info">
           <span class="selection-bar-docname" v-if="sel.docName">{{ sel.docName }}</span>
-          <span class="selection-bar-preview">{{ sel.startText }} → {{ sel.endText }} ({{ $t('chat.chars', { count: sel.charCount }) }})</span>
+          <span class="selection-bar-preview">{{ sel.startText }} → {{ sel.endText }} ({{ $t('chat.paragraphRange', { start: sel.startParaIndex, end: sel.endParaIndex }) }})</span>
         </div>
         <button class="selection-bar-clear" :title="$t('chat.clearSelection')" @click="$emit('remove-selection', index)">
           <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">

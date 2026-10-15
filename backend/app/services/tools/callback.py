@@ -5,6 +5,7 @@ import contextvars
 import threading
 
 from app.core.logging import get_logger
+from app.services.image_storage import persist_inline_images
 
 logger = get_logger(__name__)
 
@@ -121,6 +122,15 @@ async def submit_tool_response(chat_id: str, data: dict):
     if is_stop_requested(chat_id):
         # 停止后忽略迟到的工具回包，避免再次唤醒 agent 流程
         logger.info(f"[ToolCallback] ⛔ 忽略回传（已停止）session={chat_id}")
+        return
+    try:
+        data = await asyncio.to_thread(persist_inline_images, data)
+    except (ValueError, OSError) as exc:
+        data = {
+            "type": data.get("type"), "requestId": data.get("requestId"),
+            "success": False, "requiresRead": True, "error": f"保存文档图片失败: {exc}",
+        }
+    if is_stop_requested(chat_id):
         return
     request_id = str(data.get("requestId") or "").strip() if isinstance(data, dict) else ""
     if request_id:

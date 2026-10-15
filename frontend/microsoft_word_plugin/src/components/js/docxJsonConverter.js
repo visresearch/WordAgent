@@ -60,7 +60,7 @@
  * 和 tocFieldCode。这些读取元数据不属于后端生成用的 DocumentOutput。
  *
  * 图片作为段落内 inline runs（无 text、有 url），与 WPS 版一致。
- * Office 解析时通过 InlinePicture.getBase64ImageSrc 得到 data URL 写入 url（不落地 temp 文件）；
+ * Office 解析时将 InlinePicture 上传到本地服务，保存到 project/temp，url 只记录文件路径；
  * 插入时用 insertInlinePictureFromBase64。本地/相对路径的解析规则与 WPS 相同（相对路径相对 wence_data/project）。
  */
 
@@ -1118,7 +1118,7 @@ function buildBackendFileUrl(pathValue) {
 }
 
 /**
- * 将 InlinePicture 导出为与 WPS exportImageToTemp 等价的 { url, saved }（url 为 data URL，不写入磁盘）。
+ * 将 InlinePicture 保存到与 WPS 相同的 project/temp 目录，返回本地文件路径。
  */
 async function exportImageToTemp(pic, context) {
   try {
@@ -1130,8 +1130,20 @@ async function exportImageToTemp(pic, context) {
     if (!v || typeof v !== "string") {
       return { saved: false };
     }
+    const bytes = Uint8Array.from(atob(v), char => char.charCodeAt(0));
+    const form = new FormData();
+    form.append("file", new Blob([bytes], { type: "image/png" }), "word-image.png");
+    const response = await fetch(`${getBackendBaseURL()}/api/chat/image`, {
+      method: "POST",
+      body: form,
+    });
+    if (!response.ok) throw new Error(`图片保存失败: HTTP ${response.status}`);
+    const image = await response.json();
+    if (!image.saved || !isLikelyAbsolutePath(image.url)) {
+      throw new Error("图片保存接口未返回本地文件路径");
+    }
     return {
-      url: "data:image/png;base64," + v,
+      url: image.url.replace(/\\/g, "/"),
       saved: true,
       width: pic.width,
       height: pic.height,

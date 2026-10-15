@@ -53,9 +53,6 @@ from app.services.utils import try_init_langsmith
 
 logger = get_logger(__name__)
 
-MAX_CHECKPOINT_IMAGE_BYTES = 512 * 1024
-
-
 def _ocr_attachment_context(project_paths: list[str]) -> str:
     """Supply image text directly when an image must be sent to a text-only model."""
     from app.services.plugins.manager import has_capability
@@ -91,25 +88,6 @@ def _message_token_usage(message) -> dict[str, int]:
             if result[key] <= 0 and fallback[key] > 0:
                 result[key] = fallback[key]
     return result
-
-
-def _attachment_size_bytes(attachment: dict, file_id: str) -> int | None:
-    """读取附件大小，供 Checkpoint 内联图片保护使用。"""
-    raw_size = attachment.get("size")
-    try:
-        size = int(raw_size)
-        if size >= 0:
-            return size
-    except (TypeError, ValueError):
-        pass
-
-    try:
-        from app.api.routes.files import get_file_path
-
-        file_path = get_file_path(file_id)
-        return file_path.stat().st_size if file_path else None
-    except OSError:
-        return None
 
 
 def _summarize_custom_event(chunk: Any) -> str:
@@ -382,25 +360,6 @@ def _friendly_agent_error_message(exc: Exception) -> str:
     return f"模型调用失败：{text}"
 
 
-def _is_image_input_unsupported_error(exc: Exception) -> bool:
-    """判断是否是模型端点不支持图像输入错误。"""
-    text = str(exc).lower()
-    image_signals = [
-        "no endpoints found that support image input",
-        "does not support image input",
-        "does not support images",
-        "image input is not supported",
-        "unsupported image input",
-        "unknown variant image_url",
-        "image_url",
-        "expected text",
-    ]
-    return any(sig in text for sig in image_signals)
-
-
-# region 主处理函数
-
-
 async def process_writing_request_stream(
     message: str,
     document_range: list[dict] | None = None,
@@ -545,49 +504,17 @@ async def process_writing_request_stream(
                 "\nIf the active document has isEmpty=true, treat it as a blank/new document: for the first generate_document call, use the active documentId as docId and set insertParaID=0. Do not call read_document just to obtain the empty placeholder paragraph ID."
             )
         # 处理附件
-        image_content_parts = []
         image_project_paths = []
         file_reference_parts = []
-        attached_image_count = 0
-        if attached_files:
-            from app.api.routes.files import read_file_as_base64
-
-            for f in attached_files:
-                file_id = f.get("file_id", "")
-                filename = f.get("filename", "")
-                content_type = f.get("content_type", "")
-                is_image = f.get("is_image", False)
-                project_path = f.get("project_path", f"uploads/{file_id}" if file_id else "")
-
-                if is_image:
-                    attached_image_count += 1
-                    if project_path:
-                        image_project_paths.append(project_path)
-                    line = f"- {filename} [image] | project_path={project_path or '(unknown)'}"
-                    file_reference_parts.append(line)
-
-                    image_size = _attachment_size_bytes(f, file_id)
-                    if image_size is not None and image_size <= MAX_CHECKPOINT_IMAGE_BYTES:
-                        b64 = read_file_as_base64(file_id)
-                    else:
-                        b64 = None
-                        logger.warning(
-                            "[Agent] 图片未内联到 Checkpoint，改用项目路径: %s (%s bytes)",
-                            filename,
-                            image_size if image_size is not None else "unknown",
-                        )
-                    if b64:
-                        image_content_parts.append(
-                            {
-                                "type": "image_url",
-                                "image_url": {"url": f"data:{content_type};base64,{b64}"},
-                            }
-                        )
-                        logger.info(f"[Agent] 🖼️ 附件图片: {filename}")
-                else:
-                    line = f"- {filename} | project_path={project_path or '(unknown)'}"
-                    file_reference_parts.append(line)
-                    logger.info(f"[Agent] 📄 附件文件引用: {filename} -> {project_path}")
+        for attachment in attached_files or []:
+            file_id = attachment.get("file_id", "")
+            filename = attachment.get("filename", "")
+            project_path = attachment.get("project_path", f"uploads/{file_id}" if file_id else "")
+            is_image = attachment.get("is_image", False)
+            if is_image and project_path:
+                image_project_paths.append(project_path)
+            kind = " [image]" if is_image else ""
+            file_reference_parts.append(f"- {filename}{kind} | project_path={project_path or '(unknown)'}")
 
         if file_reference_parts:
             context_sections.append(
@@ -595,47 +522,26 @@ async def process_writing_request_stream(
                 "\nFiles are already uploaded under wence_data/project."
                 "\nDo NOT assume file contents from metadata."
                 "\nOnly project_path is shown; it is relative to that project root (e.g. uploads/...)."
-                "\nWhen non-image file content is needed, call `read_file` with exactly that project_path string."
-                "\nFor generate_document image runs, you may set url to the same project-relative path;"
+                "\nCall `read_file` with exactly that project_path when file content is needed."
+                "\nFor generate_document image runs, set url to the same project-relative path;"
                 " the server resolves it to an absolute local path for the Word/WPS client."
                 "\n" + "\n".join(file_reference_parts)
             )
 
         image_context = ""
-        if image_content_parts:
-            image_context = "Attached images are also provided as direct model image inputs in this request. Use the visual input directly; do not call `read_file` for these image files unless the user explicitly asks for OCR text or file metadata."
-
-        text_only_image_context = ""
-        if attached_image_count:
-            text_only_image_context = (
-                "Direct image input is unavailable in this request. Use the OCR text below when provided; "
-                "otherwise call `read_file(path)` on the image project_path when image content is needed."
+        if image_project_paths:
+            image_context = (
+                "Images are local files referenced by project_path; image bytes are never embedded in model messages. "
+                "Use the OCR text below when provided, or call `read_file(path)` when image content is needed."
             )
-
-        image_user_content = build_user_prompt(
-            message, context_sections=context_sections, image_context=image_context, **user_prompt_options
-        )
-        text_only_user_content = build_user_prompt(
-            message, context_sections=context_sections, image_context=text_only_image_context, **user_prompt_options
-        )
-        if attached_image_count and not image_content_parts:
             ocr_context = await asyncio.to_thread(_ocr_attachment_context, image_project_paths)
             if ocr_context:
-                text_only_user_content = build_user_prompt(
-                    message,
-                    context_sections=context_sections + [ocr_context],
-                    image_context=text_only_image_context,
-                    **user_prompt_options,
-                )
+                context_sections.append(ocr_context)
 
-        # 构建 HumanMessage
-        message_id = str(uuid.uuid4())
-        if image_content_parts:
-            human_content = [{"type": "text", "text": image_user_content}] + image_content_parts
-            messages.append(HumanMessage(content=human_content, id=message_id))
-        else:
-            messages.append(HumanMessage(content=text_only_user_content, id=message_id))
-        text_only_messages = list(messages[:-1]) + [HumanMessage(content=text_only_user_content, id=message_id)]
+        user_content = build_user_prompt(
+            message, context_sections=context_sections, image_context=image_context, **user_prompt_options
+        )
+        messages.append(HumanMessage(content=user_content, id=str(uuid.uuid4())))
 
         logger.debug(f"[Agent] 消息数量: {len(messages)}")
 
@@ -716,8 +622,7 @@ async def process_writing_request_stream(
                     "config": _config,
                 }
 
-                max_attempts = 3 if image_content_parts else 2
-                image_fallback_applied = False
+                max_attempts = 2
                 for attempt in range(1, max_attempts + 1):
                     if stop_event.is_set():
                         break
@@ -735,29 +640,6 @@ async def process_writing_request_stream(
                         asyncio.run_coroutine_threadsafe(queue.put(None), loop)
                         return
                     except Exception as e:
-                        if (
-                            resume_command is None
-                            and image_content_parts
-                            and not image_fallback_applied
-                            and _is_image_input_unsupported_error(e)
-                        ):
-                            image_fallback_applied = True
-                            logger.warning("[Agent] ⚠️ 当前端点不支持图像输入，自动降级为文本模式重试")
-                            ocr_context = _ocr_attachment_context(image_project_paths)
-                            fallback_messages = text_only_messages
-                            if ocr_context:
-                                fallback_content = build_user_prompt(
-                                    message,
-                                    context_sections=context_sections + [ocr_context],
-                                    image_context=text_only_image_context,
-                                    **user_prompt_options,
-                                )
-                                fallback_messages = list(messages[:-1]) + [
-                                    HumanMessage(content=fallback_content, id=message_id)
-                                ]
-                            stream_kwargs["input"] = {**stream_kwargs["input"], "messages": fallback_messages}
-                            continue
-
                         if _is_context_overflow_error(e):
                             logger.error(f"[Agent] ⚠️ 摘要后上下文仍超限（{e}）")
                             raise
