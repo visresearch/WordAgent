@@ -4,13 +4,19 @@
 
 ### Added
 - 修订username改为文策AI
-- 添加tool_history中间件，记录工具调用历史，修复停止工具调用后接入新问题消息不合法的bug
 
+### Fixed
+- 添加tool_history中间件，记录工具调用历史，修复停止工具调用后接入新问题消息不合法的bug
+- 修复前端加载项警告图标bug
+- 修复Microsoft Word加载项发送停止信号后仍然不停止的问题
 
 ### Changed
 - 更新py依赖
 - 删除冗余i18n文件
 - 优化系统提示词
+
+### Todo
+- 允许多个对话session同时运行
 
 ## [v0.6.3-beta.2]
 

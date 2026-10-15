@@ -1073,6 +1073,9 @@ export default {
 
         onComplete: () => {
           this.isLoading = false;
+          for (const part of aiMsg.contentParts) {
+            if (part.loading) part.loading = false;
+          }
           this._refreshRevisionPreview();
           if (userResponse && !this.pendingQuestions[streamSessionId]) this.refreshPendingQuestion(streamSessionId);
           this._streamingSessionId = null;

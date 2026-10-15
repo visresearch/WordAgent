@@ -102,6 +102,82 @@ function chatPane(t, apiOverrides = {}) {
   return { vm, streams, container };
 }
 const pendingQuestion = () => ({ type: 'ask_user', questions: [{ id: 'i:0', question: '采用哪种风格？', options: ['正式', '轻松'] }] });
+
+function stoppedStreamTransport(t, sync = async () => {}) {
+  const previousWord = globalThis.Word;
+  globalThis.Word = { run: async callback => callback({
+    document: { body: { paragraphs: { items: [], load() {} } } }, sync
+  }) };
+  const callbacks = { onMessage: wsManager.onMessage, onError: wsManager.onError, onComplete: wsManager.onComplete };
+  t.after(() => { globalThis.Word = previousWord; Object.assign(wsManager, callbacks); });
+  t.mock.method(wsManager, 'connect', async () => {});
+  t.mock.method(wsManager, '_armIdleTimeout', () => {});
+  const sent = [];
+  t.mock.method(wsManager, 'send', async body => sent.push(body));
+  return sent;
+}
+
+test('Word stop finishes thinking immediately and ignores late text, thinking and terminal callbacks', async t => {
+  const { vm } = chatPane(t, { chatStream });
+  const sent = stoppedStreamTransport(t);
+  vm._sendStreamRequest('整理文档', null);
+  await new Promise(resolve => setImmediate(resolve));
+  wsManager.onMessage({ type: 'thinking', content: 'checking document' });
+  wsManager.onMessage({ type: 'text', content: 'partial answer' });
+  wsManager.onMessage({ type: 'context_compaction', status: 'started' });
+  const assistant = vm.messages[0];
+  assert.equal(assistant.contentParts.at(-1).loading, true);
+  vm.stopGeneration();
+  assert.equal(vm.isLoading, false);
+  assert.equal(vm.currentStreamCtrl, null);
+  assert.equal(assistant.thinkingDone, true);
+  assert.equal(assistant.contentParts.at(-1).loading, false);
+  const stoppedMessage = structuredClone(assistant);
+  const scrollCalls = vm.scrollCalls;
+  wsManager.onMessage({ type: 'thinking', content: 'late thinking' });
+  wsManager.onMessage({ type: 'text', content: 'late answer' });
+  wsManager.onMessage({ type: 'ask_user', questions: [] });
+  wsManager.onError(new Error('late error'));
+  wsManager.onComplete();
+  vm.stopGeneration();
+  assert.deepEqual(assistant, stoppedMessage);
+  assert.equal(vm.scrollCalls, scrollCalls);
+  assert.deepEqual(sent.map(body => body.type), ['chat', 'stop']);
+});
+
+test('stopping while Office.js reads document metadata prevents a delayed chat request', async t => {
+  const { vm } = chatPane(t, { chatStream });
+  let finishRead;
+  const sent = stoppedStreamTransport(t, () => new Promise(resolve => { finishRead = resolve; }));
+  vm._sendStreamRequest('整理文档', null);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(typeof finishRead, 'function');
+  vm.stopGeneration();
+  finishRead();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(sent.map(body => body.type), ['stop']);
+  assert.equal(vm.isLoading, false);
+});
+
+test('a new Word request can receive output after the stopped stream has completed', async t => {
+  const { vm } = chatPane(t, { chatStream });
+  const sent = stoppedStreamTransport(t);
+  vm._sendStreamRequest('first request', null);
+  await new Promise(resolve => setImmediate(resolve));
+  vm.stopGeneration();
+  wsManager.onComplete();
+  vm._sendStreamRequest('second request', null);
+  await new Promise(resolve => setImmediate(resolve));
+  wsManager.onMessage({ type: 'thinking', content: 'new thinking' });
+  wsManager.onMessage({ type: 'text', content: 'new answer' });
+  wsManager.onComplete();
+  assert.equal(vm.messages[0].content, '');
+  assert.equal(vm.messages[1].content, 'new answer');
+  assert.equal(vm.messages[1].thinkingDone, true);
+  assert.equal(vm.isLoading, false);
+  assert.deepEqual(sent.map(body => body.type), ['chat', 'stop', 'chat']);
+});
+
 function pauseWithHistory(vm, streams) {
   vm._sendStreamRequest('整理文档', null);
   const events = streams[0];

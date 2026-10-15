@@ -699,23 +699,33 @@ function chatStream(message, options = {}) {
     userResponse = null,
   } = options;
 
+  let stopped = false;
   wsManager._completeCalled = false;
   if (wsManager._requestTimeoutTimer) {
     clearTimeout(wsManager._requestTimeoutTimer);
     wsManager._requestTimeoutTimer = null;
   }
 
-  wsManager.onMessage = onMessage;
-  wsManager.onError = onError;
-  wsManager.onComplete = onComplete;
+  wsManager.onMessage = data => {
+    if (!stopped) return onMessage?.(data);
+  };
+  wsManager.onError = error => {
+    if (!stopped) onError?.(error);
+  };
+  wsManager.onComplete = () => {
+    if (!stopped) onComplete?.();
+  };
 
   const execute = async () => {
     try {
       await wsManager.connect();
+      if (stopped) return;
       wsManager._armIdleTimeout();
 
       // 文档全局元信息：随用户提问发送，不放在 read_document 回包里
       const documentMeta = await getCurrentDocumentMeta();
+      // Office.js 读取是异步的，停止后不能继续发送这轮聊天请求。
+      if (stopped) return;
 
       await wsManager.send({
         type: "chat",
@@ -733,6 +743,7 @@ function chatStream(message, options = {}) {
         timestamp: Date.now(),
       });
     } catch (error) {
+      if (stopped) return;
       if (wsManager._requestTimeoutTimer) {
         clearTimeout(wsManager._requestTimeoutTimer);
         wsManager._requestTimeoutTimer = null;
@@ -747,11 +758,15 @@ function chatStream(message, options = {}) {
 
   return {
     abort: () => {
+      if (stopped) return;
+      stopped = true;
       if (wsManager._requestTimeoutTimer) {
         clearTimeout(wsManager._requestTimeoutTimer);
         wsManager._requestTimeoutTimer = null;
       }
       wsManager.send({ type: "stop" }).catch(() => {});
+      // 沿用 WPS 的停止消息，本地立即收尾，忽略随后到达的流片段。
+      onComplete?.();
     },
   };
 }
