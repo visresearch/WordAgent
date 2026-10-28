@@ -63,7 +63,7 @@ test('Word dispatches all seven tools with Office signatures and returns matchin
   assert.deepEqual(calls.find(c => c[0] === 'delete'), ['delete', [123]]);
   assert.deepEqual(calls.find(c => c[0] === 'edit'), ['edit', 123, [{ text: 'new' }]]);
   assert.deepEqual(calls.find(c => c[0] === 'break'), ['break', 123, 'wdPageBreak']);
-  assert.deepEqual(calls.find(c => c[0] === 'generate'), ['generate', { paragraphs: [], styles: {} }, 'selection', 123]);
+  assert.deepEqual(calls.find(c => c[0] === 'generate'), ['generate', { paragraphs: [], styles: {} }, 123]);
   assert.equal(calls.filter(c => c[0] === 'clear').length, 4);
   assert.equal(socket.sent.length, 7);
   assert.ok(socket.sent.every(r => r.result && !r.error));
@@ -89,6 +89,17 @@ test('nonzero docId is rejected before accessing any document; errors do not sto
   assert.match(socket.sent[2].error, /未知的 MCP 工具/);
   assert.ok(socket.sent[3].result);
   assert.equal(h.calls.filter(c => c[0] === 'clear').length, 1);
+});
+
+test('MCP 不把缺失的 insertParaID 补成文档开头', async () => {
+  const h = setup({ generateDocxFromJSON: async (_document, id) => {
+    assert.equal(id, undefined);
+    return { error: 'missing insertParaID' };
+  } });
+  h.context.startMcpBridge();
+  h.sockets[0].request('generate_document', { document: { paragraphs: [], styles: {} } });
+  await h.flush();
+  assert.equal(h.sockets[0].sent[0].error, 'missing insertParaID');
 });
 
 test('reads wait for edits to finish; stopping cancels queued work and reconnects safely', async () => {

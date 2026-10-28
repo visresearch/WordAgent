@@ -108,6 +108,40 @@ function chatPane(t, apiOverrides = {}) {
   };
   return { vm, streams, container };
 }
+
+test('a running pane cannot switch or create sessions, including while stopping', async t => {
+  const { vm, streams } = chatPane(t);
+  vm._sendStreamRequest('work', null);
+  const messages = vm.messages;
+  await vm.onSelectSession({ id: 'session-b' });
+  vm.onCreateSession({ id: 'session-c' });
+  assert.equal(vm.currentSessionId, 'session-a');
+  assert.equal(vm.messages, messages);
+  vm.stopGeneration();
+  assert.equal(vm.isLoading, true);
+  await vm.onSelectSession({ id: 'session-b' });
+  assert.equal(vm.currentSessionId, 'session-a');
+  streams[0].onComplete();
+  assert.equal(vm.isLoading, false);
+  vm.onCreateSession({ id: 'session-c' });
+  assert.equal(vm.currentSessionId, 'session-c');
+});
+
+test('session creation and uploads reserve the pane before the first await', async t => {
+  const { vm, streams } = chatPane(t);
+  let resolveSession;
+  vm.ensureSession = () => new Promise(resolve => { resolveSession = resolve; });
+  const pending = vm.handleSend('work');
+  assert.equal(vm.preparingRequest, true);
+  await vm.onSelectSession({ id: 'session-b' });
+  vm.onCreateSession({ id: 'session-c' });
+  await vm.handleSend('duplicate');
+  assert.equal(vm.currentSessionId, 'session-a');
+  resolveSession(null);
+  await pending;
+  assert.equal(vm.preparingRequest, false);
+  assert.equal(streams.length, 0);
+});
 const pendingQuestion = () => ({ type: 'ask_user', questions: [{ id: 'i:0', question: '采用哪种风格？', options: ['正式', '轻松'] }] });
 function pauseWithHistory(vm, streams) {
   vm._sendStreamRequest('整理文档', null);

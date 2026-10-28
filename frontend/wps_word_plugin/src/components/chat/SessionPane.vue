@@ -6,7 +6,7 @@
     </div>
     <!-- 新聊天按钮 -->
     <div class="new-chat-section">
-      <button class="new-chat-btn" @click="createNewSession">
+      <button class="new-chat-btn" :disabled="busy" @click="createNewSession">
         <svg
           width="16"
           height="16"
@@ -49,7 +49,8 @@
         <div 
           v-for="session in sortedSessions" 
           :key="session.id"
-          :class="['session-item', { active: session.id === currentSessionId }]"
+          :class="['session-item', { active: session.id === currentSessionId, 'session-disabled': busy }]"
+          :aria-disabled="busy"
           @click="selectSession(session)"
         >
           <div class="session-content">
@@ -71,7 +72,7 @@
                 <path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168l10-10zM11.207 2.5L13.5 4.793 14.793 3.5 12.5 1.207 11.207 2.5zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293l6.5-6.5zm-9.761 5.175l-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325z" />
               </svg>
             </button>
-            <button class="action-btn delete-btn" :title="$t('common.delete')" @click.stop="deleteSession(session)">
+            <button class="action-btn delete-btn" :disabled="busy" :title="$t('common.delete')" @click.stop="deleteSession(session)">
               <svg
                 width="12"
                 height="12"
@@ -142,6 +143,7 @@ import { t } from '../../i18n/index.js';
 export default {
   name: 'SessionPane',
   props: {
+    busy: { type: Boolean, default: false },
     currentSessionId: {
       type: String,
       default: null
@@ -190,6 +192,7 @@ export default {
 
     // 创建新会话
     const createNewSession = async () => {
+      if (props.busy) return;
       try {
         const result = await api.createSession({
           title: t('session.newConversation')
@@ -209,6 +212,7 @@ export default {
 
     // 选择会话
     const selectSession = (session) => {
+      if (props.busy) return;
       emit('select-session', session);
     };
 
@@ -253,6 +257,7 @@ export default {
 
     // 删除会话
     const deleteSession = (session) => {
+      if (props.busy) return;
       deleteTarget.value = session;
       showDeleteDialog.value = true;
     };
@@ -263,6 +268,7 @@ export default {
     };
 
     const confirmDelete = async () => {
+      if (props.busy) return;
       if (!deleteTarget.value) {
         return;
       }
@@ -333,6 +339,16 @@ export default {
 </script>
 
 <style scoped>
+.session-disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 .session-container {
   display: flex;
   flex-direction: column;

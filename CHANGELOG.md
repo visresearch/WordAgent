@@ -1,5 +1,20 @@
 # Changelog
 
+## [v0.6.4]
+
+### Added
+- 允许不同WPS窗口多个session同时运行，但是不允许单个WPS窗口跨session并发运行
+
+### Fixed
+- 优化提示词
+
+### Changed
+- 更新py依赖
+
+### Deleted
+- 移除fields旧字段
+- 移除前端回退光标位置的兜底策略
+
 ## [v0.6.3]
 
 ### Added

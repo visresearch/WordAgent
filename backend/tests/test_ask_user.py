@@ -20,7 +20,7 @@ class Model(FakeMessagesListChatModel):
     def bind_tools(self, tools, **kwargs):
         return self
 
-    def _generate(self, messages, **kwargs):
+    def _generate(self, messages, stop=None, run_manager=None, **kwargs):
         from app.services.tools.callback import _current_request_context
 
         self.seen.append(list(messages))

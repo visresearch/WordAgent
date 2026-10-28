@@ -2,6 +2,7 @@
 // btnShowAIChat函数 修复二次点击时界面不消失的问题                      20261013  by volun_leung
 
 import Util from './js/util.js';
+import { getActiveWindowId } from './js/windowContext.js';
 import api from './js/api.js';
 import { t } from '../i18n/index.js';
 
@@ -27,18 +28,19 @@ function OnAddinLoad(ribbonUI) {
  */
 async function checkAutoShowPanel() {
   try {
+    const windowId = getActiveWindowId();
     const settings = await api.getSettings();
 
     if (settings.showPanelOnStart) {
       // 自动创建并显示 AI Chat TaskPane
-      let tsId = window.Application.PluginStorage.getItem('ai_taskpane_id');
+      let tsId = window.Application.PluginStorage.getItem(`ai_taskpane_id:${windowId}`);
       if (!tsId) {
         let tskpane = window.Application.CreateTaskPane(
-          Util.GetUrlPath() + Util.GetRouterHash() + '/aichat',
+          Util.GetUrlPath() + Util.GetRouterHash() + `/aichat?windowId=${windowId}`,
           t('windows.assistant')
         );
         let id = tskpane.ID;
-        window.Application.PluginStorage.setItem('ai_taskpane_id', id);
+        window.Application.PluginStorage.setItem(`ai_taskpane_id:${windowId}`, id);
         tskpane.DockPosition = window.Application.Enum.msoCTPDockPositionRight;
         tskpane.Visible = true;
         tskpane.Width = window.devicePixelRatio * 500;
@@ -55,17 +57,18 @@ async function checkAutoShowPanel() {
 
 function OnAction(control) {
   const eleId = control.Id;
+  const windowId = getActiveWindowId();
   switch (eleId) {
     case 'btnShowAIChat':
       {
-        let tsId = window.Application.PluginStorage.getItem('ai_taskpane_id');
+        let tsId = window.Application.PluginStorage.getItem(`ai_taskpane_id:${windowId}`);
         if (!tsId) {
           let tskpane = window.Application.CreateTaskPane(
-            Util.GetUrlPath() + Util.GetRouterHash() + '/aichat',
+            Util.GetUrlPath() + Util.GetRouterHash() + `/aichat?windowId=${windowId}`,
             t('windows.assistant')
           );
           let id = tskpane.ID;
-          window.Application.PluginStorage.setItem('ai_taskpane_id', id);
+          window.Application.PluginStorage.setItem(`ai_taskpane_id:${windowId}`, id);
           tskpane.DockPosition = window.Application.Enum.msoCTPDockPositionRight;
           tskpane.Visible = true;
           tskpane.Width = window.devicePixelRatio * 500;
@@ -81,15 +84,15 @@ function OnAction(control) {
     case 'btnShowSession':
       {
         // Session 已嵌入 AIChatPane，确保 AI Chat TaskPane 可见，然后发送切换信号
-        let tsId = window.Application.PluginStorage.getItem('ai_taskpane_id');
+        let tsId = window.Application.PluginStorage.getItem(`ai_taskpane_id:${windowId}`);
         let tskpane = null;
         if (!tsId) {
           tskpane = window.Application.CreateTaskPane(
-            Util.GetUrlPath() + Util.GetRouterHash() + '/aichat',
+            Util.GetUrlPath() + Util.GetRouterHash() + `/aichat?windowId=${windowId}`,
             t('windows.assistant')
           );
           let id = tskpane.ID;
-          window.Application.PluginStorage.setItem('ai_taskpane_id', id);
+          window.Application.PluginStorage.setItem(`ai_taskpane_id:${windowId}`, id);
           tskpane.DockPosition = window.Application.Enum.msoCTPDockPositionRight;
           tskpane.Width = window.devicePixelRatio * 500;
           tskpane.Visible = true;
@@ -101,7 +104,7 @@ function OnAction(control) {
         }
         // 通过 localStorage 发送切换信号（storage 事件会在其他窗口/TaskPane 触发）
         try {
-          localStorage.setItem('wence_session_toggle', String(Date.now()));
+          localStorage.setItem(`wence_session_toggle:${windowId}`, String(Date.now()));
         } catch (e) {
           console.warn('session toggle 信号发送失败:', e);
         }
@@ -133,14 +136,14 @@ function OnAction(control) {
       break;
     case 'btnShowDebug':
       {
-        let tsId = window.Application.PluginStorage.getItem('debug_taskpane_id');
+        let tsId = window.Application.PluginStorage.getItem(`debug_taskpane_id:${windowId}`);
         if (!tsId) {
           let tskpane = window.Application.CreateTaskPane(
             Util.GetUrlPath() + Util.GetRouterHash() + '/debug',
             t('windows.debug')
           );
           let id = tskpane.ID;
-          window.Application.PluginStorage.setItem('debug_taskpane_id', id);
+          window.Application.PluginStorage.setItem(`debug_taskpane_id:${windowId}`, id);
           tskpane.DockPosition = window.Application.Enum.msoCTPDockPositionRight;
           tskpane.Width = 400;
           tskpane.Visible = true;

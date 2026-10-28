@@ -490,8 +490,8 @@ def _compact_doc_json(doc_json: dict) -> str:
                         para_compact["runs"].append(img_info)
         compact["paragraphs"].append(para_compact)
 
-    for key in ("styles", "fields", "hasTOC", "tocFieldCode"):
-        if key in ordered_doc and key != "styles":
+    for key in ("hasTOC", "tocFieldCode"):
+        if key in ordered_doc:
             compact[key] = ordered_doc[key]
 
     result = json.dumps(compact, ensure_ascii=False)

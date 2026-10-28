@@ -22,7 +22,7 @@ def runtime(monkeypatch):
     )
 
     class FakeGraph:
-        def stream(self, **kwargs):
+        async def astream(self, **kwargs):
             messages = kwargs["input"]["messages"]
             state.inputs.append(messages)
             yield "messages", (AIMessage(content="完成"), {"langgraph_node": "model"})

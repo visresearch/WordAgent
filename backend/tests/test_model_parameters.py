@@ -329,7 +329,7 @@ def test_chat_uses_saved_effort_and_filters_reasoning_from_stream_and_history(mo
     stream_inputs = []
 
     class FakeGraph:
-        def stream(self, **kwargs):
+        async def astream(self, **kwargs):
             stream_inputs.append(kwargs["input"])
             yield (
                 "messages",

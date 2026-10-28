@@ -39,8 +39,7 @@ body:
         - WPS 加载项
         - Microsoft Word 加载项
         - 后端服务
-        - 单智能体模式
-        - 多智能体模式
+        - 智能体
         - MCP Server 或 Skill
         - 文档编辑与格式渲染
         - 打包、安装或部署

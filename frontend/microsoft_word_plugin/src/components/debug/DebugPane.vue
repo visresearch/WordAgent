@@ -264,7 +264,7 @@ export default {
           this.showStatus('转换失败: 缺少必填 insertParaID（文档开头使用 0）', 'error');
           return;
         }
-        const result = await generateDocxFromJSON(jsonData, 'selection', insertParaID);
+        const result = await generateDocxFromJSON(jsonData, insertParaID);
         if (result && result.error) {
           this.showStatus('转换失败: ' + result.error, 'error');
           return;

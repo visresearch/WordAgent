@@ -51,7 +51,7 @@ async function executeTool(tool, args) {
         if (tool === 'edit_document') result = await editDocxParagraph(args.paraID, args.runs);
         if (tool === 'insert_break') result = await insertBreakAfterParagraph(args.paraID, args.breakType);
         if (tool === 'generate_document') {
-          result = await generateDocxFromJSON(args.document, 'selection', args.insertParaID ?? 0);
+          result = await generateDocxFromJSON(args.document, args.insertParaID);
         }
         return { ...checked(result, '文档操作失败'), docId: 0 };
       } finally {

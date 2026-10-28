@@ -60,7 +60,7 @@ def test_single_agent_does_not_load_business_history(monkeypatch) -> None:
 
 def test_single_agent_summary_tokens_not_forwarded(monkeypatch) -> None:
     class FakeGraph:
-        def stream(self, **_kwargs):
+        async def astream(self, **_kwargs):
             yield "custom", {"type": "context_compaction", "status": "started", "content": "压缩开始"}
             yield (
                 "messages",
@@ -234,7 +234,7 @@ def test_single_agent_image_is_not_saved_in_checkpoint_input(monkeypatch) -> Non
     captured_inputs: list[dict] = []
 
     class FakeGraph:
-        def stream(self, **kwargs):
+        async def astream(self, **kwargs):
             captured_inputs.append(kwargs["input"])
             yield "messages", (AIMessage(content="已收到图片路径"), {"langgraph_node": "model"})
 

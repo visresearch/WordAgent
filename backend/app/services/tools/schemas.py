@@ -57,11 +57,6 @@ class Paragraph(BaseModel):
         " Use an empty array for blank paragraphs.",
         default_factory=list,
     )
-    paraIndex: int | None = Field(
-        default=None,
-        description="Optional paragraph index for image anchoring."
-        " For generated content, this can be local 0-based index within this payload.",
-    )
 
     @model_validator(mode="after")
     def validate_paragraph_style(self):

@@ -1,19 +1,6 @@
-Create or edit text files in the project sandbox.
+Create or update a project text file.
 
-## Parameters
-- `path` (string): Relative file path in the project sandbox.
-- `content` (string): Content to write.
-- `append` (bool, optional): If true, append content; otherwise overwrite. Default `false`.
-
-## Behavior
-- If target file does not exist, it is created automatically.
-- Parent directories are created automatically when needed.
-- Supports text-oriented file types (including `md` and `txt`).
-
-## When to use
-- Save generated notes, summaries, plans, or intermediate artifacts.
-- Update project data files after analyzing source inputs.
-
-## Security boundary
-- Access is strictly limited to the project sandbox.
-- Any path outside the project root is rejected.
+- `path`: relative file path.
+- `content`: text to write.
+- `append`: default `false` (overwrite); `true` appends.
+- Missing files and parent directories are created automatically.

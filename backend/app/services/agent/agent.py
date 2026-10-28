@@ -1,7 +1,6 @@
 """文档处理 Agent - 使用 LangChain create_agent + 中间件 + 流式输出。"""
 
 import asyncio
-import concurrent.futures
 import json
 import re
 import threading
@@ -9,6 +8,7 @@ import time
 import traceback
 import uuid
 from collections.abc import AsyncGenerator
+from contextlib import aclosing, suppress
 from datetime import datetime
 from typing import Any
 
@@ -48,6 +48,7 @@ from app.services.human_input import pending_questions
 from app.services.agent.middleware import build_agent_middleware
 from app.services.middleware.notifying_summarization import MAX_CONTEXT_TOKENS
 from app.services.tools.tool_log import build_tool_json, set_current_tool_log
+from app.services.tools.callback import _current_stop_event
 from app.services.token_usage import normalize_usage_metadata
 from app.services.utils import try_init_langsmith
 
@@ -441,8 +442,7 @@ async def process_writing_request_stream(
     meta_list = normalize_document_meta(document_meta)
     document_name_by_id = build_document_name_by_id(meta_list)
     document_meta_for_context = meta_list[0] if len(meta_list) == 1 else meta_list
-    executor: concurrent.futures.ThreadPoolExecutor | None = None
-    stream_future: concurrent.futures.Future | None = None
+    stream_task: asyncio.Task | None = None
     stop_event = threading.Event()
     if chat_id:
         register_stop_event(chat_id, stop_event)
@@ -550,7 +550,7 @@ async def process_writing_request_stream(
         if chat_id:
             register_loop(chat_id, loop)
 
-        # 队列用于线程间传递流式数据
+        # 每轮独立队列；模型流在异步任务内运行，同步工具由 LangChain 在线程池中执行。
         queue: asyncio.Queue = asyncio.Queue()
         has_tool_result = bool(resume_tool_log)
         _collected_text_parts: list[str] = []
@@ -578,21 +578,24 @@ async def process_writing_request_stream(
                         "has_document_range": bool(document_range),
                         "has_document_meta": bool(meta_list),
                         "chat_id": chat_id or "",
+                        "session_id": session_id or "",
                     },
                 }
             except Exception:
                 langsmith_config = None
 
-        def run_stream():
-            """在独立线程中运行同步的 LangGraph stream"""
+        async def run_stream():
+            """请求上下文只绑定此任务，由 LangGraph 传递给本轮工具。"""
             try:
-                if chat_id:
-                    _current_chat_id.set(chat_id)
+                _current_chat_id.set(chat_id)
+                _current_stop_event.set(stop_event)
                 set_current_tool_log(tool_log)
                 _current_model_name.set(model_name)
                 # 设置请求上下文，供工具函数获取 document_meta
                 _current_request_context.set(
                     {
+                        "chat_id": chat_id,
+                        "session_id": session_id,
                         "document_meta": document_meta_for_context,
                         "document_range": document_range,
                     }
@@ -628,16 +631,12 @@ async def process_writing_request_stream(
                         break
                     has_any_stream_item = False
                     try:
-                        response = app.stream(**stream_kwargs)
-
-                        for stream_item in response:
-                            has_any_stream_item = True
-                            if stop_event.is_set() or (chat_id and is_stop_requested(chat_id)):
-                                logger.warning(f"[Agent] ⛔ 检测到停止信号，结束流式处理 (session={chat_id})")
-                                break
-                            asyncio.run_coroutine_threadsafe(queue.put(stream_item), loop)
-
-                        asyncio.run_coroutine_threadsafe(queue.put(None), loop)
+                        async with aclosing(app.astream(**stream_kwargs)) as response:
+                            async for stream_item in response:
+                                has_any_stream_item = True
+                                if stop_event.is_set() or is_stop_requested(chat_id):
+                                    break
+                                await queue.put(stream_item)
                         return
                     except Exception as e:
                         if _is_context_overflow_error(e):
@@ -645,17 +644,16 @@ async def process_writing_request_stream(
                             raise
                         if attempt < max_attempts and (not has_any_stream_item) and _is_transient_stream_error(e):
                             logger.error(f"[Agent] ⚠️ 流式连接异常（第 {attempt} 次）: {e}，准备重试")
-                            if stop_event.wait(0.5):
-                                break
+                            await asyncio.sleep(0.5)
                             continue
                         raise
             except Exception as e:
                 event_type = "context_overflow" if _is_context_overflow_error(e) else "error"
-                asyncio.run_coroutine_threadsafe(queue.put((event_type, str(e))), loop)
+                await queue.put((event_type, str(e)))
+            finally:
+                queue.put_nowait(None)
 
-        # 在线程池中启动
-        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-        stream_future = executor.submit(run_stream)
+        stream_task = asyncio.create_task(run_stream(), name=f"agent:{chat_id}")
 
         # 从队列中消费流式数据
         while True:
@@ -884,9 +882,9 @@ async def process_writing_request_stream(
         yield "data: [DONE]\n\n"
     finally:
         stop_event.set()
-        if stream_future is not None:
-            stream_future.cancel()
-        if executor is not None:
-            executor.shutdown(wait=False, cancel_futures=True)
+        if stream_task is not None:
+            stream_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await stream_task
         if chat_id:
             unregister_stop_event(chat_id, stop_event)

@@ -21,8 +21,7 @@
  *           wrapType: "inline",
  *           altText: "图片说明"
  *         }
- *       ],
- *       paraIndex: 0           // 可选；生成时仅用于图片锚定，不决定块顺序
+ *       ]
  *     },
  *     {                        // 表格块，位于相邻段落之间
  *       tables: [{
@@ -56,7 +55,7 @@
  * }
  *
  * read_document(full) 的读取结果是上述结构的扩展：普通段落还会带 paraID、
- * paraIndex，以及客户端支持时的 pageStart/pageEnd；顶层也可能带 fields、hasTOC
+ * paraIndex，以及客户端支持时的 pageStart/pageEnd；顶层也可能带 hasTOC
  * 和 tocFieldCode。这些读取元数据不属于后端生成用的 DocumentOutput。
  */
 
@@ -530,36 +529,8 @@ function revealInsertedRange(doc, startPos, endPos) {
   }
 }
 
-function isBlankWpsText(text) {
-  return String(text || '').replace(/[\r\n\u0007]/g, '').trim() === '';
-}
-
 function isDocumentStartInsertParaID(value) {
   return value === 0 || (typeof value === 'string' && value.trim() === '0');
-}
-
-function isEffectivelyEmptyDocument(doc) {
-  try {
-    const tableCount = doc.Tables?.Count ?? doc.Content?.Tables?.Count ?? 0;
-    if (tableCount > 0) {
-      return false;
-    }
-
-    const paraCount = doc.Paragraphs?.Count ?? 0;
-    if (paraCount === 0) {
-      return true;
-    }
-    if (paraCount > 1) {
-      return false;
-    }
-
-    const firstPara = doc.Paragraphs.Item(1);
-    const paraText = firstPara?.Range?.Text ?? '';
-    const contentText = doc.Content?.Text ?? paraText;
-    return isBlankWpsText(paraText) && isBlankWpsText(contentText);
-  } catch (e) {
-    return false;
-  }
 }
 
 /**
@@ -1912,7 +1883,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride, start
         paraStartsSorted.push(ps);
       }
 
-      const result = { paragraphs: [], tables: [], fields: [] };
+      const result = { paragraphs: [], tables: [] };
 
       // 解析范围内的段落起止位置
       const rangeStart = doc.Paragraphs.Item(startParaIndex + 1).Range.Start;
@@ -2264,8 +2235,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride, start
 
     const result = {
       paragraphs: [],
-      tables: [],
-      fields: []
+      tables: []
     };
 
     // 解析域代码（检测目录等）
@@ -2276,13 +2246,6 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride, start
           const field = fields.Item(i);
           const fieldCode = field.Code.Text || '';
           const fieldType = field.Type;
-
-          result.fields.push({
-            type: fieldType,
-            code: fieldCode.trim(),
-            start: field.Code.Start,
-            end: field.Result ? field.Result.End : field.Code.End
-          });
 
           if (fieldType === 13 || fieldCode.toUpperCase().includes('TOC')) {
             result.hasTOC = true;
@@ -3028,9 +2991,8 @@ function generateTable(doc, tableData, currentPos, styles) {
 /**
  * 从 JSON 数据生成 Word 文档
  * @param {Object} jsonData - JSON 数据
- * @param {Object} doc - 已存在的文档对象（可选，默认创建新文档）
- * @param {number|string|null} [insertParaID] - 0 表示文档开头；其他值表示在对应 paraID 段落之后插入。
- *   省略时在当前选区位置插入。
+ * @param {Object} doc - 已存在的目标文档对象
+ * @param {number|string} insertParaID - 必填。0 表示文档开头；其他值表示在对应 paraID 段落之后插入。
  * @returns {Object} - 成功返回 {success: true, doc, startPos, endPos}，失败返回 {error: string}
  */
 function generateDocxFromJSON(jsonData, doc, insertParaID) {
@@ -3044,14 +3006,17 @@ function generateDocxFromJSON(jsonData, doc, insertParaID) {
       return { error: '顶层 tables 已停用，请将表格块放入 paragraphs 数组的目标位置' };
     }
 
+    const insertAtDocumentStart = isDocumentStartInsertParaID(insertParaID);
+    const normalizedInsertParaID = insertAtDocumentStart ? 0 : normalizeParagraphParaID(insertParaID);
+    if (normalizedInsertParaID === null) {
+      return { error: 'generate_document 缺少有效 insertParaID；文档开头请传 0，其他位置请传真实 paraID' };
+    }
+
     // 提取样式字典
     const styles = jsonData.styles || {};
 
     if (!doc) {
-      doc = window.Application.Documents.Add();
-      if (!doc) {
-        return { error: '无法创建新文档' };
-      }
+      return { error: '没有打开的目标文档' };
     }
 
     const tableCountBefore = (() => {
@@ -3070,40 +3035,29 @@ function generateDocxFromJSON(jsonData, doc, insertParaID) {
     const processedElements = elements;
 
     // 确定插入起始位置
-    let insertFallbackWarning = null;
     let currentPos;
-    const insertAtDocumentStart = isDocumentStartInsertParaID(insertParaID);
-    if (insertAtDocumentStart || isEffectivelyEmptyDocument(doc)) {
-      try {
-        currentPos = doc.Content?.Start ?? doc.Paragraphs.Item(1).Range.Start;
-      } catch (e) {
-        currentPos = 0;
-      }
+    if (insertAtDocumentStart) {
+      currentPos = doc.Content.Start;
       console.log('[generateDocxFromJSON] 将从文档起点插入');
-    } else if (insertParaID !== undefined && insertParaID !== null) {
+    } else {
       // 通过段落ID定位插入位置（在指定段落之后插入）
       const totalParas = doc.Paragraphs.Count;
       let targetIndex = -1;
       for (let pi = 1; pi <= totalParas; pi++) {
         const para = doc.Paragraphs.Item(pi);
         const pid = getParagraphParaID(para);
-        if (pid === insertParaID) {
+        if (pid === normalizedInsertParaID) {
           targetIndex = pi;
           break;
         }
       }
       if (targetIndex < 0) {
-        insertFallbackWarning = `insertParaID ${insertParaID} 未找到，已回退到当前光标位置`;
-        console.warn(`[generateDocxFromJSON] ${insertFallbackWarning}`);
-        const selection = window.Application.Selection;
-        currentPos = selection ? selection.Range.Start : Math.max(0, (doc.Content?.End || 1) - 1);
-      } else {
-        currentPos = doc.Paragraphs.Item(targetIndex).Range.End; // WPS 1-based，插在目标段落后
+        return { error: `insertParaID ${insertParaID} 未找到，请重新读取/搜索当前文档后再插入` };
       }
-    } else {
-      // 默认使用当前选区位置
-      const selection = window.Application.Selection;
-      currentPos = selection ? selection.Range.Start : 0;
+      currentPos = doc.Paragraphs.Item(targetIndex).Range.End; // WPS 1-based，插在目标段落后
+    }
+    if (!Number.isInteger(currentPos) || currentPos < 0) {
+      return { error: `无法定位 insertParaID=${insertParaID} 的插入位置` };
     }
 
     // 防御：如果插入位置在表格内部，跳转到该表格之后的首个段落
@@ -3117,9 +3071,9 @@ function generateDocxFromJSON(jsonData, doc, insertParaID) {
           const tblRange = tbl.Range;
           if (currentPos >= tblRange.Start && currentPos <= tblRange.End) {
             console.log(`[generateDocxFromJSON] 插入位置(${currentPos})在表格内部(${tblRange.Start}-${tblRange.End})，寻找表格后安全位置`);
-            // 从 insertParaIndex 附近开始扫描，找到第一个在表格后面的段落
+            // 找到第一个在表格后面的段落；无法定位时停止，不猜测文档末尾。
             const totalP = doc.Paragraphs.Count;
-            let safePos = doc.Content.End - 1; // fallback: 文档末尾
+            let safePos = null;
             const scanStart = 1;
             for (let pi = scanStart; pi <= totalP; pi++) {
               const pStart = doc.Paragraphs.Item(pi).Range.Start;
@@ -3128,6 +3082,9 @@ function generateDocxFromJSON(jsonData, doc, insertParaID) {
                 break;
               }
             }
+            if (safePos === null) {
+              return { error: '无法定位表格后的插入位置，请使用表格外的段落 ID' };
+            }
             console.log(`[generateDocxFromJSON] 调整到表格后方: ${safePos}`);
             currentPos = safePos;
             break;
@@ -3135,11 +3092,10 @@ function generateDocxFromJSON(jsonData, doc, insertParaID) {
         }
       }
     } catch (e) {
-      console.warn('[generateDocxFromJSON] 表格位置检测失败:', e);
+      return { error: '表格位置检测失败: ' + e.message };
     }
 
     const insertStartPos = currentPos;  // 记录插入起始位置
-    let paraIndex = 0;
     const insertedParagraphStyles = [];
     const docUsableWidth = getDocumentUsableWidth(doc);
 
@@ -3161,7 +3117,6 @@ function generateDocxFromJSON(jsonData, doc, insertParaID) {
           range.Text = '\r';
           currentPos += 1;
           insertedParagraphStyles.push({ position: paraStartPos, pStyle: [...pStyle] });
-          paraIndex++;
           continue;
         }
 
@@ -3259,7 +3214,6 @@ function generateDocxFromJSON(jsonData, doc, insertParaID) {
         // 先记录样式，等段落分隔符全部插入后再应用。此时新文本仍与
         // 后面的原文属于同一段，提前设置 Style 会修改原有标题/段落。
         insertedParagraphStyles.push({ position: paraStartPos, pStyle: [...pStyle] });
-        paraIndex++;
 
         // 先建立段落边界，再设置段落格式。
         if (i < processedElements.length - 1) {
@@ -3272,7 +3226,6 @@ function generateDocxFromJSON(jsonData, doc, insertParaID) {
         }
       } else if (element.type === 'table') {
         currentPos = generateTable(doc, element.data, currentPos, styles);
-        paraIndex = doc.Paragraphs.Count;
 
         // 表格后换行
         if (i < processedElements.length - 1) {
@@ -3337,8 +3290,7 @@ function generateDocxFromJSON(jsonData, doc, insertParaID) {
       doc,
       startPos: insertStartPos,
       endPos: currentPos,
-      lastParagraph,
-      warning: insertFallbackWarning
+      lastParagraph
     };
   } catch (error) {
     return { error: '生成文档失败: ' + error.message };

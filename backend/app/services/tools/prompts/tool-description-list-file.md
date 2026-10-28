@@ -1,22 +1,6 @@
-List files and directories in the project sandbox.
+List project files/directories.
 
-## Parameters
-- `path` (string, optional): Relative path in the project sandbox. Default `"."`.
-- `recursive` (bool, optional): Whether to recursively list subdirectories. Default `false`.
-- `include_hidden` (bool, optional): Whether to include dotfiles/directories. Default `false`.
-
-## When to use
-- You need to discover available files before reading/editing.
-- You need to inspect folder structure and candidate target files.
-
-## When not to use
-- You already know the exact file path and can directly call `read_file`/`edit_file`.
-
-## Returns
-- Text list with one item per line:
-  - `[DIR] relative/path/`
-  - `[FILE] relative/path.ext (size bytes)`
-
-## Security boundary
-- Access is strictly limited to the project sandbox.
-- Any path outside the project root is rejected.
+- `path`: relative directory, default `"."`.
+- `recursive`: default `false`.
+- `include_hidden`: include dotfiles/directories, default `false`.
+- Returns lines as `[DIR] path/` or `[FILE] path (size bytes)`.

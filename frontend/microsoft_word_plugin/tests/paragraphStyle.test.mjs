@@ -78,7 +78,7 @@ test("生成正文和空段落时只格式化新段落，保留锚点及相邻�
   const result = await generateDocxFromJSON({ paragraphs: [
     { pStyle: bodyStyle, runs: [{ text: "（4）新增实习目的" }] },
     { pStyle: bodyStyle, runs: [] }
-  ] }, "selection", "111111111");
+  ] }, "111111111");
   assert.equal(result.success, true, result.error);
   assert.equal(result.insertedParaIDs.length, 2);
   assert.deepEqual(items.map((item) => item.text), [anchor.text, "（4）新增实习目的", "", heading.text]);

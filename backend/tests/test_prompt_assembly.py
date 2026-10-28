@@ -8,6 +8,14 @@ from app.services.agent.tools import AGENT_BASE_TOOLS
 
 
 class PromptAssemblyTests(unittest.TestCase):
+    def test_document_addressing_is_shared_by_agent_and_ask(self) -> None:
+        for mode in ("agent", "ask"):
+            prompt = single_prompts.get_agent_prompt(mode)
+            self.assertEqual(prompt.count("## Document Addressing"), 1)
+            self.assertIn("startParaIndex=0, endParaIndex=-1", prompt)
+            self.assertIn("startParaIndex=0, endParaIndex=0", prompt)
+            self.assertNotIn("Avoid full-document one-shot reads", prompt)
+
     def test_single_agent_and_ask_mode_are_isolated(self) -> None:
         agent_prompt = single_prompts.get_agent_prompt("agent")
         ask_prompt = single_prompts.get_agent_prompt("ask")

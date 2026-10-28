@@ -19,6 +19,7 @@ import {
   parseDocxToJSON
 } from './docxJsonConverter.js';
 import { executeStyleQuery } from './docxQuery.js';
+import { createChatId, getWindowId, windowStorageKey } from './windowContext.js';
 
 // ============== 配置 ==============
 
@@ -232,6 +233,7 @@ const DOCUMENT_TOOL_RESPONSES = {
 };
 
 const wsManager = {
+  _activeChat: null,
   /** @type {WebSocket|null} */
   ws: null,
   /** 连接状态 */
@@ -364,9 +366,14 @@ const wsManager = {
       };
 
       ws.onmessage = (event) => {
+        if (this.ws !== ws) return;
         let data;
         try {
           data = JSON.parse(event.data);
+          if (!this._activeChat || this._completeCalled
+              || data.chatId !== this._activeChat.chatId
+              || data.sessionId !== this._activeChat.sessionId) return;
+          if (this._stopping && DOCUMENT_TOOL_RESPONSES[data.type]) return;
 
           // 收到任何消息（包括后端 keepalive 的 ping）都重置空闲超时计时
           if (this._requestTimeoutTimer) {
@@ -434,6 +441,7 @@ const wsManager = {
       };
 
       ws.onclose = (event) => {
+        if (this.ws !== ws) return;
         console.log('[WebSocket] 连接关闭:', event.code, event.reason);
         this.connected = false;
         this.ws = null;
@@ -475,9 +483,12 @@ const wsManager = {
    * @param {Object} data - 要发送的数据
    */
   async send(data) {
+    const chat = this._activeChat;
+    if (!chat || data.chatId !== chat.chatId || data.sessionId !== chat.sessionId) return;
     if (!this.ws || !this.connected) {
       await this.connect();
     }
+    if (this._activeChat !== chat || this._completeCalled) return;
     this.ws.send(JSON.stringify(data));
   },
 
@@ -485,7 +496,7 @@ const wsManager = {
     if (!DOCUMENT_TOOL_RESPONSES[data?.type] || (data.type === 'json' && !data.requestId)) {
       return;
     }
-    this.send({ type: 'frontend_tool_progress', tool: data.type, phase,
+    this.send({ chatId: data.chatId, sessionId: data.sessionId, type: 'frontend_tool_progress', tool: data.type, phase,
       requestId: data.requestId || null, docId: data.docId, paraID: data.paraID,
       elapsedMs: Math.round(elapsedMs) }).catch(error => console.warn('[WebSocket] 回传工具进度失败:', error));
   },
@@ -495,7 +506,7 @@ const wsManager = {
     if (!type || (data.type === 'json' && !data.requestId)) {
       return;
     }
-    this.send({ type, requestId: data.requestId || null, docId: data.docId, paraID: data.paraID,
+    this.send({ chatId: data.chatId, sessionId: data.sessionId, type, requestId: data.requestId || null, docId: data.docId, paraID: data.paraID,
       success: false, requiresRead: true, documentJson: {}, matches: [], matchCount: 0,
       error: `前端处理 ${data.type} 失败: ${error?.message || String(error)}`
     }).catch(sendError => console.error('[WebSocket] 回传工具失败结果失败:', sendError));
@@ -509,10 +520,17 @@ const wsManager = {
       clearTimeout(this._reconnectTimer);
       this._reconnectTimer = null;
     }
-    if (this.ws) {
-      this.ws.close(1000, '主动关闭');
-      this.ws = null;
-      this.connected = false;
+    if (this._requestTimeoutTimer) clearTimeout(this._requestTimeoutTimer);
+    this._requestTimeoutTimer = null;
+    const socket = this.ws;
+    this.ws = null;
+    this.connected = false;
+    this._connectPromise = null;
+    this._completeCalled = true;
+    this._activeChat = null;
+    if (socket) {
+      socket.onmessage = socket.onerror = socket.onclose = null;
+      socket.close(1000, '主动关闭');
     }
   },
 
@@ -544,6 +562,7 @@ const wsManager = {
 
       progress('parse_start');
       const docData = await parseDocumentRange(startParaIndex, endParaIndex, docId, startParaID, endParaID, mode);
+      if (params.chatId !== this._activeChat?.chatId || this._completeCalled) return;
       progress('parse_finish');
 
       if (docData.error) {
@@ -558,7 +577,7 @@ const wsManager = {
 
       // 通过 WebSocket 回传文档给后端
       await this.send({
-        type: 'document_response',
+        type: 'document_response', chatId: params.chatId, sessionId: params.sessionId,
         documentJson: docData
       });
       progress('response_sent');
@@ -578,7 +597,7 @@ const wsManager = {
       console.error('[WebSocket] 解析/回传文档失败:', err);
       // 回传错误，避免后端一直等待 q.get()
       await this.send({
-        type: 'document_response',
+        type: 'document_response', chatId: params.chatId, sessionId: params.sessionId,
         documentJson: {},
         error: err?.message || String(err)
       });
@@ -591,7 +610,7 @@ const wsManager = {
    * @param {Object} query - Query DSL 对象 {type, filters}
    * @param {number|null} docId - 文档 ID，null/0 表示活动文档
    */
-  async _handleQueryRequest(query, docId = null) {
+  async _handleQueryRequest(query, docId = null, scope = this._activeChat) {
     try {
       if (canUseLightweightTextQuery(query)) {
         console.log('[WebSocket][Search] 使用轻量搜索：仅扫描段落文本/ParaID，不解析完整 JSON', {
@@ -615,7 +634,7 @@ const wsManager = {
         )].sort((a, b) => a - b);
 
         await this.send({
-          type: 'query_response',
+          type: 'query_response', chatId: scope?.chatId, sessionId: scope?.sessionId,
           matches: result.matches,
           matchCount: result.matchCount,
           matchedParaIndices,
@@ -642,6 +661,7 @@ const wsManager = {
         console.log('[WebSocket] 文档缓存未命中或文档不匹配，解析全文...', docId ? `docId=${docId}` : '(active)');
         // 先解析全文文档 JSON
         docData = await parseDocumentRange(0, -1, docId);
+        if (scope?.chatId !== this._activeChat?.chatId || this._completeCalled) return;
 
         if (docData.error) {
           throw new Error(docData.error);
@@ -672,7 +692,7 @@ const wsManager = {
 
       // 通过 WebSocket 回传查询结果
       await this.send({
-        type: 'query_response',
+        type: 'query_response', chatId: scope?.chatId, sessionId: scope?.sessionId,
         matches: result.matches,
         matchCount: result.matchCount,
         matchedParaIndices,
@@ -687,7 +707,7 @@ const wsManager = {
       console.error('[WebSocket] 查询文档失败:', err);
       // 回传空结果，避免后端一直等待
       await this.send({
-        type: 'query_response',
+        type: 'query_response', chatId: scope?.chatId, sessionId: scope?.sessionId,
         matches: [],
         matchCount: 0,
         error: err.message
@@ -742,6 +762,15 @@ function chatStream(message, options = {}) {
     userResponse = null
   } = options;
 
+  if (wsManager._activeChat && !wsManager._completeCalled) {
+    queueMicrotask(() => onError?.(new Error('当前窗口正在生成，请先停止或等待完成')));
+    return { abort() {} };
+  }
+  const chat = { chatId: createChatId(), sessionId, windowId: getWindowId() };
+  wsManager._activeChat = chat;
+  wsManager._stopping = false;
+  wsManager.clearDocumentCache();
+  let stopped = false;
   // 重置完成状态
   wsManager._completeCalled = false;
   // 清除可能残留的超时定时器
@@ -759,6 +788,7 @@ function chatStream(message, options = {}) {
     try {
       // 确保 WebSocket 已连接
       await wsManager.connect();
+      if (stopped || wsManager._activeChat !== chat) return;
 
       // 设置空闲超时：每收到任何消息（含后端 keepalive ping）会自动重置计时
       // 真正空闲到阈值才会触发，正常长 LLM 思考期间因为有 ping 不会被误杀
@@ -770,6 +800,7 @@ function chatStream(message, options = {}) {
       // 发送聊天请求
       await wsManager.send({
         type: 'chat',
+        ...chat,
         message: message.trim(),
         mode,
         model,
@@ -783,6 +814,7 @@ function chatStream(message, options = {}) {
         timestamp: Date.now()
       });
     } catch (error) {
+      if (wsManager._activeChat !== chat) return;
       // 清除超时定时器
       if (wsManager._requestTimeoutTimer) {
         clearTimeout(wsManager._requestTimeoutTimer);
@@ -804,13 +836,16 @@ function chatStream(message, options = {}) {
 
   return {
     abort: () => {
-      // 清除超时定时器
-      if (wsManager._requestTimeoutTimer) {
-        clearTimeout(wsManager._requestTimeoutTimer);
-        wsManager._requestTimeoutTimer = null;
-      }
       // 发送停止请求
-      wsManager.send({ type: 'stop' }).catch(() => {});
+      if (wsManager._activeChat !== chat || wsManager._completeCalled) return;
+      stopped = true;
+      wsManager._stopping = true;
+      if (!wsManager.connected) {
+        wsManager._completeCalled = true;
+        onComplete?.();
+        return;
+      }
+      wsManager.send({ type: 'stop', ...chat }).catch(() => {});
     }
   };
 }
@@ -938,7 +973,7 @@ function waitForNextTick() {
 }
 
 async function parseDocumentRangeLightweight(doc, startParaIndex, endParaIndex) {
-  const result = { paragraphs: [], fields: [], _lightweight: true };
+  const result = { paragraphs: [], _lightweight: true };
   const total = endParaIndex - startParaIndex + 1;
   const startedAt = Date.now();
 
@@ -1618,6 +1653,7 @@ function createDocument() {
 // ============== 导出 ==============
 
 export default {
+  windowStorageKey,
   // API 方法
   chatStream,
   getModels,

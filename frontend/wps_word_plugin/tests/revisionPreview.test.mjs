@@ -1153,7 +1153,6 @@ for (const action of ['accept', 'reject']) {
         vm[key].push({ docId: doc.DocID, _revisionBatchId: batch.batchId,
           documentJson: { paragraphs: [{}] }, msg: { _revisionBatchId: batch.batchId } });
       }
-      vm._streamInsertions.push({ docId: doc.DocID });
     }
     vm._refreshAIRevisionPreview();
     assert.deepEqual(vm.aiRevisionDocuments, [{ docId: 31, count: 1 }]);
@@ -1167,7 +1166,6 @@ for (const action of ['accept', 'reject']) {
       assert.deepEqual(vm[key].map(item => item.docId), [32]);
       assert.equal(vm[key][0].msg._revisionBatchId, docs[1].batch.batchId);
     }
-    assert.deepEqual(vm._streamInsertions, [{ docId: 32 }]);
     assert.equal(vm.pendingDocument, null);
     selectDocument(docs[1].doc);
     vm[handler](); // A's stale button must only refresh the panel.
@@ -1213,7 +1211,7 @@ test('inserting with docId zero binds the pending revision to the actual documen
     }
   });
   const msg = {};
-  const item = { docId: 0, documentJson: { paragraphs: [{}] }, msg };
+  const item = { docId: 0, insertParaID: 0, documentJson: { paragraphs: [{}] }, msg };
   assert.equal(vm._applyImmediateInsertion(item), true);
   assert.equal(item.docId, 51);
   assert.equal(msg._docId, 51);
@@ -1264,13 +1262,44 @@ test('manual formatted insertion records the actual DocID in its message and pen
       return { success: true, startPos: 10, endPos: 20 };
     }
   });
-  const msg = { documentJson: { paragraphs: [{}] } };
+  const msg = { documentJson: { paragraphs: [{}] }, _insertParaID: 0 };
   vm.insertToWord(msg);
   assert.equal(vm.pendingInsertions[0].docId, 71);
   assert.equal(msg._docId, 71);
   vm.acceptPendingRevisions();
   assert.equal(vm.pendingInsertions.length, 0);
   assert.equal(doc._items.length, 0);
+});
+
+test('缺失插入 ID 直接回报失败，不进入文档写入', () => {
+  const doc = documentWith();
+  let writes = 0;
+  const { vm, responses } = chatPane(doc, () => {}, [doc], {
+    generate() { writes++; return { success: true }; }
+  });
+  assert.equal(vm._applyImmediateInsertion({ docId: 0, requestId: 'missing', documentJson: { paragraphs: [] } }), false);
+  assert.equal(writes, 0);
+  assert.equal(responses[0].success, false);
+  assert.match(responses[0].error, /insertParaID/);
+});
+
+test('格式化插入失败、JSON 无效或缺失 ID 时均不回退纯文本写入', () => {
+  const doc = Object.assign(documentWith(), { Content: { End: 20 } });
+  const alerts = [];
+  const { vm } = chatPane(doc, message => alerts.push(message), [doc], {
+    generate() { return { error: 'Missing target paragraph' }; }
+  });
+  let plainTextWrites = 0;
+  vm.insertPlainText = () => { plainTextWrites++; };
+  for (const msg of [
+    { documentJson: { paragraphs: [] }, _insertParaID: 999 },
+    { documentJson: { paragraphs: [] } },
+    { documentJson: { tables: [] }, _insertParaID: 0 },
+    { content: '```json\n{invalid\n```' },
+  ]) vm.insertToWord(msg);
+  assert.equal(alerts.length, 4);
+  assert.equal(plainTextWrites, 0);
+  assert.equal(vm.pendingInsertions.length, 0);
 });
 
 test('edit and delete requests with docId zero also retain a concrete document identity', () => {

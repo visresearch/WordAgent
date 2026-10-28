@@ -21,8 +21,7 @@
  *           wrapType: "inline",
  *           altText: "图片说明"
  *         }
- *       ],
- *       paraIndex: 0           // 可选；生成时仅用于图片锚定，不决定块顺序
+ *       ]
  *     },
  *     {                        // 表格块，位于相邻段落之间
  *       tables: [{
@@ -56,7 +55,7 @@
  * }
  *
  * read_document(full) 的读取结果是上述结构的扩展：普通段落还会带 paraID、
- * paraIndex，以及客户端支持时的 pageStart/pageEnd；顶层也可能带 fields、hasTOC
+ * paraIndex，以及客户端支持时的 pageStart/pageEnd；顶层也可能带 hasTOC
  * 和 tocFieldCode。这些读取元数据不属于后端生成用的 DocumentOutput。
  *
  * 图片作为段落内 inline runs（无 text、有 url），与 WPS 版一致。
@@ -2137,7 +2136,7 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
         }
         await context.sync();
 
-        const rangeResult = { paragraphs: [], tables: [], fields: [] };
+        const rangeResult = { paragraphs: [], tables: [] };
         // 强制为全文段落补齐隐藏书签，确保每段都具备 paraID
         const allParaIDs = await resolveParagraphParaIDs(context, allParas.items);
         const paragraphPageRanges = await loadParagraphPageRanges(
@@ -2544,24 +2543,18 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
       const result = {
         paragraphs: [],
         tables: [],
-        fields: [],
       };
 
       // === 解析域代码 ===
       try {
         if (fields.items && fields.items.length > 0) {
           for (const field of fields.items) {
-            field.load("type,code");
-            field.result.load("text");
+            field.load("code");
           }
           await context.sync();
 
           for (const field of fields.items) {
             const fieldCode = field.code || "";
-            result.fields.push({
-              type: field.type,
-              code: fieldCode.trim(),
-            });
             if (fieldCode.toUpperCase().includes("TOC")) {
               result.hasTOC = true;
               result.tocFieldCode = fieldCode.trim();
@@ -3134,7 +3127,7 @@ async function parseDocxToJSONLightweight(startParaIndex = 0, endParaIndex = -1)
       }
 
       const paraIDs = await resolveParagraphParaIDs(context, paragraphs.items);
-      const result = { paragraphs: [], fields: [], _lightweight: true };
+      const result = { paragraphs: [], _lightweight: true };
       for (let index = start; index <= end; index++) {
         const text = cleanText(paragraphs.items[index]?.text || "");
         result.paragraphs.push({
@@ -3338,11 +3331,10 @@ function applyGeneratedParagraphStyle(paragraph, pStyle) {
  * 从 JSON 数据生成 Word 文档（异步，基于 Office.js API）
  *
  * @param {Object} jsonData - JSON 数据
- * @param {string} insertLocation - 兼容旧调用，已不再用于决定插入位置
  * @param {string|number} insertParaID - 必填。0 表示文档开头；其他值表示插入到对应 paraID 段落之后
  * @returns {Promise<Object>} - 成功返回 {success: true}，失败返回 {error: string}
  */
-async function generateDocxFromJSON(jsonData, _insertLocation = "selection", insertParaID) {
+async function generateDocxFromJSON(jsonData, insertParaID) {
   try {
     if (!jsonData || !Array.isArray(jsonData.paragraphs)) {
       return { error: "JSON数据格式不正确" };
@@ -3351,21 +3343,20 @@ async function generateDocxFromJSON(jsonData, _insertLocation = "selection", ins
       return { error: "顶层 tables 已停用，请将表格块放入 paragraphs 数组的目标位置" };
     }
 
+    const normalizedInsertParaID = normalizeParaID(insertParaID);
+    if (normalizedInsertParaID === null) {
+      return {
+        error: "generate_document 缺少必填 insertParaID；文档开头请传 0，其他位置请传真实 paraID",
+      };
+    }
+
     const styles = jsonData.styles || {};
 
     return await Word.run(async (context) => {
       let targetRange;
       let startAnchorParagraph = null;
       let emptyDocumentPlaceholder = null;
-      const existingParaIDs = new Set(await ensureAllParagraphsHaveHiddenBookmarks(context));
       const insertedParaIDs = [];
-
-      const normalizedInsertParaID = normalizeParaID(insertParaID);
-      if (normalizedInsertParaID === null) {
-        return {
-          error: "generate_document 缺少必填 insertParaID；文档开头请传 0，其他位置请传真实 paraID",
-        };
-      }
 
       if (isDocumentStartInsertParaID(insertParaID)) {
         const allParagraphs = context.document.body.paragraphs;
@@ -3397,6 +3388,8 @@ async function generateDocxFromJSON(jsonData, _insertLocation = "selection", ins
           targetRange = allParagraphs.items[targetParaIndex];
         }
       }
+
+      const existingParaIDs = new Set(await ensureAllParagraphsHaveHiddenBookmarks(context));
 
       // paragraphs 是唯一的有序内容流：普通项是段落，{tables:[...]} 项是表格块。
       // 严格按数组顺序展开，不再为表格猜测 position 或默认位置。

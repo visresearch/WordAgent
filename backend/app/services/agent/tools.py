@@ -105,11 +105,14 @@ ASK_BASE_TOOLS = [
 
 
 def get_base_tools_for_mode(mode: str | None) -> list:
-    """按单智能体模式返回基础工具列表。"""
+    """无状态工具可共享；Python 执行命名空间必须按请求隔离。"""
     normalized = (mode or "agent").strip().lower()
     if normalized == "ask":
         return list(ASK_BASE_TOOLS)
-    return list(AGENT_BASE_TOOLS)
+    return [
+        build_python_repl(get_tool_description("python_repl")) if tool is python_repl else tool
+        for tool in AGENT_BASE_TOOLS
+    ]
 
 
 # 兼容旧引用

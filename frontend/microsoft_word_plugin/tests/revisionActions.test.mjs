@@ -155,6 +155,23 @@ test('等待 Office.js 开启修订期间停止，不再提交文档写入或回
   }
 });
 
+test('JSON 无效或缺失插入 ID 时不回退纯文本写入', async () => {
+  const { instance } = component('AIChatPane', {});
+  let errors = 0;
+  let writes = 0;
+  instance._showPendingActionError = () => { errors++; };
+  instance._refreshRevisionPreview = async () => {};
+  instance._insertPlainText = async () => { writes++; };
+  instance._applyImmediateInsertion = async () => { writes++; };
+  for (const msg of [
+    { documentJson: { paragraphs: [] } },
+    { documentJson: { tables: [] }, _insertParaID: 0 },
+    { content: '```json\n{invalid\n```' },
+  ]) await instance.insertToWord(msg);
+  assert.equal(errors, 3);
+  assert.equal(writes, 0);
+});
+
 test('停止后仍可主动将已生成的内容插入 Word', async () => {
   let writes = 0;
   const { instance } = component('AIChatPane', {

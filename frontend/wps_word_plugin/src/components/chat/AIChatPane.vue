@@ -53,6 +53,7 @@
       <div v-if="sessionVisible" class="session-panel">
         <SessionPane
           :current-session-id="currentSessionId"
+          :busy="isLoading || preparingRequest"
           @select-session="onSelectSession"
           @create-session="onCreateSession"
         />
@@ -95,6 +96,7 @@ export default {
       modelsLoading: false,
       messages: [],
       isLoading: false,
+      preparingRequest: false,
       lastReadJSON: null,
       selections: [],  // 多选区数组 [{preview, startText, endText, startParaIndex, endParaIndex, charCount, hasMore}]
       uploadedFiles: [], // 已添加文件列表（File 对象）
@@ -113,7 +115,6 @@ export default {
       revisionDocumentName: '',
       pendingEdits: [],  // 已立即执行、等待统一接受/拒绝的原生段落编辑修订
       pendingInsertions: [],  // [{documentJson, docId, insertParaID, msg}] 待确认的文档插入列表
-      _streamInsertions: [], // [{insertParaID, count, docId}] 当前流式中已执行的插入操作
       historyLoading: false,
       hasHistory: false,
       historyLoaded: false,
@@ -160,11 +161,11 @@ export default {
     // storage 事件可能不在同一窗口触发，用轮询兜底
     this._lastToggleVal = '';
     try {
-      this._lastToggleVal = localStorage.getItem('wence_session_toggle') || ''; 
+      this._lastToggleVal = localStorage.getItem(api.windowStorageKey('wence_session_toggle')) || '';
     } catch (e) {}
     this._togglePoll = setInterval(() => {
       try {
-        const val = localStorage.getItem('wence_session_toggle') || '';
+        const val = localStorage.getItem(api.windowStorageKey('wence_session_toggle')) || '';
         if (val !== this._lastToggleVal) {
           this._lastToggleVal = val;
           sessionState.manualValue = !sessionState.visible;
@@ -173,6 +174,7 @@ export default {
     }, 200);
   },
   beforeUnmount() {
+    api.wsManager.close();
     clearInterval(this.revisionPreviewTimer);
     if (this._onResize) {
       window.removeEventListener('resize', this._onResize);
@@ -689,12 +691,12 @@ export default {
         this.currentStreamCtrl.abort();
         this.currentStreamCtrl = null;
       }
-      this.isLoading = false;
+      // Wait for this turn's done event before allowing another request.
     },
 
     /**
      * 初始化会话并加载历史记录
-     * 优先使用 PluginStorage 中保存的 session_id，否则查找全局最新会话
+     * 仅恢复当前窗口保存的 session_id；新窗口从空白会话开始
      */
     async initSessionAndLoadHistory() {
       // 防止初始化过程中 ensureSession 创建新会话
@@ -705,7 +707,7 @@ export default {
         // 尝试从 PluginStorage 恢复上次的 session_id
         let savedSessionId = null;
         if (window.Application && window.Application.PluginStorage) {
-          savedSessionId = window.Application.PluginStorage.getItem('current_session_id');
+          savedSessionId = window.Application.PluginStorage.getItem(api.windowStorageKey('current_session_id'));
         }
 
         if (savedSessionId) {
@@ -714,59 +716,8 @@ export default {
           this.currentSessionId = savedSessionId;
           await this.loadSessionMessages();
         } else {
-          // 没有保存的 session_id，查找全局最新会话
-          console.log('[初始化] 查找全局最新会话');
-          const result = await api.getLatestSession();
-          if (result.success && result.data?.session) {
-            this.currentSessionId = result.data.session.id;
-            this.currentSessionTitle = result.data.session.title || null;
-            console.log('[初始化] 找到最新会话:', this.currentSessionId);
-
-            // 保存到 PluginStorage
-            if (window.Application && window.Application.PluginStorage) {
-              window.Application.PluginStorage.setItem('current_session_id', String(this.currentSessionId));
-            }
-
-            // 直接使用返回的消息数据
-            const messages = result.data.messages || [];
-            this.messages = messages.map((msg) => {
-              const toolJson = msg.toolJson || null;
-              const parts = this._sanitizeContentParts(msg.contentParts);
-              return {
-                role: msg.role,
-                content: msg.content,
-                contentParts: parts.length > 0 ? parts : (msg.content ? [{ type: 'text', content: msg.content }] : []),
-                documentJson: this._extractDocumentJsonFromToolJson(toolJson),
-                toolJson,
-                selectionContext: msg.selectionContext || null,
-                thinking: msg.thinking || '',
-                thinkingExpanded: !!msg.thinking,
-                thinkingDone: true,
-                attachedFiles: msg.attachedFiles || null
-              };
-            });
-
-            if (result.data.lastUsedModel) {
-              this.selectedModel = result.data.lastUsedModel;
-            }
-            if (result.data.lastUsedProvider) {
-              this.selectedModelProvider = result.data.lastUsedProvider;
-            }
-            if (result.data.lastUsedMode) {
-              this.mode = result.data.lastUsedMode;
-            }
-            this._restoreTokenStats(result.data.tokenStats, this.currentSessionId);
-            this.pendingQuestions[this.currentSessionId] = result.data.pendingQuestion || null;
-            this.syncQuestionRecords(this.currentSessionId);
-
-            this.hasHistory = this.messages.length > 0;
-            this.historyLoaded = true;
-            this.$nextTick(() => this.scrollToBottom());
-          } else {
-            console.log('[初始化] 当前没有历史会话');
-            this.hasHistory = false;
-            this.historyLoaded = false;
-          }
+          this.hasHistory = false;
+          this.historyLoaded = false;
         }
       } catch (e) {
         console.error('[初始化] 失败:', e);
@@ -779,6 +730,7 @@ export default {
      * SessionPane 选择会话事件
      */
     async onSelectSession(session) {
+      if (this.isLoading || this.preparingRequest) return;
       const sessionId = session.id;
       const title = session.title;
       console.log('[会话切换] sessionId:', sessionId, 'title:', title);
@@ -812,7 +764,7 @@ export default {
         this.historyLoaded = true;
         this._restoreTokenStats(this._sessionTokenStats[sessionId], sessionId);
         if (window.Application && window.Application.PluginStorage) {
-          window.Application.PluginStorage.setItem('current_session_id', String(sessionId));
+          window.Application.PluginStorage.setItem(api.windowStorageKey('current_session_id'), String(sessionId));
         }
         this.$nextTick(() => this.scrollToBottom());
         return;
@@ -825,7 +777,7 @@ export default {
       this.currentSessionTitle = title || null;
 
       if (window.Application && window.Application.PluginStorage) {
-        window.Application.PluginStorage.setItem('current_session_id', String(sessionId));
+        window.Application.PluginStorage.setItem(api.windowStorageKey('current_session_id'), String(sessionId));
       }
 
       await this.loadSessionMessages(sessionId);
@@ -835,6 +787,7 @@ export default {
      * SessionPane 创建会话事件
      */
     onCreateSession(session) {
+      if (this.isLoading || this.preparingRequest) return;
       this.currentSessionId = session.id;
       this.currentSessionTitle = session.title;
       this.messages = [];
@@ -842,7 +795,7 @@ export default {
       this.hasHistory = false;
       this._restoreTokenStats(null);
       if (window.Application && window.Application.PluginStorage) {
-        window.Application.PluginStorage.setItem('current_session_id', String(session.id));
+        window.Application.PluginStorage.setItem(api.windowStorageKey('current_session_id'), String(session.id));
       }
     },
 
@@ -933,7 +886,7 @@ export default {
             this.hasHistory = false;
             this.historyLoaded = false;
             if (window.Application && window.Application.PluginStorage) {
-              window.Application.PluginStorage.removeItem('current_session_id');
+              window.Application.PluginStorage.removeItem(api.windowStorageKey('current_session_id'));
             }
           }
         }
@@ -979,7 +932,7 @@ export default {
         this.currentSessionId = null;
         this.currentSessionTitle = null;
         if (window.Application && window.Application.PluginStorage) {
-          window.Application.PluginStorage.removeItem('current_session_id');
+          window.Application.PluginStorage.removeItem(api.windowStorageKey('current_session_id'));
         }
       }
 
@@ -998,7 +951,7 @@ export default {
 
           // 保存到 PluginStorage
           if (window.Application && window.Application.PluginStorage) {
-            window.Application.PluginStorage.setItem('current_session_id', String(this.currentSessionId));
+            window.Application.PluginStorage.setItem(api.windowStorageKey('current_session_id'), String(this.currentSessionId));
           }
 
           // 通知 SessionPane 刷新列表
@@ -1016,6 +969,7 @@ export default {
      * 清空当前会话的聊天历史
      */
     async clearChatHistory() {
+      if (this.isLoading || this.preparingRequest) return;
       if (!this.currentSessionId) {
         this.messages = [];
         return;
@@ -1031,7 +985,7 @@ export default {
 
           // 清除 PluginStorage
           if (window.Application && window.Application.PluginStorage) {
-            window.Application.PluginStorage.removeItem('current_session_id');
+            window.Application.PluginStorage.removeItem(api.windowStorageKey('current_session_id'));
           }
 
           // 通知 SessionPane 刷新
@@ -1322,86 +1276,91 @@ export default {
      * 处理用户发送消息（由 ChatInput 触发）
      */
     async handleSend(userMessage) {
-      if (this.isLoading || this.pendingQuestions[this.currentSessionId]) {
+      if (this.isLoading || this.preparingRequest || this.pendingQuestions[this.currentSessionId]) {
         return;
       }
-      // 确保有会话
-      const sessionId = await this.ensureSession();
-      if (!sessionId) {
-        console.error('[发送] 无法获取会话，取消发送');
-        return;
-      }
-
-      const userMsgObj = {
-        role: 'user',
-        content: userMessage
-      };
-
-      let selectionContext = null;
-      let documentRange = null;
-
-      if (this.selections.length > 0) {
-        selectionContext = this.selections.map(s => ({
-          preview: s.preview,
-          startText: s.startText,
-          endText: s.endText,
-          startParaIndex: s.startParaIndex,
-          endParaIndex: s.endParaIndex,
-          charCount: s.charCount,
-          docId: s.docId,
-          docName: s.docName
-        }));
-        documentRange = this.selections.map(s => ({
-          startParaIndex: s.startParaIndex,
-          endParaIndex: s.endParaIndex,
-          docId: Number.isInteger(s.docId) ? s.docId : 0,
-          docName: s.docName
-        }));
-        userMsgObj.selectionContext = selectionContext;
-      }
-
-      // 上传附件（在清空前捕获）
-      let uploadedFilesMeta = [];
-      if (this.uploadedFiles.length > 0) {
-        try {
-          const uploadResult = await api.uploadFiles(this.uploadedFiles);
-          if (uploadResult.success && uploadResult.files) {
-            uploadedFilesMeta = uploadResult.files;
-            console.log('[AIChatPane] 附件上传成功:', uploadedFilesMeta.length, '个文件');
-          } else {
-            console.warn('[AIChatPane] 附件上传失败:', uploadResult.error);
-          }
-        } catch (err) {
-          console.warn('[AIChatPane] 附件上传异常:', err);
+      this.preparingRequest = true;
+      try {
+        // 确保有会话
+        const sessionId = await this.ensureSession();
+        if (!sessionId) {
+          console.error('[发送] 无法获取会话，取消发送');
+          return;
         }
+
+        const userMsgObj = {
+          role: 'user',
+          content: userMessage
+        };
+
+        let selectionContext = null;
+        let documentRange = null;
+
+        if (this.selections.length > 0) {
+          selectionContext = this.selections.map(s => ({
+            preview: s.preview,
+            startText: s.startText,
+            endText: s.endText,
+            startParaIndex: s.startParaIndex,
+            endParaIndex: s.endParaIndex,
+            charCount: s.charCount,
+            docId: s.docId,
+            docName: s.docName
+          }));
+          documentRange = this.selections.map(s => ({
+            startParaIndex: s.startParaIndex,
+            endParaIndex: s.endParaIndex,
+            docId: Number.isInteger(s.docId) ? s.docId : 0,
+            docName: s.docName
+          }));
+          userMsgObj.selectionContext = selectionContext;
+        }
+
+        // 上传附件（在清空前捕获）
+        let uploadedFilesMeta = [];
+        if (this.uploadedFiles.length > 0) {
+          try {
+            const uploadResult = await api.uploadFiles(this.uploadedFiles);
+            if (uploadResult.success && uploadResult.files) {
+              uploadedFilesMeta = uploadResult.files;
+              console.log('[AIChatPane] 附件上传成功:', uploadedFilesMeta.length, '个文件');
+            } else {
+              console.warn('[AIChatPane] 附件上传失败:', uploadResult.error);
+            }
+          } catch (err) {
+            console.warn('[AIChatPane] 附件上传异常:', err);
+          }
+        }
+
+        // 添加附件到用户消息对象
+        if (uploadedFilesMeta.length > 0) {
+          userMsgObj.attachedFiles = uploadedFilesMeta;
+        }
+
+        this.messages.push(userMsgObj);
+        if (!this.currentSessionTitle || ['新对话', 'New conversation'].includes(this.currentSessionTitle)) {
+          this.currentSessionTitle = userMessage.length > 30 ? userMessage.substring(0, 30) + '...' : userMessage;
+        }
+        this.historyLoaded = true;
+
+        this.clearAllSelections();
+        this.clearAllFiles();
+
+        this._sendStreamRequest(userMessage, documentRange, uploadedFilesMeta, selectionContext);
+      } finally {
+        this.preparingRequest = false;
       }
-
-      // 添加附件到用户消息对象
-      if (uploadedFilesMeta.length > 0) {
-        userMsgObj.attachedFiles = uploadedFilesMeta;
-      }
-
-      this.messages.push(userMsgObj);
-      if (!this.currentSessionTitle || ['新对话', 'New conversation'].includes(this.currentSessionTitle)) {
-        this.currentSessionTitle = userMessage.length > 30 ? userMessage.substring(0, 30) + '...' : userMessage;
-      }
-      this.historyLoaded = true;
-
-      this.clearAllSelections();
-      this.clearAllFiles();
-
-      this._sendStreamRequest(userMessage, documentRange, uploadedFilesMeta, selectionContext);
     },
 
     /**
      * 发送流式请求的公共方法
      */
     _sendStreamRequest(userMessage, documentRange, files = [], selectionContext = null, userResponse = null, pendingQuestion = null) {
+      if (this.isLoading) return;
       this.transcriptVersion += 1;
       this.isLoading = true;
       const streamSessionId = this.currentSessionId;
       this._streamingSessionId = streamSessionId;
-      this._streamInsertions = [];
       this.scrollToBottom();
 
       this.messages.push({
@@ -1611,6 +1570,7 @@ export default {
         });
         this.scrollToBottom();
         api.wsManager._handleDocumentRequest({
+          chatId: data.chatId, sessionId: data.sessionId,
           startParaIndex: this._toIntOrNull(data.startParaIndex),
           endParaIndex: this._toIntOrNull(data.endParaIndex),
           startParaID: this._toIntOrNull(data.startParaID),
@@ -1630,7 +1590,7 @@ export default {
           loading: true
         });
         this.scrollToBottom();
-        api.wsManager._handleQueryRequest(data.query, this._toIntOrDefault(data.docId, 0));
+        api.wsManager._handleQueryRequest(data.query, this._toIntOrDefault(data.docId, 0), data);
         return;
       }
 
@@ -1706,7 +1666,7 @@ export default {
         this._applyImmediateDelete({
           paraIDs,
           docId: this._toIntOrDefault(data.docId, 0),
-          requestId: data.requestId || null
+          chatId: data.chatId, sessionId: data.sessionId, requestId: data.requestId || null
         });
         return;
       }
@@ -1753,7 +1713,7 @@ export default {
           paraID,
           runs,
           docId: this._toIntOrDefault(data.docId, 0),
-          requestId: data.requestId || null,
+          chatId: data.chatId, sessionId: data.sessionId, requestId: data.requestId || null,
           msg
         });
         return;
@@ -1801,6 +1761,7 @@ export default {
           });
           if (requestId) {
             api.wsManager.send({
+            chatId: data.chatId, sessionId: data.sessionId,
               type: 'insert_break_response',
               requestId,
               success: true,
@@ -1817,6 +1778,7 @@ export default {
           console.warn('[AIChatPane] 插入断行失败:', result.error);
           if (requestId) {
             api.wsManager.send({
+            chatId: data.chatId, sessionId: data.sessionId,
               type: 'insert_break_response',
               requestId,
               success: false,
@@ -1847,6 +1809,7 @@ export default {
           pendingPart.loading = false;
           msg._docId = this._toIntOrDefault(result.documentId, 0);
           api.wsManager.send({
+            chatId: data.chatId, sessionId: data.sessionId,
             type: 'create_document_response',
             success: true,
             documentId: msg._docId
@@ -1856,6 +1819,7 @@ export default {
           pendingPart.loading = false;
           console.error('[AIChatPane] 创建 WPS 空白 DOCX 失败:', error);
           api.wsManager.send({
+            chatId: data.chatId, sessionId: data.sessionId,
             type: 'create_document_response',
             success: false,
             error: error?.message || String(error)
@@ -2002,7 +1966,7 @@ export default {
           msg: msg,
           insertStartPos: null,
           insertEndPos: null,
-          requestId: data.requestId || null
+          chatId: data.chatId, sessionId: data.sessionId, requestId: data.requestId || null
         };
         const inserted = this._applyImmediateInsertion(insItem);
         if (!inserted) {
@@ -2036,6 +2000,7 @@ export default {
           return;
         }
         api.wsManager.send({
+          chatId: payload.chatId, sessionId: payload.sessionId,
           type: 'delete_response',
           requestId: payload.requestId,
           ...result
@@ -2188,6 +2153,7 @@ export default {
           return;
         }
         api.wsManager.send({
+          chatId: payload.chatId, sessionId: payload.sessionId,
           type: 'edit_document_response',
           requestId: payload.requestId,
           ...result
@@ -2282,6 +2248,7 @@ export default {
           return;
         }
         api.wsManager.send({
+          chatId: insItem.chatId, sessionId: insItem.sessionId,
           type: 'generate_document_response',
           requestId: insItem.requestId,
           ...payload
@@ -2289,6 +2256,10 @@ export default {
       };
       insItem.docId = this._toIntOrDefault(insItem.docId, 0);
       insItem.insertParaID = this._toIntOrNull(insItem.insertParaID);
+      if (insItem.insertParaID === null) {
+        sendResult({ success: false, error: 'generate_document 缺少有效 insertParaID' });
+        return false;
+      }
       const doc = this._resolveTargetDoc(insItem.docId);
       if (!doc) {
         console.warn('[AIChatPane] _applyImmediateInsertion: 无法获取文档对象 docId=', insItem.docId);
@@ -2324,17 +2295,6 @@ export default {
           sendResult({ success: false, error: result?.error || '文档插入失败' });
           return false;
         }
-        if (result.warning) {
-          if (insItem.msg && Array.isArray(insItem.msg.contentParts)) {
-            insItem.msg.contentParts.push({
-              type: 'status',
-              content: `⚠️ ${result.warning}`,
-              loading: false
-            });
-          }
-          console.warn('[AIChatPane] 即时插入警告:', result.warning);
-        }
-
         insItem.insertStartPos = result.startPos;
         insItem.insertEndPos = result.endPos;
         insItem._alreadyInserted = true;
@@ -2344,17 +2304,6 @@ export default {
           'insert'
         );
         insItem._revisionBatchId = revisionBatch.batchId;
-
-        // 记录本次流中已执行的插入，供后续 delete_document 做索引偏移
-        const { paragraphCount: paraCount, tableCount } = this._countDocumentContent(insItem.documentJson);
-        const shiftCount = paraCount + tableCount;
-        if (shiftCount > 0) {
-          this._streamInsertions.push({
-            insertParaID: insItem.insertParaID,
-            count: shiftCount,
-            docId: this._toIntOrDefault(insItem.docId, 0)
-          });
-        }
 
         if (insItem.msg) {
           insItem.msg.insertStartPos = result.startPos;
@@ -2421,7 +2370,6 @@ export default {
       const result = settleAllDocumentRevisions(doc, action, docId);
       if (result.success) {
         this._clearSettledRevisionItems(item => item.docId === docId);
-        this._streamInsertions = this._streamInsertions.filter(item => item.docId !== docId);
       } else {
         alert(t('chat.undoFailed', { error: result.error }));
       }
@@ -2551,31 +2499,21 @@ export default {
         if (!jsonData) {
           if (content.includes('```json')) {
             const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
-            if (jsonMatch) {
-              try {
-                jsonData = JSON.parse(jsonMatch[1]);
-              } catch (e) {
-                console.log('JSON 代码块解析失败，使用纯文本模式');
-              }
-            }
-          } else if (content.trim().startsWith('{') && content.trim().endsWith('}')) {
-            try {
-              jsonData = JSON.parse(content);
-            } catch (e) {
-              console.log('不是有效 JSON，使用纯文本模式');
-            }
+            if (!jsonMatch) throw new Error('文档 JSON 代码块不完整');
+            jsonData = JSON.parse(jsonMatch[1]);
+          } else if (content.trim().startsWith('{')) {
+            jsonData = JSON.parse(content);
           }
         }
 
-        if (jsonData && (jsonData.paragraphs || jsonData.tables || jsonData.images)) {
+        if (jsonData) {
+          if (!Array.isArray(jsonData.paragraphs)) throw new Error('文档 JSON 缺少 paragraphs');
           console.log('检测到文档 JSON，使用格式化输出');
 
           // 使用 msg._insertParaID（从 generate_complete 事件中保存）
-          const insertParaID = Number.isInteger(msg._insertParaID) ? msg._insertParaID : null;
+          const insertParaID = this._toIntOrNull(msg._insertParaID ?? jsonData.insertParaID);
           if (insertParaID === null) {
-            console.log('insertParaID 未指定，使用当前光标位置插入');
-          } else {
-            console.log('插入到段落ID之后:', insertParaID);
+            throw new Error('generate_document 缺少有效 insertParaID');
           }
 
           if (this._revisionDocumentId(doc) === null) {
@@ -2623,8 +2561,7 @@ export default {
             this._refreshAIRevisionPreview();
           } else {
             abortTrackedEdit(trackedEdit);
-            console.error('生成文档失败:', result.error);
-            this.insertPlainText(content, msg);
+            throw new Error(result.error || '生成文档失败');
           }
         } else {
           this.insertPlainText(content, msg);
@@ -2636,7 +2573,7 @@ export default {
     },
 
     /**
-     * 插入纯文本（作为后备方案）
+     * 用户主动插入普通聊天文本
      */
     insertPlainText(content, msg = null) {
       let trackedEdit = null;
@@ -2694,7 +2631,7 @@ export default {
     },
 
     hidePane() {
-      let tsId = window.Application.PluginStorage.getItem('ai_taskpane_id');
+      let tsId = window.Application.PluginStorage.getItem(api.windowStorageKey('ai_taskpane_id'));
       if (tsId) {
         let tskpane = window.Application.GetTaskPane(tsId);
         if (tskpane) {

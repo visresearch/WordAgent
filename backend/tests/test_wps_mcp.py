@@ -53,6 +53,17 @@ def test_mcp_lists_tools_and_roundtrips_through_wps_bridge(monkeypatch):
         assert initialized.status_code == 200
         assert runtime.snapshot()["clients"][0]["name"] == "Codex"
         listed = _mcp_request(client, "tools/list")
+        generate_schema = next(
+            tool["inputSchema"] for tool in listed.json()["result"]["tools"] if tool["name"] == "generate_document"
+        )
+        assert "insertParaID" in generate_schema["required"]
+        assert "paraIndex" not in generate_schema["$defs"]["Paragraph"]["properties"]
+        missing_anchor = _mcp_request(
+            client, "tools/call",
+            {"name": "generate_document", "arguments": {"document": {"paragraphs": [], "styles": {}}}},
+        ).json()["result"]
+        assert missing_anchor["isError"] is True
+        assert "insertParaID" in missing_anchor["content"][0]["text"]
         assert {tool["name"] for tool in listed.json()["result"]["tools"]} == {
             "delete_document",
             "edit_document",

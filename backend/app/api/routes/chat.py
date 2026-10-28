@@ -6,6 +6,7 @@ import asyncio
 import json
 import traceback
 import uuid
+from contextlib import aclosing, suppress
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -19,7 +20,6 @@ from app.services.agent.agent import (
 )
 from app.services.agent.tools import (
     cleanup_tool_request,
-    clear_stop,
     create_tool_request,
     request_stop,
     submit_tool_response,
@@ -109,331 +109,172 @@ def _normalize_document_range(document_range: list | None) -> list | None:
 # ============== WebSocket 聊天接口 ==============
 
 
+# These reservations live on the server event loop. No lock is held across
+# different windows/sessions; one session's checkpoint must have a single writer.
+_active_windows: dict[str, str] = {}
+_active_sessions: dict[str, str] = {}
+_active_chats: set[str] = set()
+
+
+class _ChatSocket:
+    """Bind outgoing events to a single turn, including tools, errors and done."""
+
+    def __init__(self, websocket, send_lock, chat_id, session_id):
+        self.websocket = websocket
+        self.app = websocket.app
+        self.send_lock = send_lock
+        self.chat_id = chat_id
+        self.session_id = session_id
+
+    async def send_text(self, payload):
+        data = json.loads(payload)
+        data.update(chatId=self.chat_id, sessionId=self.session_id)
+        async with self.send_lock:
+            await self.websocket.send_text(json.dumps(data, ensure_ascii=False))
+
+    async def close(self, **kwargs):
+        await self.websocket.close(**kwargs)
+
+
 @router.websocket("/ws")
 async def chat_websocket(websocket: WebSocket):
-    """
-    WordAgent 双向 WebSocket 聊天接口。
+    """One active turn per window; independent windows run concurrently.
 
-    同一连接既传输 Agent 流式输出，也承载文档工具的前端执行请求与结果回传。
-    服务端只有 `_receiver` 调用 ``websocket.receive_text()``，再通过内部队列分发，
-    避免多个协程并发接收导致 ``concurrent recv`` 冲突。所有消息均为 JSON 对象，
-    由 ``type`` 字段区分。
-
-    前端 → 后端
-    ------------
-    1. 发起聊天：
-       ``{"type":"chat","message":"...","mode":"agent|ask",``
-       ``"model":"auto","provider":"...","sessionId":"019f...",``
-       ``"documentRange":[...],"documentMeta":{...},``
-       ``"selectionContext":{...},"files":[...]}``
-
-       - ``message``：用户输入。
-       - ``mode``：``agent`` 或 ``ask``，非法值按 ``agent`` 处理。
-       - ``documentRange``：可选文档范围；每项的 ``docId`` 必须可转换为整数。
-       - ``documentMeta``：可为单文档对象或多文档数组。
-       - ``selectionContext``：可选的当前选区上下文。
-       - ``files``：附件元数据列表。
-
-    2. 读取文档回包：
-       ``{"type":"document_response","documentJson":{...},"error":null}``
-
-    3. 查询文档回包：
-       ``{"type":"query_response","matches":[...],"matchCount":1,``
-       ``"matchedParaIndices":[4],"matchedParaIDs":[123],"error":null}``
-
-    4. 创建文档回包：
-       ``{"type":"create_document_response","success":true,"documentId":123}``
-       失败时使用 ``success:false`` 并提供 ``error``。
-
-    5. 生成文档回包：
-       ``{"type":"generate_document_response","requestId":"...",``
-       ``"success":true,"docId":123,"lastParagraph":``
-       ``{"paraID":456,"paraIndex":10,"pageStart":2,"pageEnd":2}}``
-
-       ``requestId`` 必须原样回传。仅在客户端原生 API 成功取得物理页码时返回
-       ``pageStart/pageEnd``；否则省略这两个字段。
-
-    6. 插入换行/分页/分节符回包：
-       ``{"type":"insert_break_response","requestId":"...",``
-       ``"success":true,"breakType":"wdPageBreak","paragraphAfterBreak":``
-       ``{"paraID":789,"paraIndex":11,"pageStart":3,"pageEnd":3}}``
-
-       ``requestId`` 必须原样回传；失败时提供 ``error``。
-
-    7. 删除结果：
-       ``{"type":"delete_response","requestId":"...",``
-       ``"success":true,"deletedCount":3,"missingParaIDs":[],``
-       ``"failedParaIDs":[],"replacementInsertParaID":88}``。
-
-       ``requestId`` 必须原样回传。删除会立即在原生修订模式下执行；失败时使用
-       ``success:false`` 并提供 ``error``。
-
-    8. 编辑段落结果：
-       ``{"type":"edit_document_response","requestId":"...",``
-       ``"success":true,"docId":123,"paraID":456}``。
-
-       ``requestId`` 必须原样回传；编辑只替换段落内容并保留原段落样式。
-
-    9. 停止当前请求：``{"type":"stop"}``。
-
-    后端 → 前端
-    ------------
-    1. 对话流：
-       - ``{"type":"text","content":"..."}``：回答正文增量。
-       - ``{"type":"thinking","content":"..."}``：思考内容增量。
-       - ``{"type":"token_stats","current_tokens":12000,"max_tokens":128000}``：
-         当前上下文 token 统计。
-       - ``{"type":"status","content":"...","loading":false}``：状态提示。
-       - ``{"type":"tool_compress","content":"...","detail":{...}}``：工具输出压缩信息。
-       - ``{"type":"mcp_tool_call","toolName":"...","args":{...}}``。
-       - ``{"type":"mcp_tool_result","toolName":"...",``
-         ``"outputPreview":"...","isError":false}``。
-
-    2. 文档读取与查询：
-       - ``{"type":"read_document","content":"...","docId":0,``
-         ``"startParaIndex":0,"endParaIndex":-1,"startParaID":null,``
-         ``"endParaID":null,"mode":"full|lightweight"}``。
-       - ``{"type":"read_complete","content":"...","docId":0}``。
-       - ``{"type":"search_document","content":"...","query":{...},"docId":0}``。
-       - ``{"type":"query_complete","content":"...","docId":0,...}``。
-
-    3. 文档变更：
-       - ``{"type":"json","content":{...},"docId":0,"requestId":"..."}``：
-         请求前端执行 ``generate_document``；执行后须回传同一 ``requestId``。
-       - ``{"type":"generate_complete","content":"...","docId":0,``
-         ``"insertParaID":123,"requestId":"..."}``。
-       - ``{"type":"delete_document","content":"...","paraIDs":[...],``
-         ``"docId":0,"requestId":"..."}``；前端执行后须回传同一 ``requestId``。
-       - ``{"type":"insert_break","content":"...","paraID":123,``
-         ``"breakType":"wdLineBreak|wdPageBreak|wdSectionBreakNextPage",``
-         ``"requestId":"..."}``。
-       - ``{"type":"edit_document","content":"...","paraID":123,``
-         ``"runs":[{"text":"..."}],"docId":0,"requestId":"..."}``。
-       - ``{"type":"create_document","format":"docx","content":"..."}``。
-
-    4. 连接控制：
-       - ``{"type":"ping"}``：应用层保活，前端直接忽略。
-       - ``{"type":"done"}``：本轮流结束；服务端保证最多发送一次正常结束事件。
-       - ``{"type":"error","content":"..."}``：终止性错误，通常随后发送 ``done``。
-
-    ``generate_document_response``、``delete_response``、``edit_document_response`` 与
-    ``insert_break_response`` 使用 ``requestId`` 进行关联，允许回包乱序且不会被
-    其他并发工具调用消费。读取、查询和创建文档仍使用会话级回调队列。
+    chatId identifies a turn and its tool responses/stop events. sessionId is
+    the persistent conversation/checkpoint. windowId survives reconnects.
+    Word clients without explicit IDs use the connection as their window.
     """
     await websocket.accept()
-    chat_id = str(uuid.uuid4())
-    logger.info(f"[WebSocket] 连接建立 session={chat_id}")
+    connection_id = str(uuid.uuid4())
+    send_lock = asyncio.Lock()
+    stream_task = None
+    receive_task = None
+    current_socket = None
+    scoped_protocol = False
+    window_id = None
 
-    # 为此会话创建单智能体工具回调队列
-    create_tool_request(chat_id)
-
-    # 单一接收者：所有 WebSocket 消息通过此队列分发
-    # 避免多个协程同时调用 websocket.receive_text() 导致 RuntimeError
-    msg_queue: asyncio.Queue = asyncio.Queue()
-
-    async def _receiver():
-        """专用 WebSocket 接收协程 - 只有这一个协程调用 recv"""
+    async def finish_turn(socket, owner_window, data):
         try:
-            while True:
-                raw = await websocket.receive_text()
-                try:
-                    await msg_queue.put(json.loads(raw))
-                except (json.JSONDecodeError, ValueError) as e:
-                    logger.error(f"[WebSocket] ⚠️ JSON 解析失败，跳过此消息: {e}")
-                    continue
-        except WebSocketDisconnect:
-            await msg_queue.put(None)
-        except Exception as e:
-            logger.error(f"[WebSocket] ⚠️ 接收协程异常: {e}")
-            await msg_queue.put(None)
-
-    recv_task = asyncio.create_task(_receiver())
+            await _run_ws_stream(
+                socket,
+                socket.chat_id,
+                data.get("message", ""),
+                _normalize_mode(data.get("mode")),
+                data.get("model", ""),
+                data.get("provider", ""),
+                _normalize_document_range(data.get("documentRange")),
+                data.get("documentMeta") or {},
+                data.get("selectionContext"),
+                data.get("files") or [],
+                socket.session_id,
+                data.get("userResponse"),
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.exception("聊天请求失败 chat_id=%s", socket.chat_id)
+            await socket.send_text(json.dumps({"type": "error", "content": str(exc)}, ensure_ascii=False))
+            await socket.send_text('{"type":"done"}')
+        finally:
+            request_stop(socket.chat_id)
+            cleanup_tool_request(socket.chat_id)
+            _active_chats.discard(socket.chat_id)
+            if _active_windows.get(owner_window) == socket.chat_id:
+                _active_windows.pop(owner_window)
+            if _active_sessions.get(socket.session_id) == socket.chat_id:
+                _active_sessions.pop(socket.session_id)
 
     try:
         while True:
-            # 从消息队列获取下一条消息
-            data = await msg_queue.get()
-            if data is None:
-                # 连接已断开
-                break
-
-            msg_type = data.get("type", "")
-
+            if receive_task is None:
+                receive_task = asyncio.create_task(websocket.receive_text())
+            tasks = {receive_task}
+            if stream_task is not None:
+                tasks.add(stream_task)
+            completed, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            if stream_task is not None and stream_task in completed:
+                await stream_task
+                stream_task = None
+                current_socket = None
+            if receive_task not in completed:
+                continue
+            raw = receive_task.result()
+            receive_task = None
+            try:
+                data = json.loads(raw)
+            except (json.JSONDecodeError, ValueError):
+                continue
+            if not isinstance(data, dict):
+                continue
+            msg_type = data.get("type")
             if msg_type == "chat":
-                # 新请求开始前，清理上一次 stop 状态并重建工具队列（丢弃残留消息）
-                clear_stop(chat_id)
-                create_tool_request(chat_id)
-
-                # 聊天请求
-                message = data.get("message", "")
-                mode = _normalize_mode(data.get("mode", "agent"))
-                model = data.get("model", "")
-                provider = data.get("provider", "")
-                raw_session_id = data.get("sessionId")
-                session_id = normalize_uuid(raw_session_id)
-                document_meta = data.get("documentMeta") or {}
-                raw_selection_context = data.get("selectionContext")
-                selection_context = raw_selection_context if isinstance(raw_selection_context, (list, dict)) else None
-                try:
-                    document_range = _normalize_document_range(data.get("documentRange"))
-                except ValueError as e:
-                    err = f"documentRange 参数错误: {e}"
-                    logger.warning(f"[WebSocket] ⚠️ {err}")
-                    await websocket.send_text(json.dumps({"type": "error", "content": err}, ensure_ascii=False))
-                    await websocket.send_text(json.dumps({"type": "done"}, ensure_ascii=False))
+                chat_id = normalize_uuid(data.get("chatId")) or str(uuid.uuid4())
+                session_id = normalize_uuid(data.get("sessionId"))
+                incoming_window = normalize_uuid(data.get("windowId")) or connection_id
+                socket = _ChatSocket(websocket, send_lock, chat_id, session_id)
+                error = None
+                if any(data.get(key) is not None and normalize_uuid(data[key]) is None
+                       for key in ("chatId", "sessionId", "windowId")):
+                    error = "chatId、sessionId、windowId 必须是有效 UUID"
+                elif window_id is not None and incoming_window != window_id:
+                    error = "同一连接不能切换 windowId"
+                elif stream_task is not None or incoming_window in _active_windows:
+                    error = "当前窗口正在生成，请等待完成或停止后再切换会话"
+                elif chat_id in _active_chats:
+                    error = "chatId 已在运行，请为每轮请求创建新的 chatId"
+                elif session_id is not None and session_id in _active_sessions:
+                    error = "此会话正在其他窗口运行，请使用另一个会话"
+                if error:
+                    await socket.send_text(json.dumps({"type": "error", "content": error}, ensure_ascii=False))
+                    await socket.send_text('{"type":"done"}')
                     continue
-                attached_files = data.get("files", [])  # 附件列表 [{file_id, filename, content_type, is_image}, ...]
-
-                logger.info("=" * 50)
-                logger.info("收到 WebSocket 聊天请求:")
-                logger.info(f"用户消息: {message}")
-                logger.info(f"模式: {mode}")
-                logger.info(f"模型: {model}")
+                window_id = incoming_window
+                _active_windows[window_id] = chat_id
+                _active_chats.add(chat_id)
                 if session_id is not None:
-                    logger.info(f"会话ID: {session_id}")
-                if document_range:
-                    logger.info(f"文档范围: {document_range}")
-                if document_meta:
-                    # 支持单个文档和多个文档的打印
-                    if isinstance(document_meta, list):
-                        logger.info(f"文档元信息: {document_meta}")
-                    else:
-                        logger.info(
-                            "文档元信息: %s",
-                            {
-                                "documentName": document_meta.get("documentName", ""),
-                                "totalParas": document_meta.get("totalParas", 0),
-                                "isEmpty": document_meta.get("isEmpty", False),
-                            },
-                        )
-                if attached_files:
-                    logger.info(f"附件: {[f.get('filename', '?') for f in attached_files]}")
-                logger.info("=" * 50)
-
-                # 启动流式处理
+                    _active_sessions[session_id] = chat_id
+                create_tool_request(chat_id)
+                current_socket = socket
+                scoped_protocol = data.get("chatId") is not None
                 stream_task = asyncio.create_task(
-                    _run_ws_stream(
-                        websocket,
-                        chat_id,
-                        message,
-                        mode,
-                        model,
-                        provider,
-                        document_range,
-                        document_meta,
-                        selection_context,
-                        attached_files,
-                        session_id,
-                        data.get("userResponse"),
-                    )
+                    finish_turn(socket, window_id, data), name=f"chat:{chat_id}"
                 )
-
-                # 在流式生成期间，继续从队列读取消息（document_response / stop）
-                while not stream_task.done():
-                    try:
-                        incoming = await asyncio.wait_for(msg_queue.get(), timeout=0.5)
-                        if incoming is None:
-                            # 连接断开 - 必须通知 agent 线程停止，
-                            # 否则 ThreadPoolExecutor 里的 LangGraph 会变成孤儿继续跑
-                            logger.info(f"[WebSocket] 客户端断开，停止 agent (session={chat_id})")
-                            request_stop(chat_id)
-                            stream_task.cancel()
-                            try:
-                                await stream_task
-                            except asyncio.CancelledError:
-                                pass
-                            return
-                        incoming_type = incoming.get("type", "")
-                        if incoming_type == "frontend_tool_progress":
-                            logger.info(
-                                "[Frontend Tool] tool=%s phase=%s requestId=%s docId=%s paraID=%s elapsedMs=%s",
-                                incoming.get("tool"),
-                                incoming.get("phase"),
-                                incoming.get("requestId"),
-                                incoming.get("docId"),
-                                incoming.get("paraID"),
-                                incoming.get("elapsedMs"),
-                            )
-                        elif incoming_type == "document_response":
-                            logger.info("[WebSocket] 收到前端回传文档")
-                            await submit_tool_response(chat_id, incoming)
-                        elif incoming_type == "query_response":
-                            logger.info("[WebSocket] 收到前端回传查询结果")
-                            await submit_tool_response(chat_id, incoming)
-                        elif incoming_type == "delete_response":
-                            logger.info(f"[WebSocket] 收到前端删除结果: {incoming}")
-                            await submit_tool_response(chat_id, incoming)
-                        elif incoming_type == "edit_document_response":
-                            logger.info(f"[WebSocket] 收到前端段落编辑结果: {incoming}")
-                            await submit_tool_response(chat_id, incoming)
-                        elif incoming_type in {
-                            "create_document_response",
-                            "generate_document_response",
-                            "insert_break_response",
-                        }:
-                            logger.info(f"[WebSocket] 收到前端工具执行结果: {incoming}")
-                            await submit_tool_response(chat_id, incoming)
-                        elif incoming_type == "stop":
-                            logger.info("[WebSocket] 收到停止请求")
-                            request_stop(chat_id)
-                            stream_task.cancel()
-                            try:
-                                await stream_task
-                            except asyncio.CancelledError:
-                                pass
-                            await websocket.send_text(json.dumps({"type": "done"}, ensure_ascii=False))
-                            break
-                    except asyncio.TimeoutError:
-                        continue
-
-                # 确保 stream_task 完成
-                if not stream_task.done():
-                    try:
+            elif current_socket is not None:
+                # A late response/stop from a previous turn cannot affect this one.
+                if scoped_protocol and (
+                    data.get("chatId") != current_socket.chat_id
+                    or data.get("sessionId") != current_socket.session_id
+                ):
+                    continue
+                if msg_type == "stop":
+                    request_stop(current_socket.chat_id)
+                    stream_task.cancel()
+                    with suppress(asyncio.CancelledError):
                         await stream_task
-                    except asyncio.CancelledError:
-                        pass
-
-            elif msg_type == "document_response":
-                # 非流式过程中的文档回传（fallback）
-                await submit_tool_response(chat_id, data)
-
-            elif msg_type == "query_response":
-                # 非流式过程中的查询结果回传（fallback）
-                await submit_tool_response(chat_id, data)
-
-            elif msg_type in {
-                "create_document_response",
-                "generate_document_response",
-                "edit_document_response",
-                "insert_break_response",
-            }:
-                # 前端可变更工具执行完成后回传结果，供工具继续执行后续调用。
-                await submit_tool_response(chat_id, data)
-
-            elif msg_type == "stop":
-                logger.info("[WebSocket] 收到停止请求(空闲态)")
-                request_stop(chat_id)
-
+                    await current_socket.send_text('{"type":"done"}')
+                    stream_task = None
+                    current_socket = None
+                elif msg_type in {
+                    "document_response", "query_response", "create_document_response",
+                    "generate_document_response", "edit_document_response", "delete_response",
+                    "insert_break_response",
+                }:
+                    await submit_tool_response(current_socket.chat_id, data)
+                elif msg_type == "frontend_tool_progress":
+                    logger.debug("前端工具进度 chat_id=%s %s", current_socket.chat_id, data)
     except WebSocketDisconnect:
-        logger.info(f"[WebSocket] 连接断开 session={chat_id}")
-    except Exception as e:
-        logger.error(f"[WebSocket] 错误: {e}")
-        import traceback
-
-        traceback.print_exc()
-        try:
-            await websocket.send_text(json.dumps({"type": "error", "content": str(e)}, ensure_ascii=False))
-        except Exception:
-            pass
+        pass
     finally:
-        # 兜底：确保 agent 线程拿到停止信号，避免孤儿继续跑 LLM/工具
-        try:
-            request_stop(chat_id)
-        except Exception:
-            pass
-        recv_task.cancel()
-        cleanup_tool_request(chat_id)
-        logger.info(f"[WebSocket] 清理完成 session={chat_id}")
+        if current_socket is not None:
+            request_stop(current_socket.chat_id)
+        if stream_task is not None:
+            stream_task.cancel()
+            with suppress(asyncio.CancelledError, Exception):
+                await stream_task
+        if receive_task is not None:
+            receive_task.cancel()
+            with suppress(asyncio.CancelledError, Exception):
+                await receive_task
 
 
 class _IdleAbort(Exception):
@@ -493,6 +334,9 @@ async def _iterate_with_idle_watchdog(aiter, on_warn, on_abort):
     finally:
         if next_task is not None and not next_task.done():
             next_task.cancel()
+            with suppress(asyncio.CancelledError, StopAsyncIteration):
+                await next_task
+        await aiterator.aclose()
 
 
 async def _single_agent_stream_with_state(
@@ -533,7 +377,7 @@ async def _single_agent_stream_with_state(
             model = original.get("model", model)
             provider = original.get("provider", provider)
             mode = original.get("mode", mode)
-        async for chunk in single_agent_stream(
+        async with aclosing(single_agent_stream(
             message=message,
             document_range=document_range,
             document_meta=document_meta or {},
@@ -545,8 +389,9 @@ async def _single_agent_stream_with_state(
             session_id=session_id,
             checkpointer=checkpointer,
             **resume_kwargs,
-        ):
-            yield chunk
+        )) as stream:
+            async for chunk in stream:
+                yield chunk
 
 
 async def _persist_chat_turn(
@@ -816,44 +661,47 @@ async def _run_ws_stream(
             token_usage = {"input_tokens": 0, "output_tokens": 0, "cached_tokens": 0}
 
             try:
-                async for chunk in _iterate_with_idle_watchdog(stream_iter, _on_idle_warn, _on_idle_abort):
-                    if chunk.startswith("data: "):
-                        payload = chunk[6:].strip()
-                        if payload == "[DONE]":
-                            # Finish persistence before allowing the client to submit a resume.
-                            pass
-                        else:
-                            try:
-                                parsed_payload = json.loads(payload)
-                                if isinstance(parsed_payload, dict):
-                                    _record_payload(parsed_payload)
-                            except Exception:
+                async with aclosing(
+                    _iterate_with_idle_watchdog(stream_iter, _on_idle_warn, _on_idle_abort)
+                ) as chunks:
+                    async for chunk in chunks:
+                        if chunk.startswith("data: "):
+                            payload = chunk[6:].strip()
+                            if payload == "[DONE]":
+                                # Finish persistence before allowing the client to submit a resume.
                                 pass
-                            await _send(payload)
-                    elif chunk.startswith("__token_usage__:"):
-                        raw = chunk.split(":", 1)[1].strip()
-                        try:
-                            parsed = json.loads(raw)
-                            if isinstance(parsed, dict):
-                                token_usage = parsed
-                        except Exception as e:
-                            logger.error(f"[WebSocket] 解析 token usage 失败: {e}")
-                    elif chunk.startswith("__memory_conversation__:"):
-                        raw = chunk.split(":", 1)[1].strip()
-                        try:
-                            parsed = json.loads(raw)
-                            if isinstance(parsed, dict):
-                                memory_conversation = parsed
-                        except Exception as e:
-                            logger.error(f"[WebSocket] 解析 memory conversation 失败: {e}")
-                    elif chunk.startswith("__tool_json__:"):
-                        raw = chunk.split(":", 1)[1].strip()
-                        try:
-                            parsed = json.loads(raw)
-                            if isinstance(parsed, dict):
-                                tool_json = parsed
-                        except Exception as e:
-                            logger.error(f"[WebSocket] 解析 tool_json 失败: {e}")
+                            else:
+                                try:
+                                    parsed_payload = json.loads(payload)
+                                    if isinstance(parsed_payload, dict):
+                                        _record_payload(parsed_payload)
+                                except Exception:
+                                    pass
+                                await _send(payload)
+                        elif chunk.startswith("__token_usage__:"):
+                            raw = chunk.split(":", 1)[1].strip()
+                            try:
+                                parsed = json.loads(raw)
+                                if isinstance(parsed, dict):
+                                    token_usage = parsed
+                            except Exception as e:
+                                logger.error(f"[WebSocket] 解析 token usage 失败: {e}")
+                        elif chunk.startswith("__memory_conversation__:"):
+                            raw = chunk.split(":", 1)[1].strip()
+                            try:
+                                parsed = json.loads(raw)
+                                if isinstance(parsed, dict):
+                                    memory_conversation = parsed
+                            except Exception as e:
+                                logger.error(f"[WebSocket] 解析 memory conversation 失败: {e}")
+                        elif chunk.startswith("__tool_json__:"):
+                            raw = chunk.split(":", 1)[1].strip()
+                            try:
+                                parsed = json.loads(raw)
+                                if isinstance(parsed, dict):
+                                    tool_json = parsed
+                            except Exception as e:
+                                logger.error(f"[WebSocket] 解析 tool_json 失败: {e}")
 
                 # Completion is sent below, after saving this turn.
             finally:

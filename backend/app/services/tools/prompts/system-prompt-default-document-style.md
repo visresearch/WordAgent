@@ -20,6 +20,5 @@ Use these defaults only for newly generated content when the user, template, or 
 
 - `pS_1`: document title; `pS_2`: top-level heading; `pS_4`: subsection; `pS_3`: body and ordinary blank paragraphs; `pS_5`: table cell; `pS_6`: figure caption.
 - `rS_1/rS_3`: Chinese/English headings; `rS_2/rS_4`: Chinese/English body; `rS_5`: caption.
-- Every paragraph, including `runs: []`, must use a defined non-empty `pStyle`. Every referenced style ID must exist in `document.styles`.
 - Body English uses `Times New Roman`. Split mixed Chinese-English text into separate runs and keep the required Chinese font for Chinese runs.
 - Put figure captions directly below the figure as `图X 描述` using `pS_6` and `rS_5`.

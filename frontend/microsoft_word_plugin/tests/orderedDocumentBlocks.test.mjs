@@ -53,7 +53,6 @@ test("read_document 即使没有表格也不返回顶层 tables", () => {
   const result = orderReadDocumentBlocks({
     paragraphs: [paragraph, tableBlock],
     tables: [],
-    fields: [],
   });
 
   assert.equal(Object.hasOwn(result, "tables"), false);

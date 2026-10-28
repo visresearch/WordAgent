@@ -1,6 +1,6 @@
 # 关于作者
 
-与我交流：https://cmcblog.netlify.app/about/
+与我交流：https://cmcblog.top/about/
 
 # QQ 交流群
 

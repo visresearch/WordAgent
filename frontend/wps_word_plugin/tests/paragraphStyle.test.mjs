@@ -149,3 +149,14 @@ test('新段落中的多个 runs 与空段落均不会提前给原有标题套�
   assert.equal(heading.Style, '标题 2');
   assert.equal(styleWrites.includes(heading), false);
 });
+
+test('显式 0 在文首插入，字符串段落 ID 在对应段落后插入', () => {
+  for (const id of [0, '0', '1']) {
+    const { doc, paragraphs } = insertionDocument();
+    const result = generateDocxFromJSON({ paragraphs: [
+      { pStyle: ['left', 0, 0, 0, 0, 0, 0, '正文', 0], runs: [{ text: '新增' }] }
+    ] }, doc, id);
+    assert.equal(result.success, true, result.error);
+    assert.equal(paragraphs[id === '1' ? 1 : 0].text, '新增\r');
+  }
+});

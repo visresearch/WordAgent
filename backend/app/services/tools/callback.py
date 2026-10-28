@@ -27,6 +27,10 @@ _stop_requested_sessions: set[str] = set()
 _stop_events: dict[str, threading.Event] = {}
 # 当前线程使用的 chat_id（通过 contextvars 传递到 tool 函数中）
 _current_chat_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("_current_chat_id", default=None)
+# Worker threads inherit this event even after the socket's registry is cleaned up.
+_current_stop_event: contextvars.ContextVar[threading.Event | None] = contextvars.ContextVar(
+    "_current_stop_event", default=None
+)
 # 当前线程使用的模型名（供子智能体继承主智能体的模型）
 _current_model_name: contextvars.ContextVar[str | None] = contextvars.ContextVar("_current_model_name", default=None)
 # 当前线程请求上下文（供工具获取文档元信息/范围等）
@@ -51,16 +55,7 @@ def register_loop(chat_id: str, loop: asyncio.AbstractEventLoop):
 
 
 def cleanup_tool_request(chat_id: str):
-    """清理会话的等待队列。
-
-    注意：故意 *不* 在这里 discard `_stop_requested_sessions[chat_id]`。
-    因为客户端断连后，WebSocket 协程会立刻进 finally 调用本函数，但 agent 线程
-    可能还卡在 `llm.invoke(...)` 里。如果此时把 stop 标志清掉，等 LLM 返回后
-    `should_continue` / `tools_node` 检查 `is_stop_requested` 就会拿到 False，
-    继续执行下一个工具（典型现象：连接已断却又跑了 generate_document）。
-    chat_id 是每次连接生成的 UUID，不会复用，所以让标志留在内存里几乎无成本；
-    新会话开始时 `clear_stop` / `create_tool_request` 各自会 discard 自己的 chat_id。
-    """
+    """清理本轮队列；仍在退出的同步工具通过上下文中的停止事件保持取消状态。"""
     _pending_tool_requests.pop(chat_id, None)
     _pending_loops.pop(chat_id, None)
     waiters = _pending_tool_response_waiters.pop(chat_id, {})
@@ -68,6 +63,7 @@ def cleanup_tool_request(chat_id: str):
         if not waiter.done():
             waiter.cancel()
     _pending_tool_response_backlog.pop(chat_id, None)
+    _stop_requested_sessions.discard(chat_id)
 
 
 def register_stop_event(chat_id: str, event: threading.Event) -> None:
@@ -114,12 +110,13 @@ def clear_stop(chat_id: str):
 
 def is_stop_requested(chat_id: str | None) -> bool:
     """判断会话是否收到停止请求。"""
-    return bool(chat_id) and chat_id in _stop_requested_sessions
+    event = _current_stop_event.get() if chat_id == _current_chat_id.get() else None
+    return bool(chat_id) and (chat_id in _stop_requested_sessions or (event is not None and event.is_set()))
 
 
 async def submit_tool_response(chat_id: str, data: dict):
     """前端通过 WebSocket 回传工具结果时调用。"""
-    if is_stop_requested(chat_id):
+    if chat_id not in _pending_tool_requests or is_stop_requested(chat_id):
         # 停止后忽略迟到的工具回包，避免再次唤醒 agent 流程
         logger.info(f"[ToolCallback] ⛔ 忽略回传（已停止）session={chat_id}")
         return
@@ -130,7 +127,7 @@ async def submit_tool_response(chat_id: str, data: dict):
             "type": data.get("type"), "requestId": data.get("requestId"),
             "success": False, "requiresRead": True, "error": f"保存文档图片失败: {exc}",
         }
-    if is_stop_requested(chat_id):
+    if chat_id not in _pending_tool_requests or is_stop_requested(chat_id):
         return
     request_id = str(data.get("requestId") or "").strip() if isinstance(data, dict) else ""
     if request_id:

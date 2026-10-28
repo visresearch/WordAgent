@@ -122,7 +122,6 @@ export default {
       pendingRevisionCount: 0,
       pendingInsertions: [], // [{documentJson, docId, insertParaID, msg}] 待确认的文档插入列表
       settlingRevisions: false,
-      _streamInsertions: [], // [{insertParaID, count, docId}] 当前流式中已执行的插入操作
       hasHistory: false,
       historyLoaded: false,
       historyLoading: false,
@@ -1007,7 +1006,6 @@ export default {
       this.isLoading = true;
       const streamSessionId = this.currentSessionId;
       this._streamingSessionId = streamSessionId;
-      this._streamInsertions = [];
 
       this.messages.push({
         role: 'assistant',
@@ -1686,40 +1684,6 @@ export default {
       }
     },
 
-    _shiftParaIndexIDsForInsertions(paraIDs = [], docId = 0) {
-      const normalizedDocId = this._toIntOrDefault(docId, 0);
-      const insertionRanges = this.pendingInsertions
-        .filter((ins) => this._toIntOrDefault(ins.docId, 0) === normalizedDocId)
-        .map((ins) => {
-          const start = Number(ins.insertStartParaIndex);
-          const end = Number(ins.insertEndParaIndex);
-          if (Number.isInteger(start) && Number.isInteger(end) && end >= start) {
-            return { start, count: end - start + 1 };
-          }
-          const insertedCount = this._normalizeParaIdList(ins.insertedParaIDs || []).length;
-          return Number.isInteger(start) && insertedCount > 0
-            ? { start, count: insertedCount }
-            : null;
-        })
-        .filter(Boolean)
-        .sort((a, b) => a.start - b.start);
-
-      return [...new Set(
-        this._normalizeParaIdList(paraIDs)
-          .map((paraID) => Number(paraID))
-          .filter((idx) => Number.isInteger(idx) && idx >= 0)
-          .map((originalIndex) => {
-            let shiftedIndex = originalIndex;
-            for (const range of insertionRanges) {
-              if (range.start <= shiftedIndex) {
-                shiftedIndex += range.count;
-              }
-            }
-            return String(shiftedIndex);
-          })
-      )];
-    },
-
     _toIntOrDefault(value, defaultValue) {
       const n = this._toIntOrNull(value);
       return n === null ? defaultValue : n;
@@ -2021,7 +1985,7 @@ export default {
           await abortTrackedEdit(trackedEdit);
           return false;
         }
-        result = await generateDocxFromJSON(docPayload, "selection", requestedInsertParaID);
+        result = await generateDocxFromJSON(docPayload, requestedInsertParaID);
         if (!result || !result.success) {
           await abortTrackedEdit(trackedEdit);
           console.error('[AIChatPane] 即时插入失败:', result?.error || '(unknown)');
@@ -2084,14 +2048,6 @@ export default {
         console.error('[AIChatPane] 读取本次新增修订失败:', error);
         await sendResult({ success: false, requiresRead: true, error: error?.message || String(error) });
         return false;
-      }
-
-      if (shiftCount > 0) {
-        this._streamInsertions.push({
-          insertParaID: requestedInsertParaID,
-          count: shiftCount,
-          docId: normalizedDocId
-        });
       }
 
       if (pendingItem.msg) {
@@ -2164,7 +2120,6 @@ export default {
         this.pendingEdits = this.pendingEdits.filter(item => item._revisionBatchId);
         this.deleteRevisions = this.deleteRevisions.filter(item => item._revisionBatchId);
         this._refreshPendingDocumentSummary();
-        if (!this.pendingInsertions.length) this._streamInsertions = [];
         if (!settled.success) this._showPendingActionError(action, settled.error);
         if (settled.handled > 0) api.wsManager.clearDocumentCache();
       } catch (error) {
@@ -2224,11 +2179,14 @@ export default {
         let jsonData = msg.documentJson || null;
         if (!jsonData) {
           const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
-          const candidate = jsonMatch?.[1] || content.trim();
-          try { jsonData = JSON.parse(candidate); } catch (error) { /* Plain text. */ }
+          if (content.includes('```json') && !jsonMatch) throw new Error('文档 JSON 代码块不完整');
+          if (jsonMatch || content.trim().startsWith('{')) {
+            jsonData = JSON.parse(jsonMatch?.[1] || content.trim());
+          }
         }
-        if (jsonData && (jsonData.paragraphs || jsonData.tables)) {
-          const insertParaID = this._toParaIdOrNull(jsonData.insertParaID);
+        if (jsonData) {
+          if (!Array.isArray(jsonData.paragraphs)) throw new Error('文档 JSON 缺少 paragraphs');
+          const insertParaID = this._toParaIdOrNull(msg._insertParaID ?? jsonData.insertParaID);
           if (insertParaID === null) throw new Error('generate_document requires insertParaID');
           return this._applyImmediateInsertion({ documentJson: jsonData, docId: 0, insertParaID, msg });
         }

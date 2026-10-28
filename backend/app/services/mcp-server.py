@@ -232,7 +232,7 @@ async def insert_break(
 @mcp.tool()
 async def generate_document(
     document: DocumentOutput,
-    insertParaID: int = 0,
+    insertParaID: int,
     docId: int = 0,
     host: Host | None = None,
 ) -> dict:

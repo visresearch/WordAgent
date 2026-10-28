@@ -28,7 +28,7 @@ function mockParagraph(text, bookmarkName) {
   };
 }
 
-test("轻量读取仅返回段落文本、位置和 paraID", async () => {
+test("轻量读取仅返回段落文本、位置和 paraID", async t => {
   const items = [
     mockParagraph("第一段\r", "_123456789_p"),
     mockParagraph("\r", "_987654321_p"),
@@ -44,11 +44,13 @@ test("轻量读取仅返回段落文本、位置和 paraID", async () => {
     },
     async sync() {},
   };
+  const previous = globalThis.Word;
   globalThis.Word = {
     async run(callback) {
       return callback(context);
     },
   };
+  t.after(() => { globalThis.Word = previous; });
 
   const result = await parseDocxToJSONLightweight(0, -1);
 
@@ -61,7 +63,13 @@ test("轻量读取仅返回段落文本、位置和 paraID", async () => {
       },
       { runs: [], paraIndex: 1, paraID: "987654321" },
     ],
-    fields: [],
     _lightweight: true,
   });
+
+  // 0,0 must remain a single-paragraph read, not an alias for the whole document.
+  const first = await parseDocxToJSONLightweight(0, 0);
+  assert.deepEqual(first.paragraphs, [result.paragraphs[0]]);
+
+  const tail = await parseDocxToJSONLightweight(1, -1);
+  assert.deepEqual(tail.paragraphs, [result.paragraphs[1]]);
 });
