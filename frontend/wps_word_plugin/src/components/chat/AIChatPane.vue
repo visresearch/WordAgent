@@ -1656,18 +1656,16 @@ export default {
 
       // 后端请求删除文档段落：立即在原生修订模式下执行，并回传真实结果。
       if (data.type === 'delete_document') {
-        const paraIDs = Array.isArray(data.paraIDs)
-          ? data.paraIDs.map(v => Number(v)).filter(v => Number.isInteger(v))
-          : [];
-        console.log('[AIChatPane] 后端请求删除文档段落, paraIDs:', paraIDs, 'docId:', data.docId);
+        const startParaID = data.startParaID;
+        const endParaID = data.endParaID ?? startParaID;
         msg.contentParts.push({
           type: 'status',
-          content: data.content || t('chat.prepareDelete', { ids: paraIDs.join(', ') }),
+          content: data.content || t('chat.prepareDelete', { ids: `${startParaID} → ${endParaID}` }),
           loading: true
         });
         this.scrollToBottom();
         this._applyImmediateDelete({
-          paraIDs,
+          startParaID, endParaID,
           docId: this._toIntOrDefault(data.docId, 0),
           chatId: data.chatId, sessionId: data.sessionId, requestId: data.requestId || null
         });
@@ -1998,150 +1996,59 @@ export default {
     },
 
     _applyImmediateDelete(payload) {
-      const sendResult = (result) => {
+      const sendResult = result => {
         if (!payload?.requestId) {
           return;
         }
         api.wsManager.send({
           chatId: payload.chatId, sessionId: payload.sessionId,
-          type: 'delete_response',
-          requestId: payload.requestId,
-          ...result
-        }).catch((error) => console.warn('[AIChatPane] 回传删除结果失败:', error));
+          type: 'delete_response', requestId: payload.requestId, ...result
+        }).catch(error => console.warn('[AIChatPane] 回传删除结果失败:', error));
       };
-      let docId = this._toIntOrDefault(payload?.docId, 0);
-      const paraIDs = Array.isArray(payload?.paraIDs)
-        ? payload.paraIDs.map(v => Number(v)).filter(v => Number.isInteger(v))
-        : [];
-      const doc = this._resolveTargetDoc(docId);
+      const doc = this._resolveTargetDoc(this._toIntOrDefault(payload?.docId, 0));
       if (!doc) {
-        console.warn('[AIChatPane] _applyImmediateDelete: 无法获取文档对象 docId=', docId);
-        sendResult({ success: false, deletedCount: 0, error: `无法获取文档 docId=${docId}` });
+        sendResult({ success: false, deletedCount: 0, error: '无法获取目标文档' });
         return false;
       }
-      docId = this._revisionDocumentId(doc);
+      const docId = this._revisionDocumentId(doc);
       if (docId === null) {
         sendResult({ success: false, deletedCount: 0, error: '无法读取 WPS 文档 DocID' });
         return false;
       }
-      if (!paraIDs.length) {
-        console.warn('[AIChatPane] _applyImmediateDelete: paraIDs 为空');
-        sendResult({ success: false, deletedCount: 0, error: 'delete_document 缺少有效 paraIDs' });
-        return false;
-      }
-
-      const targetIds = new Set(paraIDs);
-      const matchedParas = [];
-      const matchedIds = new Set();
-      let firstMatchedIndex = null;
-      for (let pi = 1; pi <= doc.Paragraphs.Count; pi++) {
-        const para = doc.Paragraphs.Item(pi);
-        const pid = Number(getParagraphParaID(para));
-        if (Number.isInteger(pid) && targetIds.has(pid)) {
-          matchedParas.push(para);
-          matchedIds.add(pid);
-          if (firstMatchedIndex === null) {
-            firstMatchedIndex = pi;
-          }
-        }
-      }
-      const missingParaIDs = paraIDs.filter((pid) => !matchedIds.has(pid));
-      if (matchedParas.length === 0) {
-        const error = '未找到匹配 paraIDs 的段落；这些 ID 可能已经被删除或已经失效';
-        sendResult({ success: false, deletedCount: 0, missingParaIDs, error });
-        return false;
-      }
-
-      // A paragraph carrying a pending deletion Revision still exists in the
-      // WPS object model. It must never be reused as the replacement anchor:
-      // text inserted there can become part of the deletion and disappear on
-      // Accept(). Return the nearest surviving paragraph before the range.
-      let replacementInsertParaID = 0;
-      for (let pi = Number(firstMatchedIndex) - 1; pi >= 1; pi--) {
-        const previousID = Number(getParagraphParaID(doc.Paragraphs.Item(pi)));
-        if (Number.isInteger(previousID) && !targetIds.has(previousID)) {
-          replacementInsertParaID = previousID;
-          break;
-        }
-      }
-
-      const targetRange = matchedParas.reduce(
-        (bounds, para) => {
-          const range = this._rangeForDeleteMarking(para);
-          return {
-            start: Math.min(bounds.start, Number(range.Start)),
-            end: Math.max(bounds.end, Number(range.End))
-          };
-        },
-        { start: Number.POSITIVE_INFINITY, end: Number.NEGATIVE_INFINITY }
-      );
-
       let trackedEdit = null;
       let deleteResult = null;
       try {
         trackedEdit = beginTrackedEdit(doc);
-        deleteResult = deleteDocxPara([...matchedIds], doc);
-        if (!deleteResult || Number(deleteResult.deletedCount) === 0) {
+        deleteResult = deleteDocxPara(payload.startParaID, payload.endParaID, doc);
+        if (!deleteResult || (!deleteResult.success && !deleteResult.deletedParaIDs?.length && !deleteResult.requiresRead)) {
           abortTrackedEdit(trackedEdit);
-          const error = deleteResult?.message || '删除段落失败';
-          sendResult({
-            success: false,
-            deletedCount: 0,
-            missingParaIDs,
-            failedParaIDs: deleteResult?.failedParaIDs || [],
-            replacementInsertParaID,
-            error
-          });
+          api.wsManager.clearDocumentCache();
+          sendResult({ ...deleteResult, success: false, deletedCount: deleteResult?.deletedCount ?? null,
+            error: deleteResult?.message || '范围删除失败' });
           return false;
         }
-
-        const failedParaIDs = Array.isArray(deleteResult.failedParaIDs)
-          ? deleteResult.failedParaIDs
-          : [];
-        const fullyDeleted = missingParaIDs.length === 0
-          && failedParaIDs.length === 0
-          && Number(deleteResult.deletedCount) === matchedIds.size;
-        const revisionBatch = finishTrackedEdit(trackedEdit, targetRange, 'delete');
-        // 删除已有的插入修订等操作可能不会生成独立的删除标记。
-        // Range.Delete() 已成功执行，不能仅因未识别到新标记而向后端报删除失败。
+        const revisionBatch = finishTrackedEdit(trackedEdit, deleteResult.targetRange, 'delete');
         if (revisionBatch.batchId) {
           this.deleteRevisions.push({
-            paraIDs: [...matchedIds],
-            docId,
-            replacementInsertParaID,
-            preview: t('chat.deletePreview', { ids: [...matchedIds].join(', ') }),
+            paraIDs: deleteResult.deletedParaIDs || [], docId,
+            replacementInsertParaID: deleteResult.replacementInsertParaID,
+            preview: t('chat.deletePreview', { ids: `${payload.startParaID} → ${payload.endParaID ?? payload.startParaID}` }),
             _revisionBatchId: revisionBatch.batchId
           });
-        } else {
-          console.info('[AIChatPane] 段落已删除，WPS 未返回可归属的独立删除修订');
         }
         this._refreshAIRevisionPreview();
         api.wsManager.clearDocumentCache();
-
         sendResult({
-          success: fullyDeleted,
-          deletedCount: Number(deleteResult.deletedCount) || 0,
-          missingParaIDs,
-          failedParaIDs,
-          replacementInsertParaID,
-          revisionCount: revisionBatch.revisionCount,
+          ...deleteResult, revisionCount: revisionBatch.revisionCount,
           ...(!revisionBatch.batchId ? { requiresRead: true } : {}),
-          ...(fullyDeleted ? {} : { error: '部分段落未删除；请重新读取文档后仅重试仍存在的 paraID' })
+          ...(deleteResult.success ? {} : { error: deleteResult.message || '范围删除未完成；请重新读取文档' })
         });
-        return fullyDeleted;
+        return deleteResult.success === true;
       } catch (error) {
         abortTrackedEdit(trackedEdit);
         api.wsManager.clearDocumentCache();
-        const message = error?.message || String(error);
-        console.warn('[AIChatPane] 创建 WPS 原生删除修订失败:', message);
-        sendResult({
-          success: false,
-          deletedCount: deleteResult?.deletedCount ?? null,
-          missingParaIDs,
-          replacementInsertParaID,
-          requiresRead: true,
-          error: message
-        });
+        sendResult({ ...deleteResult, success: false, deletedCount: deleteResult?.deletedCount ?? null,
+          requiresRead: true, error: error?.message || String(error) });
         return false;
       }
     },
@@ -2435,26 +2342,6 @@ export default {
       }
 
       this._refreshAIRevisionPreview();
-    },
-
-    /**
-     * 取用于删除标记的段落 Range：优先 Duplicate + Expand(wdParagraph)，避免用数值重建 Range 时末尾少字。
-     * @param {*} para - WPS Paragraph
-     */
-    _rangeForDeleteMarking(para) {
-      let rng;
-      try {
-        rng = para.Range.Duplicate;
-      } catch (e) {
-        void e;
-        rng = para.Range;
-      }
-      try {
-        rng.Expand(4); // wdParagraph
-      } catch (e2) {
-        void e2;
-      }
-      return rng;
     },
 
     /**

@@ -18,11 +18,12 @@ class DeleteDocumentToolTests(unittest.TestCase):
             "replacementInsertParaID": 88,
         }
 
-        result = _delete_document_impl([101, "202", 101], 9)
+        result = _delete_document_impl(101, "202", 9)
 
         request = writer.call_args_list[0].args[0]
         self.assertEqual(request["type"], "delete_document")
-        self.assertEqual(request["paraIDs"], [101, 202])
+        self.assertEqual(request["startParaID"], 101)
+        self.assertEqual(request["endParaID"], 202)
         self.assertEqual(request["docId"], 9)
         self.assertTrue(request["requestId"])
         wait_for_result.assert_called_once_with(request["requestId"])
@@ -45,7 +46,7 @@ class DeleteDocumentToolTests(unittest.TestCase):
             "error": "部分 paraID 未找到",
         }
 
-        result = _delete_document_impl([101, 202, 303], 0)
+        result = _delete_document_impl(101, 303, 0)
 
         self.assertFalse(result["success"])
         self.assertEqual(result["deletedCount"], 1)
@@ -55,7 +56,7 @@ class DeleteDocumentToolTests(unittest.TestCase):
 
     @patch("app.services.tools.document_tools.get_stream_writer")
     def test_rejects_empty_para_ids_without_contacting_frontend(self, get_writer):
-        result = _delete_document_impl([None, "", "not-an-id"], 0)
+        result = _delete_document_impl(None, "not-an-id", 0)
 
         self.assertFalse(result["success"])
         self.assertEqual(result["requestedCount"], 0)
@@ -79,6 +80,31 @@ def test_unknown_delete_result_is_not_reported_as_zero_deletions():
             },
         ),
     ):
-        result = _delete_document_impl([101], 9)
+        result = _delete_document_impl(101, None, 9)
     assert result["deletedCount"] is None
     assert result["requiresRead"] is True
+
+
+def test_range_schema_has_explicit_endpoints_and_no_independent_id_list():
+    from app.services.tools.document_tools import build_delete_document
+    tool = build_delete_document("Delete a range")
+    schema = tool.args_schema.model_json_schema()
+    assert "startParaID" in schema["required"]
+    assert "endParaID" in schema["properties"]
+    assert "paraIDs" not in schema["properties"]
+
+
+def test_table_count_and_actual_ids_are_forwarded_without_confusing_endpoints_with_count():
+    with (
+        patch("app.services.tools.document_tools.get_stream_writer", return_value=Mock()),
+        patch("app.services.tools.document_tools._wait_for_frontend_mutation", return_value={
+            "success": True, "requestedCount": 5, "deletedCount": 5, "deletedTableCount": 1,
+            "deletedParaIDs": [900, 10, 500, -30, 200], "replacementInsertParaID": 0,
+        }),
+    ):
+        result = _delete_document_impl(900, 200, 9)
+    assert result["startParaID"] == 900
+    assert result["endParaID"] == 200
+    assert result["requestedCount"] == 5
+    assert result["deletedTableCount"] == 1
+    assert result["deletedParaIDs"] == [900, 10, 500, -30, 200]

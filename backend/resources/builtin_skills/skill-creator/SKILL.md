@@ -36,7 +36,7 @@ For Word editing skills, encode these rules explicitly:
 
 - read existing content and obtain real paragraph IDs
 - use `insertParaID=0` to insert at the document start, including in a non-empty document
-- replace content with one `delete_document` call followed by `generate_document`, using the returned `replacementInsertParaID` rather than a just-deleted paragraph ID
+- replace a verified continuous range with `delete_document(startParaID, endParaID)` followed by `generate_document`, using the returned `replacementInsertParaID` rather than a just-deleted paragraph ID
 - after `delete_document`, check `success`, `deletedCount`, `missingParaIDs`, and `failedParaIDs`; UI confirmation only accepts or rejects the native revisions already created
 - preserve unaffected content and styles
 

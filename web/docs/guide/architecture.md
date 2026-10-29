@@ -65,3 +65,5 @@ MCP 有两条调用路径：
 ## 前后端接口预览
 
 ![](/api.jpg)
+
+表格尺寸使用平行的一维数组：`rowHeights: [25, 30]` 表示从上到下的行高（磅），`rowHeightRules: [1, 2]` 表示最小高度和固定高度（`0` 为自动）。读取时的 `paraID` / `endParaID` 是表格首末段落的定位锚点；`pageStart` / `pageEnd` 是可用时的原生物理页码。删除表格统一通过 `delete_document(startParaID, endParaID)` 覆盖完整表格范围，不使用独立表格 ID 或逐单元格清空。

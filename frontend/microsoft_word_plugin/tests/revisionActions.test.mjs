@@ -31,7 +31,7 @@ test('删除成功但修订读取失败时保留实际删除数，要求重读�
     finishTrackedEdit: async () => { throw new Error('Cannot load tracked changes'); },
     Word: { run() { assert.fail('Must not undo a completed deletion'); } }
   });
-  assert.equal(await instance._applyImmediateDelete({ docId: 0, paraIDs: [10, 20, 30], requestId: 'delete-1' }), false);
+  assert.equal(await instance._applyImmediateDelete({ docId: 0, startParaID: 10, endParaID: 30, requestId: 'delete-1' }), false);
   assert.equal(sent.length, 1);
   assert.equal(sent[0].deletedCount, 3);
   assert.equal(sent[0].requiresRead, true);
@@ -106,7 +106,7 @@ test('停止会跳过尚未开始的 Word 文档操作，并冻结该轮聊天�
       instance._insertQueue = new Promise(resolve => { releaseQueue = resolve; });
       instance._sendStreamRequest('edit', null);
       events.onMessage({ type: 'thinking', content: 'original thinking' });
-      events.onMessage({ type, docId: 0, paraID: '12', paraIDs: ['12'],
+      events.onMessage({ type, docId: 0, paraID: '12', startParaID: '12', endParaID: '12',
         runs: [], content: type === 'json' ? { insertParaID: '12', paragraphs: [] } : undefined });
       instance.stopGeneration();
       const assistant = instance.messages[0];
@@ -142,7 +142,7 @@ test('等待 Office.js 开启修订期间停止，不再提交文档写入或回
         editDocxParagraph: write, deleteDocxPara: write, generateDocxFromJSON: write
       });
       const msg = { contentParts: [] };
-      const operation = instance[method]({ docId: 0, paraID: '12', paraIDs: ['12'], runs: [],
+      const operation = instance[method]({ docId: 0, paraID: '12', startParaID: '12', endParaID: '12', runs: [],
         insertParaID: '12', documentJson: { paragraphs: [] }, requestId: 'operation-1', msg, streamMessage: msg });
       assert.equal(typeof finishTracking, 'function');
       msg._streamStopped = true;

@@ -51,7 +51,7 @@ test('Word dispatches all seven tools with Office signatures and returns matchin
   assert.equal(socket.url, 'ws://127.0.0.1:3880/api/mcp/bridge?host=word');
   socket.request('read_document', { startParaIndex: 2, endParaIndex: 4, startParaID: 123, endParaID: 456, mode: 'lightweight' });
   socket.request('search_document', { query: { type: 'paragraph', filters: { text: 'hello' } } });
-  socket.request('delete_document', { paraIDs: [123] });
+  socket.request('delete_document', { startParaID: 123, endParaID: 456 });
   socket.request('edit_document', { paraID: 123, runs: [{ text: 'new' }] });
   socket.request('insert_break', { paraID: 123, breakType: 'wdPageBreak' });
   socket.request('generate_document', { document: { paragraphs: [], styles: {} }, insertParaID: 123 });
@@ -60,7 +60,7 @@ test('Word dispatches all seven tools with Office signatures and returns matchin
   const calls = h.plain(h.calls);
   assert.deepEqual(calls[0], ['parse', 2, 4, 0, 123, 456, 'lightweight']);
   assert.deepEqual(calls[1], ['parse', 0, -1, 0]);
-  assert.deepEqual(calls.find(c => c[0] === 'delete'), ['delete', [123]]);
+  assert.deepEqual(calls.find(c => c[0] === 'delete'), ['delete', 123, 456]);
   assert.deepEqual(calls.find(c => c[0] === 'edit'), ['edit', 123, [{ text: 'new' }]]);
   assert.deepEqual(calls.find(c => c[0] === 'break'), ['break', 123, 'wdPageBreak']);
   assert.deepEqual(calls.find(c => c[0] === 'generate'), ['generate', { paragraphs: [], styles: {} }, 123]);
@@ -78,7 +78,7 @@ test('nonzero docId is rejected before accessing any document; errors do not sto
   const socket = h.sockets[0];
   socket.onmessage({ data: '{invalid' });
   socket.onmessage({ data: JSON.stringify({ requestId: [], tool: 'delete_document' }) });
-  socket.request('delete_document', { docId: 12, paraIDs: [123] });
+  socket.request('delete_document', { docId: 12, startParaID: 123, endParaID: 456 });
   socket.request('edit_document', { paraID: 123, runs: [] });
   socket.request('unknown');
   socket.request('read_document');
@@ -119,7 +119,7 @@ test('reads wait for edits to finish; stopping cancels queued work and reconnect
   assert.equal(h.timers.size, 0);
   h.context.startMcpBridge();
   const current = h.sockets[1];
-  socket.request('delete_document', { paraIDs: [123] });
+  socket.request('delete_document', { startParaID: 123, endParaID: 456 });
   current.close();
   assert.equal(h.timers.size, 1);
   const [id, timer] = [...h.timers][0];

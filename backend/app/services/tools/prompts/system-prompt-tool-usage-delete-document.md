@@ -1,6 +1,8 @@
 ## delete_document Usage Policy
 
-- Use only for requested deletion or replacement requiring new paragraphs; verify uncertain targets first.
-- For deleting all content, collect all paragraph IDs from a complete current read, including blank paragraphs and table-cell paragraphs. A local selection or search matches alone do not establish complete coverage.
-- Check `success`, `deletedCount`, `missingParaIDs`, and `failedParaIDs` before generating replacement content.
+- Use only for requested deletion or replacement requiring new paragraphs. Pass `startParaID` and optional `endParaID` from a current read; omission means one paragraph. Both endpoints are included, following document order, not the numerical order of IDs. Never pass paragraph indices, `paraIDs` lists, or a `-1` end-of-document sentinel.
+- Everything between the endpoints is deleted, including blank paragraphs and complete tables. Split non-contiguous targets into separate range calls so unrelated content between them is preserved.
+- Table deletion is supported only through `delete_document`. Use the table's returned `paraID` and `endParaID` to cover the entire table, or verified paragraphs surrounding it. Do not clear its cells one by one or use a separate table ID, Python, or another tool to delete it. A range that cuts through a table boundary is rejected without expanding the user's target; read and correct the endpoints. To clear individual cell text, use `edit_document` instead.
+- Before deleting all content, obtain a complete current read (`startParaIndex=0, endParaIndex=-1`) and identify the actual first and last paragraph IDs, including the boundary IDs of table blocks. A local selection or search matches alone do not establish complete coverage.
+- Check `success`, `deletedCount`, `deletedTableCount`, `missingParaIDs`, and `failedParaIDs` before generating replacement content. Native tracked deletions may remain visible until accepted. Partial or unknown writes require a fresh read and verification of the remaining range; never blindly repeat the original range.
 - After successful deletion, use `replacementInsertParaID` for replacement generation. Never reuse a deleted ID: Track Changes may retain it until acceptance, causing inserted text to disappear with the deletion.

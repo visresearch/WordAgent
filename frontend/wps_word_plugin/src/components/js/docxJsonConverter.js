@@ -40,7 +40,8 @@
  *         }]],
  *         tStyle: "tS_1",
  *         columnWidths: [120],                 // 可选，单位：磅
- *         rowHeights: [[40, 1]]                // 可选：[高度, 高度规则]
+ *         rowHeights: [40],                    // 可选，每行高度（磅）
+ *         rowHeightRules: [1]                  // 可选：0=自动，1=最小，2=固定
  *       }]
  *     }
  *   ],
@@ -1629,7 +1630,7 @@ function parseCellParagraphs(cellRange, doc) {
  * @param {Object} table - WPS Table 对象
  * @returns {Object} - 表格数据
  */
-function parseTable(table) {
+function parseTable(table, doc) {
   const tableRange = table.Range;
   const tableData = {
     rows: table.Rows.Count,
@@ -1637,6 +1638,19 @@ function parseTable(table) {
     cells: [],
     tStyle: [getTableAlignmentName(table.Rows.Alignment)]  // 表格样式数组
   };
+
+  Object.assign(tableData, getParagraphPageRange(doc, tableRange));
+  try {
+    const paragraphs = tableRange.Paragraphs;
+    const paraID = getParagraphParaID(paragraphs.Item(1));
+    const endParaID = getParagraphParaID(paragraphs.Item(paragraphs.Count));
+    if (paraID !== null) {
+      tableData.paraID = paraID;
+    }
+    if (endParaID !== null) {
+      tableData.endParaID = endParaID;
+    }
+  } catch (e) {}
 
   // 捕获列宽
   try {
@@ -1656,16 +1670,21 @@ function parseTable(table) {
   // 捕获行高
   try {
     const rowHeights = [];
+    const rowHeightRules = [];
     for (let r = 1; r <= table.Rows.Count; r++) {
       try {
         const row = table.Rows.Item(r);
-        rowHeights.push([row.Height || 0, row.HeightRule || 0]);
+        const height = Number(row.Height);
+        rowHeights.push(Number.isFinite(height) && height >= 0 && height < 9999999 ? height : 0);
+        rowHeightRules.push([0, 1, 2].includes(row.HeightRule) ? row.HeightRule : 0);
       } catch (e) {
-        rowHeights.push([0, 0]);
+        rowHeights.push(0);
+        rowHeightRules.push(0);
       }
     }
-    if (rowHeights.some(h => h[0] > 0 && h[1] > 0)) {
+    if (rowHeights.some(h => h > 0)) {
       tableData.rowHeights = rowHeights;
+      tableData.rowHeightRules = rowHeightRules;
     }
   } catch (e) {}
 
@@ -1895,7 +1914,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride, start
       for (const tObj of tableObjects) {
         if (tObj.rangeStart >= rangeStart && tObj.rangeEnd <= rangeEnd) {
           try {
-            const tableData = parseTable(tObj.table);
+            const tableData = parseTable(tObj.table, doc);
             tableData.paraIndex = paraStartToIndex.get(tObj.rangeStart) ?? -1;
             // 计算 endParaIndex：找到表格 Range.End 之后第一个段落的索引 - 1
             tableData.endParaIndex = _findEndParaIndex(paraStartsSorted, tObj.rangeEnd, allParas.Count);
@@ -2278,7 +2297,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride, start
         const table = tables.Item(i);
         const tableRange = table.Range;
         tableRanges.push({ start: tableRange.Start, end: tableRange.End });
-        const tableData = parseTable(table);
+        const tableData = parseTable(table, doc);
         tableData.paraIndex = paraStartToIndex.get(tableRange.Start) ?? -1;
         tableData.endParaIndex = _findEndParaIndex(paraStartsSorted, tableRange.End, totalParaCount);
         result.tables.push(tableData);
@@ -2785,11 +2804,12 @@ function generateTable(doc, tableData, currentPos, styles) {
   if (tableData.rowHeights && tableData.rowHeights.length === tableData.rows) {
     for (let r = 0; r < tableData.rows; r++) {
       try {
-        const [height, heightRule] = tableData.rowHeights[r];
-        if (height > 0 && heightRule > 0) {
+        const item = tableData.rowHeights[r];
+        const height = Array.isArray(item) ? item[0] : item;
+        const heightRule = tableData.rowHeightRules?.[r] ?? (Array.isArray(item) ? item[1] : 1);
+        if (heightRule === 0 || height > 0) {
           const tableRow = table.Rows.Item(r + 1);
-          tableRow.HeightRule = heightRule;
-          tableRow.Height = height;
+          tableRow.SetHeight(height || 0, heightRule);
         }
       } catch (e) {}
     }
@@ -3455,122 +3475,104 @@ function editDocxParagraph(paraID, runs, docOverride) {
 // ============== 段落删除 ==============
 
 /**
- * 根据段落ID列表删除文档中的段落（按出现位置逆序删）
- *
- * @param {number[]} paraIDs - 要删除的段落 paraID 列表（每个 ID 对应一个独立段落）
- * @param {Object} [docOverride] - 可选，指定文档对象，默认为 ActiveDocument
- * @returns {{ success: boolean, deletedCount: number, deletedParaIDs: number[], failedParaIDs: number[], missingParaIDs: number[], message: string }}
+ * Delete one inclusive, document-ordered paraID range, including whole tables.
+ * Validate both endpoints and table boundaries before making any mutation.
  */
-function deleteDocxPara(paraIDs, docOverride) {
-  if (!Array.isArray(paraIDs) || paraIDs.length === 0) {
-    return {
-      success: false,
-      deletedCount: 0,
-      deletedParaIDs: [],
-      failedParaIDs: [],
-      missingParaIDs: [],
-      message: '未提供有效的 paraIDs 列表'
-    };
+function deleteDocxPara(startParaID, endParaID = null, docOverride) {
+  const startID = normalizeParagraphParaID(startParaID);
+  const endID = endParaID === null || endParaID === undefined ? startID : normalizeParagraphParaID(endParaID);
+  const result = {
+    success: false, deletedCount: 0, deletedTableCount: 0,
+    deletedParaIDs: [], failedParaIDs: [], missingParaIDs: []
+  };
+  if (startID === null || endID === null) {
+    return { ...result, message: '必须提供有效的 startParaID / endParaID；不接受 paraIDs 列表或索引' };
   }
-
-  const normalizedIDs = [...new Set(
-    paraIDs
-      .map((v) => Number(v))
-      .filter((v) => Number.isInteger(v))
-  )];
-  if (normalizedIDs.length === 0) {
-    return {
-      success: false,
-      deletedCount: 0,
-      deletedParaIDs: [],
-      failedParaIDs: [],
-      missingParaIDs: [],
-      message: 'paraIDs 中没有有效整数ID'
-    };
-  }
-
   const doc = docOverride || window.Application?.ActiveDocument;
   if (!doc) {
-    return {
-      success: false,
-      deletedCount: 0,
-      deletedParaIDs: [],
-      failedParaIDs: [],
-      missingParaIDs: normalizedIDs,
-      message: '没有打开的文档'
-    };
+    return { ...result, message: '没有打开的文档' };
   }
 
-  const totalParas = doc.Paragraphs.Count;
-  if (totalParas === 0) {
-    return {
-      success: false,
-      deletedCount: 0,
-      deletedParaIDs: [],
-      failedParaIDs: [],
-      missingParaIDs: normalizedIDs,
-      message: '文档中没有段落'
-    };
-  }
-
-  const targets = [];
-  for (let i = 1; i <= totalParas; i++) {
-    const para = doc.Paragraphs.Item(i);
-    const pid = getParagraphParaID(para);
-    if (normalizedIDs.includes(pid)) {
-      targets.push({
-        paraIndex: i - 1,
-        start: para.Range.Start,
-        end: para.Range.End,
-        paraID: pid
-      });
+  try {
+    const paragraphs = [];
+    for (let i = 1; i <= doc.Paragraphs.Count; i++) {
+      const para = doc.Paragraphs.Item(i);
+      paragraphs.push({ paraID: getParagraphParaID(para), start: para.Range.Start, end: para.Range.End });
     }
-  }
+    const first = paragraphs.findIndex(para => para.paraID === startID);
+    const last = paragraphs.findIndex(para => para.paraID === endID);
+    result.missingParaIDs = [...new Set([startID, endID])].filter(id => !paragraphs.some(p => p.paraID === id));
+    if (result.missingParaIDs.length) {
+      return { ...result, message: '起止 paraID 未找到；请重新读取文档' };
+    }
+    if (last < first) {
+      return { ...result, message: 'endParaID 在文档中早于 startParaID' };
+    }
 
-  const foundIDs = new Set(targets.map((target) => target.paraID));
-  const missingParaIDs = normalizedIDs.filter((paraID) => !foundIDs.has(paraID));
-  if (targets.length === 0) {
-    return {
-      success: false,
-      deletedCount: 0,
-      deletedParaIDs: [],
-      failedParaIDs: [],
-      missingParaIDs,
-      message: '未找到匹配 paraIDs 的段落'
-    };
-  }
+    const targets = paragraphs.slice(first, last + 1);
+    const start = targets[0].start;
+    const end = targets[targets.length - 1].end;
+    result.requestedCount = targets.length;
+    result.targetRange = { start, end };
+    result.replacementInsertParaID = first > 0 ? paragraphs[first - 1].paraID : 0;
+    if (result.replacementInsertParaID === null) {
+      return { ...result, message: '无法确定删除范围之前的插入锚点；请重新读取文档' };
+    }
 
-  // 从后往前删，避免位置偏移
-  targets.sort((a, b) => b.start - a.start);
-  const deletedParaIDs = [];
-  const failedParaIDs = [];
-  for (const t of targets) {
-    try {
-      let delStart = t.start;
-      const delEnd = t.end;
-      if (delEnd >= doc.Content.End && delStart > 0) {
-        delStart -= 1;
+    const tables = [];
+    const collection = doc.Content?.Tables || doc.Tables;
+    for (let i = 1; i <= (collection?.Count || 0); i++) {
+      const table = collection.Item(i);
+      const range = table.Range;
+      if (range.Start >= end || range.End <= start) {
+        continue;
       }
-      doc.Range(delStart, delEnd).Delete();
-      deletedParaIDs.push(t.paraID);
-    } catch (e) {
-      console.log('删除段落失败:', e.message);
-      failedParaIDs.push(t.paraID);
+      if (range.Start < start || range.End > end) {
+        return { ...result, message: '删除范围只覆盖了部分表格；请使用完整表格的 paraID / endParaID，或表格外的起止段落' };
+      }
+      tables.push({ table, start: range.Start, end: range.End });
     }
-  }
+    // Deleting an outer table also removes its nested tables. Do not execute
+    // a second deletion against a child table whose native object has vanished.
+    const outerTables = tables.filter(item => !tables.some(other =>
+      other !== item && other.start <= item.start && other.end >= item.end
+      && (other.start < item.start || other.end > item.end)
+    )).sort((a, b) => a.start - b.start);
+    const operations = [];
+    let cursor = start;
+    for (const table of outerTables) {
+      if (cursor < table.start) {
+        operations.push({ start: cursor, end: table.start });
+      }
+      operations.push({ ...table, tableCount: tables.filter(t => t.start >= table.start && t.end <= table.end).length });
+      cursor = table.end;
+    }
+    if (cursor < end) {
+      operations.push({ start: cursor, end });
+    }
 
-  const deletedCount = deletedParaIDs.length;
-  const fullyDeleted = deletedCount === normalizedIDs.length;
-  return {
-    success: fullyDeleted,
-    deletedCount,
-    deletedParaIDs,
-    failedParaIDs,
-    missingParaIDs,
-    message: fullyDeleted
-      ? `成功删除 ${deletedCount} 个段落（按 paraID）`
-      : `仅删除 ${deletedCount}/${normalizedIDs.length} 个段落（按 paraID）`
-  };
+    // Delete native tables explicitly (Range.Delete can leave their structure).
+    // Execute from the end so earlier character offsets stay valid.
+    for (const operation of operations.reverse()) {
+      try {
+        if (operation.table) {
+          operation.table.Delete();
+        } else {
+          doc.Range(operation.start, operation.end).Delete();
+        }
+        const removed = targets.filter(p => p.start >= operation.start && p.start < operation.end);
+        result.deletedCount += removed.length;
+        result.deletedParaIDs.push(...removed.map(p => p.paraID).filter(id => id !== null));
+        result.deletedTableCount += operation.tableCount || 0;
+      } catch (error) {
+        result.failedParaIDs = targets.map(p => p.paraID).filter(id => id !== null && !result.deletedParaIDs.includes(id));
+        return { ...result, requiresRead: true, message: `范围删除未完成：${error.message}` };
+      }
+    }
+    return { ...result, success: true, message: `已删除范围内 ${result.deletedCount} 个段落、${result.deletedTableCount} 个表格` };
+  } catch (error) {
+    return { ...result, requiresRead: true, message: `无法删除范围：${error.message}` };
+  }
 }
 
 // WPS/Word WdBreakType values. Keep the public API descriptive and map to
@@ -3665,6 +3667,8 @@ export default {
   cleanCellText,
   getCellParagraphRuns,
   parseCellParagraphs,
+  parseTable,
+  generateTable,
   makeInlineImageRun,
   exportImageToTemp,
   deduplicateStyles,
@@ -3716,6 +3720,8 @@ export {
   cleanCellText,
   getCellParagraphRuns,
   parseCellParagraphs,
+  parseTable,
+  generateTable,
   makeInlineImageRun,
   exportImageToTemp,
   deduplicateStyles,

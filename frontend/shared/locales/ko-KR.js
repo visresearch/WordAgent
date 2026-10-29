@@ -182,8 +182,8 @@ export default {
   },
   debug: {
     title: '디버그 패널', hint: '개발자 도구를 열려면 F12를 누르세요', parse: '문서 내용 파싱', parseSelection: '선택 파싱',
-    showDocuments: '열려 있는 파일 이름 표시', openDocuments: '열려 있는 문서 ({count})', deleteParagraphs: '인덱스별 문단 삭제',
-    deletePlaceholder: '예: 3, 7처럼 0부터 시작하는 문단 인덱스 입력', clear: '지우기', jsonToDoc: 'JSON을 문서로',
+    showDocuments: '열려 있는 파일 이름 표시', openDocuments: '열려 있는 문서 ({count})', deleteParagraphs: 'paraID 범위 삭제',
+    deletePlaceholder: '시작 및 끝 paraID 입력(양끝 포함). 문단 하나는 ID 하나만 입력', clear: '지우기', jsonToDoc: 'JSON을 문서로',
     jsonPlaceholder: '여기에 JSON을 붙여넣으세요...', apply: '문서에 적용', export: '내보내기', copy: '클립보드에 복사',
     download: 'JSON 다운로드', deleteAction: '문단 삭제', result: '파싱 결과:', paragraphs: '문단: {count}', tables: '표: {count}', images: '이미지: {count}', chars: '문자 수: {count}'
   }

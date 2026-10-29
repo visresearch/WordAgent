@@ -196,8 +196,8 @@ export default {
   },
   debug: {
     title: 'Debug panel', hint: 'Press F12 to open developer tools', parse: 'Parse document content', parseSelection: 'Parse selection',
-    showDocuments: 'Show open file names', openDocuments: 'Open documents ({count})', deleteParagraphs: 'Delete paragraphs by index',
-    deletePlaceholder: 'Enter start and end paragraph indices (0-based), for example: 3, 7', clear: 'Clear', jsonToDoc: 'JSON to document',
+    showDocuments: 'Show open file names', openDocuments: 'Open documents ({count})', deleteParagraphs: 'Delete a paraID range',
+    deletePlaceholder: 'Enter start and end paraIDs (inclusive); one ID deletes one paragraph', clear: 'Clear', jsonToDoc: 'JSON to document',
     jsonPlaceholder: 'Paste JSON here...', apply: 'Apply to document', export: 'Export', copy: 'Copy to clipboard',
     download: 'Download JSON', deleteAction: 'Delete paragraphs', result: 'Parsed result:', paragraphs: 'Paragraphs: {count}', tables: 'Tables: {count}', images: 'Images: {count}', chars: 'Characters: {count}'
   }

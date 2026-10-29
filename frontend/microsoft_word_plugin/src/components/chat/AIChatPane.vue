@@ -1267,16 +1267,17 @@ export default {
 
       // 后端请求删除文档段落：立即在原生修订模式下执行，并回传真实结果。
       if (data.type === 'delete_document') {
-        const paraIDs = this._normalizeParaIdList(data.paraIDs);
-        console.log('[AIChatPane] 后端请求删除文档段落, paraIDs:', paraIDs, 'docId:', data.docId);
+        const startParaID = data.startParaID;
+        const endParaID = data.endParaID ?? startParaID;
+
         msg.contentParts.push({
           type: 'status',
-          content: data.content || t('chat.prepareDelete', { ids: paraIDs.join(', ') }),
+          content: data.content || t('chat.prepareDelete', { ids: `${startParaID} → ${endParaID}` }),
           loading: true
         });
         this._insertQueue = this._insertQueue
           .then(() => !msg._streamStopped && this._applyImmediateDelete({
-            paraIDs,
+            startParaID, endParaID,
             docId: this._toIntOrDefault(data.docId, 0),
             requestId: data.requestId || null,
             msg
@@ -1672,18 +1673,6 @@ export default {
       });
     },
 
-    async _deleteByParaIDsOneByOne(paraIDs = []) {
-      const normalized = this._normalizeParaIdList(paraIDs);
-      if (!normalized.length) {
-        return;
-      }
-      try {
-        await deleteDocxPara(normalized);
-      } catch (e) {
-        console.warn("[AIChatPane] delete by paraIDs failed:", normalized, e);
-      }
-    },
-
     _toIntOrDefault(value, defaultValue) {
       const n = this._toIntOrNull(value);
       return n === null ? defaultValue : n;
@@ -1755,9 +1744,11 @@ export default {
         }
       };
       const docId = this._toIntOrDefault(payload?.docId, 0);
-      const paraIDs = this._normalizeParaIdList(payload?.paraIDs);
-      if (!paraIDs.length) {
-        await sendResult({ success: false, deletedCount: 0, error: 'delete_document 缺少有效 paraIDs' });
+      const startParaID = this._toParaIdOrNull(payload?.startParaID);
+      const endParaID = this._toParaIdOrNull(payload?.endParaID ?? payload?.startParaID);
+      const paraIDs = [startParaID, endParaID].filter(id => id !== null);
+      if (startParaID === null || endParaID === null) {
+        await sendResult({ success: false, deletedCount: 0, error: 'delete_document 缺少有效 startParaID/endParaID' });
         return false;
       }
 
@@ -1770,13 +1761,15 @@ export default {
           await abortTrackedEdit(trackedEdit);
           return false;
         }
-        deleteResult = await deleteDocxPara(paraIDs);
-        if (!deleteResult?.success) {
+        deleteResult = await deleteDocxPara(startParaID, endParaID);
+        if (!deleteResult?.success && !deleteResult?.deletedParaIDs?.length) {
           await abortTrackedEdit(trackedEdit);
+          api.wsManager.clearDocumentCache();
           const error = deleteResult?.message || '删除段落失败';
           await sendResult({
             success: false,
-            deletedCount: Number(deleteResult?.deletedCount) || 0,
+            ...deleteResult,
+            deletedCount: deleteResult?.deletedCount ?? null,
             missingParaIDs: deleteResult?.missingParaIDs || paraIDs,
             replacementInsertParaID: deleteResult?.replacementInsertParaID ?? null,
             error
@@ -1808,14 +1801,15 @@ export default {
         api.wsManager.clearDocumentCache();
 
         const missingParaIDs = deleteResult.missingParaIDs || [];
-        const fullyDeleted = missingParaIDs.length === 0;
+        const fullyDeleted = deleteResult.success === true && missingParaIDs.length === 0;
         await sendResult({
+          ...deleteResult,
           success: fullyDeleted,
-          deletedCount: Number(deleteResult.deletedCount) || 0,
+          deletedCount: deleteResult.deletedCount ?? null,
           missingParaIDs,
           replacementInsertParaID: deleteResult.replacementInsertParaID ?? '0',
           revisionCount: revisionBatch.revisionCount,
-          ...(fullyDeleted ? {} : { error: '部分 paraID 未找到；请重新读取文档后仅处理仍存在的段落' })
+          ...(fullyDeleted ? {} : { requiresRead: true, error: deleteResult.message || '范围删除未完成；请重新读取文档' })
         });
         return fullyDeleted;
       } catch (error) {

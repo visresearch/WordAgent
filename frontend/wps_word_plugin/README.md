@@ -81,3 +81,9 @@ rm -rf ~/.local/share/Kingsoft/wps/addons/data/linux-x64/cef/globalcache
 - [WPS 开放平台](https://open.wps.cn/)
 - [WPSJS API 文档](https://qn.cache.wpscdn.cn/encs/doc/office_v19/index.htm)
 - [WPSJS API 文档（新版）](https://open.wps.cn/previous/docs/client/wpsLoad)
+
+## 表格 JSON 与范围删除
+
+表格的 `rowHeights` 是从上到下的高度数组（磅），`rowHeightRules` 是平行的规则数组：`0` 自动、`1` 最小高度、`2` 固定高度。读取结果还包含表格首末段落的 `paraID` / `endParaID`、全文段落索引范围，以及宿主可提供时的 `pageStart` / `pageEnd`。
+
+`delete_document` 仅接受一个连续范围：`startParaID` 和可省略的 `endParaID`（省略表示单段）。范围包含两端，并删除其中完整的表格；不再接受 `paraIDs` 列表。删除整表时使用该表的首末 ID，部分表格边界、失效端点或反向范围会在删除前报错。不连续的目标应分多次调用。发生部分失败或结果未知时，重新读取确认剩余范围；替换生成应使用返回的 `replacementInsertParaID`。

@@ -189,8 +189,8 @@ export default {
   },
   debug: {
     title: 'Panel debug', hint: 'Tekan F12 untuk membuka developer tools', parse: 'Parse konten dokumen', parseSelection: 'Parse pilihan',
-    showDocuments: 'Tampilkan nama file yang terbuka', openDocuments: 'Dokumen terbuka ({count})', deleteParagraphs: 'Hapus paragraf berdasarkan indeks',
-    deletePlaceholder: 'Masukkan indeks paragraf awal dan akhir (0-based), contoh: 3, 7', clear: 'Kosongkan', jsonToDoc: 'JSON ke dokumen',
+    showDocuments: 'Tampilkan nama file yang terbuka', openDocuments: 'Dokumen terbuka ({count})', deleteParagraphs: 'Hapus rentang paraID',
+    deletePlaceholder: 'Masukkan paraID awal dan akhir (inklusif); satu ID untuk satu paragraf', clear: 'Kosongkan', jsonToDoc: 'JSON ke dokumen',
     jsonPlaceholder: 'Tempel JSON di sini...', apply: 'Terapkan ke dokumen', export: 'Ekspor', copy: 'Salin ke clipboard',
     download: 'Unduh JSON', deleteAction: 'Hapus paragraf', result: 'Hasil parse:', paragraphs: 'Paragraf: {count}', tables: 'Tabel: {count}', images: 'Gambar: {count}', chars: 'Karakter: {count}'
   }

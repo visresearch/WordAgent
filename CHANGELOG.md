@@ -8,9 +8,12 @@
 
 ### Fixed
 - 优化提示词
+- 修改table的jsonschema格式
+- 修改delete_document工具输入参数为startParaID和endParaID，前端允许删除表格
 
 ### Changed
 - 更新py依赖
+- 更新web文档
 
 ### Deleted
 - 移除fields旧字段

@@ -101,3 +101,13 @@ class CompactDocumentPageRangeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_compaction_keeps_table_boundary_ids_and_pages():
+    table = {"paraIndex": 2, "endParaIndex": 3, "paraID": 101, "endParaID": 202,
+             "pageStart": 1, "pageEnd": 2, "cells": [[{"text": "cell"}]]}
+    with patch.object(document_tools, "_MAX_DOC_JSON_CHARS", 1):
+        compact = json.loads(document_tools._compact_doc_json({"paragraphs": [{"tables": [table]}]}))
+    result = compact["paragraphs"][0]["tables"][0]
+    assert {key: result[key] for key in ("paraID", "endParaID", "pageStart", "pageEnd")} == {
+        "paraID": 101, "endParaID": 202, "pageStart": 1, "pageEnd": 2}

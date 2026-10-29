@@ -52,7 +52,7 @@ async function executeTool(tool, args) {
       return { ...executeStyleQuery(documentJson, args.query), docId };
     }
     case 'delete_document': {
-      const result = deleteDocxPara(args.paraIDs, targetDocument(docId));
+      const result = deleteDocxPara(args.startParaID, args.endParaID, targetDocument(docId));
       wsManager.clearDocumentCache();
       return { ...result, docId };
     }

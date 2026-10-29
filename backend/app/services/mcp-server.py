@@ -186,9 +186,18 @@ async def search_document(query: DocumentQuery, docId: int = 0, host: Host | Non
 
 
 @mcp.tool()
-async def delete_document(paraIDs: list[int], docId: int = 0, host: Host | None = None) -> dict:
-    """Delete paragraphs by their current paraIDs. Read first to identify the IDs."""
-    return await bridge.call("delete_document", {"paraIDs": paraIDs, "docId": docId, "host": host})
+async def delete_document(
+    startParaID: int, endParaID: int | None = None, docId: int = 0, host: Host | None = None
+) -> dict:
+    """Delete one inclusive paraID range and every complete table inside it.
+
+    Read first. IDs are endpoints in document order, not numerical bounds.
+    Omit endParaID for one paragraph. Table deletion is only supported through
+    this range operation; a partial-table boundary is rejected without mutation.
+    """
+    return await bridge.call("delete_document", {
+        "startParaID": startParaID, "endParaID": endParaID, "docId": docId, "host": host
+    })
 
 
 @mcp.tool()

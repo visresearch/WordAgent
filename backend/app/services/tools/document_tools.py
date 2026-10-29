@@ -437,6 +437,7 @@ def _compact_doc_json(doc_json: dict) -> str:
                 table_compact = {
                     "paraIndex": table.get("paraIndex"),
                     "endParaIndex": table.get("endParaIndex"),
+                    **{key: table[key] for key in ("paraID", "endParaID", "pageStart", "pageEnd") if key in table},
                 }
                 rows = []
                 for row in table.get("cells", []):
@@ -872,18 +873,17 @@ def _search_document_impl(query: DocumentQuery, docId: RequiredDocIdInput) -> st
     return '{"matches": [], "matchCount": 0, "error": "non-websocket"}'
 
 
-def _delete_document_impl(paraIDs: list[int | str], docId: DocIdInput) -> dict:
+def _delete_document_impl(startParaID: ParaIdInput, endParaID: ParaIdInput = None, docId: DocIdInput = 0) -> dict:
     """delete_document 的核心逻辑。"""
     resolved_doc_id = _normalize_doc_id(docId)
-    normalized_para_ids = [_normalize_para_id(pid) for pid in paraIDs]
-    normalized_para_ids = [pid for pid in normalized_para_ids if pid is not None]
-    deduped_para_ids = list(dict.fromkeys(normalized_para_ids))
-    if not deduped_para_ids:
+    start_id = _normalize_para_id(startParaID)
+    end_id = start_id if endParaID is None else _normalize_para_id(endParaID)
+    if start_id in (None, 0) or end_id in (None, 0):
         return {
             "success": False,
             "requestedCount": 0,
             "deletedCount": 0,
-            "error": "No valid paraIDs provided for deletion",
+            "error": "Provide valid startParaID/endParaID from a current read; indices and paraIDs lists are not supported",
         }
 
     writer = get_stream_writer()
@@ -893,15 +893,16 @@ def _delete_document_impl(paraIDs: list[int | str], docId: DocIdInput) -> dict:
         writer(
             {
                 "type": "delete_document",
-                "content": f"🗑️ 正在删除 {len(deduped_para_ids)} 个段落",
-                "paraIDs": deduped_para_ids,
+                "content": f"🗑️ 正在删除段落范围 {start_id} → {end_id}",
+                "startParaID": start_id,
+                "endParaID": end_id,
                 "docId": resolved_doc_id,
                 "requestId": request_id,
             }
         )
         frontend_result = _wait_for_frontend_mutation(request_id)
 
-    logger.info(f"[delete_document] 请求前端删除文档段落 (paraIDs={deduped_para_ids}, docId={resolved_doc_id})")
+    logger.info(f"[delete_document] 请求前端删除范围 (startParaID={start_id}, endParaID={end_id}, docId={resolved_doc_id})")
     stopped = bool(frontend_result) and (
         frontend_result.get("type") == "stop" or frontend_result.get("error") == "stopped_by_user"
     )
@@ -923,8 +924,9 @@ def _delete_document_impl(paraIDs: list[int | str], docId: DocIdInput) -> dict:
         if stopped or frontend_success is False or frontend_error
         else (True if frontend_success is True else None),
         "docId": resolved_doc_id,
-        "paraIDs": deduped_para_ids,
-        "requestedCount": len(deduped_para_ids),
+        "startParaID": start_id,
+        "endParaID": end_id,
+        "requestedCount": _parse_int_like(frontend_result.get("requestedCount")) if isinstance(frontend_result, dict) else None,
         "deletedCount": max(0, deleted_count) if deleted_count is not None else None,
         "missingParaIDs": missing_para_ids,
         "failedParaIDs": failed_para_ids,
@@ -932,7 +934,7 @@ def _delete_document_impl(paraIDs: list[int | str], docId: DocIdInput) -> dict:
         "requestId": request_id,
     }
     if isinstance(frontend_result, dict):
-        for key in ("requiresRead", "paragraph"):
+        for key in ("requiresRead", "paragraph", "deletedParaIDs", "deletedTableCount"):
             if key in frontend_result:
                 result[key] = frontend_result[key]
     if stopped:
@@ -942,7 +944,7 @@ def _delete_document_impl(paraIDs: list[int | str], docId: DocIdInput) -> dict:
     elif frontend_result is None:
         result["warning"] = (
             "Frontend response timed out or is unavailable. Do not repeat the same delete blindly; "
-            "read the document and retry only paragraph IDs that still exist."
+            "read the affected area and verify the remaining range before retrying."
         )
 
     if writer:
@@ -1332,14 +1334,15 @@ def build_delete_document(description: str):
     """根据传入的 description 构造 delete_document 工具实例。"""
 
     @tool(description=description)
-    def delete_document(paraIDs: list[int | str], docId: DocIdInput = 0) -> dict:
-        """Delete specified paragraphs from the document by paraID list.
+    def delete_document(startParaID: int | str, endParaID: ParaIdInput = None, docId: DocIdInput = 0) -> dict:
+        """Delete one inclusive, document-ordered paragraph range, including complete tables.
 
         Args:
-            paraIDs: Paragraph IDs to delete (int-like list). Each paraID is deleted independently (not a range).
-            docId: Document ID (int-like). Positive/negative are both allowed. 0 means current active document.
+            startParaID: First paragraph ID from a current read. Not an index or numeric ordering key.
+            endParaID: Last paragraph ID (inclusive). Defaults to startParaID for one paragraph.
+            docId: Target document ID; 0 means current active document.
         """
-        return _delete_document_impl(paraIDs, docId)
+        return _delete_document_impl(startParaID, endParaID, docId)
 
     return delete_document
 

@@ -88,3 +88,12 @@ class PromptAssemblyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_deletion_policy_uses_only_inclusive_ranges_and_explicit_table_boundaries():
+    prompt = single_prompts.get_agent_prompt("agent")
+    assert "delete_document(startParaID, endParaID)" in prompt
+    assert "Table deletion is supported only through `delete_document`" in prompt
+    assert "Split non-contiguous targets into separate range calls" in prompt
+    assert "`paraIDs` lists" in prompt
+    assert "lists every independent target ID" not in prompt

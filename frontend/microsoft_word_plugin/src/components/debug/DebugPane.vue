@@ -161,7 +161,7 @@ export default {
 
     async deleteDocxPara() {
       if (!this.deletePositionsInput.trim()) {
-        this.showStatus('请输入要删除的 paraID 列表', 'error');
+        this.showStatus('请输入起始 paraID 和结束 paraID（单段可只填一个）', 'error');
         return;
       }
 
@@ -182,13 +182,13 @@ export default {
         return;
       }
 
-      if (indices.length === 0) {
-        this.showStatus('未解析到有效的 paraID', 'error');
+      if (indices.length === 0 || indices.length > 2) {
+        this.showStatus('请填写一个或两个 paraID，表示连续删除范围', 'error');
         return;
       }
 
       try {
-        const result = await deleteDocxParaFn(indices);
+        const result = await deleteDocxParaFn(indices[0], indices[1]);
         if (result.success) {
           this.showStatus(result.message, 'success');
         } else {

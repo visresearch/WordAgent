@@ -197,8 +197,8 @@ export default {
   },
   debug: {
     title: '调试面板', hint: '按 F12 可以打开调试器', parse: '文档内容解析', parseSelection: '解析选中内容',
-    showDocuments: '显示所有文件名', openDocuments: '已打开文档（{count}）', deleteParagraphs: '按索引删除段落',
-    deletePlaceholder: '输入起始和结束段落索引（0-based），如：3, 7', clear: '清空', jsonToDoc: 'JSON 转文档',
+    showDocuments: '显示所有文件名', openDocuments: '已打开文档（{count}）', deleteParagraphs: '按 paraID 范围删除内容',
+    deletePlaceholder: '输入起始和结束 paraID（含两端）；单段可只填一个', clear: '清空', jsonToDoc: 'JSON 转文档',
     jsonPlaceholder: '粘贴 JSON 到此处...', apply: '应用到文档', export: '导出操作', copy: '复制到剪贴板',
     download: '下载 JSON 文件', deleteAction: '删除段落', result: '解析结果：', paragraphs: '段落：{count}', tables: '表格：{count}', images: '图片：{count}', chars: '字数：{count}'
   }

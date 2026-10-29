@@ -34,7 +34,7 @@
 | **search_document** | 查询某种格式或文字信息的段落位置 | ✅ | ✅ |
 | **generate_document** | 生成带格式的文档内容并插入到 Word 中 | ✅ | ❌ |
 | **edit_document** | 按 `paraID` 替换单个段落正文并保留原 `pStyle` | ✅ | ❌ |
-| **delete_document** | 删除 Word 中指定的段落 | ✅ | ❌ |
+| **delete_document** | 按起止 paraID 删除连续内容及完整表格 | ✅ | ❌ |
 | **create_document** | 创建并打开新的空白 DOCX 文档 | ✅ | ❌ |
 | **insert_break** | 在指定段落后插入换行、分页或分节符 | ✅ | ❌ |
 | **mcp_tools** | 调用已启用的 MCP 服务器工具 | ✅ | 视配置而定 |

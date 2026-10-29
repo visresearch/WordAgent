@@ -1228,9 +1228,9 @@ test('删除成功但 WPS 未返回独立删除修订时仍回报成功，并要
   doc.Paragraphs = { Count: 1, Item: () => ({ ID: 101, Range: range }) };
   doc.Application.Undo = () => assert.fail('Deletion must never automatically undo');
   const { vm, responses } = chatPane(doc, () => {}, [doc], {
-    paraID: para => para.ID, delete: () => ({ deletedCount: 1 })
+    paraID: para => para.ID, delete: () => ({ success: true, deletedCount: 1, deletedParaIDs: [101], targetRange: { start: 10, end: 20 } })
   });
-  assert.equal(vm._applyImmediateDelete({ docId: 0, paraIDs: [101], requestId: 'delete' }), true);
+  assert.equal(vm._applyImmediateDelete({ docId: 0, startParaID: 101, requestId: 'delete' }), true);
   assert.equal(responses[0].success, true);
   assert.equal(responses[0].deletedCount, 1);
   assert.equal(responses[0].revisionCount, 0);
@@ -1245,9 +1245,9 @@ test('部分删除且没有新增修订时仍报告未完成的段落', () => {
   doc.Paragraphs = { Count: 2, Item: index => ({ ID: index === 1 ? 101 : 202, Range: range }) };
   const { vm, responses } = chatPane(doc, () => {}, [doc], {
     paraID: para => para.ID,
-    delete: () => ({ deletedCount: 1, failedParaIDs: [202] })
+    delete: () => ({ success: false, deletedCount: 1, deletedParaIDs: [101], failedParaIDs: [202], targetRange: { start: 10, end: 20 } })
   });
-  assert.equal(vm._applyImmediateDelete({ docId: 62, paraIDs: [101, 202], requestId: 'partial' }), false);
+  assert.equal(vm._applyImmediateDelete({ docId: 62, startParaID: 101, endParaID: 202, requestId: 'partial' }), false);
   assert.equal(responses[0].success, false);
   assert.equal(responses[0].deletedCount, 1);
   assert.deepEqual(responses[0].failedParaIDs, [202]);
@@ -1316,12 +1316,12 @@ test('edit and delete requests with docId zero also retain a concrete document i
     paraID: para => para.ID,
     delete() {
       doc._items.push(revision({ type: 2, start: 10, end: 20, text: 'Deleted' }));
-      return { deletedCount: 1 };
+      return { success: true, deletedCount: 1, deletedParaIDs: [101], targetRange: { start: 10, end: 20 } };
     }
   });
   assert.equal(vm._applyImmediateEdit({ docId: 0, paraID: 101, runs: [] }), true);
   assert.equal(vm.pendingEdits[0].docId, 81);
-  assert.equal(vm._applyImmediateDelete({ docId: 0, paraIDs: [101] }), true);
+  assert.equal(vm._applyImmediateDelete({ docId: 0, startParaID: 101 }), true);
   assert.equal(vm.deleteRevisions[0].docId, 81);
   vm.acceptPendingRevisions();
   assert.equal(vm.pendingEdits.length + vm.deleteRevisions.length, 0);
@@ -1372,4 +1372,15 @@ test('revision preview polling does not scan native revisions while the agent is
   assert.equal(reads, 0);
   assert.equal(vm.activeRevisionDocId, 91);
   assert.equal(vm.pendingEdits.length, 1);
+});
+
+
+test('unknown range deletion counts remain unknown in the WPS chat response', () => {
+  const doc = Object.assign(documentWith(), { DocID: 90 });
+  const { vm, responses } = chatPane(doc, () => {}, [doc], {
+    delete: () => ({ success: false, deletedCount: null, requiresRead: true, message: 'Unknown deletion result' })
+  });
+  assert.equal(vm._applyImmediateDelete({ startParaID: 101, requestId: 'unknown' }), false);
+  assert.equal(responses[0].deletedCount, null);
+  assert.equal(responses[0].requiresRead, true);
 });

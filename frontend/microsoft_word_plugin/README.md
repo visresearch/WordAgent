@@ -106,3 +106,11 @@ Word 的 `docId` 仅支持 `0`，代表加载项侧栏所属文档。请仅保�
 - 如果 manifest 修改后没有生效，先执行 `pnpm stop`，关闭 Word，再重新 `pnpm start`。
 - 如果功能区显示默认图标，先检查清单中的 PNG 地址能否正常打开。Office 要求图标可缓存，图片响应不能包含 `Cache-Control` 指令；GUI 静态服务只对页面、脚本和清单禁用缓存，图片保留默认缓存行为。参见 [微软图标响应要求](https://learn.microsoft.com/en-us/javascript/api/manifest/image)。
 - 如果修改图标或按钮名称后仍显示旧内容，重新加载新版清单；必要时在 Word 的“文件 → 选项 → 信任中心 → 信任中心设置 → 受信任的加载项目录”中勾选下次启动清除 Web 加载项缓存，再重启 Word。仅刷新侧栏不能保证清单更新。参见 [清除 Office 缓存](https://learn.microsoft.com/en-us/office/dev/add-ins/testing/clear-cache)。
+
+## 表格 JSON 与范围删除
+
+表格的 `rowHeights` 是从上到下的高度数组（磅），`rowHeightRules` 是平行的规则数组：`0` 自动、`1` 最小高度、`2` 固定高度。读取结果还包含表格首末段落的 `paraID` / `endParaID`、全文段落索引范围，以及宿主可提供时的 `pageStart` / `pageEnd`。
+
+`delete_document` 仅接受一个连续范围：`startParaID` 和可省略的 `endParaID`（省略表示单段）。范围包含两端，并删除其中完整的表格；不再接受 `paraIDs` 列表。删除整表时使用该表的首末 ID，部分表格边界、失效端点或反向范围会在删除前报错。不连续的目标应分多次调用。发生部分失败或结果未知时，重新读取确认剩余范围；替换生成应使用返回的 `replacementInsertParaID`。
+
+固定行高规则 `2` 的生成需要 WordApiDesktop 1.4；旧版 Word 会在写入前明确报错，不会静默改成最小行高。

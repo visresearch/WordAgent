@@ -40,7 +40,8 @@
  *         }]],
  *         tStyle: "tS_1",
  *         columnWidths: [120],                 // 可选，单位：磅
- *         rowHeights: [[40, 1]]                // 可选：[高度, 高度规则]
+ *         rowHeights: [40],                    // 可选，每行高度（磅）
+ *         rowHeightRules: [1]                  // 可选：0=自动，1=最小，2=固定
  *       }]
  *     }
  *   ],
@@ -137,7 +138,7 @@ function getLoadedParagraphPageRange(pageCollection) {
   };
 }
 
-async function loadParagraphPageRanges(context, paragraphs) {
+async function loadParagraphPageRanges(context, paragraphs, location = "Content") {
   const result = new Map();
   if (!supportsRequirementSet("WordApiDesktop", "1.2")) {
     return result;
@@ -146,7 +147,7 @@ async function loadParagraphPageRanges(context, paragraphs) {
   try {
     const pending = [];
     for (const paragraph of paragraphs || []) {
-      const pages = paragraph.getRange("Content").pages;
+      const pages = paragraph.getRange(location).pages;
       pages.load("items/index");
       pending.push({ paragraph, pages });
     }
@@ -2062,6 +2063,38 @@ function parseRunsFromOoxml(ooxmlString) {
   }
 }
 
+async function readTableRowDimensions(context, table) {
+  const heights = table.rows.items.map(row => {
+    const height = Number(row.preferredHeight);
+    return Number.isFinite(height) && height >= 0 && height < 9999999 ? height : 0;
+  });
+  const rules = heights.map(height => height > 0 ? 1 : 0);
+  // preferredHeight alone cannot distinguish a minimum height from an exact
+  // height. Preserve the rule from OOXML, including auto rows, when available.
+  try {
+    const xml = table.getRange('Whole').getOoxml();
+    await context.sync();
+    const document = new DOMParser().parseFromString(xml.value, 'application/xml');
+    const namespace = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+    const tableNode = document.getElementsByTagNameNS(namespace, 'tbl')[0];
+    const rows = Array.from(tableNode.children).filter(node => node.localName === 'tr');
+    rows.forEach((row, index) => {
+      if (index >= heights.length) return;
+      const properties = Array.from(row.children).find(node => node.localName === 'trPr');
+      const height = properties && Array.from(properties.children).find(node => node.localName === 'trHeight');
+      if (!height) return;
+      const value = Number(height.getAttributeNS(namespace, 'val')) / 20;
+      if (Number.isFinite(value) && value >= 0) heights[index] = value;
+      const rule = height.getAttributeNS(namespace, 'hRule');
+      rules[index] = rule === 'exact' ? 2 : rule === 'auto' ? 0 : 1;
+    });
+  } catch (error) {
+    // Older hosts still expose preferredHeight; the minimum-height semantics
+    // of that API are retained when OOXML is unavailable.
+  }
+  return heights.some(height => height > 0) ? { rowHeights: heights, rowHeightRules: rules } : {};
+}
+
 // ============== 解析函数 ==============
 
 /**
@@ -2224,18 +2257,15 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
 
             const tableRows = table.rows;
 
-            // 捕获行高
-            const rowHeights = [];
+            // Load before reading Office.js properties.
             for (const row of tableRows.items) {
               row.load("cellCount,preferredHeight");
               row.cells.load("items");
-              const h = row.preferredHeight || 0;
-              rowHeights.push([h, h > 0 ? 1 : 0]);
             }
             await context.sync();
-            if (rowHeights.some((h) => h[0] > 0)) {
-              tableData.rowHeights = rowHeights;
-            }
+            Object.assign(tableData, await readTableRowDimensions(context, table));
+            const tablePages = await loadParagraphPageRanges(context, [table], "Whole");
+            Object.assign(tableData, tablePages.get(table) || {});
 
             // 加载单元格属性
             for (const row of tableRows.items) {
@@ -2592,15 +2622,9 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
             tStyle: [getAlignmentName(table.alignment)],
           };
 
-          // 捕获行高
-          const rowHeights = [];
-          for (const row of table.rows.items) {
-            const h = row.preferredHeight || 0;
-            rowHeights.push([h, h > 0 ? 1 : 0]);
-          }
-          if (rowHeights.some((h) => h[0] > 0)) {
-            tableData.rowHeights = rowHeights;
-          }
+          Object.assign(tableData, await readTableRowDimensions(context, table));
+          const tablePages = await loadParagraphPageRanges(context, [table], "Whole");
+          Object.assign(tableData, tablePages.get(table) || {});
 
           const tableRows = table.rows;
           for (const row of tableRows.items) {
@@ -3352,6 +3376,14 @@ async function generateDocxFromJSON(jsonData, insertParaID) {
 
     const styles = jsonData.styles || {};
 
+    if (!supportsRequirementSet("WordApiDesktop", "1.4") && expandOrderedDocumentBlocks(jsonData.paragraphs).some(element =>
+      element.type === "table" && element.data.rowHeights?.some((height, index) =>
+        (element.data.rowHeightRules?.[index] ?? (Array.isArray(height) ? height[1] : 1)) === 2
+      )
+    )) {
+      return { error: "当前 Word 不支持固定行高（需要 WordApiDesktop 1.4）；请升级 Word 或明确使用最小行高规则 1" };
+    }
+
     return await Word.run(async (context) => {
       let targetRange;
       let startAnchorParagraph = null;
@@ -3586,8 +3618,12 @@ async function generateDocxFromJSON(jsonData, insertParaID) {
             await context.sync();
             for (let r = 0; r < rows; r++) {
               try {
-                const [height] = tableData.rowHeights[r];
-                if (height > 0) {
+                const item = tableData.rowHeights[r];
+                const height = Array.isArray(item) ? item[0] : item;
+                const rule = tableData.rowHeightRules?.[r] ?? (Array.isArray(item) ? item[1] : 1);
+                if (supportsRequirementSet("WordApiDesktop", "1.4")) {
+                  tableRows.items[r].setHeight(height || 0, ["Auto", "AtLeast", "Exactly"][rule]);
+                } else if (height > 0 && rule !== 0) {
                   tableRows.items[r].preferredHeight = height;
                 }
               } catch (e) {}
@@ -3991,86 +4027,96 @@ async function insertBreakAfterParagraph(paraID, breakType) {
   }
 }
 
-/**
- * 根据段落ID列表删除文档中的段落（按出现位置逆序删除）
- * @param {Array<string|number>} paraIDs - 待删除段落 paraID 列表
- * @returns {Promise<{ success: boolean, deletedCount: number, message: string }>}
- */
-async function deleteDocxPara(paraIDs) {
-  if (!Array.isArray(paraIDs) || paraIDs.length === 0) {
-    return { success: false, deletedCount: 0, message: "未提供有效的 paraIDs 列表" };
+/** Delete one inclusive paraID range; whole tables are deleted structurally. */
+async function deleteDocxPara(startParaID, endParaID = null) {
+  if (!['number', 'string'].includes(typeof startParaID)
+    || (endParaID != null && !['number', 'string'].includes(typeof endParaID))) {
+    return { success: false, deletedCount: 0, message: '只接受 startParaID/endParaID，不接受 paraIDs 列表' };
   }
-
-  const normalizedIDs = normalizeParaIDList(paraIDs);
-  if (normalizedIDs.length === 0) {
-    return { success: false, deletedCount: 0, message: "paraIDs 中没有有效段落ID" };
+  const startID = normalizeParaID(startParaID);
+  const endID = endParaID == null ? startID : normalizeParaID(endParaID);
+  const result = { success: false, deletedCount: 0, deletedTableCount: 0,
+    deletedParaIDs: [], failedParaIDs: [], missingParaIDs: [] };
+  if (!startID || !endID || startID === '0' || endID === '0') {
+    return { ...result, message: '必须提供有效的 startParaID/endParaID；不接受 paraIDs 列表或索引' };
   }
-
   try {
-    return await Word.run(async (context) => {
-      const allParas = context.document.body.paragraphs;
-      allParas.load("items/uniqueLocalId");
+    return await Word.run(async context => {
+      const paragraphs = context.document.body.paragraphs;
+      const tables = context.document.body.tables;
+      paragraphs.load('items/uniqueLocalId');
+      tables.load('items/nestingLevel');
       await context.sync();
-      const allParaIDs = await resolveParagraphParaIDs(context, allParas.items);
+      const ids = await resolveParagraphParaIDs(context, paragraphs.items);
+      const first = ids.indexOf(startID);
+      const last = ids.indexOf(endID);
+      result.missingParaIDs = [...new Set([startID, endID])].filter(id => !ids.includes(id));
+      if (result.missingParaIDs.length) return { ...result, message: '起止 paraID 未找到；请重新读取文档' };
+      if (last < first) return { ...result, message: 'endParaID 在文档中早于 startParaID' };
+      result.requestedCount = last - first + 1;
+      result.replacementInsertParaID = first > 0 ? ids[first - 1] : '0';
+      if (!result.replacementInsertParaID) return { ...result, message: '无法确定范围之前的插入锚点' };
 
-      const totalParas = allParas.items.length;
-      if (totalParas === 0) {
-        return { success: false, deletedCount: 0, message: "文档中没有段落" };
+      const tableParagraphs = tables.items.map(table => {
+        const items = table.getRange('Whole').paragraphs;
+        items.load('items/uniqueLocalId');
+        return { table, items };
+      });
+      await context.sync();
+      const selectedTables = [];
+      for (const item of tableParagraphs) {
+        const tableIDs = await resolveParagraphParaIDs(context, item.items.items);
+        const start = ids.indexOf(tableIDs[0]);
+        const end = ids.indexOf(tableIDs[tableIDs.length - 1]);
+        if (start < 0 || end < start) return { ...result, message: '无法确定表格的完整段落范围；请重新读取文档' };
+        if (start > last || end < first) continue;
+        if (start < first || end > last) {
+          return { ...result, message: '删除范围只覆盖了部分表格；请使用完整表格的 paraID/endParaID，或表格外的起止段落' };
+        }
+        selectedTables.push({ table: item.table, start, end, level: item.table.nestingLevel });
       }
-
-      const targets = [];
-      for (let idx = 0; idx < totalParas; idx++) {
-        const paraID = allParaIDs[idx];
-        if (paraID && normalizedIDs.includes(paraID)) {
-          targets.push({ paraIndex: idx, paraID });
+      const outerTables = selectedTables.filter(item => !selectedTables.some(other =>
+        other !== item && other.start <= item.start && other.end >= item.end
+        && (other.start < item.start || other.end > item.end || other.level < item.level)
+      )).sort((a, b) => a.start - b.start);
+      const operations = [];
+      let cursor = first;
+      for (const table of outerTables) {
+        if (cursor < table.start) operations.push({ start: cursor, end: table.start - 1 });
+        operations.push({ ...table, tableCount: selectedTables.filter(t => t.start >= table.start && t.end <= table.end).length });
+        cursor = table.end + 1;
+      }
+      if (cursor <= last) operations.push({ start: cursor, end: last });
+      for (const operation of operations) {
+        if (!operation.table) {
+          operation.range = paragraphs.items[operation.start].getRange('Whole')
+            .expandTo(paragraphs.items[operation.end].getRange('Whole'));
         }
       }
 
-      if (targets.length === 0) {
-        return {
-          success: false,
-          deletedCount: 0,
-          deletedParaIDs: [],
-          missingParaIDs: normalizedIDs,
-          message: "未找到匹配 paraIDs 的段落",
-        };
-      }
-
-      const foundIDs = new Set(targets.map((target) => target.paraID));
-      const missingParaIDs = normalizedIDs.filter((paraID) => !foundIDs.has(paraID));
-      const firstTargetIndex = Math.min(...targets.map((target) => target.paraIndex));
-      let replacementInsertParaID = "0";
-      for (let idx = firstTargetIndex - 1; idx >= 0; idx--) {
-        const previousID = allParaIDs[idx];
-        if (previousID && !foundIDs.has(previousID)) {
-          replacementInsertParaID = previousID;
-          break;
+      const targets = ids.slice(first, last + 1);
+      for (const operation of operations.reverse()) {
+        try {
+          for (let i = operation.start; i <= operation.end; i++) {
+            const names = await collectWenceParaIDBookmarkNames(context, paragraphs.items[i]);
+            await deleteWenceParaIDBookmarks(context, names);
+          }
+          if (operation.table) operation.table.delete();
+          else operation.range.delete();
+          await context.sync();
+          result.deletedCount += operation.end - operation.start + 1;
+          result.deletedParaIDs.push(...ids.slice(operation.start, operation.end + 1).filter(Boolean));
+          result.deletedTableCount += operation.tableCount || 0;
+        } catch (error) {
+          return { ...result, deletedCount: null, requiresRead: true,
+            failedParaIDs: targets.filter(id => id && !result.deletedParaIDs.includes(id)),
+            message: `范围删除结果未确认：${error.message}` };
         }
       }
-
-      let deletedCount = 0;
-      let deletedBookmarkCount = 0;
-      targets.sort((a, b) => b.paraIndex - a.paraIndex);
-      for (const target of targets) {
-        const para = allParas.items[target.paraIndex];
-        const bookmarkNames = await collectWenceParaIDBookmarkNames(context, para);
-        deletedBookmarkCount += await deleteWenceParaIDBookmarks(context, bookmarkNames);
-        para.delete();
-        deletedCount++;
-      }
-      await context.sync();
-
-      return {
-        success: deletedCount > 0,
-        deletedCount,
-        deletedParaIDs: targets.map((target) => target.paraID),
-        missingParaIDs,
-        replacementInsertParaID,
-        message: `成功删除 ${deletedCount} 个段落（按 paraID），清理 ${deletedBookmarkCount} 个段落书签`,
-      };
+      return { ...result, success: true, message: `已删除范围内 ${result.deletedCount} 个段落、${result.deletedTableCount} 个表格` };
     });
-  } catch (e) {
-    return { success: false, deletedCount: 0, message: `删除失败: ${e.message}` };
+  } catch (error) {
+    return { ...result, requiresRead: true, message: `无法删除范围：${error.message}` };
   }
 }
 

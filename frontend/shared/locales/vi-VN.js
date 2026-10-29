@@ -182,8 +182,8 @@ export default {
   },
   debug: {
     title: 'Bảng điều khiển gỡ lỗi', hint: 'Nhấn F12 để mở công cụ nhà phát triển', parse: 'Phân tích nội dung tài liệu', parseSelection: 'Phân tích phần chọn',
-    showDocuments: 'Hiển thị tên tệp tin đang mở', openDocuments: 'Tài liệu đang mở ({count})', deleteParagraphs: 'Xóa đoạn theo chỉ số',
-    deletePlaceholder: 'Nhập chỉ số đoạn bắt đầu và kết thúc (dựa trên 0), ví dụ: 3, 7', clear: 'Xóa', jsonToDoc: 'JSON sang tài liệu',
+    showDocuments: 'Hiển thị tên tệp tin đang mở', openDocuments: 'Tài liệu đang mở ({count})', deleteParagraphs: 'Xóa phạm vi paraID',
+    deletePlaceholder: 'Nhập paraID đầu và cuối (bao gồm cả hai); một ID cho một đoạn', clear: 'Xóa', jsonToDoc: 'JSON sang tài liệu',
     jsonPlaceholder: 'Dán JSON vào đây...', apply: 'Áp dụng vào tài liệu', export: 'Xuất', copy: 'Sao chép vào bộ nhớ tạm',
     download: 'Tải xuống JSON', deleteAction: 'Xóa đoạn', result: 'Kết quả phân tích:', paragraphs: 'Đoạn: {count}', tables: 'Bảng: {count}', images: 'Hình ảnh: {count}', chars: 'Ký tự: {count}'
   }

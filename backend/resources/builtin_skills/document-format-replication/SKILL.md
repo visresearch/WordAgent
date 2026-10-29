@@ -108,11 +108,11 @@ The cover is a literal-cloning task:
 Preserve structural content that carries layout, including section boundaries, headers, footers, page-numbering setup, table shells, and intentional blank paragraphs. Replace only identified placeholders or content ranges:
 
 1. Locate the exact target paragraphs with `search_document` and confirm them with `read_document`.
-2. Call `delete_document` once for the confirmed paragraph IDs.
+2. Call `delete_document(startParaID, endParaID)` for the confirmed continuous range, including complete tables. Split non-contiguous targets into separate calls.
 3. Insert replacement content with `generate_document` using the `replacementInsertParaID` returned by `delete_document`; never reuse a just-deleted paraID that remains visible as a native revision.
 4. Use the cloned reference block as the generated payload and replace only approved text fields.
 
-Check the immediate `delete_document` result before generating replacement content. On partial failure, re-read and retry only IDs that still exist. Do not rebuild an intact template from scratch when targeted replacement preserves more formatting.
+Check the immediate `delete_document` result before generating replacement content. On partial failure, re-read and verify the remaining range before retrying. Do not rebuild an intact template from scratch when targeted replacement preserves more formatting.
 
 ### Blank or independent target
 

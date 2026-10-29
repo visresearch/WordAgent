@@ -47,7 +47,7 @@ async function executeTool(tool, args) {
       // Clear even after a failed operation: Office may have applied part of it.
       try {
         let result;
-        if (tool === 'delete_document') result = await deleteDocxPara(args.paraIDs);
+        if (tool === 'delete_document') result = await deleteDocxPara(args.startParaID, args.endParaID);
         if (tool === 'edit_document') result = await editDocxParagraph(args.paraID, args.runs);
         if (tool === 'insert_break') result = await insertBreakAfterParagraph(args.paraID, args.breakType);
         if (tool === 'generate_document') {

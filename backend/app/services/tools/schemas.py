@@ -1,5 +1,6 @@
 """Document and query schemas used by agent tools."""
 
+import math
 from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -138,12 +139,42 @@ class Table(BaseModel):
         description="Column widths in points; length must equal columns."
         " If omitted, frontend auto-distributes width. Example: [120, 280].",
     )
-    rowHeights: list[list[int | float]] | None = Field(
+    rowHeights: list[float] | None = Field(
         default=None,
-        description="Row heights; length must equal rows. Each item is [height, heightRule], where"
-        " height is in points and heightRule: 0=auto, 1=at least, 2=exact."
-        " If omitted, height is content-driven. Example: [[40, 1], [40, 1]].",
+        description="Row heights in points, from top to bottom; length must equal rows."
+        " Example: [40, 40]. If omitted, height is content-driven.",
     )
+    rowHeightRules: list[Literal[0, 1, 2]] | None = Field(
+        default=None,
+        description="Per-row height rules, from top to bottom; length must equal rows."
+        " 0=auto, 1=at least, 2=exact. Defaults to 1 for a supplied height. Example: [1, 2].",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_legacy_row_heights(cls, data):
+        """Accept old saved documents, but advertise and emit only flat arrays."""
+        if isinstance(data, dict):
+            heights = data.get("rowHeights")
+            if heights and all(isinstance(item, (list, tuple)) and len(item) == 2 for item in heights):
+                data = {**data, "rowHeights": [item[0] for item in heights]}
+                if data.get("rowHeightRules") is None:
+                    data["rowHeightRules"] = [item[1] for item in heights]
+        return data
+
+    @model_validator(mode="after")
+    def validate_row_dimensions(self):
+        if self.rowHeights is not None:
+            if len(self.rowHeights) != self.rows:
+                raise ValueError("rowHeights length must equal rows")
+            if any(not math.isfinite(height) or height < 0 for height in self.rowHeights):
+                raise ValueError("rowHeights must contain finite, non-negative heights in points")
+        if self.rowHeightRules is not None:
+            if len(self.rowHeightRules) != self.rows:
+                raise ValueError("rowHeightRules length must equal rows")
+            if self.rowHeights is None:
+                raise ValueError("rowHeightRules requires rowHeights")
+        return self
 
 
 class TableBlock(BaseModel):

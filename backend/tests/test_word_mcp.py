@@ -48,7 +48,7 @@ def test_word_tool_discovery_and_all_seven_roundtrips(monkeypatch):
         examples = {
             "read_document": {"mode": "lightweight", "startParaID": 123},
             "search_document": {"query": {"type": "paragraph", "filters": {"text": "hello"}}},
-            "delete_document": {"paraIDs": [123]},
+            "delete_document": {"startParaID": 123, "endParaID": 456},
             "edit_document": {"paraID": 123, "runs": [{"text": "new", "rStyle": "rS_1"}], "styles": {"rS_1": style}},
             "insert_break": {"paraID": 123, "breakType": "wdPageBreak"},
             "generate_document": {"document": {"paragraphs": [], "styles": {}}, "insertParaID": 123},

@@ -74,7 +74,7 @@ Codex CLI 和 IDE 扩展共享 MCP 配置；保存后重新打开会话，IDE �
 | `read_document` | 按段落索引或段落 ID 读取文档，支持 `full` 和 `lightweight` 模式 |
 | `search_document` | 按文本或样式查询文档，定位目标段落 |
 | `edit_document` | 替换指定段落正文，保留其段落样式 |
-| `delete_document` | 按当前段落 ID 删除段落 |
+| `delete_document` | 按起止 paraID 连续删除内容及完整表格 |
 | `generate_document` | 插入带格式的结构化内容，`insertParaID: 0` 表示文档开头 |
 | `insert_break` | 在指定段落后插入换行、分页或下一页分节符 |
 | `create_document` | 创建并打开新的空白 DOCX 文档 |
@@ -108,3 +108,5 @@ Microsoft Word 的 `create_document` 会打开新文档。后续调用前需关�
 桌面程序显示服务状态与 **最近活跃客户端**。客户端发出 MCP 请求后，会在列表中显示约 2 分钟；该列表表示近期活动，不能精确判断客户端是否仍保持打开。
 
 若工具提示“插件页面未连接”，请打开目标文档的加载项侧栏。若 MCP 请求返回 HTTP 503，请检查 **MCP 服务器** 页面是否已点击 **运行**，以及后端是否正常启动。
+
+表格删除统一使用 `delete_document`，例如 `{"host":"wps","docId":0,"startParaID":145448706,"endParaID":130618599}`。两个 ID 必须取自当前读取结果，表示文档顺序中的首末段落，并非数值区间；省略 `endParaID` 仅删除一个段落。整表可直接使用表格对象的 `paraID` / `endParaID`。范围只覆盖部分表格时会拒绝，不会自动扩大删除范围。旧的 `paraIDs` 列表参数已移除。

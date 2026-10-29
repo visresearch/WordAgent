@@ -60,7 +60,7 @@ Agent 模式修改文档时，会先以原生修订展示本轮变更，并在�
 | `search_document` | 按文本或格式定位段落 | ✅ | ✅ |
 | `generate_document` | 生成并插入结构化内容 | ✅ | ❌ |
 | `edit_document` | 原位替换段落正文 | ✅ | ❌ |
-| `delete_document` | 删除指定段落 | ✅ | ❌ |
+| `delete_document` | 按起止 paraID 删除连续内容及完整表格 | ✅ | ❌ |
 | `create_document` | 创建并打开新的空白 DOCX 文档 | ✅ | ❌ |
 | `insert_break` | 插入换行、分页或下一页分节符 | ✅ | ❌ |
 | `load_skill_context` | 加载已启用 Skill | ✅ | ✅ |

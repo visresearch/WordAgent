@@ -182,8 +182,8 @@ export default {
   },
   debug: {
     title: 'デバッグパネル', hint: '開発者ツールを開くにはF12を押す', parse: 'ドキュメント内容を解析', parseSelection: '選択を解析',
-    showDocuments: '開いているファイル名を表示', openDocuments: '開いているドキュメント ({count})', deleteParagraphs: 'インデックスによる段落削除',
-    deletePlaceholder: '例: 3, 7 のように、0から始まる段落インデックスを入力', clear: 'クリア', jsonToDoc: 'JSONをドキュメントに',
+    showDocuments: '開いているファイル名を表示', openDocuments: '開いているドキュメント ({count})', deleteParagraphs: 'paraID の範囲を削除',
+    deletePlaceholder: '開始と終了の paraID を入力（両端を含む）。1 段落は ID を 1 つ入力', clear: 'クリア', jsonToDoc: 'JSONをドキュメントに',
     jsonPlaceholder: 'ここにJSONを貼り付け...', apply: 'ドキュメントに適用', export: 'エクスポート', copy: 'クリップボードにコピー',
     download: 'JSONをダウンロード', deleteAction: '段落を削除', result: '解析結果:', paragraphs: '段落: {count}', tables: '表: {count}', images: '画像: {count}', chars: '文字数: {count}'
   }
