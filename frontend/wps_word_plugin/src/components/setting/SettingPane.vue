@@ -457,7 +457,7 @@ export default {
 <style scoped>
 .setting-container {
   display: flex;
-  height: 100vh;
+  height: var(--wps-viewport-height, 100vh);
   width: 100%;
   background: #f5f5f5;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;

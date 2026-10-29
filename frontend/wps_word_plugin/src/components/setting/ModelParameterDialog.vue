@@ -190,6 +190,7 @@
 
 <script>
 import { nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { getUiRect, getUiViewport, UI_ZOOM_EVENT } from '../../uiZoom.js';
 
 export default {
   name: 'ModelParameterDialog',
@@ -238,8 +239,8 @@ export default {
       if (!reasoningOpen.value || !reasoningTrigger.value) {
         return;
       }
-      const anchor = reasoningTrigger.value.getBoundingClientRect();
-      const body = dialog.value.querySelector('.dialog-body').getBoundingClientRect();
+      const anchor = getUiRect(reasoningTrigger.value);
+      const body = getUiRect(dialog.value.querySelector('.dialog-body'));
       if (anchor.bottom <= body.top || anchor.top >= body.bottom) {
         closeReasoningMenu();
         return;
@@ -247,8 +248,7 @@ export default {
       // The teleported menu can escape the editor, but stays inside the settings viewport.
       const margin = 8;
       const gap = 4;
-      const viewportWidth = document.documentElement.clientWidth;
-      const viewportHeight = document.documentElement.clientHeight;
+      const { width: viewportWidth, height: viewportHeight } = getUiViewport();
       const belowTop = Math.max(margin, anchor.bottom + gap);
       const aboveBottom = Math.min(viewportHeight - margin, anchor.top - gap);
       const below = Math.max(0, viewportHeight - margin - belowTop);
@@ -386,12 +386,14 @@ export default {
       document.addEventListener('mousedown', onOutsideInteraction);
       document.addEventListener('focusin', onOutsideInteraction);
       window.addEventListener('resize', positionReasoningMenu);
+      window.addEventListener(UI_ZOOM_EVENT, positionReasoningMenu);
       document.addEventListener('scroll', onViewportScroll, true);
     });
     onBeforeUnmount(() => {
       document.removeEventListener('mousedown', onOutsideInteraction);
       document.removeEventListener('focusin', onOutsideInteraction);
       window.removeEventListener('resize', positionReasoningMenu);
+      window.removeEventListener(UI_ZOOM_EVENT, positionReasoningMenu);
       document.removeEventListener('scroll', onViewportScroll, true);
       nextTick(() => {
         if (previousFocus?.isConnected) {

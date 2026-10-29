@@ -6,6 +6,12 @@ import router from './router';
 import ribbon from './components/ribbon.js';
 import { i18n } from './i18n/index.js';
 import { startMcpBridge } from './components/js/mcp-server.js';
+import { installUiZoom } from './uiZoom.js';
+
+const disposeUiZoom = installUiZoom();
+if (import.meta.hot) {
+  import.meta.hot.dispose(disposeUiZoom);
+}
 
 // 将 ribbon 挂载到全局，供 WPS 调用
 window.ribbon = ribbon;

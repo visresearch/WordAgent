@@ -4,6 +4,7 @@
 
 ### Added
 - 允许不同WPS窗口多个session同时运行，但是不允许单个WPS窗口跨session并发运行
+- WPS前端加载项手动实现ctrl鼠标滚轮zoom缩放界面
 
 ### Fixed
 - 优化提示词

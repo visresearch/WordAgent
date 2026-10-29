@@ -79,6 +79,7 @@ import ChatInput from './ChatInput.vue';
 import SessionPane from './SessionPane.vue';
 import { sessionState } from '../../sessionState.js';
 import { t } from '../../i18n/index.js';
+import { getUiViewport, UI_ZOOM_EVENT } from '../../uiZoom.js';
 
 export default {
   name: 'AIChatPane',
@@ -151,10 +152,11 @@ export default {
 
     // 监听窗口宽度变化（600px 阈值）
     this._onResize = () => {
-      this.isWide = window.innerWidth >= 600;
+      this.isWide = getUiViewport().width >= 600;
     };
     this._onResize();
     window.addEventListener('resize', this._onResize);
+    window.addEventListener(UI_ZOOM_EVENT, this._onResize);
     sessionState.visible = this.sessionVisible;
 
     // 监听 Ribbon 按钮通过 localStorage 发送的 session 切换信号
@@ -178,6 +180,7 @@ export default {
     clearInterval(this.revisionPreviewTimer);
     if (this._onResize) {
       window.removeEventListener('resize', this._onResize);
+      window.removeEventListener(UI_ZOOM_EVENT, this._onResize);
     }
     if (this._togglePoll) {
       clearInterval(this._togglePoll);
@@ -2647,7 +2650,7 @@ export default {
 .chat-root {
   display: flex;
   height: 100%;
-  min-height: 100vh;
+  min-height: var(--wps-viewport-height, 100vh);
   min-width: 100%;
 }
 
@@ -2657,7 +2660,7 @@ export default {
   flex: 1 1 auto;
   min-width: 0;
   height: 100%;
-  min-height: 100vh;
+  min-height: var(--wps-viewport-height, 100vh);
   background: #f7f8fa;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   box-sizing: border-box;
@@ -2668,7 +2671,7 @@ export default {
   flex-shrink: 0;
   border-left: 1px solid #e8e8e8;
   height: 100%;
-  min-height: 100vh;
+  min-height: var(--wps-viewport-height, 100vh);
   overflow: hidden;
 }
 

@@ -156,7 +156,7 @@ export default {
 .about-container {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: var(--wps-viewport-height, 100vh);
   width: 100%;
   background: #ffffff;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;

@@ -293,6 +293,7 @@ import MarkdownIt from 'markdown-it';
 import UserQuestion from './UserQuestion.vue';
 import questionIcon from '../../assets/icons/question.svg';
 import { t } from '../../i18n/index.js';
+import { getUiZoom, UI_ZOOM_EVENT } from '../../uiZoom.js';
 
 const md = new MarkdownIt({
   html: false,
@@ -365,10 +366,12 @@ export default {
   mounted() {
     this.$refs.messagesContainer?.addEventListener('contextmenu', this.handleImgContextMenu);
     document.addEventListener('click', this.hideImgMenu);
+    window.addEventListener(UI_ZOOM_EVENT, this.hideImgMenu);
   },
   beforeUnmount() {
     this.$refs.messagesContainer?.removeEventListener('contextmenu', this.handleImgContextMenu);
     document.removeEventListener('click', this.hideImgMenu);
+    window.removeEventListener(UI_ZOOM_EVENT, this.hideImgMenu);
   },
   methods: {
     openExternalLink(url) {
@@ -407,9 +410,8 @@ export default {
       }
       e.preventDefault();
       this._contextImg = img;
-      const rect = this.$refs.messagesContainer.getBoundingClientRect();
-      this.imgMenuX = e.clientX - rect.left;
-      this.imgMenuY = e.clientY - rect.top;
+      this.imgMenuX = e.clientX / getUiZoom();
+      this.imgMenuY = e.clientY / getUiZoom();
       this.imgMenuVisible = true;
     },
     hideImgMenu() {
@@ -1169,7 +1171,7 @@ export default {
 }
 
 .img-context-menu {
-  position: absolute;
+  position: fixed;
   z-index: 1000;
   background: #fff;
   border: 1px solid #e0e0e0;
