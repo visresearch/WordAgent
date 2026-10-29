@@ -1,4 +1,4 @@
-const STORAGE_KEY = 'wence_wps_ui_zoom';
+const STORAGE_PREFIX = 'wence_wps_ui_zoom';
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 2;
 const ZOOM_STEP = 0.1;
@@ -6,6 +6,17 @@ const ZOOM_STEP = 0.1;
 export const UI_ZOOM_EVENT = 'wps-ui-zoom-change';
 
 let zoom = 1;
+
+function getStorageKey() {
+  const { hash = '', search = '', pathname = '' } = window.location || {};
+  const route = hash.replace(/^#/, '');
+  const queryIndex = route.indexOf('?');
+  const params = new URLSearchParams(queryIndex >= 0 ? route.slice(queryIndex + 1) : search);
+  const windowId = params.get('windowId');
+  const panel = (route.split('?')[0] || pathname).split('/').filter(Boolean).pop();
+  // A page without an explicit owner keeps its zoom in memory only.
+  return windowId && panel ? `${STORAGE_PREFIX}:${windowId}:${panel}` : null;
+}
 
 function normalizeZoom(value) {
   const number = Number(value);
@@ -33,6 +44,7 @@ export function getUiRect(element) {
 }
 
 export function installUiZoom() {
+  const storageKey = getStorageKey();
   const root = document.documentElement;
   const previousZoom = root.style.zoom;
   const viewportProperties = ['--wps-viewport-width', '--wps-viewport-height'];
@@ -52,9 +64,9 @@ export function installUiZoom() {
     zoom = next;
     root.style.zoom = String(zoom);
     updateViewport();
-    if (persist) {
+    if (persist && storageKey) {
       try {
-        window.localStorage.setItem(STORAGE_KEY, String(zoom));
+        window.localStorage.setItem(storageKey, String(zoom));
       } catch {
         // Some WPS installations restrict storage; zoom still works in memory.
       }
@@ -84,15 +96,9 @@ export function installUiZoom() {
     }
   };
 
-  const onStorage = event => {
-    if (event.key === STORAGE_KEY || event.key === null) {
-      applyZoom(event.newValue);
-    }
-  };
-
   let storedZoom;
   try {
-    storedZoom = window.localStorage.getItem(STORAGE_KEY);
+    if (storageKey) storedZoom = window.localStorage.getItem(storageKey);
   } catch {
     // Storage is optional in the embedded browser.
   }
@@ -103,13 +109,11 @@ export function installUiZoom() {
   window.addEventListener('wheel', onWheel, wheelOptions);
   window.addEventListener('keydown', onKeydown, keyOptions);
   window.addEventListener('resize', updateViewport);
-  window.addEventListener('storage', onStorage);
 
   return () => {
     window.removeEventListener('wheel', onWheel, wheelOptions);
     window.removeEventListener('keydown', onKeydown, keyOptions);
     window.removeEventListener('resize', updateViewport);
-    window.removeEventListener('storage', onStorage);
     root.style.zoom = previousZoom;
     viewportProperties.forEach((name, index) => {
       if (previousViewport[index]) {

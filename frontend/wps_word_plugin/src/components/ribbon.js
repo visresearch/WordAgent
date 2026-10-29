@@ -114,7 +114,7 @@ function OnAction(control) {
       {
         // 使用 WPS 原生对话框显示设置界面
         window.Application.ShowDialog(
-          Util.GetUrlPath() + Util.GetRouterHash() + '/setting',
+          Util.GetUrlPath() + Util.GetRouterHash() + `/setting?windowId=${windowId}`,
           t('windows.settings'),
           900 * window.devicePixelRatio,
           600 * window.devicePixelRatio,
@@ -126,7 +126,7 @@ function OnAction(control) {
       {
         // 使用 WPS 原生对话框显示关于界面
         window.Application.ShowDialog(
-          Util.GetUrlPath() + Util.GetRouterHash() + '/about',
+          Util.GetUrlPath() + Util.GetRouterHash() + `/about?windowId=${windowId}`,
           t('windows.about'),
           900 * window.devicePixelRatio,
           600 * window.devicePixelRatio,
@@ -139,7 +139,7 @@ function OnAction(control) {
         let tsId = window.Application.PluginStorage.getItem(`debug_taskpane_id:${windowId}`);
         if (!tsId) {
           let tskpane = window.Application.CreateTaskPane(
-            Util.GetUrlPath() + Util.GetRouterHash() + '/debug',
+            Util.GetUrlPath() + Util.GetRouterHash() + `/debug?windowId=${windowId}`,
             t('windows.debug')
           );
           let id = tskpane.ID;
