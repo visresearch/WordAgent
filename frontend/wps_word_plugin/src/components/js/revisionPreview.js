@@ -184,7 +184,11 @@ function showFinalRevisionPreview(view) {
   if (!view) {
     return;
   }
-  const settings = { RevisionsView: 0, ShowInsertionsAndDeletions: true, ShowFormatChanges: false };
+  const settings = { RevisionsView: 0, ShowInsertionsAndDeletions: true, ShowFormatChanges: false ,
+    //enum WdRevisionsMode {        wdBalloonRevisions = 0,        wdInLineRevisions = 1,        wdMixedRevisions = 2    } volun_leung 设置混合模式-插入内容的时候也能显示批注栏
+    //enum WdRevisionsBalloonMargin {        wdLeftMargin = 0,        wdRightMargin = 1    }  volun_leung 设置作者批注栏位置在右
+    RevisionsMode: 2 , RevisionsBalloonSide:1
+  };
   for (const [property, value] of Object.entries(settings)) {
     try {
       view[property] = value;
