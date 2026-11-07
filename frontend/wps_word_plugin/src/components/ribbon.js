@@ -6,6 +6,41 @@ import { getActiveWindowId } from './js/windowContext.js';
 import api from './js/api.js';
 import { t } from '../i18n/index.js';
 
+// WPS TaskPane 在加载项内共享，不能用活动文档窗口的 ID 判断是否已创建。
+// windowId 仅用于固定面板的会话上下文，复用时必须沿用原 ID 发送信号。
+function ensureTaskPane(storageKey, route, title, width) {
+  const app = window.Application;
+  const storage = app.PluginStorage;
+  const taskPaneId = storage.getItem(storageKey);
+  let taskPane = null;
+  if (taskPaneId) {
+    try {
+      taskPane = app.GetTaskPane(taskPaneId);
+    } catch (e) {
+      console.warn('读取已缓存的面板失败:', e);
+    }
+  }
+  if (taskPane) {
+    return { taskPane, windowId: storage.getItem(`${storageKey}:windowId`), created: false };
+  }
+
+  const windowId = getActiveWindowId();
+  taskPane = app.CreateTaskPane(
+    Util.GetUrlPath() + Util.GetRouterHash() + `/${route}?windowId=${windowId}`,
+    title
+  );
+  storage.setItem(storageKey, taskPane.ID);
+  storage.setItem(`${storageKey}:windowId`, windowId);
+  taskPane.DockPosition = app.Enum.msoCTPDockPositionRight;
+  taskPane.Visible = true;
+  taskPane.Width = width;
+  return { taskPane, windowId, created: true };
+}
+
+function ensureAIChatPane() {
+  return ensureTaskPane('ai_taskpane_id', 'aichat', t('windows.assistant'), window.devicePixelRatio * 500);
+}
+
 //这个函数在整个wps加载项中是第一个执行的
 function OnAddinLoad(ribbonUI) {
   if (typeof window.Application.ribbonUI !== 'object') {
@@ -28,27 +63,11 @@ function OnAddinLoad(ribbonUI) {
  */
 async function checkAutoShowPanel() {
   try {
-    const windowId = getActiveWindowId();
     const settings = await api.getSettings();
 
     if (settings.showPanelOnStart) {
-      // 自动创建并显示 AI Chat TaskPane
-      let tsId = window.Application.PluginStorage.getItem(`ai_taskpane_id:${windowId}`);
-      if (!tsId) {
-        let tskpane = window.Application.CreateTaskPane(
-          Util.GetUrlPath() + Util.GetRouterHash() + `/aichat?windowId=${windowId}`,
-          t('windows.assistant')
-        );
-        let id = tskpane.ID;
-        window.Application.PluginStorage.setItem(`ai_taskpane_id:${windowId}`, id);
-        tskpane.DockPosition = window.Application.Enum.msoCTPDockPositionRight;
-        tskpane.Visible = true;
-        tskpane.Width = window.devicePixelRatio * 500;
-        
-      } else {
-        let tskpane = window.Application.GetTaskPane(tsId);
-        tskpane.Visible = true;
-      }
+      const { taskPane } = ensureAIChatPane();
+      taskPane.Visible = true;
     }
   } catch (e) {
     console.warn('自动打开面板失败:', e);
@@ -57,51 +76,23 @@ async function checkAutoShowPanel() {
 
 function OnAction(control) {
   const eleId = control.Id;
-  const windowId = getActiveWindowId();
   switch (eleId) {
     case 'btnShowAIChat':
       {
-        let tsId = window.Application.PluginStorage.getItem(`ai_taskpane_id:${windowId}`);
-        if (!tsId) {
-          let tskpane = window.Application.CreateTaskPane(
-            Util.GetUrlPath() + Util.GetRouterHash() + `/aichat?windowId=${windowId}`,
-            t('windows.assistant')
-          );
-          let id = tskpane.ID;
-          window.Application.PluginStorage.setItem(`ai_taskpane_id:${windowId}`, id);
-          tskpane.DockPosition = window.Application.Enum.msoCTPDockPositionRight;
-          tskpane.Visible = true;
-          tskpane.Width = window.devicePixelRatio * 500;
-          
-        } else {
-          let tskpane = window.Application.GetTaskPane(tsId);
-          tskpane.Visible = !tskpane.Visible;
-          tskpane.Width = window.devicePixelRatio * 500; 
-          
+        const { taskPane, created } = ensureAIChatPane();
+        if (!created) {
+          taskPane.Visible = !taskPane.Visible;
+          if (taskPane.Visible) {
+            taskPane.Width = window.devicePixelRatio * 500;
+          }
         }
       }
       break;
     case 'btnShowSession':
       {
         // Session 已嵌入 AIChatPane，确保 AI Chat TaskPane 可见，然后发送切换信号
-        let tsId = window.Application.PluginStorage.getItem(`ai_taskpane_id:${windowId}`);
-        let tskpane = null;
-        if (!tsId) {
-          tskpane = window.Application.CreateTaskPane(
-            Util.GetUrlPath() + Util.GetRouterHash() + `/aichat?windowId=${windowId}`,
-            t('windows.assistant')
-          );
-          let id = tskpane.ID;
-          window.Application.PluginStorage.setItem(`ai_taskpane_id:${windowId}`, id);
-          tskpane.DockPosition = window.Application.Enum.msoCTPDockPositionRight;
-          tskpane.Width = window.devicePixelRatio * 500;
-          tskpane.Visible = true;
-        } else {
-          tskpane = window.Application.GetTaskPane(tsId);
-          if (!tskpane.Visible) {
-            tskpane.Visible = true;
-          }
-        }
+        const { taskPane, windowId } = ensureAIChatPane();
+        taskPane.Visible = true;
         // 通过 localStorage 发送切换信号（storage 事件会在其他窗口/TaskPane 触发）
         try {
           localStorage.setItem(`wence_session_toggle:${windowId}`, String(Date.now()));
@@ -112,6 +103,7 @@ function OnAction(control) {
       break;
     case 'btnShowSetting':
       {
+        const windowId = getActiveWindowId();
         // 使用 WPS 原生对话框显示设置界面
         window.Application.ShowDialog(
           Util.GetUrlPath() + Util.GetRouterHash() + `/setting?windowId=${windowId}`,
@@ -124,6 +116,7 @@ function OnAction(control) {
       break;
     case 'btnShowAbout':
       {
+        const windowId = getActiveWindowId();
         // 使用 WPS 原生对话框显示关于界面
         window.Application.ShowDialog(
           Util.GetUrlPath() + Util.GetRouterHash() + `/about?windowId=${windowId}`,
@@ -136,20 +129,9 @@ function OnAction(control) {
       break;
     case 'btnShowDebug':
       {
-        let tsId = window.Application.PluginStorage.getItem(`debug_taskpane_id:${windowId}`);
-        if (!tsId) {
-          let tskpane = window.Application.CreateTaskPane(
-            Util.GetUrlPath() + Util.GetRouterHash() + `/debug?windowId=${windowId}`,
-            t('windows.debug')
-          );
-          let id = tskpane.ID;
-          window.Application.PluginStorage.setItem(`debug_taskpane_id:${windowId}`, id);
-          tskpane.DockPosition = window.Application.Enum.msoCTPDockPositionRight;
-          tskpane.Width = 400;
-          tskpane.Visible = true;
-        } else {
-          let tskpane = window.Application.GetTaskPane(tsId);
-          tskpane.Visible = !tskpane.Visible;
+        const { taskPane, created } = ensureTaskPane('debug_taskpane_id', 'debug', t('windows.debug'), 400);
+        if (!created) {
+          taskPane.Visible = !taskPane.Visible;
         }
       }
       break;

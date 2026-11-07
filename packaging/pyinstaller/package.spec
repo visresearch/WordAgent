@@ -180,6 +180,11 @@ a = Analysis(
     excludes=[
         "resources.plugins",
         "wordagent_plugin_ocr",
+        "wordagent_plugin_pdf",
+        "pymupdf",
+        "fitz",
+        "pymupdf4llm",
+        "pymupdf_layout",
         "rapidocr_onnxruntime",
         "onnxruntime",
         "cv2",

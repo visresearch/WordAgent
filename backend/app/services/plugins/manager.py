@@ -401,3 +401,7 @@ def invoke_capability(capability: str, payload: dict) -> dict:
 
 def recognize_image(path: Path) -> str:
     return str(invoke_capability("ocr", {"path": str(path)})["text"])
+
+
+def extract_pdf_text(path: Path) -> str:
+    return str(invoke_capability("pdf", {"path": str(path)})["text"])

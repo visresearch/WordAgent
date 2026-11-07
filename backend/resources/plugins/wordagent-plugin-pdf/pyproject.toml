@@ -1,0 +1,16 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "wordagent-plugin-pdf"
+version = "0.1.0"
+description = "Optional PDF text extraction plugin for WordAgent"
+requires-python = ">=3.11"
+dependencies = ["pymupdf>=1.27.2.2"]
+
+[project.entry-points."wordagent.plugins"]
+pdf = "wordagent_plugin_pdf.plugin:Plugin"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/wordagent_plugin_pdf"]

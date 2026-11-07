@@ -64,9 +64,12 @@ def _python_project(root, requirement=">=3.11", program=None):
     return root
 
 
-def test_plugin_install_verify_discover_and_remove(tmp_path, monkeypatch):
+@pytest.mark.parametrize("catalog_item", manager.CATALOG, ids=lambda item: item["id"])
+def test_plugin_install_verify_discover_and_remove(tmp_path, monkeypatch, catalog_item):
     monkeypatch.setenv("WENCE_DATA_DIR", str(tmp_path))
     monkeypatch.setattr(manager, "_uv", lambda: "uv")
+    plugin_id = catalog_item["id"]
+    capability = catalog_item["capabilities"][0]
     downloads = []
 
     def download(item, log, plugin_dir):
@@ -79,30 +82,33 @@ def test_plugin_install_verify_discover_and_remove(tmp_path, monkeypatch):
     def run(command, log):
         commands.append(command)
         if command[1] == "venv":
-            python = manager._python("ocr")
+            python = manager._python(plugin_id)
             python.parent.mkdir(parents=True)
             python.touch()
         if command[-1] == "--inspect":
-            return 'PLUGIN_RESULT:{"name":"OCR","description":"image text","capabilities":["ocr"]}'
+            return "PLUGIN_RESULT:" + json.dumps({
+                "name": catalog_item["name"], "description": "test plugin", "capabilities": [capability]
+            })
         if "--validate-source" in command:
             return 'PLUGIN_RESULT:{"pythonVersion":"3.11.14"}'
         if command[-1] == "--check":
-            assert not manager.has_capability("ocr")
+            assert not manager.has_capability(capability)
             return 'PLUGIN_RESULT:{"ready":true}'
         return ""
 
     monkeypatch.setattr(manager, "_run", run)
-    info = manager.install_plugin("ocr", lambda _: None)
-    assert info["capabilities"] == ["ocr"]
-    assert downloads == [manager.CATALOG[0]["source"]]
-    assert manager.has_capability("ocr")
-    assert manager.discover_plugins()[0]["installed"] is True
+    info = manager.install_plugin(plugin_id, lambda _: None)
+    assert info["capabilities"] == [capability]
+    assert downloads == [catalog_item["source"]]
+    assert manager.has_capability(capability)
+    discovered = {item["id"]: item for item in manager.discover_plugins()}
+    assert discovered[plugin_id]["installed"] is True
     assert any(command[-1] == "--check" for command in commands)
-    assert (manager._plugin_dir("ocr") / "source/pyproject.toml").is_file()
+    assert (manager._plugin_dir(plugin_id) / "source/pyproject.toml").is_file()
     assert any("--managed-python" in command and "--relocatable" in command for command in commands)
-    manager.remove_plugin("ocr", lambda _: None)
-    assert not manager.has_capability("ocr")
-    assert not manager.plugins_dir().joinpath("ocr").exists()
+    manager.remove_plugin(plugin_id, lambda _: None)
+    assert not manager.has_capability(capability)
+    assert not manager.plugins_dir().joinpath(plugin_id).exists()
 
 
 @pytest.mark.parametrize(
@@ -280,9 +286,9 @@ def test_install_failure_removes_environment_and_leaves_plugin_unavailable(tmp_p
 
     monkeypatch.setattr(manager, "_run", fail)
     with pytest.raises(RuntimeError, match="installation failed"):
-        manager.install_plugin("ocr", lambda _: None)
+        manager.install_plugin(manager.CATALOG[0]["id"], lambda _: None)
     assert not manager.has_capability("ocr")
-    assert not manager.plugins_dir().joinpath("ocr").exists()
+    assert not manager.plugins_dir().joinpath(manager.CATALOG[0]["id"]).exists()
 
 
 def test_custom_github_ids_are_stable_and_do_not_collide_between_repositories():

@@ -143,17 +143,10 @@ def _get_image_metadata(file_path: Path) -> str:
 
 
 def _extract_pdf_text(file_path: Path) -> str:
+    from app.services.plugins.manager import extract_pdf_text
+
     try:
-        import importlib
-
-        fitz = importlib.import_module("fitz")  # pymupdf
-
-        doc = fitz.open(str(file_path))
-        pages = []
-        for page in doc:
-            pages.append(page.get_text())
-        doc.close()
-        text = "\n".join(pages).strip()
+        text = extract_pdf_text(file_path)
         return text if text else "[PDF extracted no readable text.]"
     except Exception as exc:
         return f"[PDF text extraction failed: {exc}]"

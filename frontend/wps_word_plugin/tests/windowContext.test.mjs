@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-test('WPS windows share PluginStorage but keep separate pane and conversation keys', async t => {
+test('WPS conversation contexts keep separate session and signal keys in shared PluginStorage', async t => {
   const previous = globalThis.window;
   const storage = new Map();
   globalThis.window = {
@@ -30,7 +30,7 @@ test('WPS windows share PluginStorage but keep separate pane and conversation ke
   assert.equal(storage.get(b.windowStorageKey('current_session_id')), undefined);
   storage.set(b.windowStorageKey('current_session_id'), 'session-b');
   assert.equal(storage.get(a.windowStorageKey('current_session_id')), 'session-a');
-  assert.notEqual(a.windowStorageKey('ai_taskpane_id'), b.windowStorageKey('ai_taskpane_id'));
+  assert.notEqual(a.windowStorageKey('current_session_id'), b.windowStorageKey('current_session_id'));
   assert.notEqual(a.windowStorageKey('wence_session_toggle'), b.windowStorageKey('wence_session_toggle'));
   window.location = { hash: '', search: `?windowId=${first}` };
   const filePane = await import('../src/components/js/windowContext.js?file-pane');

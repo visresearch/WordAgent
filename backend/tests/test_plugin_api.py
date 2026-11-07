@@ -7,17 +7,17 @@ from fastapi.testclient import TestClient
 from app.api.routes import plugins
 
 
-def test_plugin_list_uses_the_agent_catalog_github_folder(monkeypatch):
+@pytest.mark.parametrize("catalog_item", plugins.manager.CATALOG, ids=lambda item: item["id"])
+def test_plugin_list_uses_the_agent_catalog_github_folder(monkeypatch, catalog_item):
     app = FastAPI()
     app.include_router(plugins.router)
     monkeypatch.setattr(plugins.manager, "installed_plugins", lambda: [])
     response = TestClient(app).get("/plugins")
     assert response.status_code == 200
-    item = response.json()["plugins"][0]
-    assert item["id"] == plugins.manager.CATALOG[0]["id"]
+    item = next(item for item in response.json()["plugins"] if item["id"] == catalog_item["id"])
     assert item["installed"] is False
-    assert item["source"] == plugins.manager.CATALOG[0]["source"]
-    assert "/backend/resources/plugins/wordagent-plugin-ocr" in item["source"]
+    assert item["source"] == catalog_item["source"]
+    assert f"/backend/resources/plugins/{catalog_item['package']}" in item["source"]
 
 
 def test_plugin_install_operation_exposes_logs_and_completion(monkeypatch):

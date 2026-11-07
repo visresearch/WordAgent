@@ -2521,7 +2521,7 @@ export default {
     },
 
     hidePane() {
-      let tsId = window.Application.PluginStorage.getItem(api.windowStorageKey('ai_taskpane_id'));
+      let tsId = window.Application.PluginStorage.getItem('ai_taskpane_id');
       if (tsId) {
         let tskpane = window.Application.GetTaskPane(tsId);
         if (tskpane) {

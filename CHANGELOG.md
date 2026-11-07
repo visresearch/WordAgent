@@ -1,5 +1,15 @@
 # Changelog
 
+## [v0.6.5]
+
+### Fixed
+- 修复[wps的ribbon.js重复创建窗口](https://github.com/visresearch/WordAgent/issues/8)的bug
+- 修复mcp-server有多个加载项侧栏连接报错的bug
+
+### Changed
+- 更新py依赖
+- 将PDF功能移到插件
+
 ## [v0.6.4]
 
 ### Added
