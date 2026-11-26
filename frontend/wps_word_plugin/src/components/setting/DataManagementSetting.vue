@@ -1,110 +1,82 @@
 <template>
   <div class="data-management-container">
-    <div class="page-header">
-      <h1 class="page-title">
-        {{ $t('data.title') }}
-      </h1>
-      <p class="page-desc">
-        {{ $t('data.subtitle') }}
-      </p>
-    </div>
+    <!-- 清除缓存 -->
+    <section class="setting-section">
+      <div class="section-header">
+        <svg
+          class="section-icon"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+        >
+          <path d="M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z" />
+          <line
+            x1="18"
+            y1="9"
+            x2="12"
+            y2="15"
+          />
+          <line
+            x1="12"
+            y1="9"
+            x2="18"
+            y2="15"
+          />
+        </svg>
+        <div class="section-title-group">
+          <h2 class="section-title">
+            {{ $t('data.clearCache') }}
+          </h2>
+          <p class="section-subtitle">
+            {{ $t('data.clearCacheDesc') }}
+          </p>
+        </div>
+      </div>
 
-    <div class="settings-content">
-      <!-- 清除缓存 -->
-      <div class="setting-section">
-        <div class="section-header">
+      <dl class="cache-details">
+        <div class="cache-row">
+          <dt>{{ $t('data.cacheLocation') }}</dt>
+          <dd>{{ cacheDir || 'wence_data/project/temp；wence_data/project/uploads' }}</dd>
+        </div>
+        <div class="cache-row">
+          <dt>{{ $t('data.cacheSize') }}</dt>
+          <dd>{{ cacheSizeText }}</dd>
+        </div>
+      </dl>
+
+      <div class="action-area">
+        <button
+          class="btn btn-secondary"
+          :disabled="scanningCache"
+          @click="scanCache"
+        >
           <svg
-            class="section-icon"
+            width="16"
+            height="16"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
             stroke-width="2"
           >
-            <path d="M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z" />
+            <circle cx="11" cy="11" r="8" />
             <line
-              x1="18"
-              y1="9"
-              x2="12"
-              y2="15"
-            />
-            <line
-              x1="12"
-              y1="9"
-              x2="18"
-              y2="15"
+              x1="21"
+              y1="21"
+              x2="16.65"
+              y2="16.65"
             />
           </svg>
-          <div class="section-title-group">
-            <h2 class="section-title">
-              {{ $t('data.clearCache') }}
-            </h2>
-            <p class="section-subtitle">
-              {{ $t('data.clearCacheDesc') }}
-            </p>
-          </div>
-        </div>
-
-        <div class="cache-info-box">
-          <div class="cache-info-item">
-            <span class="cache-label">{{ $t('data.cacheLocation') }}</span>
-            <span class="cache-value">{{ cacheDir || 'wence_data/project/temp；wence_data/project/uploads' }}</span>
-          </div>
-          <div class="cache-info-item">
-            <span class="cache-label">{{ $t('data.cacheSize') }}</span>
-            <span class="cache-value">{{ cacheSizeText }}</span>
-          </div>
-        </div>
-
-        <div class="action-area">
-          <button
-            class="btn btn-secondary"
-            :disabled="scanningCache"
-            @click="scanCache"
-          >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <circle cx="11" cy="11" r="8" />
-              <line
-                x1="21"
-                y1="21"
-                x2="16.65"
-                y2="16.65"
-              />
-            </svg>
-            {{ scanningCache ? $t('data.scanning') : $t('data.scan') }}
-          </button>
-          <button
-            class="btn btn-warning"
-            :disabled="clearingCache || cacheFileCount === 0"
-            @click="clearCache"
-          >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <polyline points="3 6 5 6 21 6" />
-              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-            </svg>
-            {{ clearingCache ? $t('data.clearing') : $t('data.clearCache') }}
-          </button>
-        </div>
-      </div>
-
-      <!-- 数据清理 -->
-      <div class="setting-section danger-section">
-        <div class="section-header">
+          {{ scanningCache ? $t('data.scanning') : $t('data.scan') }}
+        </button>
+        <button
+          class="btn btn-primary"
+          :disabled="clearingCache || cacheFileCount === 0"
+          @click="clearCache"
+        >
           <svg
-            class="section-icon"
+            width="16"
+            height="16"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -112,155 +84,174 @@
           >
             <polyline points="3 6 5 6 21 6" />
             <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-            <line
-              x1="10"
-              y1="11"
-              x2="10"
-              y2="17"
-            />
-            <line
-              x1="14"
-              y1="11"
-              x2="14"
-              y2="17"
-            />
           </svg>
-          <div class="section-title-group">
-            <h2 class="section-title">
-              {{ $t('data.deleteAll') }}
-            </h2>
-            <p class="section-subtitle">
-              {{ $t('data.deleteAllDesc') }}
-            </p>
-          </div>
-        </div>
+          {{ clearingCache ? $t('data.clearing') : $t('data.clearCache') }}
+        </button>
+      </div>
+    </section>
 
-        <div class="warning-box">
-          <span
-            class="warning-icon section-icon-mask"
-            :style="{ '--section-icon-url': 'url(' + warningIcon + ')' }"
-            aria-hidden="true"
-          ></span>
-          <div class="warning-content">
-            <p class="warning-title">
-              {{ $t('data.warning') }}
-            </p>
-            <p class="warning-text">
-              {{ $t('data.deleteIncludes') }}
-            </p>
-            <ul class="warning-list">
-              <li>{{ $t('data.chats') }}</li>
-              <li>{{ $t('data.cachedDocs') }}</li>
-              <li>{{ $t('data.sessionState') }}</li>
-            </ul>
-          </div>
-        </div>
-
-        <div class="action-area">
-          <button 
-            class="btn btn-danger" 
-            :disabled="deleting"
-            @click="showDeleteConfirm = true"
-          >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 16 16"
-              fill="currentColor"
-            >
-              <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z" />
-              <path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z" />
-            </svg>
+    <!-- 数据清理 -->
+    <section class="setting-section">
+      <div class="section-header">
+        <svg
+          class="section-icon"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+        >
+          <polyline points="3 6 5 6 21 6" />
+          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+          <line
+            x1="10"
+            y1="11"
+            x2="10"
+            y2="17"
+          />
+          <line
+            x1="14"
+            y1="11"
+            x2="14"
+            y2="17"
+          />
+        </svg>
+        <div class="section-title-group">
+          <h2 class="section-title">
             {{ $t('data.deleteAll') }}
-          </button>
-        </div>
-
-        <!-- 删除确认对话框 -->
-        <div v-if="showDeleteConfirm" class="modal-overlay" @click.self="showDeleteConfirm = false">
-          <div class="modal-dialog">
-            <div class="modal-header">
-              <svg
-                class="modal-icon danger"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-              >
-                <circle cx="12" cy="12" r="10" />
-                <line
-                  x1="15"
-                  y1="9"
-                  x2="9"
-                  y2="15"
-                />
-                <line
-                  x1="9"
-                  y1="9"
-                  x2="15"
-                  y2="15"
-                />
-              </svg>
-              <h3 class="modal-title">
-                {{ $t('data.confirmTitle') }}
-              </h3>
-            </div>
-            
-            <div class="modal-body">
-              <p>{{ $t('data.confirmBody') }}</p>
-              <div class="confirm-input-group">
-                <label>{{ $t('data.typeDelete') }}</label>
-                <input 
-                  v-model="confirmText" 
-                  type="text" 
-                  class="confirm-input"
-                  :placeholder="$t('data.deletePlaceholder')"
-                  @keyup.enter="confirmDelete"
-                />
-              </div>
-            </div>
-            
-            <div class="modal-footer">
-              <button class="btn btn-cancel" @click="cancelDelete">
-                {{ $t('common.cancel') }}
-              </button>
-              <button 
-                class="btn btn-confirm-danger" 
-                :disabled="confirmText !== 'DELETE' || deleting"
-                @click="confirmDelete"
-              >
-                <span v-if="deleting" class="loading-spinner"></span>
-                {{ deleting ? $t('data.deleting') : $t('data.confirmDelete') }}
-              </button>
-            </div>
-          </div>
+          </h2>
+          <p class="section-subtitle">
+            {{ $t('data.deleteAllDesc') }}
+          </p>
         </div>
       </div>
 
-      <!-- 操作结果提示 -->
-      <transition name="fade">
-        <div v-if="resultMessage" class="result-message" :class="{ success: resultSuccess, error: !resultSuccess }">
-          <svg
-            v-if="resultSuccess"
-            width="20"
-            height="20"
-            viewBox="0 0 16 16"
-            fill="currentColor"
-          >
-            <path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0zm-3.97-3.03a.75.75 0 0 0-1.08.022L7.477 9.417 5.384 7.323a.75.75 0 0 0-1.06 1.06L6.97 11.03a.75.75 0 0 0 1.079-.02l3.992-4.99a.75.75 0 0 0-.01-1.05z" />
-          </svg>
-          <svg
-            v-else
-            width="20"
-            height="20"
-            viewBox="0 0 16 16"
-            fill="currentColor"
-          >
-            <path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0zM5.354 4.646a.5.5 0 1 0-.708.708L7.293 8l-2.647 2.646a.5.5 0 0 0 .708.708L8 8.707l2.646 2.647a.5.5 0 0 0 .708-.708L8.707 8l2.647-2.646a.5.5 0 0 0-.708-.708L8 7.293 5.354 4.646z" />
-          </svg>
-          <span>{{ resultMessage }}</span>
+      <div class="warning-box">
+        <span
+          class="warning-icon section-icon-mask"
+          :style="{ '--section-icon-url': 'url(' + warningIcon + ')' }"
+          aria-hidden="true"
+        ></span>
+        <div class="warning-content">
+          <p class="warning-title">
+            {{ $t('data.warning') }}
+          </p>
+          <p>
+            {{ $t('data.deleteIncludes') }}
+          </p>
+          <ul class="warning-list">
+            <li>{{ $t('data.chats') }}</li>
+            <li>{{ $t('data.cachedDocs') }}</li>
+            <li>{{ $t('data.sessionState') }}</li>
+          </ul>
         </div>
-      </transition>
-    </div>
+      </div>
+
+      <div class="action-area">
+        <button
+          class="btn btn-danger"
+          :disabled="deleting"
+          @click="showDeleteConfirm = true"
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 16 16"
+            fill="currentColor"
+          >
+            <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z" />
+            <path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z" />
+          </svg>
+          {{ $t('data.deleteAll') }}
+        </button>
+      </div>
+
+      <!-- 删除确认对话框 -->
+      <div v-if="showDeleteConfirm" class="modal-overlay" @click.self="showDeleteConfirm = false">
+        <div class="modal-dialog">
+          <div class="modal-header">
+            <svg
+              class="modal-icon"
+              aria-hidden="true"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <circle cx="12" cy="12" r="10" />
+              <line
+                x1="15"
+                y1="9"
+                x2="9"
+                y2="15"
+              />
+              <line
+                x1="9"
+                y1="9"
+                x2="15"
+                y2="15"
+              />
+            </svg>
+            <h3 class="modal-title">
+              {{ $t('data.confirmTitle') }}
+            </h3>
+          </div>
+
+          <div class="modal-body">
+            <p>{{ $t('data.confirmBody') }}</p>
+            <div class="confirm-input-group">
+              <label for="data-delete-confirm">{{ $t('data.typeDelete') }}</label>
+              <input
+                id="data-delete-confirm"
+                v-model="confirmText"
+                type="text"
+                class="confirm-input"
+                :placeholder="$t('data.deletePlaceholder')"
+                @keyup.enter="confirmDelete"
+              />
+            </div>
+          </div>
+
+          <div class="modal-footer">
+            <button class="btn btn-secondary" @click="cancelDelete">
+              {{ $t('common.cancel') }}
+            </button>
+            <button
+              class="btn btn-danger"
+              :disabled="confirmText !== 'DELETE' || deleting"
+              @click="confirmDelete"
+            >
+              <span v-if="deleting" class="loading-spinner"></span>
+              {{ deleting ? $t('data.deleting') : $t('data.confirmDelete') }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 操作结果提示 -->
+    <transition name="fade">
+      <div v-if="resultMessage" class="result-message" :class="{ success: resultSuccess, error: !resultSuccess }">
+        <svg
+          v-if="resultSuccess"
+          width="20"
+          height="20"
+          viewBox="0 0 16 16"
+          fill="currentColor"
+        >
+          <path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0zm-3.97-3.03a.75.75 0 0 0-1.08.022L7.477 9.417 5.384 7.323a.75.75 0 0 0-1.06 1.06L6.97 11.03a.75.75 0 0 0 1.079-.02l3.992-4.99a.75.75 0 0 0-.01-1.05z" />
+        </svg>
+        <svg
+          v-else
+          width="20"
+          height="20"
+          viewBox="0 0 16 16"
+          fill="currentColor"
+        >
+          <path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0zM5.354 4.646a.5.5 0 1 0-.708.708L7.293 8l-2.647 2.646a.5.5 0 0 0 .708.708L8 8.707l2.646 2.647a.5.5 0 0 0 .708-.708L8.707 8l2.647-2.646a.5.5 0 0 0-.708-.708L8 7.293 5.354 4.646z" />
+        </svg>
+        <span>{{ resultMessage }}</span>
+      </div>
+    </transition>
   </div>
 </template>
 
@@ -442,225 +433,190 @@ export default {
 <style scoped src="./setting.css"></style>
 
 <style scoped>
-.data-management-container {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  background-color: #ffffff;
+.data-management-container > .setting-section:last-child {
+  margin-bottom: 0;
 }
 
-.danger-section {
-  border: 2px solid #fee2e2;
+.cache-details {
+  margin: 0 0 16px;
 }
 
-.danger-section .section-header {
-  border-bottom-color: #fee2e2;
-}
-
-.danger-section .section-title {
-  color: #c0392b;
-}
-
-/* 缓存信息 */
-.cache-info-box {
-  background: #f8f9fa;
-  border: 1px solid #e9ecef;
-  border-radius: 8px;
-  padding: 16px;
-  margin-bottom: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.cache-info-item {
-  display: flex;
-  justify-content: space-between;
+.cache-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
   align-items: center;
+  gap: 12px;
+  padding: 16px 0;
+  border-bottom: 1px solid #f0f0f0;
+  font-size: 14px;
+  color: #333;
+  overflow-wrap: anywhere;
 }
 
-.cache-label {
-  font-size: 13px;
-  color: #6b7280;
-}
-
-.cache-value {
-  font-size: 13px;
-  color: #374151;
-  font-weight: 500;
-  word-break: break-all;
+.cache-row dd {
+  margin: 0;
+  color: #666;
   text-align: right;
-  max-width: 60%;
 }
 
 .warning-box {
   display: flex;
-  gap: 16px;
-  padding: 20px;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  border-radius: 6px;
   background: #fef3f2;
-  border: 1px solid #fecaca;
-  border-radius: 8px;
-  margin-bottom: 24px;
+  color: #991b1b;
+  font-size: 13px;
 }
 
 .warning-icon {
-  width: 24px;
-  height: 24px;
-  color: #dc2626;
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
   flex-shrink: 0;
 }
 
 .warning-content {
-  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .warning-title {
-  font-size: 14px;
+  margin-bottom: 4px;
   font-weight: 600;
-  color: #991b1b;
-  margin: 0 0 8px 0;
-}
-
-.warning-text {
-  font-size: 13px;
-  color: #7f1d1d;
-  margin: 0 0 8px 0;
 }
 
 .warning-list {
-  margin: 0;
-  padding-left: 20px;
-  font-size: 13px;
-  color: #7f1d1d;
+  margin: 4px 0 0;
+  padding-inline-start: 18px;
 }
 
-.warning-list li {
-  margin-bottom: 4px;
-}
-
-.action-area {
+.action-area,
+.modal-footer {
   display: flex;
-  justify-content: flex-start;
-  gap: 12px;
-}
-
-.btn-secondary {
-  background: #f3f4f6;
-  color: #374151;
-  border: 1px solid #d1d5db;
-}
-
-.btn-secondary:hover:not(:disabled) {
-  background: #e5e7eb;
-}
-
-.btn-secondary:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.btn-warning {
-  background: #f59e0b;
-  color: white;
-}
-
-.btn-warning:hover:not(:disabled) {
-  background: #d97706;
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.4);
-}
-
-.btn-warning:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .btn {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 20px;
-  border: none;
-  border-radius: 8px;
-  font-size: 14px;
+  max-width: 100%;
+  padding: 8px 16px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 13px;
   font-weight: 500;
+  line-height: 1.5;
+  text-align: left;
+  overflow-wrap: anywhere;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background-color 0.2s, border-color 0.2s;
+}
+
+.btn svg {
+  flex-shrink: 0;
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn:focus-visible {
+  outline: 2px solid #667eea;
+  outline-offset: 2px;
+}
+
+.btn-secondary {
+  border-color: #e0e0e0;
+  background: #fff;
+  color: #666;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: #f5f5f5;
+}
+
+.btn-primary {
+  background: #667eea;
+  color: #fff;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #596bda;
 }
 
 .btn-danger {
   background: #dc2626;
-  color: white;
+  color: #fff;
 }
 
 .btn-danger:hover:not(:disabled) {
   background: #b91c1c;
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.4);
 }
 
-.btn-danger:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-/* 模态框样式 */
 .modal-overlay {
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
+  inset: 0;
+  z-index: 1000;
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.4);
 }
 
 .modal-dialog {
-  background: white;
-  border-radius: 12px;
-  width: 90%;
-  max-width: 440px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  display: flex;
+  flex-direction: column;
+  width: 440px;
+  max-width: 100%;
+  max-height: 100%;
   overflow: hidden;
+  border: 1px solid #e8e8e8;
+  border-radius: 12px;
+  background: #fff;
+  color: #333;
+  box-shadow: 0 20px 60px rgba(24, 30, 48, 0.2);
 }
 
 .modal-header {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  padding: 24px 24px 16px;
-  text-align: center;
+  flex-shrink: 0;
+  gap: 10px;
+  padding: 16px 24px;
+  border-bottom: 1px solid #eee;
 }
 
 .modal-icon {
-  width: 48px;
-  height: 48px;
-  margin-bottom: 16px;
-}
-
-.modal-icon.danger {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
   color: #dc2626;
 }
 
 .modal-title {
-  font-size: 18px;
-  font-weight: 600;
-  color: #1f2937;
   margin: 0;
+  font-size: 17px;
+  font-weight: 600;
 }
 
 .modal-body {
-  padding: 0 24px 24px;
+  min-height: 0;
+  padding: 16px 24px;
+  overflow-y: auto;
+  color: #666;
+  font-size: 13px;
 }
 
 .modal-body p {
-  font-size: 14px;
-  color: #6b7280;
-  margin: 0 0 20px 0;
-  text-align: center;
+  margin: 0 0 16px;
 }
 
 .confirm-input-group {
@@ -670,65 +626,37 @@ export default {
 }
 
 .confirm-input-group label {
-  font-size: 13px;
-  color: #374151;
-}
-
-.confirm-input-group strong {
-  color: #dc2626;
+  color: #333;
 }
 
 .confirm-input {
-  padding: 10px 12px;
-  border: 2px solid #e5e7eb;
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #e0e0e0;
   border-radius: 6px;
-  font-size: 14px;
-  transition: all 0.2s ease;
+  color: #333;
+  font: inherit;
 }
 
 .confirm-input:focus {
   outline: none;
-  border-color: #dc2626;
-  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.1);
+  border-color: #667eea;
+  box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.12);
 }
 
 .modal-footer {
-  display: flex;
-  gap: 12px;
-  padding: 16px 24px;
-  background: #f9fafb;
   justify-content: flex-end;
-}
-
-.btn-cancel {
-  background: #f3f4f6;
-  color: #374151;
-  border: 1px solid #e5e7eb;
-}
-
-.btn-cancel:hover {
-  background: #e5e7eb;
-}
-
-.btn-confirm-danger {
-  background: #dc2626;
-  color: white;
-}
-
-.btn-confirm-danger:hover:not(:disabled) {
-  background: #b91c1c;
-}
-
-.btn-confirm-danger:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+  flex-shrink: 0;
+  padding: 14px 24px;
+  border-top: 1px solid #eee;
 }
 
 .loading-spinner {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
   border: 2px solid rgba(255, 255, 255, 0.3);
-  border-top-color: white;
+  border-top-color: #fff;
   border-radius: 50%;
   animation: spin 0.6s linear infinite;
 }
@@ -739,25 +667,27 @@ export default {
   }
 }
 
-/* 结果提示 */
 .result-message {
   display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 16px 20px;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 500;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.result-message svg {
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  flex-shrink: 0;
 }
 
 .result-message.success {
-  background: #d1fae5;
-  color: #065f46;
+  color: #059669;
 }
 
 .result-message.error {
-  background: #fee2e2;
-  color: #991b1b;
+  color: #dc2626;
 }
 
 .fade-enter-active,
@@ -769,5 +699,4 @@ export default {
 .fade-leave-to {
   opacity: 0;
 }
-
 </style>

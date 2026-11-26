@@ -173,7 +173,7 @@ async def read_document(
     mode: Literal["full", "lightweight"] = "full",
     host: Host | None = None,
 ) -> dict:
-    """Read a paragraph range (0-based indices or paraIDs); endParaIndex=-1 reads to the end."""
+    """Read a paragraph range. Use endParaIndex=-1 to read to the end. WPS returns native equations as LaTeX formula runs."""
     return await bridge.call("read_document", locals())
 
 
@@ -208,7 +208,10 @@ async def edit_document(
     host: Host | None = None,
     styles: dict[str, list] | None = None,
 ) -> dict:
-    """Replace a paragraph, preserving its paragraph style. For runs with rStyle IDs, supply the styles dictionary from a full read; omit rStyle to preserve character formatting."""
+    """Replace a paragraph's content while preserving its paragraph style.
+
+    In WPS, use one LaTeX formula run per native equation. Resolve rStyle IDs with the styles from a full read.
+    """
     resolved_runs = []
     for run in runs:
         value = run.model_dump(exclude_none=True)
@@ -245,7 +248,7 @@ async def generate_document(
     docId: int = 0,
     host: Host | None = None,
 ) -> dict:
-    """Insert styled document blocks after insertParaID (0 inserts at the start)."""
+    """Insert styled blocks after insertParaID (0 inserts at the start), including LaTeX formula runs in WPS."""
     return await bridge.call(
         "generate_document",
         {

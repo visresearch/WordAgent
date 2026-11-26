@@ -12,6 +12,7 @@
  *       pStyle: "pS_1",       // 必填：styles 中的段落样式 ID
  *       runs: [                // 空数组表示空白段落
  *         { text: "正文", rStyle: "rS_1" },
+ *         { formula: "x^2" }, // 原生公式的 LaTeX 源码
  *         {                    // 图片 run：省略 text
  *           url: "image.png",
  *           width: 320,
@@ -59,6 +60,8 @@
  * paraIndex，以及客户端支持时的 pageStart/pageEnd；顶层也可能带 hasTOC
  * 和 tocFieldCode。这些读取元数据不属于后端生成用的 DocumentOutput。
  */
+
+import { canInsertFormula, insertFormula, prepareFormula, readFormulaRanges } from './documentFormula.js';
 
 // ============== 格式转换辅助函数 ==============
 
@@ -407,7 +410,7 @@ function stripRedundantReadTableTextFields(documentJson) {
             const fallbackText = cleanCellText(String(paragraph.text || ''));
             if (
               fallbackText &&
-              (!Array.isArray(paragraph.runs) || !paragraph.runs.some((run) => run?.text))
+              (!Array.isArray(paragraph.runs) || !paragraph.runs.some((run) => run?.text || run?.formula || run?.formulaError))
             ) {
               paragraph.runs = [{ text: fallbackText, rStyle: paragraph.rStyle || cell.rStyle || null }];
             }
@@ -1049,341 +1052,100 @@ function getImageParagraphStyle(img, styles) {
   return normalized;
 }
 
-const MATH_FONT_KEYWORDS = ['cambria math', 'dejavu math', 'tex gyre', 'stix', 'latin modern math'];
+// Keep native formula contents out of ordinary text runs.
+function readParagraphRuns(doc, range, formulas, inlineImages = [], inCell = false) {
+  const chars = range.Characters;
+  if (!chars?.Count) return readLightweightParagraphRuns(doc, range, formulas);
 
-const MATH_SYMBOL_TO_LATEX = {
-  '\u221e': '\\infty',
-  '\u2211': '\\sum',
-  '\u220f': '\\prod',
-  '\u222b': '\\int',
-  '\u221a': '\\sqrt',
-  '\u00d7': '\\times',
-  '\u00f7': '\\div',
-  '\u00b1': '\\pm',
-  '\u2213': '\\mp',
-  '\u2264': '\\le',
-  '\u2265': '\\ge',
-  '\u2260': '\\ne',
-  '\u2248': '\\approx',
-  '\u2261': '\\equiv',
-  '\u00b7': '\\cdot',
-  '\u22c5': '\\cdot',
-  '\u03b1': '\\alpha',
-  '\u03b2': '\\beta',
-  '\u03b3': '\\gamma',
-  '\u03b4': '\\delta',
-  '\u03b5': '\\epsilon',
-  '\u03b8': '\\theta',
-  '\u03bb': '\\lambda',
-  '\u03bc': '\\mu',
-  '\u03c0': '\\pi',
-  '\u03c1': '\\rho',
-  '\u03c3': '\\sigma',
-  '\u03c6': '\\phi',
-  '\u03c9': '\\omega',
-  '\u0393': '\\Gamma',
-  '\u0394': '\\Delta',
-  '\u0398': '\\Theta',
-  '\u039b': '\\Lambda',
-  '\u03a0': '\\Pi',
-  '\u03a3': '\\Sigma',
-  '\u03a6': '\\Phi',
-  '\u03a9': '\\Omega',
-  '\u2212': '-'
-};
+  const runs = [];
+  let formulaIndex = 0;
+  let currentRun = null;
+  let lastFormat = null;
+  const flushText = () => {
+    if (inCell && currentRun) currentRun.text = cleanCellText(currentRun.text);
+    if (currentRun?.text) runs.push(currentRun);
+    currentRun = null;
+    lastFormat = null;
+  };
 
-const SUPERSCRIPT_CHAR_MAP = {
-  '\u2070': '0', '\u00b9': '1', '\u00b2': '2', '\u00b3': '3', '\u2074': '4',
-  '\u2075': '5', '\u2076': '6', '\u2077': '7', '\u2078': '8', '\u2079': '9',
-  '\u207a': '+', '\u207b': '-', '\u207c': '=', '\u207d': '(', '\u207e': ')',
-  '\u207f': 'n', '\u1d43': 'a', '\u1d47': 'b', '\u1d9c': 'c', '\u1d48': 'd',
-  '\u1d49': 'e', '\u1da0': 'f', '\u1d4d': 'g', '\u02b0': 'h', '\u2071': 'i',
-  '\u02b2': 'j', '\u1d4f': 'k', '\u02e1': 'l', '\u1d50': 'm',
-  '\u1d52': 'o', '\u1d56': 'p', '\u02b3': 'r', '\u02e2': 's', '\u1d57': 't',
-  '\u1d58': 'u', '\u1d5b': 'v', '\u02b7': 'w', '\u02e3': 'x', '\u02b8': 'y',
-  '\u1dbb': 'z'
-};
+  for (let index = 1; index <= chars.Count; index++) {
+    const char = chars.Item(index);
+    const position = char.Start;
+    while (formulaIndex < formulas.length && formulas[formulaIndex].start <= position) {
+      flushText();
+      runs.push(formulas[formulaIndex++].run);
+    }
+    if (formulaIndex > 0 && position < formulas[formulaIndex - 1].end) continue;
 
-const SUBSCRIPT_CHAR_MAP = {
-  '\u2080': '0', '\u2081': '1', '\u2082': '2', '\u2083': '3', '\u2084': '4',
-  '\u2085': '5', '\u2086': '6', '\u2087': '7', '\u2088': '8', '\u2089': '9',
-  '\u208a': '+', '\u208b': '-', '\u208c': '=', '\u208d': '(', '\u208e': ')',
-  '\u2090': 'a', '\u2091': 'e', '\u2092': 'o', '\u2093': 'x', '\u2094': 'schwa',
-  '\u2095': 'h', '\u2096': 'k', '\u2097': 'l', '\u2098': 'm', '\u2099': 'n',
-  '\u209a': 'p', '\u209b': 's', '\u209c': 't'
-};
-
-function isMathFont(fontName) {
-  if (!fontName) {
-    return false;
-  }
-  const normalized = String(fontName).toLowerCase();
-  return MATH_FONT_KEYWORDS.some((keyword) => normalized.includes(keyword));
-}
-
-function containsMathUnicode(text) {
-  if (!text) {
-    return false;
-  }
-  return /[\u2200-\u22ff\u27c0-\u27ef\u2980-\u29ff\u2a00-\u2aff\u2070-\u209f]|[\ud835\udc00-\ud835\udfff]/u.test(text);
-}
-
-function stripMathDelimiters(text) {
-  let value = (text || '').trim();
-  if (!value) {
-    return '';
-  }
-  if (value.startsWith('$$') && value.endsWith('$$') && value.length > 4) {
-    value = value.slice(2, -2).trim();
-  } else if (value.startsWith('$') && value.endsWith('$') && value.length > 2) {
-    value = value.slice(1, -1).trim();
-  } else if (value.startsWith('\\(') && value.endsWith('\\)') && value.length > 4) {
-    value = value.slice(2, -2).trim();
-  } else if (value.startsWith('\\[') && value.endsWith('\\]') && value.length > 4) {
-    value = value.slice(2, -2).trim();
-  }
-  return value;
-}
-
-function convertScriptCharsToLatex(text, scriptMap, marker) {
-  let result = '';
-  let buffer = '';
-
-  for (const ch of text) {
-    const mapped = scriptMap[ch];
-    if (mapped) {
-      buffer += mapped;
+    const text = char.Text || '';
+    if (!text || /^[\r\n\f\u0007]+$/.test(text)) continue;
+    if (isCharacterInsideInlineImage(char, inlineImages)) {
+      flushText();
       continue;
     }
 
-    if (buffer) {
-      result += `${marker}{${buffer}}`;
-      buffer = '';
-    }
-    result += ch;
-  }
-
-  if (buffer) {
-    result += `${marker}{${buffer}}`;
-  }
-
-  return result;
-}
-
-function replaceMathSymbolsWithLatex(text) {
-  let value = text;
-  for (const [symbol, latex] of Object.entries(MATH_SYMBOL_TO_LATEX)) {
-    value = value.split(symbol).join(latex);
-  }
-  return value;
-}
-
-function repairCommonFormulaPatterns(text) {
-  let value = text;
-
-  value = value
-    .replace(/\s*\(\s*/g, '(')
-    .replace(/\s*\)\s*/g, ')')
-    .replace(/\s*\-\s*/g, '-')
-    .replace(/\s*=\s*/g, '=')
-    .replace(/\s+!/g, '!')
-    .replace(/\s*\^\s*/g, '^')
-    .replace(/\s*_\s*/g, '_');
-
-  value = value.replace(/([A-Za-z])\(n\)\(([A-Za-z])\)/g, '$1^{(n)}($2)');
-  value = value.replace(/\(x-a\)\s*n\b/g, '(x-a)^n');
-
-  if (!/\\sum/.test(value)) {
-    value = value.replace(/n=0\s*\\infty/g, '\\sum_{n=0}^{\\infty}');
-    value = value.replace(/\bn=0\s*\\infty/g, '\\sum_{n=0}^{\\infty}');
-  }
-
-  value = value.replace(/\\sum\s*\{?\s*n\s*=\s*0\s*\}?\s*\^?\s*\\infty/g, '\\sum_{n=0}^{\\infty}');
-
-  if (/f\^\{\(n\)\}\(a\)/.test(value) && /n!/.test(value) && !/\\frac\{/.test(value)) {
-    value = value.replace(/f\^\{\(n\)\}\(a\)\s*n!/g, '\\frac{f^{(n)}(a)}{n!}');
-  }
-
-  value = value
-    .replace(/\(\s*x\s*\)/g, '(x)')
-    .replace(/\(\s*a\s*\)/g, '(a)')
-    .replace(/\(\s*n\s*\)/g, '(n)')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  return value;
-}
-
-function scoreLatexCandidate(text) {
-  if (!text) {
-    return -100;
-  }
-
-  let score = 0;
-  if (/\\sum/.test(text)) {
-    score += 4;
-  }
-  if (/\\sum_\{[^}]+\}\^\{[^}]+\}/.test(text)) {
-    score += 4;
-  }
-  if (/\\frac\{[^}]+\}\{[^}]+\}/.test(text)) {
-    score += 4;
-  }
-  if (/\\infty/.test(text)) {
-    score += 2;
-  }
-  if (/\^[{(]?[A-Za-z0-9]+/.test(text)) {
-    score += 2;
-  }
-  if (/_\{[^}]+\}/.test(text)) {
-    score += 2;
-  }
-  if (/[A-Za-z]\^\{\(n\)\}/.test(text)) {
-    score += 2;
-  }
-  if (/\(x-a\)\^n/.test(text)) {
-    score += 2;
-  }
-  if (/n\s*=\s*0\s*\\infty/.test(text)) {
-    score -= 4;
-  }
-  if (/\\sum\s+n\s*=/.test(text)) {
-    score -= 3;
-  }
-  if (/\s{2,}/.test(text)) {
-    score -= 1;
-  }
-
-  return score;
-}
-
-function normalizeFormulaTextToLatex(text) {
-  let value = stripMathDelimiters((text || '').replace(/[\r\n\f]+/g, ' ').trim());
-  if (!value) {
-    return '';
-  }
-
-  value = value.normalize('NFKD');
-  value = replaceMathSymbolsWithLatex(value);
-  value = convertScriptCharsToLatex(value, SUPERSCRIPT_CHAR_MAP, '^');
-  value = convertScriptCharsToLatex(value, SUBSCRIPT_CHAR_MAP, '_');
-  value = repairCommonFormulaPatterns(value);
-  value = value.replace(/\s+/g, ' ').trim();
-
-  value = value.replace(/\\sum\s*([a-zA-Z]\s*=\s*[^\\\s]+)\s*\\infty/g, '\\sum_{$1}^{\\infty}');
-  value = value.replace(/\\sum_\{\s*([a-zA-Z])\s*=\s*([^}]+)\s*\}\^\{\s*\\infty\s*\}/g, '\\sum_{$1=$2}^{\\infty}');
-
-  if (/\\sum_\{n=0\}\^\{\\infty\}/.test(value) && /f\^\{\(n\)\}\(a\)/.test(value) && /\(x-a\)\^n/.test(value) && !/\\frac\{/.test(value)) {
-    value = value.replace(/f\^\{\(n\)\}\(a\)\s*n!/g, '\\frac{f^{(n)}(a)}{n!}');
-  }
-
-  return value;
-}
-
-function normalizeParsedRun(run) {
-  if (!run || !run.text) {
-    return run;
-  }
-
-  const text = run.text;
-  const rStyle = run.rStyle || DEFAULT_RSTYLE;
-  const fontName = rStyle[RSTYLE.FONT_NAME] || '';
-  const hasLatexSyntax = /\\[a-zA-Z]+/.test(text) || /[_^]\{?[^\s]/.test(text) || /^\$\$?[\s\S]+\$\$?$/.test(text.trim());
-
-  if (!hasLatexSyntax && !isMathFont(fontName) && !containsMathUnicode(text)) {
-    return run;
-  }
-
-  const latexText = normalizeFormulaTextToLatex(text);
-  if (!latexText) {
-    return run;
-  }
-
-  return {
-    ...run,
-    text: latexText,
-    isFormula: true,
-    formulaFormat: 'latex'
-  };
-}
-
-function extractFormulaRunsFromRange(paraRange) {
-  const formulaRuns = [];
-  if (!paraRange) {
-    return formulaRuns;
-  }
-
-  try {
-    const oMaths = paraRange.OMaths;
-    if (!oMaths || oMaths.Count <= 0) {
-      return formulaRuns;
-    }
-
-    for (let i = 1; i <= oMaths.Count; i++) {
+    const font = char.Font;
+    let highlight = 0;
+    if (!inCell) {
       try {
-        const oMath = oMaths.Item(i);
-        const formulaRange = oMath.Range;
-        if (!formulaRange) {
-          continue;
-        }
-
-        let originalFormulaText = '';
+        highlight = char.HighlightColorIndex || 0;
+      } catch (error) {
         try {
-          originalFormulaText = cleanText(formulaRange.Text || '');
-        } catch (e) {}
-
-        let linearFormulaText = '';
-        try {
-          oMath.Linearize();
-          const linearText = cleanText(formulaRange.Text || '');
-          if (linearText) {
-            linearFormulaText = linearText;
-          }
-        } catch (e) {}
-
-        try {
-          oMath.BuildUp();
-        } catch (e) {}
-
-        const originalLatex = normalizeFormulaTextToLatex(originalFormulaText);
-        const linearLatex = normalizeFormulaTextToLatex(linearFormulaText);
-
-        let latexText = originalLatex;
-        if (scoreLatexCandidate(linearLatex) > scoreLatexCandidate(originalLatex)) {
-          latexText = linearLatex;
-        }
-
-        if (!latexText) {
-          continue;
-        }
-
-        const font = formulaRange.Font || {};
-        formulaRuns.push({
-          start: formulaRange.Start,
-          end: formulaRange.End,
-          text: latexText,
-          rStyle: makeRStyle(
-            font.Name || 'Cambria Math',
-            font.Size || 12,
-            false,
-            true,
-            0,
-            '#000000',
-            getRGBColor(font.Color),
-            0,
-            false,
-            false,
-            false
-          ),
-          isFormula: true,
-          formulaFormat: 'latex'
-        });
-      } catch (e) {}
+          highlight = font.HighlightColorIndex || 0;
+        } catch (fallbackError) {}
+      }
     }
-  } catch (e) {}
+    const format = [
+      font.Name, font.Size, font.Bold, font.Italic, font.Color,
+      ...(inCell ? [] : [font.Underline, highlight, font.StrikeThrough, font.Superscript, font.Subscript])
+    ].join('|');
+    if (format === lastFormat && currentRun) {
+      currentRun.text += text;
+      continue;
+    }
+    flushText();
+    lastFormat = format;
+    currentRun = {
+      text,
+      rStyle: makeRStyle(
+        font.Name || '', font.Size || 12,
+        font.Bold === -1 || font.Bold === true,
+        font.Italic === -1 || font.Italic === true,
+        font.Underline || 0,
+        getRGBColor(font.UnderlineColor),
+        getRGBColor(font.Color),
+        highlight,
+        !inCell && (font.StrikeThrough === -1 || font.StrikeThrough === true),
+        !inCell && (font.Superscript === -1 || font.Superscript === true),
+        !inCell && (font.Subscript === -1 || font.Subscript === true)
+      )
+    };
+  }
 
-  formulaRuns.sort((a, b) => a.start - b.start);
-  return formulaRuns;
+  flushText();
+  for (const formula of formulas.slice(formulaIndex)) runs.push(formula.run);
+  return runs;
+}
+
+function readLightweightParagraphRuns(doc, range, formulas = readFormulaRanges(range)) {
+  const runs = [];
+  const appendText = (value) => {
+    const text = cleanText(value);
+    if (text) runs.push({ text, rStyle: '' });
+  };
+  if (!formulas.length) {
+    appendText(range.Text || '');
+    return runs;
+  }
+
+  let position = range.Start;
+  for (const { start, end, run } of formulas) {
+    if (start > position) appendText(doc.Range(position, start).Text || '');
+    runs.push(run);
+    position = end;
+  }
+  if (range.End > position) appendText(doc.Range(position, range.End).Text || '');
+  return runs;
 }
 
 // ============== 图片处理 ==============
@@ -1479,6 +1241,7 @@ function parseCellParagraphs(cellRange, doc) {
         const para = cellParas.Item(p);
         const paraRange = para.Range;
         const paraText = cleanText(paraRange.Text);
+        const formulas = readFormulaRanges(paraRange);
         const paraID = getParagraphParaID(para);
 
         if (paraID === null) {
@@ -1504,114 +1267,15 @@ function parseCellParagraphs(cellRange, doc) {
         // 空单元格仍然有真实的段落对象和 paraID。保留这个空段落，
         // 这样 agent 可以通过 edit_document(paraID, runs) 写入内容，
         // 也不会因为缺少 runs 而把单元格误判为不存在。
-        if (!paraText || paraText.match(/^[\r\n]*$/)) {
+        if (!paraText && !formulas.length) {
           paragraphs.push(paraData);
           continue;
         }
 
-        // 解析 runs
         try {
-          const chars = paraRange.Characters;
-          if (chars && chars.Count > 0) {
-            const formulaRuns = extractFormulaRunsFromRange(paraRange);
-            let formulaRunIndex = 0;
-            let activeFormulaEnd = -1;
-            let lastFormat = null;
-            let currentRun = null;
-
-            for (let c = 1; c <= chars.Count; c++) {
-              const char = chars.Item(c);
-              const charText = char.Text;
-
-              if (!charText || charText.match(/^[\r\n\u0007]$/)) {
-                continue;
-              }
-
-              const charStart = typeof char.Start === 'number' ? char.Start : null;
-              if (charStart !== null && formulaRuns.length > 0) {
-                while (formulaRunIndex < formulaRuns.length && charStart >= formulaRuns[formulaRunIndex].end) {
-                  formulaRunIndex++;
-                }
-
-                const currentFormula = formulaRuns[formulaRunIndex];
-                if (currentFormula && charStart >= currentFormula.start && charStart < currentFormula.end) {
-                  if (currentRun && currentRun.text) {
-                    currentRun.text = cleanCellText(currentRun.text);
-                    if (currentRun.text) {
-                      paraData.runs.push(normalizeParsedRun(currentRun));
-                    }
-                  }
-
-                  if (activeFormulaEnd !== currentFormula.end) {
-                    const formulaRunData = { ...currentFormula };
-                    delete formulaRunData.start;
-                    delete formulaRunData.end;
-                    paraData.runs.push(formulaRunData);
-                    activeFormulaEnd = currentFormula.end;
-                  }
-
-                  currentRun = null;
-                  lastFormat = null;
-                  continue;
-                }
-              }
-
-              const font = char.Font;
-              const formatKey = `${font.Name}_${font.Size}_${font.Bold}_${font.Italic}_${font.Color}`;
-
-              if (formatKey !== lastFormat) {
-                if (currentRun && currentRun.text) {
-                  currentRun.text = cleanCellText(currentRun.text);
-                  if (currentRun.text) {
-                    paraData.runs.push(normalizeParsedRun(currentRun));
-                  }
-                }
-                currentRun = {
-                  text: charText,
-                  rStyle: makeRStyle(
-                    font.Name || '',
-                    font.Size || 12,
-                    font.Bold === -1 || font.Bold === true,
-                    font.Italic === -1 || font.Italic === true,
-                    font.Underline || 0,
-                    getRGBColor(font.UnderlineColor),
-                    getRGBColor(font.Color),
-                    0,
-                    false,
-                    false,
-                    false
-                  )
-                };
-                lastFormat = formatKey;
-              } else if (currentRun) {
-                currentRun.text += charText;
-              }
-            }
-
-            if (currentRun && currentRun.text) {
-              currentRun.text = cleanCellText(currentRun.text);
-              if (currentRun.text) {
-                paraData.runs.push(normalizeParsedRun(currentRun));
-              }
-            }
-          }
-        } catch (e) {
-          const font = paraRange.Font;
-          paraData.runs.push(normalizeParsedRun({
-            text: paraText,
-            rStyle: makeRStyle(
-              font.Name || '',
-              font.Size || 12,
-              font.Bold === -1 || font.Bold === true,
-              font.Italic === -1 || font.Italic === true,
-              'none',
-              '#000000',
-              'none',
-              false,
-              false,
-              false
-            )
-          }));
+          paraData.runs = readParagraphRuns(doc, paraRange, formulas, [], true);
+        } catch (error) {
+          paraData.runs = readLightweightParagraphRuns(doc, paraRange, formulas);
         }
 
         if (paraData.runs.length > 0) {
@@ -2055,9 +1719,10 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride, start
         }
 
         const paraText = cleanText(paraRange.Text || '');
+        const formulas = readFormulaRanges(paraRange);
 
         // 空段落但有图片
-        if ((!paraText || paraText.match(/^[\r\n\f\u0007]*$/)) && (paraInlineImages.length > 0 || paraFloatingImages.length > 0)) {
+        if (!formulas.length && (!paraText || paraText.match(/^[\r\n\f\u0007]*$/)) && (paraInlineImages.length > 0 || paraFloatingImages.length > 0)) {
           result.paragraphs.push({
             pStyle: readParagraphPStyle(para),
             runs: [],
@@ -2068,7 +1733,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride, start
         }
 
         // 如果是空段落且没有图片
-        if (!paraText || paraText.match(/^[\r\n\f\u0007]*$/)) {
+        if (!formulas.length && (!paraText || paraText.match(/^[\r\n\f\u0007]*$/))) {
           if (paraInlineImages.length === 0 && paraFloatingImages.length === 0) {
             result.paragraphs.push({
               pStyle: readParagraphPStyle(para),
@@ -2089,104 +1754,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride, start
           ...getParagraphPageRange(doc, paraRange)
         };
 
-        // 解析 runs
-        const chars = paraRange.Characters;
-        if (chars && chars.Count > 0) {
-          const formulaRuns = extractFormulaRunsFromRange(paraRange);
-          let formulaRunIndex = 0;
-          let activeFormulaEnd = -1;
-          let lastFormat = null;
-          let currentRun = null;
-
-          for (let j = 1; j <= chars.Count; j++) {
-            const char = chars.Item(j);
-            const font = char.Font;
-            const charText = char.Text || '';
-
-            if (charText.match(/^[\r\n\f\u0007]+$/)) {
-              continue;
-            }
-
-            const charStart = typeof char.Start === 'number' ? char.Start : null;
-            // WPS 可能把嵌入式图片的对象占位符返回为 `/`。图片会在本段
-            // 末尾作为 image run 添加，不能再把这个占位符当成文本输出。
-            if (isCharacterInsideInlineImage(char, paraInlineImages)) {
-              if (currentRun && currentRun.text) {
-                paragraphData.runs.push(normalizeParsedRun(currentRun));
-              }
-              currentRun = null;
-              lastFormat = null;
-              continue;
-            }
-
-            if (charStart !== null && formulaRuns.length > 0) {
-              while (formulaRunIndex < formulaRuns.length && charStart >= formulaRuns[formulaRunIndex].end) {
-                formulaRunIndex++;
-              }
-
-              const currentFormula = formulaRuns[formulaRunIndex];
-              if (currentFormula && charStart >= currentFormula.start && charStart < currentFormula.end) {
-                if (currentRun && currentRun.text) {
-                  paragraphData.runs.push(normalizeParsedRun(currentRun));
-                }
-
-                if (activeFormulaEnd !== currentFormula.end) {
-                  const formulaRunData = { ...currentFormula };
-                  delete formulaRunData.start;
-                  delete formulaRunData.end;
-                  paragraphData.runs.push(formulaRunData);
-                  activeFormulaEnd = currentFormula.end;
-                }
-
-                currentRun = null;
-                lastFormat = null;
-                continue;
-              }
-            }
-
-            let highlightIndex = 0;
-            try {
-              highlightIndex = char.HighlightColorIndex || 0; 
-            } catch (e) {
-              try {
-                highlightIndex = font.HighlightColorIndex || 0; 
-              } catch (e2) {}
-            }
-
-            const formatKey = [
-              font.Name, font.Size, font.Bold, font.Italic,
-              font.Underline, font.Color, highlightIndex,
-              font.StrikeThrough, font.Superscript, font.Subscript
-            ].join('|');
-
-            if (formatKey === lastFormat && currentRun) {
-              currentRun.text += charText;
-            } else {
-              if (currentRun && currentRun.text) {
-                paragraphData.runs.push(normalizeParsedRun(currentRun));
-              }
-              currentRun = {
-                text: charText,
-                rStyle: makeRStyle(
-                  font.Name || '', font.Size || 12,
-                  font.Bold === -1 || font.Bold === true,
-                  font.Italic === -1 || font.Italic === true,
-                  font.Underline || 0,
-                  getRGBColor(font.UnderlineColor),
-                  getRGBColor(font.Color),
-                  highlightIndex,
-                  font.StrikeThrough === -1 || font.StrikeThrough === true,
-                  font.Superscript === -1 || font.Superscript === true,
-                  font.Subscript === -1 || font.Subscript === true
-                )
-              };
-              lastFormat = formatKey;
-            }
-          }
-          if (currentRun && currentRun.text) {
-            paragraphData.runs.push(normalizeParsedRun(currentRun));
-          }
-        }
+        paragraphData.runs = readParagraphRuns(doc, paraRange, formulas, paraInlineImages);
 
         // 在段落末尾添加 inline 图片 runs
         for (const img of paraInlineImages) {
@@ -2462,9 +2030,10 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride, start
         }
 
         const paraText = para.Range.Text || '';
+        const formulas = readFormulaRanges(paraRange);
 
         // 空段落但有图片
-        if ((!paraText || paraText.match(/^[\r\n\f\u0007]*$/)) && (paraInlineImages.length > 0 || paraFloatingImages.length > 0)) {
+        if (!formulas.length && (!paraText || paraText.match(/^[\r\n\f\u0007]*$/)) && (paraInlineImages.length > 0 || paraFloatingImages.length > 0)) {
           result.paragraphs.push({
             pStyle: readParagraphPStyle(para),
             runs: [],
@@ -2475,7 +2044,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride, start
         }
 
         // 空段落且没有图片
-        if (paraText.match(/^[\r\n\f\u0007]*$/)) {
+        if (!formulas.length && paraText.match(/^[\r\n\f\u0007]*$/)) {
           if (paraInlineImages.length === 0 && paraFloatingImages.length === 0) {
             result.paragraphs.push({
               pStyle: readParagraphPStyle(para),
@@ -2497,116 +2066,7 @@ function parseDocxToJSON(range, startParaIndex, endParaIndex, docOverride, start
           ...getParagraphPageRange(doc, paraRange)
         };
 
-        // 解析 runs - 使用Characters确保捕获Tab等特殊字符
-        const chars = paraRange.Characters;
-        if (chars && chars.Count > 0) {
-          const formulaRuns = extractFormulaRunsFromRange(paraRange);
-          let formulaRunIndex = 0;
-          let activeFormulaEnd = -1;
-          let lastFormat = null;
-          let currentRun = null;
-
-          for (let j = 1; j <= chars.Count; j++) {
-            const char = chars.Item(j);
-            const font = char.Font;
-            const charText = char.Text || '';
-
-            // 跳过段落结束符等，但保留Tab
-            if (charText.match(/^[\r\n\f\u0007]+$/)) {
-              continue;
-            }
-
-            const charStart = typeof char.Start === 'number' ? char.Start : null;
-            // WPS 可能把嵌入式图片的对象占位符返回为 `/`。图片会在本段
-            // 末尾作为 image run 添加，不能再把这个占位符当成文本输出。
-            if (isCharacterInsideInlineImage(char, paraInlineImages)) {
-              if (currentRun && currentRun.text) {
-                paragraphData.runs.push(normalizeParsedRun(currentRun));
-              }
-              currentRun = null;
-              lastFormat = null;
-              continue;
-            }
-
-            if (charStart !== null && formulaRuns.length > 0) {
-              while (formulaRunIndex < formulaRuns.length && charStart >= formulaRuns[formulaRunIndex].end) {
-                formulaRunIndex++;
-              }
-
-              const currentFormula = formulaRuns[formulaRunIndex];
-              if (currentFormula && charStart >= currentFormula.start && charStart < currentFormula.end) {
-                if (currentRun && currentRun.text) {
-                  paragraphData.runs.push(normalizeParsedRun(currentRun));
-                }
-
-                if (activeFormulaEnd !== currentFormula.end) {
-                  const formulaRunData = { ...currentFormula };
-                  delete formulaRunData.start;
-                  delete formulaRunData.end;
-                  paragraphData.runs.push(formulaRunData);
-                  activeFormulaEnd = currentFormula.end;
-                }
-
-                currentRun = null;
-                lastFormat = null;
-                continue;
-              }
-            }
-
-            // 获取高亮颜色（使用 Range 的 HighlightColorIndex）
-            let highlightIndex = 0;
-            try {
-              const charRange = char;
-              highlightIndex = charRange.HighlightColorIndex || 0;
-            } catch (e) {
-              // 如果失败，尝试从 Font 获取
-              try {
-                highlightIndex = font.HighlightColorIndex || 0;
-              } catch (e2) {}
-            }
-
-            const formatKey = [
-              font.Name,
-              font.Size,
-              font.Bold,
-              font.Italic,
-              font.Underline,
-              font.Color,
-              highlightIndex,
-              font.StrikeThrough,
-              font.Superscript,
-              font.Subscript
-            ].join('|');
-
-            if (formatKey === lastFormat && currentRun) {
-              currentRun.text += charText;
-            } else {
-              if (currentRun && currentRun.text) {
-                paragraphData.runs.push(normalizeParsedRun(currentRun));
-              }
-              currentRun = {
-                text: charText,
-                rStyle: makeRStyle(
-                  font.Name || '',
-                  font.Size || 12,
-                  font.Bold === -1 || font.Bold === true,
-                  font.Italic === -1 || font.Italic === true,
-                  font.Underline || 0,
-                  getRGBColor(font.UnderlineColor),
-                  getRGBColor(font.Color),
-                  highlightIndex,
-                  font.StrikeThrough === -1 || font.StrikeThrough === true,
-                  font.Superscript === -1 || font.Superscript === true,
-                  font.Subscript === -1 || font.Subscript === true
-                )
-              };
-              lastFormat = formatKey;
-            }
-          }
-          if (currentRun && currentRun.text) {
-            paragraphData.runs.push(normalizeParsedRun(currentRun));
-          }
-        }
+        paragraphData.runs = readParagraphRuns(doc, paraRange, formulas, paraInlineImages);
 
         // 在段落末尾添加 inline 图片 runs
         for (const img of paraInlineImages) {
@@ -2742,7 +2202,7 @@ function insertImage(doc, img, insertPos, maxWidth) {
  * @param {number} currentPos - 当前位置
  * @returns {number} - 新的位置
  */
-function generateTable(doc, tableData, currentPos, styles) {
+function generateTable(doc, tableData, currentPos, styles, formulas = new Map()) {
   // 在表格前添加换行
   if (currentPos > 0) {
     const range = doc.Range(currentPos, currentPos);
@@ -2846,14 +2306,16 @@ function generateTable(doc, tableData, currentPos, styles) {
             paraMetadata.push({ pStyle: para.pStyle });
 
             for (const run of getCellParagraphRuns(para)) {
-              const runText = cleanCellText(run.text || '');
+              const formula = formulas.get(run);
+              const runText = formula ? '□' : cleanCellText(run.text || '');
               if (!runText) {
                 continue;
               }
               runMetadata.push({
                 offset: fullText.length,
                 length: runText.length,
-                rStyle: run.rStyle
+                rStyle: run.rStyle,
+                formula
               });
               fullText += runText;
             }
@@ -2866,6 +2328,7 @@ function generateTable(doc, tableData, currentPos, styles) {
 
             // 阶段3：按偏移量逐个设置run字符格式
             for (const rm of runMetadata) {
+              if (rm.formula) continue;
               try {
                 const formatRange = doc.Range(basePos + rm.offset, basePos + rm.offset + rm.length);
                 const font = formatRange.Font;
@@ -2905,6 +2368,13 @@ function generateTable(doc, tableData, currentPos, styles) {
                 font.Superscript = rStyle[RSTYLE.SUPERSCRIPT] ? -1 : 0;
                 font.Subscript = rStyle[RSTYLE.SUBSCRIPT] ? -1 : 0;
               } catch (e) {}
+            }
+
+            // Replace placeholders from right to left so earlier offsets stay valid.
+            for (const { offset, formula } of [...runMetadata].reverse()) {
+              if (!formula) continue;
+              const end = insertFormula(doc, basePos + offset, formula);
+              doc.Range(end, end + 1).Delete();
             }
 
             // 阶段4：逐段设置段落格式（通过 Paragraphs 集合精确定位）
@@ -2966,6 +2436,9 @@ function generateTable(doc, tableData, currentPos, styles) {
 
         cell.VerticalAlignment = getCellVerticalAlignmentValue(cStyle[CSTYLE.VERTICAL_ALIGNMENT] ?? 'center');
       } catch (e) {
+        if (tableData.cells[row][col]?.paragraphs?.some(paragraph =>
+          paragraph.runs?.some(run => formulas.has(run))
+        )) throw e;
         console.warn(`[generateTable] 写入单元格失败 row=${row + 1}, col=${col + 1}:`, e);
       }
     }
@@ -3016,6 +2489,7 @@ function generateTable(doc, tableData, currentPos, styles) {
  * @returns {Object} - 成功返回 {success: true, doc, startPos, endPos}，失败返回 {error: string}
  */
 function generateDocxFromJSON(jsonData, doc, insertParaID) {
+  let formulaInsertion;
   try {
     jsonData = normalizeDocumentJsonInput(jsonData);
 
@@ -3049,10 +2523,18 @@ function generateDocxFromJSON(jsonData, doc, insertParaID) {
 
     // paragraphs 是唯一的有序内容流：普通项是段落，{tables:[...]} 项是表格块。
     // 严格按数组顺序展开，不再为表格猜测 paraIndex 或默认位置。
-    const elements = expandOrderedDocumentBlocks(jsonData.paragraphs);
-
-    // 不压缩空白段落：有序块中的每一项都必须保留其精确位置。
-    const processedElements = elements;
+    const processedElements = expandOrderedDocumentBlocks(jsonData.paragraphs);
+    const formulas = new Map();
+    for (const { type, data } of processedElements) {
+      const paragraphs = type === 'paragraph' ? [data] :
+        (data.cells || []).flatMap(row => row.flatMap(cell => cell?.paragraphs || []));
+      for (const paragraph of paragraphs) {
+        for (const run of paragraph.runs || []) {
+          const formula = prepareFormula(run);
+          if (formula) formulas.set(run, formula);
+        }
+      }
+    }
 
     // 确定插入起始位置
     let currentPos;
@@ -3115,7 +2597,12 @@ function generateDocxFromJSON(jsonData, doc, insertParaID) {
       return { error: '表格位置检测失败: ' + e.message };
     }
 
+    if (formulas.size && !canInsertFormula(doc.Range(currentPos, currentPos))) {
+      return { error: '此 WPS 客户端不支持插入原生公式' };
+    }
+
     const insertStartPos = currentPos;  // 记录插入起始位置
+    if (formulas.size) formulaInsertion = { start: insertStartPos, endBefore: doc.Content.End };
     const insertedParagraphStyles = [];
     const docUsableWidth = getDocumentUsableWidth(doc);
 
@@ -3145,6 +2632,11 @@ function generateDocxFromJSON(jsonData, doc, insertParaID) {
 
         if (para.runs && para.runs.length > 0) {
           for (const run of para.runs) {
+            const formula = formulas.get(run);
+            if (formula) {
+              currentPos = insertFormula(doc, currentPos, formula);
+              continue;
+            }
             // 检查是否是图片 run（没有 text 字段）
             const isImageRun = !run.text && run.url;
             if (isImageRun) {
@@ -3157,17 +2649,12 @@ function generateDocxFromJSON(jsonData, doc, insertParaID) {
             }
 
             // 文本 run
-            let runText = run.text || '';
+            const runText = run.text || '';
             if (!runText) {
               continue;
             }
 
             const rStyle = resolveStyle(styles, run.rStyle, DEFAULT_RSTYLE);
-            const isExplicitLatexRun = run.isFormula === true && run.formulaFormat === 'latex';
-            if (isExplicitLatexRun) {
-              runText = run.text || normalizeFormulaTextToLatex(run.text);
-            }
-
             const range = doc.Range(currentPos, currentPos);
             range.Text = runText;
 
@@ -3245,7 +2732,7 @@ function generateDocxFromJSON(jsonData, doc, insertParaID) {
           }
         }
       } else if (element.type === 'table') {
-        currentPos = generateTable(doc, element.data, currentPos, styles);
+        currentPos = generateTable(doc, element.data, currentPos, styles, formulas);
 
         // 表格后换行
         if (i < processedElements.length - 1) {
@@ -3313,6 +2800,16 @@ function generateDocxFromJSON(jsonData, doc, insertParaID) {
       lastParagraph
     };
   } catch (error) {
+    if (formulaInsertion) {
+      const { start, endBefore } = formulaInsertion;
+      try {
+        const insertedLength = doc.Content.End - endBefore;
+        if (insertedLength > 0) doc.Range(start, start + insertedLength).Delete();
+        if (doc.Content.End !== endBefore) throw new Error('插入范围未能完全回退');
+      } catch (rollbackError) {
+        return { error: `生成文档失败: ${error.message}。请重新读取目标区域，检查是否已写入部分内容。` };
+      }
+    }
     return { error: '生成文档失败: ' + error.message };
   }
 }
@@ -3325,7 +2822,7 @@ function generateDocxFromJSON(jsonData, doc, insertParaID) {
  * beginTrackedEdit/finishTrackedEdit so WPS records a native replacement.
  *
  * @param {number|string} paraID
- * @param {Array<Object>} runs - text runs; image runs are rejected
+ * @param {Array<Object>} runs - text or LaTeX formula runs
  * @param {Object} [docOverride]
  * @returns {{success:boolean, paraID?:number, startPos?:number, endPos?:number, replacedTextLength?:number, error?:string}}
  */
@@ -3362,10 +2859,19 @@ function editDocxParagraph(paraID, runs, docOverride) {
     return { success: false, paraID: normalizedParaID, error: `未找到 paraID=${normalizedParaID} 的段落` };
   }
 
-  const textRuns = [];
+  const replacementRuns = [];
   for (const run of runs) {
     if (!run || typeof run !== 'object') {
       continue;
+    }
+    try {
+      const formula = prepareFormula(run);
+      if (formula) {
+        replacementRuns.push({ formula });
+        continue;
+      }
+    } catch (error) {
+      return { success: false, paraID: normalizedParaID, error: error.message };
     }
     if (run.url && run.text === undefined) {
       return { success: false, paraID: normalizedParaID, error: 'edit_document 暂不支持图片 run' };
@@ -3378,7 +2884,7 @@ function editDocxParagraph(paraID, runs, docOverride) {
       if (run.rStyle != null && (!Array.isArray(run.rStyle) || run.rStyle.length !== 11)) {
         return { success: false, paraID: normalizedParaID, error: '字符样式未解析，尚未修改文档；请重新读取文档后再编辑' };
       }
-      textRuns.push({ text, rStyle: run.rStyle });
+      replacementRuns.push({ text, rStyle: run.rStyle });
     }
   }
 
@@ -3403,49 +2909,66 @@ function editDocxParagraph(paraID, runs, docOverride) {
     }
     const replacedTextLength = Math.max(0, contentEnd - startPos);
     const originalText = String(paraRange.Text || '').replace(/[\r\n\u0007]+$/, '');
-    if (contentEnd > startPos) {
-      contentRange.Delete();
+    const hasFormulas = replacementRuns.some(run => run.formula);
+    if (hasFormulas && !canInsertFormula(doc.Range(startPos, startPos))) {
+      throw new Error('此 WPS 客户端不支持插入原生公式');
     }
+    if (!hasFormulas && contentEnd > startPos) contentRange.Delete();
 
+    const endBefore = hasFormulas ? doc.Content.End : null;
     let currentPos = startPos;
-    for (const run of textRuns) {
-      const range = doc.Range(currentPos, currentPos);
-      range.Text = run.text;
-      const insertedRange = doc.Range(currentPos, currentPos + run.text.length);
-      // A read_document rStyle is a reference ID and edit_document has no
-      // separate style dictionary. Apply only inline style arrays when callers
-      // provide them; otherwise WPS inherits the existing paragraph character
-      // formatting instead of resetting it to a default style.
-      if (Array.isArray(run.rStyle)) {
-        const rStyle = resolveStyle({}, run.rStyle, DEFAULT_RSTYLE);
-        const font = insertedRange.Font;
-        if (rStyle[RSTYLE.FONT_NAME]) {
-          font.Name = rStyle[RSTYLE.FONT_NAME];
+    try {
+      for (const run of replacementRuns) {
+        if (run.formula) {
+          currentPos = insertFormula(doc, currentPos, run.formula);
+          continue;
         }
-        if (rStyle[RSTYLE.FONT_SIZE]) {
-          font.Size = rStyle[RSTYLE.FONT_SIZE];
-        }
-        font.Bold = rStyle[RSTYLE.BOLD] ? -1 : 0;
-        font.Italic = rStyle[RSTYLE.ITALIC] ? -1 : 0;
-        font.StrikeThrough = rStyle[RSTYLE.STRIKETHROUGH] ? -1 : 0;
-        font.Superscript = rStyle[RSTYLE.SUPERSCRIPT] ? -1 : 0;
-        font.Subscript = rStyle[RSTYLE.SUBSCRIPT] ? -1 : 0;
-        font.Underline = rStyle[RSTYLE.UNDERLINE] || 0;
-        if (rStyle[RSTYLE.UNDERLINE_COLOR]) {
-          font.UnderlineColor = parseRGBColor(rStyle[RSTYLE.UNDERLINE_COLOR]);
-        }
-        if (rStyle[RSTYLE.COLOR]) {
-          font.Color = parseRGBColor(rStyle[RSTYLE.COLOR]);
-        }
-        if (rStyle[RSTYLE.HIGHLIGHT] != null) {
-          try {
-            insertedRange.HighlightColorIndex = rStyle[RSTYLE.HIGHLIGHT]; 
-          } catch (error) {
-            void error; 
+        const range = doc.Range(currentPos, currentPos);
+        range.Text = run.text;
+        const insertedRange = doc.Range(currentPos, currentPos + run.text.length);
+        // A read_document rStyle is a reference ID and edit_document has no
+        // separate style dictionary. Apply only inline style arrays when callers
+        // provide them; otherwise WPS inherits the existing paragraph character
+        // formatting instead of resetting it to a default style.
+        if (Array.isArray(run.rStyle)) {
+          const rStyle = resolveStyle({}, run.rStyle, DEFAULT_RSTYLE);
+          const font = insertedRange.Font;
+          if (rStyle[RSTYLE.FONT_NAME]) {
+            font.Name = rStyle[RSTYLE.FONT_NAME];
+          }
+          if (rStyle[RSTYLE.FONT_SIZE]) {
+            font.Size = rStyle[RSTYLE.FONT_SIZE];
+          }
+          font.Bold = rStyle[RSTYLE.BOLD] ? -1 : 0;
+          font.Italic = rStyle[RSTYLE.ITALIC] ? -1 : 0;
+          font.StrikeThrough = rStyle[RSTYLE.STRIKETHROUGH] ? -1 : 0;
+          font.Superscript = rStyle[RSTYLE.SUPERSCRIPT] ? -1 : 0;
+          font.Subscript = rStyle[RSTYLE.SUBSCRIPT] ? -1 : 0;
+          font.Underline = rStyle[RSTYLE.UNDERLINE] || 0;
+          if (rStyle[RSTYLE.UNDERLINE_COLOR]) {
+            font.UnderlineColor = parseRGBColor(rStyle[RSTYLE.UNDERLINE_COLOR]);
+          }
+          if (rStyle[RSTYLE.COLOR]) {
+            font.Color = parseRGBColor(rStyle[RSTYLE.COLOR]);
+          }
+          if (rStyle[RSTYLE.HIGHLIGHT] != null) {
+            try {
+              insertedRange.HighlightColorIndex = rStyle[RSTYLE.HIGHLIGHT];
+            } catch (error) {
+              void error;
+            }
           }
         }
+        currentPos += run.text.length;
       }
-      currentPos += run.text.length;
+    } catch (error) {
+      // Stage the replacement before deleting the original when native insertion can fail.
+      const insertedLength = hasFormulas ? doc.Content.End - endBefore : 0;
+      if (insertedLength > 0) doc.Range(startPos, startPos + insertedLength).Delete();
+      throw error;
+    }
+    if (hasFormulas && replacedTextLength > 0) {
+      doc.Range(currentPos, currentPos + replacedTextLength).Delete();
     }
 
     // No paragraph marks were inserted/deleted, so the index is unchanged.
@@ -3657,6 +3180,7 @@ function insertBreakAfterParagraph(paraID, breakType, docOverride) {
 export default {
   // 主要函数
   parseDocxToJSON,
+  readLightweightParagraphRuns,
   generateDocxFromJSON,
   editDocxParagraph,
   deleteDocxPara,
@@ -3712,6 +3236,7 @@ export default {
 // 也支持命名导出
 export {
   parseDocxToJSON,
+  readLightweightParagraphRuns,
   generateDocxFromJSON,
   editDocxParagraph,
   deleteDocxPara,

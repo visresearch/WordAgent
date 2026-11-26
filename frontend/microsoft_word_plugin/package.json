@@ -22,7 +22,9 @@
     "watch": "webpack --mode development --watch"
   },
   "dependencies": {
+    "@mdit/plugin-katex": "0.25.2",
     "core-js": "^3.49.0",
+    "katex": "0.16.47",
     "markdown-it": "^14.3.0",
     "regenerator-runtime": "^0.14.1",
     "vue": "^3.5.40",

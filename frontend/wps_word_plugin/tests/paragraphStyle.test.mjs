@@ -138,6 +138,27 @@ test('在第（3）点后生成第（4）（5）点不会改动后面的标题�
   }
 });
 
+test('从 JSON 生成原生公式时，后续文字接在公式结束位置', () => {
+  const { doc, paragraphs } = insertionDocument();
+  const range = doc.Range;
+  doc.Range = (start, end) => Object.assign(range(start, end), {
+    InsertXML(xml) {
+      assert.match(xml, /<m:rad>/);
+      this.Text = '\uFFFC';
+    },
+    OMaths: doc.Content.Text.slice(start, end) === '\uFFFC'
+      ? { Count: 1, Item: () => ({ Range: { Start: start, End: end } }) }
+      : { Count: 0 }
+  });
+
+  const result = generateDocxFromJSON({ paragraphs: [{ runs: [
+    { text: '值=' }, { formula: '\\sqrt{x}' }, { text: '。' }
+  ] }] }, doc, 1);
+
+  assert.equal(result.success, true, result.error);
+  assert.equal(paragraphs[1].text, '值=\uFFFC。\r');
+});
+
 test('新段落中的多个 runs 与空段落均不会提前给原有标题套用样式', () => {
   const { doc, heading, styleWrites } = insertionDocument();
   const pStyle = ['left', 0, 0, 0, 18, 0, 0, '正文', 0];

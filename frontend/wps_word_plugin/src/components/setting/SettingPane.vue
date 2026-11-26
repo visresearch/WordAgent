@@ -85,7 +85,15 @@
       </div>
 
       <!-- 数据管理 -->
-      <div v-if="currentTab === 'data'" class="tab-content full-height">
+      <div v-if="currentTab === 'data'" class="tab-content">
+        <div class="tab-header">
+          <h2 class="tab-title">
+            {{ $t('data.title') }}
+          </h2>
+          <p class="tab-desc">
+            {{ $t('data.subtitle') }}
+          </p>
+        </div>
         <DataManagementPane
           :cache-info="cacheInfo"
           @update:cache-info="onCacheUpdate"
@@ -526,10 +534,6 @@ export default {
   flex: 1;
   overflow-y: auto;
   padding: 24px 32px;
-}
-
-.tab-content.full-height {
-  padding: 0;
 }
 
 .tab-header {

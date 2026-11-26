@@ -198,15 +198,14 @@
 
 <script>
 import MarkdownIt from 'markdown-it';
+import { katex } from '@mdit/plugin-katex';
+import 'katex/dist/katex.min.css';
+import '../../../../shared/chatMath.css';
+import { createChatMarkdownRenderer } from '../../../../shared/chatMarkdown.mjs';
 import UserQuestion from './UserQuestion.vue';
 import { t } from '../../i18n/index.js';
 
-const md = new MarkdownIt({
-  html: false,
-  breaks: true,
-  linkify: true,
-  typographer: true
-});
+const renderMarkdown = createChatMarkdownRenderer(MarkdownIt, katex);
 
 export default {
   name: 'ChatMessages',
@@ -328,10 +327,7 @@ export default {
       a.download = 'chart.png';
       a.click();
     },
-    renderMarkdown(content) {
-      if (!content) return '';
-      return md.render(content);
-    },
+    renderMarkdown,
     toggleThinking(index) {
       this.$emit('toggle-thinking', index);
       this.$nextTick(() => {

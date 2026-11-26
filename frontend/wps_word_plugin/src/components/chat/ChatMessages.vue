@@ -290,17 +290,16 @@
 
 <script>
 import MarkdownIt from 'markdown-it';
+import { katex } from '@mdit/plugin-katex';
+import 'katex/dist/katex.min.css';
+import '../../../../shared/chatMath.css';
+import { createChatMarkdownRenderer } from '../../../../shared/chatMarkdown.mjs';
 import UserQuestion from './UserQuestion.vue';
 import questionIcon from '../../assets/icons/question.svg';
 import { t } from '../../i18n/index.js';
 import { getUiZoom, UI_ZOOM_EVENT } from '../../uiZoom.js';
 
-const md = new MarkdownIt({
-  html: false,
-  breaks: true,
-  linkify: true,
-  typographer: true
-});
+const renderMarkdown = createChatMarkdownRenderer(MarkdownIt, katex);
 
 export default {
   name: 'ChatMessages',
@@ -460,15 +459,7 @@ export default {
       a.download = 'chart.png';
       a.click();
     },
-    /**
-     * 渲染 Markdown 内容
-     */
-    renderMarkdown(content) {
-      if (!content) {
-        return '';
-      }
-      return md.render(String(content).replace(/\r\n?/g, '\n'));
-    },
+    renderMarkdown,
 
     /**
      * 切换 thinking 内容的展开/收起状态

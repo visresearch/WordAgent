@@ -1,7 +1,8 @@
+import json
 import unittest
 from unittest.mock import patch
 
-from app.services.tools.document_tools import _format_generated_document_message, _generate_document_impl
+from app.services.tools.document_tools import _compact_doc_json, _format_generated_document_message, _generate_document_impl
 from app.services.tools.schemas import DocumentOutput
 
 
@@ -76,6 +77,38 @@ class GenerateDocumentSummaryTests(unittest.TestCase):
             result = _generate_document_impl(document, 9, 0)
 
         self.assertEqual(result["lastParagraph"], {"paraID": 2468, "paraIndex": 7})
+
+    def test_formula_run_is_forwarded_without_counting_it_as_an_image(self):
+        events = []
+        latex = r"\sqrt{x}"
+        document = DocumentOutput.model_validate({
+            "paragraphs": [{"pStyle": "pS_1", "runs": [{"formula": latex}]}],
+            "styles": {"pS_1": ["left", 0, 0, 0, 0, 0, 0, "", 0]},
+        })
+        with (
+            patch("app.services.tools.document_tools.get_stream_writer", return_value=events.append),
+            patch("app.services.tools.document_tools._wait_for_frontend_mutation", return_value={"success": True}),
+        ):
+            _generate_document_impl(document, 9, 0)
+
+        run = events[0]["content"]["paragraphs"][0]["runs"][0]
+        self.assertEqual(run["formula"], latex)
+        self.assertIsNone(run["url"])
+        self.assertEqual(events[-1]["content"], "📝 文档已生成，共 1 个段落")
+
+    def test_long_read_preserves_formula_runs_in_body_and_table(self):
+        body_formula = {"formula": r"\frac{a}{b}"}
+        cell_formula = {"formula": "x^{2}"}
+        doc = {"paragraphs": [
+            {"paraID": 1, "runs": [{"text": "before"}, body_formula]},
+            {"tables": [{"cells": [[{"paragraphs": [{"paraID": 2, "runs": [cell_formula]}]}]]}]},
+        ]}
+        with patch("app.services.tools.document_tools._MAX_DOC_JSON_CHARS", 1):
+            result = json.loads(_compact_doc_json(doc))
+
+        self.assertEqual(result["paragraphs"][0]["runs"][1], body_formula)
+        cell = result["paragraphs"][1]["tables"][0]["cells"][0][0]
+        self.assertEqual(cell["paragraphs"], [{"paraID": 2, "runs": [cell_formula]}])
 
 
 if __name__ == "__main__":

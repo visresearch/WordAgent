@@ -16,7 +16,8 @@
 import {
   cleanText,
   getParagraphParaID,
-  parseDocxToJSON
+  parseDocxToJSON,
+  readLightweightParagraphRuns
 } from './docxJsonConverter.js';
 import { executeStyleQuery } from './docxQuery.js';
 import { createChatId, getWindowId, windowStorageKey } from './windowContext.js';
@@ -988,9 +989,8 @@ async function parseDocumentRangeLightweight(doc, startParaIndex, endParaIndex) 
     const para = doc.Paragraphs.Item(idx + 1);
     const paraID = getParagraphParaID(para);
     if (paraID !== null) {
-      const text = cleanText(para?.Range?.Text || '');
       result.paragraphs.push({
-        runs: text ? [{ text, rStyle: '' }] : [],
+        runs: readLightweightParagraphRuns(doc, para.Range),
         paraIndex: idx,
         paraID
       });

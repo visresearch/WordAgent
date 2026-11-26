@@ -51,6 +51,18 @@ class EditDocumentToolTests(unittest.TestCase):
         self.assertFalse(result["success"])
         get_writer.assert_not_called()
 
+    @patch("app.services.tools.document_tools._wait_for_frontend_mutation", return_value={"success": True})
+    @patch("app.services.tools.document_tools.get_stream_writer")
+    def test_sends_formula_runs_without_converting_them_to_text(self, get_writer, _wait):
+        events = []
+        get_writer.return_value = events.append
+        latex = r"\frac{1}{\sqrt{x}}"
+
+        result = _edit_document_impl(101, [Run(text="值："), Run(formula=latex)], 9)
+
+        self.assertTrue(result["success"])
+        self.assertEqual(events[0]["runs"], [{"text": "值："}, {"formula": latex}])
+
     @patch("app.services.tools.document_tools._wait_for_frontend_mutation", return_value=None)
     @patch("app.services.tools.document_tools.get_stream_writer")
     def test_timeout_is_an_unconfirmed_result_instead_of_a_confirmed_edit_failure(self, get_writer, wait_for_result):

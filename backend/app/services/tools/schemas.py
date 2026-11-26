@@ -7,9 +7,10 @@ from pydantic import BaseModel, Field, model_validator
 
 
 class Run(BaseModel):
-    """A run can be either a text run or an inline image.
+    """A run can contain text, a native WPS equation, or an image.
 
     Text run: {text: "...", rStyle: "..."}  (has text field)
+    Formula run: {formula: "..."}  (LaTeX source)
     Image run: {url: "...", width: 380, ...}  (no text field)
     """
 
@@ -17,7 +18,7 @@ class Run(BaseModel):
     text: str | None = Field(
         default=None,
         description=(
-            "Text content (omit this field for image run). "
+            "Text content (omit for formula or image runs). "
             "For quoted phrases inside text, use Chinese quotation marks such as “...” or 「...」; "
             "do not put raw ASCII double quote characters inside text."
         ),
@@ -25,6 +26,13 @@ class Run(BaseModel):
     rStyle: str | None = Field(
         default=None,
         description='Character style reference ID, e.g. "rS_1", mapped to document.styles["rS_1"]',
+    )
+    formula: str | None = Field(
+        default=None,
+        description=(
+            "LaTeX source for one editable equation in WPS Writer, without surrounding dollar signs. "
+            "Use a dedicated run, for example {\"formula\": \"x^{2}\"}; omit text and url."
+        ),
     )
     # Image run fields (if text is absent, this is an image run)
     url: str | None = Field(
@@ -41,6 +49,22 @@ class Run(BaseModel):
     )
     altText: str | None = Field(default=None, description="Alternative text")
 
+    @model_validator(mode="before")
+    @classmethod
+    def reject_unreadable_formula(cls, data):
+        if isinstance(data, dict) and data.get("formulaError") is not None:
+            raise ValueError("A formulaError marks an unreadable equation and cannot be used in a write run")
+        return data
+
+    @model_validator(mode="after")
+    def validate_formula(self):
+        if self.formula is not None:
+            if not self.formula.strip():
+                raise ValueError("formula requires non-empty LaTeX source")
+            if self.text is not None or self.url is not None:
+                raise ValueError("A formula run cannot also contain text or an image URL")
+        return self
+
 
 class Paragraph(BaseModel):
     """A paragraph. Each line should be a separate paragraph; do not use \\n in run text."""
@@ -53,7 +77,7 @@ class Paragraph(BaseModel):
     )
     runs: list[Run] = Field(
         description="Array of runs. A paragraph can contain multiple runs with different formatting."
-        " Each run is either a text run {text:'...', rStyle:'...'} or an image run {url:'...', width:...}."
+        " Use {text:'...', rStyle:'...'}, {formula:'LaTeX source'} (WPS), or {url:'...', width:...}."
         " Do not use \\n for line breaks in text; create new paragraphs instead."
         " Use an empty array for blank paragraphs.",
         default_factory=list,
@@ -86,7 +110,7 @@ class CellParagraph(BaseModel):
         ),
     )
     runs: list[Run] = Field(
-        description="Array of runs. A cell paragraph can contain multiple runs with different formatting.",
+        description="Array of runs. Use a separate formula run with LaTeX source for each WPS equation.",
         default_factory=list,
     )
 

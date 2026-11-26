@@ -272,8 +272,7 @@ def _ensure_image_payload_shape(doc_dict: dict) -> None:
         for run in runs:
             if not isinstance(run, dict):
                 continue
-            # 跳过文本 run
-            if run.get("text") is not None:
+            if run.get("text") is not None or run.get("formula") is not None:
                 continue
 
             # 这里是图片 run（无 text 字段）
@@ -440,10 +439,27 @@ def _compact_doc_json(doc_json: dict) -> str:
                     **{key: table[key] for key in ("paraID", "endParaID", "pageStart", "pageEnd") if key in table},
                 }
                 rows = []
+                formula_cells = []
                 for row in table.get("cells", []):
                     cells = []
+                    structured_cells = []
                     for cell in row:
                         if isinstance(cell, dict):
+                            paragraphs = [
+                                {
+                                    **{key: para[key] for key in ("paraID", "paraIndex") if key in para},
+                                    "runs": [
+                                        {key: run[key] for key in ("text", "formula", "formulaError") if key in run}
+                                        for run in para.get("runs", [])
+                                        if isinstance(run, dict)
+                                    ],
+                                }
+                                for para in cell.get("paragraphs") or []
+                                if isinstance(para, dict)
+                            ]
+                            structured_cells.append(
+                                {"paragraphs": paragraphs} if paragraphs else {"text": cell.get("text", "")}
+                            )
                             cell_text = cell.get("text", "")
                             if not cell_text and cell.get("paragraphs"):
                                 cell_text = "".join(
@@ -456,8 +472,17 @@ def _compact_doc_json(doc_json: dict) -> str:
                             cells.append(cell_text)
                         else:
                             cells.append(str(cell))
+                            structured_cells.append({"text": str(cell)})
                     rows.append(cells)
-                table_compact["cellTexts"] = rows
+                    formula_cells.append(structured_cells)
+                if any(
+                    "formula" in run or "formulaError" in run
+                    for row in formula_cells for cell in row for para in cell.get("paragraphs", [])
+                    for run in para["runs"]
+                ):
+                    table_compact["cells"] = formula_cells
+                else:
+                    table_compact["cellTexts"] = rows
                 compact_tables.append(table_compact)
             if compact_tables:
                 compact["paragraphs"].append({"tables": compact_tables})
@@ -469,7 +494,11 @@ def _compact_doc_json(doc_json: dict) -> str:
             para_compact["pageEnd"] = block["pageEnd"]
         for r in block.get("runs", []):
             if isinstance(r, dict):
-                if r.get("text") is not None:
+                if r.get("formula") is not None:
+                    para_compact["runs"].append({"formula": r["formula"]})
+                elif r.get("formulaError") is not None:
+                    para_compact["runs"].append({"formulaError": r["formulaError"]})
+                elif r.get("text") is not None:
                     para_compact["runs"].append({"text": r.get("text", ""), "rStyle": r.get("rStyle")})
                 else:
                     img_info = {
@@ -589,7 +618,7 @@ def _read_document_impl(
                         count = 0
                         for p in doc.get("paragraphs", []):
                             for r in p.get("runs", []):
-                                if isinstance(r, dict) and r.get("text") is None:
+                                if isinstance(r, dict) and r.get("url"):
                                     count += 1
                         return count
 
@@ -662,7 +691,7 @@ def _generate_document_impl(document: DocumentOutput, docId: DocIdInput, insertP
     image_count = 0
     for p in paragraph_blocks:
         for r in p.get("runs", []):
-            if isinstance(r, dict) and r.get("text") is None:
+            if isinstance(r, dict) and r.get("url") and r.get("text") is None:
                 image_count += 1
 
     generated_message = _format_generated_document_message(para_count, table_count, image_count)
@@ -1036,10 +1065,14 @@ def _edit_document_impl(
             run_dict = {k: v for k, v in run.items() if v is not None}
         else:
             continue
-        # edit_document only replaces paragraph text. Image runs are not silently
-        # inserted because they need a document-local image path and a different
-        # insertion workflow.
-        if run_dict.get("text") is None:
+        if run_dict.get("formulaError") is not None:
+            return {
+                "success": False,
+                "docId": resolved_doc_id,
+                "paraID": normalized_para_id,
+                "error": "An unreadable formula cannot be reused as a replacement run",
+            }
+        if run_dict.get("text") is None and run_dict.get("formula") is None:
             if run_dict.get("url"):
                 unsupported_runs.append(run_dict.get("url"))
             continue
@@ -1071,7 +1104,7 @@ def _edit_document_impl(
             "success": False,
             "docId": resolved_doc_id,
             "paraID": normalized_para_id,
-            "error": "edit_document 目前只支持文本 runs，不支持图片 runs",
+            "error": "edit_document 支持文本和 WPS 公式 runs，不支持图片 runs",
         }
 
     writer = get_stream_writer()
@@ -1361,7 +1394,7 @@ def build_edit_document(description: str):
 
         Args:
             paraID: Existing paragraph ID from read_document/search_document.
-            runs: New text runs. Use an empty list to clear the paragraph content.
+            runs: New text and WPS LaTeX formula runs. Use an empty list to clear the paragraph content.
             docId: Document ID (int-like). 0 means the active document.
         """
         styles = _document_character_styles(runtime.state, docId) if runtime is not None else {}

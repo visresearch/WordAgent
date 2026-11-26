@@ -73,6 +73,58 @@ test('未解析的字符样式在删除旧内容之前被拒绝', () => {
   assert.equal(doc.operations.length, 0);
 });
 
+test('WPS 原生公式使用宿主坐标插在文本之间，并保留段落标记', () => {
+  let body = '原始内容\r';
+  const font = {};
+  const doc = {
+    get Content() { return { End: body.length }; },
+    Paragraphs: { Count: 1, Item: () => ({ ParaID: 101, Range: { Start: 0, End: body.length, Text: body } }) },
+    Range(start, end) {
+      return {
+        Font: font,
+        get Text() { return body.slice(start, end); },
+        set Text(text) { body = body.slice(0, start) + text + body.slice(end); },
+        Delete() { this.Text = ''; },
+        InsertXML(xml) {
+          assert.match(xml, /<m:oMath[\s>]/);
+          assert.match(xml, /<m:f>/);
+          this.Text = '\uFFFC\uFFFC'; // Native formula range occupies two positions in this host.
+        },
+        get OMaths() {
+          return this.Text === '\uFFFC\uFFFC'
+            ? { Count: 1, Item: () => ({ Range: { Start: start, End: end } }) }
+            : { Count: 0 };
+        }
+      };
+    }
+  };
+  const result = editDocxParagraph(101, [{ text: '值=' }, { formula: '\\frac{a}{b}' }, { text: '。' }], doc);
+  assert.equal(result.success, true);
+  assert.equal(result.endPos, 5);
+  assert.equal(body, '值=\uFFFC\uFFFC。\r');
+});
+
+test('插入原生公式失败时回退临时写入并保留原文', () => {
+  let body = '保留的原文\r';
+  const doc = {
+    get Content() { return { End: body.length }; },
+    Paragraphs: { Count: 1, Item: () => ({ ParaID: 101, Range: { Start: 0, End: body.length, Text: body } }) },
+    Range(start, end) {
+      return {
+        Font: {},
+        get Text() { return body.slice(start, end); },
+        set Text(text) { body = body.slice(0, start) + text + body.slice(end); },
+        InsertXML() { this.Text = 'XML 被当成普通字符串'; },
+        OMaths: { Count: 0 },
+        Delete() { this.Text = ''; }
+      };
+    }
+  };
+  const result = editDocxParagraph(101, [{ text: '新内容' }, { formula: 'x^2' }], doc);
+  assert.equal(result.success, false);
+  assert.equal(body, '保留的原文\r');
+});
+
 for (const markerPositions of [1, 2]) {
   for (const text of ['', '旧内容']) {
     test(`表格单元格保留结束标记（原文长度 ${text.length}，结束标记占 ${markerPositions} 个坐标）`, () => {

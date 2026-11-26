@@ -93,3 +93,10 @@ test('read_document 表格文本只保留在 runs 中', () => {
   assert.equal(Object.hasOwn(cell.paragraphs[0], 'rStyle'), false);
   assert.deepEqual(cell.paragraphs[0].runs, [{ text: '唯一保留的文本', rStyle: 'rS_1' }]);
 });
+
+test('read_document 保留只含公式的单元格段落', () => {
+  const formula = { formula: '\\sqrt{x}' };
+  const table = { cells: [[{ paragraphs: [{ text: 'x', runs: [formula] }] }]] };
+  const result = orderReadDocumentBlocks({ paragraphs: [{ tables: [table] }] });
+  assert.deepEqual(result.paragraphs[0].tables[0].cells[0][0].paragraphs, [{ runs: [formula] }]);
+});

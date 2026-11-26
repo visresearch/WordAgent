@@ -64,7 +64,9 @@ In addition, this project supports two types of pluggable extensions for custom 
 - [x] MCP server and Skill tool integration
 - [x] Context compression
 - [x] Short-term and long-term memory
-- [x] Complex style editing for tables, illustrations, equations, etc. (equations are readable but cannot be generated)
+- [x] Rich-text editing for tables and illustrations
+- [x] Equation understanding, generation, and editing in WPS Writer. The agent reads native DOCX equations as LaTeX and writes editable equations into the document.
+- [x] LaTeX formula rendering in the WPS and Microsoft Word add-in chats
 - [ ] LAN access and cloud deployment beyond localhost
 
 #### Supported Office Software

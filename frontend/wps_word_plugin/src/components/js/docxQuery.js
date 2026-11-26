@@ -15,6 +15,10 @@
 
 import { PSTYLE, RSTYLE } from './docxJsonConverter.js';
 
+function searchableRunText(run) {
+  return run?.text ?? run?.formula ?? '';
+}
+
 function collectSearchableParagraphs(docJson) {
   const collected = [];
   let sourceOrder = 0;
@@ -314,7 +318,7 @@ function executeTermQuery(paragraphs, term) {
 function getFieldValue(para, field) {
   switch (field) {
     case 'text':
-      return para.text || para.runs?.map(r => r.text).join('') || '';
+      return para.text || para.runs?.map(searchableRunText).join('') || '';
     case 'styleName':
       return para.pStyle?.[PSTYLE.STYLE_NAME] || '';
     case 'fontName':
@@ -487,7 +491,7 @@ function matchRunFilters(run, filters) {
   for (const [key, expected] of Object.entries(filters)) {
     switch (key) {
       case 'text':
-        if (!(run.text || '').toLowerCase().includes(String(expected).toLowerCase())) {
+        if (!searchableRunText(run).toLowerCase().includes(String(expected).toLowerCase())) {
           return false;
         }
         break;
@@ -496,7 +500,7 @@ function matchRunFilters(run, filters) {
           return false;
         }
         textRegex.lastIndex = 0;
-        if (!textRegex.test(run.text || '')) {
+        if (!textRegex.test(searchableRunText(run))) {
           return false;
         }
         break;
@@ -667,9 +671,9 @@ function getRunPosition(para, runIndex) {
   const runs = para.runs || [];
   let offset = 0;
   for (let i = 0; i < runIndex; i++) {
-    offset += (runs[i].text || '').length;
+    offset += searchableRunText(runs[i]).length;
   }
-  const runText = runs[runIndex]?.text || '';
+  const runText = searchableRunText(runs[runIndex]);
   return {
     paraIndex,
     start: offset,
@@ -687,7 +691,7 @@ function getParagraphPosition(para) {
   const runs = para.runs || [];
   let totalLen = 0;
   for (const run of runs) {
-    totalLen += (run.text || '').length;
+    totalLen += searchableRunText(run).length;
   }
   return {
     paraIndex,
@@ -731,7 +735,8 @@ export function executeStyleQuery(docJson, queryDSL) {
       const runs = para.runs || [];
       for (let ri = 0; ri < runs.length && matches.length < MAX_MATCHES; ri++) {
         const run = runs[ri];
-        if (!run.text) {
+        const text = searchableRunText(run);
+        if (!text) {
           continue;
         }
         
@@ -740,7 +745,7 @@ export function executeStyleQuery(docJson, queryDSL) {
           const paraID = Number.isInteger(para?.paraID) ? para.paraID : null;
           
           matches.push({
-            text: run.text,
+            text,
             paragraphIndex: paraIndex,
             paragraphId: paraID,
             rStyle: run.rStyle || []

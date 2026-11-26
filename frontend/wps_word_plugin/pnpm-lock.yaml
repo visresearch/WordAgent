@@ -14,12 +14,24 @@ importers:
       '@mdi/js':
         specifier: ^7.4.47
         version: 7.4.47
+      '@mdit/plugin-katex':
+        specifier: 0.25.2
+        version: 0.25.2(markdown-it@14.3.0)
+      '@quirekit/math-omml':
+        specifier: 0.0.3
+        version: 0.0.3
       axios:
         specifier: ^1.18.1
         version: 1.18.1
       core-js:
         specifier: ^3.49.0
         version: 3.49.0
+      fflate:
+        specifier: 0.8.2
+        version: 0.8.2
+      katex:
+        specifier: 0.16.47
+        version: 0.16.47
       markdown-it:
         specifier: ^14.3.0
         version: 14.3.0
@@ -258,6 +270,33 @@ packages:
   '@mdi/js@7.4.47':
     resolution: {integrity: sha512-KPnNOtm5i2pMabqZxpUz7iQf+mfrYZyKCZ8QNz85czgEt7cuHcGorWfdzUMWYA0SD+a6Hn4FmJ+YhzzzjkTZrQ==}
 
+  '@mdit/helper@0.23.2':
+    resolution: {integrity: sha512-w4oja7kZYnkSiodfn4Neg1gmlIkvQtmCBJTLvLFOaET7xt8KomDNPQeumpGobQ9dWkXFqBKHlxjTYgroPH+CvA==}
+    engines: {node: '>= 20'}
+    peerDependencies:
+      markdown-it: ^14.1.0
+    peerDependenciesMeta:
+      markdown-it:
+        optional: true
+
+  '@mdit/plugin-katex@0.25.2':
+    resolution: {integrity: sha512-r7nKvngZP2XXVGsYIXZt4UNxhTAxwSbLSXQtW445nJGhcp0ZrWmdPoz3AFZAX5x51inARab/lnZhD3uq01V5Yg==}
+    engines: {node: '>= 20'}
+    peerDependencies:
+      markdown-it: ^14.1.0
+    peerDependenciesMeta:
+      markdown-it:
+        optional: true
+
+  '@mdit/plugin-tex@0.24.2':
+    resolution: {integrity: sha512-nVKIJHQJHvgDByKMpCgFT6gdeEZUyzZby24BjCjxP2N10bkgK8IEwZIBu7G5n5WBw2D0kmFD4Top+YA2mjeiQQ==}
+    engines: {node: '>= 20'}
+    peerDependencies:
+      markdown-it: ^14.1.0
+    peerDependenciesMeta:
+      markdown-it:
+        optional: true
+
   '@nodelib/fs.scandir@2.1.5':
     resolution: {integrity: sha512-vq24Bq3ym5HEQm2NKCr3yXDwjc7vTsEThRDnkp2DK9p1uqLR+DHurm/NOTo0KG7HYHU7eppKZj3MyqYuMBf62g==}
     engines: {node: '>= 8'}
@@ -273,6 +312,15 @@ packages:
   '@pkgr/core@0.3.6':
     resolution: {integrity: sha512-SEeaJLb3qBNF/OaXnaR1NmmBbFYk1zC0ZH/52fATcRPLFg/p791YrcyFFy44Bo9sLaGuSuLp5Q6axbb/O+v/RA==}
     engines: {node: ^14.18.0 || >=16.0.0}
+
+  '@quirekit/ime@0.0.3':
+    resolution: {integrity: sha512-rzEXKBBjChCrQfz/y7XtDR5zytKRNcLqwMz7IGMGL81ZvQjAMnienqLx+ZjtPJqrgaFxQ+T7aNI+8NU1DFhZkw==}
+
+  '@quirekit/math-omml@0.0.3':
+    resolution: {integrity: sha512-1bJARkvA5S6UmeU29idoH5Wphnkt7+nywWDeVv5iYgoW4XwAsd5tfbXZvi7k3AFUiIy2/SOmeP3PVzmSrN1gwQ==}
+
+  '@quirekit/math@0.0.3':
+    resolution: {integrity: sha512-8jtyJxYZ1hDCzGVQd81GjA51jOf/TXcajSmcBFmWm68FGg69EOWJwniE0BAFBPNoHu714r7CzWV1V2ZCn2taaw==}
 
   '@rollup/rollup-android-arm-eabi@4.62.2':
     resolution: {integrity: sha512-6o7ZLZK+BeenkZCFNDXqpbjw9bD6nuWonvS/lwQJp7NoVVxm6p3qE7qQ5jGuBjiFsgvqjD8mZAU5oWxTmbOeOg==}
@@ -404,6 +452,15 @@ packages:
 
   '@types/estree@1.0.9':
     resolution: {integrity: sha512-GhdPgy1el4/ImP05X05Uw4cw2/M93BCUmnEvWZNStlCzEKME4Fkk+YpoA5OiHNQmoS7Cafb8Xa3Pya8m1Qrzeg==}
+
+  '@types/linkify-it@5.0.0':
+    resolution: {integrity: sha512-sVDA58zAw4eWAffKOaQH5/5j3XeayukzDk+ewSsnv3p4yJEZHCCzMDiZM8e0OUrRvmpGZ85jf4yDHkHsgBNr9Q==}
+
+  '@types/markdown-it@14.2.0':
+    resolution: {integrity: sha512-NoQ2yGlLWj4wpxMs+TYmRKk3thDrQ97agr7sFqfLsAlvoS8SNQuTrlObhFqG9iugdTtgOE9jpJ6FNM4ZGsa5xQ==}
+
+  '@types/mdurl@2.0.0':
+    resolution: {integrity: sha512-RGdgjQUZba5p6QEFAVx2OGb8rQDL/cPRG7GiedRzMcJ1tYnUANBncjbSB1NRGwbvjcPeikRABz2nshyPk1bhWg==}
 
   '@ungap/structured-clone@1.3.3':
     resolution: {integrity: sha512-60YRaenCQcVjYEKOcG824+DRGGIQ3VKErcBoAEDJZz5bKIs2ZG+X/H9Nk+Q6EVkwJk5QNApxbrc5QtBSwtrXAg==}
@@ -561,6 +618,10 @@ packages:
   commander@4.1.1:
     resolution: {integrity: sha512-NOKm8xhkzAjzFx8B2v5OAHT+u5pRQc2UCa2Vq9jYL/31o2wi9mxBA7LIFs3sV5VSC49z6pEhfbMULvShKj26WA==}
     engines: {node: '>= 6'}
+
+  commander@8.3.0:
+    resolution: {integrity: sha512-OkTL9umf+He2DZkUq8f8J9of7yL6RJKI24dVITBmNfZBmri9zYZQrKkuXiKhyfPSu8tUhnVBB1iKXevvnlR4Ww==}
+    engines: {node: '>= 12'}
 
   concat-map@0.0.1:
     resolution: {integrity: sha512-/Srv4dswyQNBfohGpz9o6Yb3Gz3SrUDqBH5rTuhGR7ahtlbYKnVxw2bCFMRljaA7EXHaXZ8wsHdodFvbkhKmqg==}
@@ -782,6 +843,9 @@ packages:
   fastq@1.20.1:
     resolution: {integrity: sha512-GGToxJ/w1x32s/D2EKND7kTil4n8OVk/9mycTc4VDza13lOvpUZTGX3mFSCtV9ksdGBVzvsyAVLM6mHFThxXxw==}
 
+  fflate@0.8.2:
+    resolution: {integrity: sha512-cPJU47OaAoCbg0pBvzsgpTPhmhqI5eJjh/JIu8tPj5q+T7iLvW/JAYUqmE7KOB4R1ZyEhzBaIQpQpardBF5z8A==}
+
   figures@3.2.0:
     resolution: {integrity: sha512-yaduQFRKLXYOGgEn6AZau90j3ggSOyiqXU0F9JZfeXYhNa+Jk4X+s45A2zg5jns87GAFa34BBm2kXw4XpNcbdg==}
     engines: {node: '>=8'}
@@ -982,6 +1046,10 @@ packages:
 
   jsonfile@4.0.0:
     resolution: {integrity: sha512-m6F1R3z8jjlf2imQHS2Qez5sjKWQzbuuhuJ/FKYFRZvPE3PuHcSMVZzfsLhGVOkfd20obL5SWEBew5ShlquNxg==}
+
+  katex@0.16.47:
+    resolution: {integrity: sha512-Eeo8Ys1doU1z+x8AZsPpQu+p/QcZBI5PeOo7QGQdy2x2m0MU/hYagBbGOmXwr5KVbEfVuWv9LpnQWeehogurjg==}
+    hasBin: true
 
   keyv@4.5.4:
     resolution: {integrity: sha512-oxVHkHR/EJf2CNXnWxRLW6mg7JyCCUcG0DtEGmL2ctUo1PNTin1PUil+r/+4r5MpVgC/fn1kjsx7mjSujKqIpw==}
@@ -1634,6 +1702,27 @@ snapshots:
 
   '@mdi/js@7.4.47': {}
 
+  '@mdit/helper@0.23.2(markdown-it@14.3.0)':
+    dependencies:
+      '@types/markdown-it': 14.2.0
+    optionalDependencies:
+      markdown-it: 14.3.0
+
+  '@mdit/plugin-katex@0.25.2(markdown-it@14.3.0)':
+    dependencies:
+      '@mdit/helper': 0.23.2(markdown-it@14.3.0)
+      '@mdit/plugin-tex': 0.24.2(markdown-it@14.3.0)
+      '@types/markdown-it': 14.2.0
+      katex: 0.16.47
+    optionalDependencies:
+      markdown-it: 14.3.0
+
+  '@mdit/plugin-tex@0.24.2(markdown-it@14.3.0)':
+    dependencies:
+      '@types/markdown-it': 14.2.0
+    optionalDependencies:
+      markdown-it: 14.3.0
+
   '@nodelib/fs.scandir@2.1.5':
     dependencies:
       '@nodelib/fs.stat': 2.0.5
@@ -1647,6 +1736,16 @@ snapshots:
       fastq: 1.20.1
 
   '@pkgr/core@0.3.6': {}
+
+  '@quirekit/ime@0.0.3': {}
+
+  '@quirekit/math-omml@0.0.3':
+    dependencies:
+      '@quirekit/math': 0.0.3
+
+  '@quirekit/math@0.0.3':
+    dependencies:
+      '@quirekit/ime': 0.0.3
 
   '@rollup/rollup-android-arm-eabi@4.62.2':
     optional: true
@@ -1726,6 +1825,15 @@ snapshots:
   '@rushstack/eslint-patch@1.16.1': {}
 
   '@types/estree@1.0.9': {}
+
+  '@types/linkify-it@5.0.0': {}
+
+  '@types/markdown-it@14.2.0':
+    dependencies:
+      '@types/linkify-it': 5.0.0
+      '@types/mdurl': 2.0.0
+
+  '@types/mdurl@2.0.0': {}
 
   '@ungap/structured-clone@1.3.3': {}
 
@@ -1920,6 +2028,8 @@ snapshots:
       delayed-stream: 1.0.0
 
   commander@4.1.1: {}
+
+  commander@8.3.0: {}
 
   concat-map@0.0.1: {}
 
@@ -2197,6 +2307,8 @@ snapshots:
     dependencies:
       reusify: 1.1.0
 
+  fflate@0.8.2: {}
+
   figures@3.2.0:
     dependencies:
       escape-string-regexp: 1.0.5
@@ -2402,6 +2514,10 @@ snapshots:
   jsonfile@4.0.0:
     optionalDependencies:
       graceful-fs: 4.2.11
+
+  katex@0.16.47:
+    dependencies:
+      commander: 8.3.0
 
   keyv@4.5.4:
     dependencies:

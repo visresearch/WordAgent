@@ -1,0 +1,16 @@
+.markdown-body .katex {
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.markdown-body .katex-display {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.25em 0;
+}
+
+.markdown-body .katex-display > .katex {
+  width: max-content;
+  min-width: 100%;
+}

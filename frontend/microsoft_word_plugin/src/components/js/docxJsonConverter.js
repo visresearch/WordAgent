@@ -3367,6 +3367,14 @@ async function generateDocxFromJSON(jsonData, insertParaID) {
       return { error: "顶层 tables 已停用，请将表格块放入 paragraphs 数组的目标位置" };
     }
 
+    const containsFormula = (runs) => runs?.some(run => run?.formula != null || run?.formulaError != null);
+    if (expandOrderedDocumentBlocks(jsonData.paragraphs).some(({ type, data }) =>
+      type === "paragraph" ? containsFormula(data.runs) :
+        data.cells?.some(row => row.some(cell => cell?.paragraphs?.some(para => containsFormula(para.runs))))
+    )) {
+      return { error: "formula 公式 run 当前只支持 WPS 文字加载项" };
+    }
+
     const normalizedInsertParaID = normalizeParaID(insertParaID);
     if (normalizedInsertParaID === null) {
       return {
@@ -3849,6 +3857,9 @@ async function editDocxParagraph(paraID, runs) {
   for (const run of runs) {
     if (!run || typeof run !== "object") {
       continue;
+    }
+    if (run.formula != null || run.formulaError != null) {
+      return { success: false, paraID: normalizedParaID, error: "formula 公式 run 当前只支持 WPS 文字加载项" };
     }
     if (run.url && run.text === undefined) {
       return { success: false, paraID: normalizedParaID, error: "edit_document 暂不支持图片 run" };
