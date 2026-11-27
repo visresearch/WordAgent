@@ -9,7 +9,7 @@ from langchain_core.messages import ToolMessage
 
 from app.services.utils import _get_env_float, _get_env_int
 
-_DOCUMENT_MUTATIONS = {"copy_document", "edit_document", "delete_document", "generate_document", "insert_break"}
+_DOCUMENT_MUTATIONS = {"adjust_document", "copy_document", "edit_document", "delete_document", "generate_document", "insert_break"}
 TOOL_MAX_RETRIES = _get_env_int("WORDAGENT_TOOL_MAX_RETRIES", 2)
 TOOL_RETRY_ON_FAILURE = "continue"
 TOOL_RETRY_BACKOFF_FACTOR = _get_env_float("WORDAGENT_TOOL_RETRY_BACKOFF_FACTOR", 2.0)

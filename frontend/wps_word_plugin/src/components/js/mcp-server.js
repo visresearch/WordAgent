@@ -1,5 +1,5 @@
 /** WPS 页面侧的 MCP 文档工具执行与后端连接。 */
-import { createDocument, getDocumentById, parseDocumentRange, wsManager } from './api.js';
+import { adjustDocument, createDocument, getDocumentById, parseDocumentRange, wsManager } from './api.js';
 import { executeStyleQuery } from './docxQuery.js';
 import {
   deleteDocxPara,
@@ -46,6 +46,8 @@ async function executeTool(tool, args) {
       ), '读取文档失败');
       return { documentJson, docId };
     }
+    case 'adjust_document':
+      return { ...await adjustDocument(docId, args.pageMarginsCm), docId };
     case 'search_document': {
       targetDocument(docId);
       const documentJson = checked(await parseDocumentRange(0, -1, docId), '读取文档失败');

@@ -67,6 +67,7 @@
 /* global Office, Word */
 
 import { parseParaIDFromContentControlMetadata } from "./contentControlMetadata.mjs";
+import { readPageMargins } from "./pageMargins.js";
 
 // ============== 样式数组索引常量 ==============
 
@@ -2107,7 +2108,7 @@ async function readTableRowDimensions(context, table) {
  *   省略时默认等于 startParaIndex（即只解析单段）；-1 表示解析到文档末尾
  * @returns {Promise<Object>} - JSON 数据或错误对象
  */
-async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex) {
+async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex, includeMeta = false) {
   const includeUnderlineColor = supportsRequirementSet("WordApiDesktop", "1.3");
   const fontReadProperties = getFontReadProperties(includeUnderlineColor);
   try {
@@ -2548,7 +2549,7 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
           });
         }
 
-        return orderReadDocumentBlocks(deduplicateStyles(rangeResult));
+        return withPageMarginMeta(context, orderReadDocumentBlocks(deduplicateStyles(rangeResult)), includeMeta);
       }
 
       // ========== 常规路径：解析选区或全文 ==========
@@ -3121,7 +3122,7 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
         }
       }
 
-      return orderReadDocumentBlocks(deduplicateStyles(result));
+      return withPageMarginMeta(context, orderReadDocumentBlocks(deduplicateStyles(result)), includeMeta);
     });
   } catch (error) {
     return { error: "解析失败: " + error.message };
@@ -3132,7 +3133,7 @@ async function parseDocxToJSON(scope = "selection", startParaIndex, endParaIndex
  * Read only paragraph text and stable paraIDs. This is used for large-document
  * discovery where character, paragraph, and table style details are unnecessary.
  */
-async function parseDocxToJSONLightweight(startParaIndex = 0, endParaIndex = -1) {
+async function parseDocxToJSONLightweight(startParaIndex = 0, endParaIndex = -1, includeMeta = false) {
   try {
     return await Word.run(async (context) => {
       const paragraphs = context.document.body.paragraphs;
@@ -3160,11 +3161,19 @@ async function parseDocxToJSONLightweight(startParaIndex = 0, endParaIndex = -1)
           paraID: paraIDs[index] ?? null,
         });
       }
-      return result;
+      return withPageMarginMeta(context, result, includeMeta);
     });
   } catch (error) {
     return { error: "轻量解析失败: " + (error?.message || String(error)) };
   }
+}
+
+async function withPageMarginMeta(context, result, includeMeta) {
+  if (includeMeta) {
+    const pageMarginsCm = await readPageMargins(context);
+    if (pageMarginsCm) result.meta = { ...result.meta, pageMarginsCm };
+  }
+  return result;
 }
 
 // ============== 生成函数 ==============

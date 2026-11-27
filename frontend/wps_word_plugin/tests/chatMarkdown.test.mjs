@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { katex } from '@mdit/plugin-katex';
 import MarkdownIt from 'markdown-it';
-import { createChatMarkdownRenderer } from '../../shared/chatMarkdown.mjs';
+import { createChatMarkdownRenderer } from '../../shared/js/chatMarkdown.mjs';
 
 const renderMarkdown = createChatMarkdownRenderer(MarkdownIt, katex);
 const fourier = String.raw`\hat f(\omega)=\int_{-\infty}^{\infty} f(t)e^{-\mathrm{i}\omega t}\,\mathrm{d}t`;

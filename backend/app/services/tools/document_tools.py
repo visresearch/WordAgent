@@ -31,7 +31,7 @@ from .callback import (
     wait_for_tool_response,
 )
 from .prompts import get_tool_description
-from .schemas import DocumentOutput, DocumentQuery, Run
+from .schemas import DocumentOutput, DocumentQuery, PageMarginsCm, Run
 
 logger = get_logger(__name__)
 
@@ -523,7 +523,7 @@ def _compact_doc_json(doc_json: dict) -> str:
                         para_compact["runs"].append(img_info)
         compact["paragraphs"].append(para_compact)
 
-    for key in ("hasTOC", "tocFieldCode"):
+    for key in ("hasTOC", "tocFieldCode", "meta"):
         if key in ordered_doc:
             compact[key] = ordered_doc[key]
 
@@ -627,7 +627,7 @@ def _read_document_impl(
 
                     image_count = count_inline_images(doc_json)
                     has_content = doc_json and (doc_json.get("paragraphs") or doc_json.get("tables"))
-                    if has_content:
+                    if has_content or doc_json.get("meta"):
                         content_blocks = doc_json.get("paragraphs", [])
                         para_count = sum(
                             1
@@ -1417,6 +1417,35 @@ def build_insert_break(description: str):
     return insert_break
 
 
+@tool(description=(
+    "Set page margins in centimeters on all sections of the target document. "
+    "Pass docId and pageMarginsCm with at least one of top, bottom, left, right. "
+    "Omitted sides keep their values in each section. Use docId=0 for the current document. "
+    "Read meta.pageMarginsCm with read_document to check the result."
+))
+def adjust_document(docId: RequiredDocIdInput, pageMarginsCm: PageMarginsCm) -> dict:
+    doc_id = _normalize_required_doc_id(docId)
+    chat_id = _current_chat_id.get(None)
+    if not chat_id or is_stop_requested(chat_id):
+        return {"success": False, "error": "An active Word or WPS chat is required to adjust page margins."}
+
+    request_id = str(uuid.uuid4())
+    writer = get_stream_writer()
+    writer({
+        "type": "adjust_document",
+        "content": "正在调整页边距",
+        "docId": doc_id,
+        "pageMarginsCm": pageMarginsCm.model_dump(exclude_none=True),
+        "requestId": request_id,
+    })
+    result = _wait_for_frontend_mutation(request_id)
+    if result is None:
+        return {"success": None, "requiresRead": True, "error": "Page margin update was not confirmed. Use read_document to check the actual margins."}
+    if result.get("type") == "stop" or result.get("error") == "stopped_by_user":
+        return {"success": False, "error": "stopped_by_user"}
+    return {key: result[key] for key in ("success", "docId", "pageMarginsCm", "error", "requiresRead") if key in result}
+
+
 def build_create_document(description: str):
     """根据传入的 description 构造 create_document 工具实例。"""
 
@@ -1536,6 +1565,7 @@ __all__ = [
     "build_delete_document",
     "build_edit_document",
     "build_insert_break",
+    "adjust_document",
     "build_create_document",
     "copy_document",
     "view_document",

@@ -1,5 +1,5 @@
 /** Microsoft Word 页面侧的 MCP 工具执行与后端桥接。 */
-import { createDocument, parseDocumentRange, wsManager } from './api.js';
+import { adjustDocument, createDocument, parseDocumentRange, wsManager } from './api.js';
 import { executeStyleQuery } from './docxQuery.js';
 import {
   deleteDocxPara,
@@ -36,6 +36,8 @@ async function executeTool(tool, args) {
       ), '读取文档失败');
       return { documentJson, docId: 0 };
     }
+    case 'adjust_document':
+      return { ...await adjustDocument(0, args.pageMarginsCm), docId: 0 };
     case 'search_document': {
       const documentJson = checked(await parseDocumentRange(0, -1, 0), '读取文档失败');
       return { ...executeStyleQuery(documentJson, args.query || {}), docId: 0 };

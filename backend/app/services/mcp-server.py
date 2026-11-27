@@ -16,7 +16,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from mcp.server.fastmcp import FastMCP
 
 from app.services.mcp_runtime import ControlledMcpApp
-from app.services.tools.schemas import DocumentOutput, DocumentQuery, Run
+from app.services.tools.schemas import DocumentOutput, DocumentQuery, PageMarginsCm, Run
 
 Host = Literal["wps", "word"]
 
@@ -239,6 +239,14 @@ async def insert_break(
 ) -> dict:
     """Insert a line break, page break or next-page section break after a paragraph."""
     return await bridge.call("insert_break", locals())
+
+
+@mcp.tool()
+async def adjust_document(pageMarginsCm: PageMarginsCm, docId: int = 0, host: Host | None = None) -> dict:
+    """Set the supplied page margins (cm) on every section of the document."""
+    return await bridge.call("adjust_document", {
+        "docId": docId, "pageMarginsCm": pageMarginsCm.model_dump(exclude_none=True), "host": host,
+    })
 
 
 @mcp.tool()

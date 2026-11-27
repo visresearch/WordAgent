@@ -95,14 +95,17 @@
 
 <script>
 import { computed, nextTick, onMounted, ref } from 'vue';
-import api from '../js/api.js';
-import { t } from '../../i18n/index.js';
+import { useI18n } from '../../js/i18n.mjs';
 
 export default {
   name: 'LongTermMemorySetting',
-  props: { enabled: { type: Boolean, default: undefined } },
+  props: {
+    enabled: { type: Boolean, default: undefined },
+    memoryApi: { type: Object, required: true }
+  },
   emits: ['update:enabled'],
-  setup() {
+  setup(props) {
+    const { t } = useI18n();
     const resultMessage = ref('');
     const resultSuccess = ref(false);
     // 长期记忆相关
@@ -135,7 +138,7 @@ export default {
     const loadMemory = async () => {
       memoryLoading.value = true;
       try {
-        const content = await api.getMemory();
+        const content = await props.memoryApi.getMemory();
         memoryContent.value = content;
         memoryHasChanged.value = false;
         nextTick(syncMemoryLineNumberScroll);
@@ -156,7 +159,7 @@ export default {
     const saveMemory = async () => {
       memorySaving.value = true;
       try {
-        await api.saveMemory(memoryContent.value);
+        await props.memoryApi.saveMemory(memoryContent.value);
         memoryHasChanged.value = false;
         resultMessage.value = t('data.memorySaved');
         resultSuccess.value = true;
@@ -197,7 +200,7 @@ export default {
 };
 </script>
 
-<style scoped src="./setting.css"></style>
+<style scoped src="../../assets/setting.css"></style>
 <style scoped>
 .memory-editor-box {
   margin-bottom: 12px;

@@ -4,7 +4,7 @@
 
 /* global Office */
 
-import "../assets/main.css";
+import "../../../shared/assets/microsoft.css";
 import { createApp } from "vue";
 import App from "../App.vue";
 import router from "../router";

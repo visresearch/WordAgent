@@ -132,7 +132,7 @@
 <script>
 import { nextTick, ref, watch } from 'vue';
 import api from '../js/api.js';
-import iconMcp from '../../assets/icons/mcp.svg';
+import iconMcp from '../../../../shared/assets/icons/mcp.svg';
 import { t } from '../../i18n/index.js';
 
 function normalizeServer(server = {}) {
@@ -361,7 +361,7 @@ export default {
 };
 </script>
 
-<style scoped src="./setting.css"></style>
+<style scoped src="../../../../shared/assets/setting.css"></style>
 
 <style scoped>
 .mcp-setting-container {

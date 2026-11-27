@@ -80,13 +80,18 @@
         </div>
       </div>
     </section>
-    <LongTermMemorySetting :enabled="localSettings.enableLongTermMemory" @update:enabled="onMemoryEnabledChange" />
+    <LongTermMemorySetting
+      :enabled="localSettings.enableLongTermMemory"
+      :memory-api="memoryApi"
+      @update:enabled="onMemoryEnabledChange"
+    />
   </div>
 </template>
 
 <script>
 import { computed, ref, watch } from 'vue';
-import LongTermMemorySetting from './LongTermMemorySetting.vue';
+import api from '../js/api.js';
+import LongTermMemorySetting from '../../../../shared/components/setting/LongTermMemorySetting.vue';
 import { t } from '../../i18n/index.js';
 
 export default {
@@ -173,6 +178,7 @@ export default {
     };
 
     return {
+      memoryApi: api,
       localSettings,
       promptTemplates,
       onSettingChange,
@@ -184,7 +190,7 @@ export default {
 };
 </script>
 
-<style scoped src="./setting.css"></style>
+<style scoped src="../../../../shared/assets/setting.css"></style>
 
 <style scoped>
 .personalization-container {

@@ -71,7 +71,7 @@
 <script>
 import robotIcon from '../assets/robot.svg';
 import sessionIcon from '../assets/session.svg';
-import templatesIcon from '../../wps_word_plugin/public/images/newFromTemp.svg';
+import templatesIcon from '../../shared/assets/icons/template.svg';
 import settingIcon from '../assets/setting.svg';
 import aboutIcon from '../assets/about.svg';
 import debugIcon from '../assets/debug.svg';

@@ -12,6 +12,7 @@ from app.services.tools.tool_log import append_tool_call
 from app.services.utils import normalize_tool_args
 
 _BUILTIN_TOOL_NAMES = {
+    "adjust_document",
     "ask_user",
     "copy_document",
     "create_document",

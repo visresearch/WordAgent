@@ -1,41 +1,9 @@
-import { inject, ref } from 'vue';
-import enUS from '../../../shared/locales/en-US.js';
-import idID from '../../../shared/locales/id-ID.js';
-import zhCN from '../../../shared/locales/zh-CN.js';
-import jaJP from '../../../shared/locales/ja-JP.js';
-import koKR from '../../../shared/locales/ko-KR.js';
-import viVN from '../../../shared/locales/vi-VN.js';
-
-const STORAGE_KEY = 'wence-interface-language';
-const messages = { 'en-US': enUS, 'id-ID': idID, 'zh-CN': zhCN, 'ja-JP': jaJP, 'ko-KR': koKR, 'vi-VN': viVN };
-const I18N_KEY = Symbol('wence-i18n');
-
-function normalizeLocale(value) {
-  if (!value) {
-    return 'en-US';
-  }
-  const normalized = String(value).toLowerCase();
-  if (normalized === 'en-us' || normalized.startsWith('en')) {
-    return 'en-US';
-  }
-  if (normalized === 'id-id' || normalized === 'id' || normalized.startsWith('id')) {
-    return 'id-ID';
-  }
-  if (normalized === 'ja-jp' || normalized === 'ja' || normalized.startsWith('ja')) {
-    return 'ja-JP';
-  }
-  if (normalized === 'ko-kr' || normalized === 'ko' || normalized.startsWith('ko')) {
-    return 'ko-KR';
-  }
-  if (normalized === 'vi-vn' || normalized === 'vi' || normalized.startsWith('vi')) {
-    return 'vi-VN';
-  }
-  return 'zh-CN';
-}
+import { ref } from 'vue';
+import { I18N_KEY, LANGUAGE_STORAGE_KEY, normalizeLocale, resolveTranslation, useI18n as useSharedI18n } from '../../../shared/js/i18n.mjs';
 
 function initialLocale() {
   try {
-    const stored = localStorage.getItem(STORAGE_KEY);
+    const stored = localStorage.getItem(LANGUAGE_STORAGE_KEY);
     if (stored) {
       return normalizeLocale(stored);
     }
@@ -47,14 +15,8 @@ function initialLocale() {
 
 export const locale = ref(initialLocale());
 
-function resolveMessage(source, key) {
-  return key.split('.').reduce((value, part) => value?.[part], source);
-}
-
 export function t(key, params = {}) {
-  const value = resolveMessage(messages[locale.value], key)
-    ?? resolveMessage(messages['zh-CN'], key)
-    ?? key;
+  const value = resolveTranslation(locale.value, key);
   return String(value).replace(/\{(\w+)\}/g, (_, name) => String(params[name] ?? `{${name}}`));
 }
 
@@ -63,14 +25,14 @@ export function setLocale(value) {
   locale.value = nextLocale;
   document.documentElement.lang = nextLocale;
   try {
-    localStorage.setItem(STORAGE_KEY, nextLocale);
+    localStorage.setItem(LANGUAGE_STORAGE_KEY, nextLocale);
   } catch (error) {
     console.warn('[i18n] Unable to store the selected language:', error);
   }
 }
 
 export function useI18n() {
-  return inject(I18N_KEY, { locale, setLocale, t });
+  return useSharedI18n({ locale, setLocale, t });
 }
 
 export const i18n = {

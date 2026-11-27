@@ -160,20 +160,20 @@
 <script>
 import { ref, reactive, computed, onMounted } from 'vue';
 import api from '../js/api.js';
-import GeneralSetting from './GeneralSetting.vue';
+import GeneralSetting from '../../../../shared/components/setting/GeneralSetting.vue';
 import ModelSetting from './ModelSetting.vue';
 import MCPserverSetting from './MCPserverSetting.vue';
 import PersonalizationPane from './PersonalizationSetting.vue';
 import DataManagementPane from './DataManagementSetting.vue';
 import SkillSetting from './SkillSetting.vue';
 import PluginSetting from './PluginSetting.vue';
-import iconSetting from '../../assets/icons/setting.svg';
-import iconModel from '../../assets/icons/model.svg';
-import iconUser from '../../assets/icons/user.svg';
-import iconMcp from '../../assets/icons/mcp.svg';
-import iconPlugin from '../../assets/icons/plugin.svg';
-import iconData from '../../assets/icons/data.svg';
-import iconSkill from '../../assets/icons/skill.svg';
+import iconSetting from '../../../../shared/assets/icons/setting-nav.svg';
+import iconModel from '../../../../shared/assets/icons/model.svg';
+import iconUser from '../../../../shared/assets/icons/user.svg';
+import iconMcp from '../../../../shared/assets/icons/mcp.svg';
+import iconPlugin from '../../../../shared/assets/icons/plugin.svg';
+import iconData from '../../../../shared/assets/icons/data.svg';
+import iconSkill from '../../../../shared/assets/icons/skill.svg';
 import { locale, setLocale, t } from '../../i18n/index.js';
 
 export default {
@@ -460,7 +460,7 @@ export default {
 };
 </script>
 
-<style scoped src="./setting.css"></style>
+<style scoped src="../../../../shared/assets/setting.css"></style>
 
 <style scoped>
 .setting-container {

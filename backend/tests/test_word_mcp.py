@@ -51,6 +51,7 @@ def test_word_tool_discovery_and_all_seven_roundtrips(monkeypatch):
             "delete_document": {"startParaID": 123, "endParaID": 456},
             "edit_document": {"paraID": 123, "runs": [{"text": "new", "rStyle": "rS_1"}], "styles": {"rS_1": style}},
             "insert_break": {"paraID": 123, "breakType": "wdPageBreak"},
+            "adjust_document": {"pageMarginsCm": {"left": 3}},
             "generate_document": {"document": {"paragraphs": [], "styles": {}}, "insertParaID": 123},
             "create_document": {},
         }
@@ -62,6 +63,8 @@ def test_word_tool_discovery_and_all_seven_roundtrips(monkeypatch):
                 if tool == "edit_document":
                     assert request["arguments"]["runs"][0]["rStyle"] == style
                     assert "styles" not in request["arguments"]
+                if tool == "adjust_document":
+                    assert request["arguments"] == {"docId": 0, "pageMarginsCm": {"left": 3}}
             # A Word-only connection is also selected for legacy calls without host.
             _roundtrip(client, socket, "create_document", {})
             result = _mcp_request(

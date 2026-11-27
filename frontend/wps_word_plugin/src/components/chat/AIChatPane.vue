@@ -1459,6 +1459,25 @@ export default {
     _handleStreamMessage(data, aiMsg, streamSessionId) {
       const msg = aiMsg;
 
+      if (data.type === 'adjust_document') {
+        const isCurrent = () => api.wsManager._activeChat?.chatId === data.chatId
+          && !api.wsManager._stopping && !api.wsManager._completeCalled;
+        const execute = async () => {
+          if (!isCurrent()) return;
+          const result = await api.adjustDocument(data.docId, data.pageMarginsCm);
+          if (!isCurrent()) return;
+          return api.wsManager.send({
+            ...result,
+            type: 'adjust_document_response',
+            chatId: data.chatId,
+            sessionId: data.sessionId,
+            docId: data.docId,
+            requestId: data.requestId
+          });
+        };
+        return execute();
+      }
+
       if (['copy_document', 'save_document_template', 'view_document'].includes(data.type)) {
         const isCurrent = () => api.wsManager._activeChat?.chatId === data.chatId
           && !api.wsManager._stopping && !api.wsManager._completeCalled;

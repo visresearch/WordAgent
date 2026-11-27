@@ -144,6 +144,7 @@ def _summarize_custom_event(chunk: Any) -> str:
         "edit_document",
         "edit_complete",
         "insert_break",
+        "adjust_document",
         "create_document",
         "generate_complete",
     }:

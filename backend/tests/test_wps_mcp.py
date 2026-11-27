@@ -67,6 +67,7 @@ def test_mcp_lists_tools_and_roundtrips_through_wps_bridge(monkeypatch):
         assert {tool["name"] for tool in listed.json()["result"]["tools"]} == {
             "delete_document",
             "edit_document",
+            "adjust_document",
             "create_document",
             "insert_break",
             "generate_document",

@@ -185,7 +185,7 @@
 
 <script>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { setLocale, t } from '../../i18n/index.js';
+import { useI18n } from '../../js/i18n.mjs';
 
 export default {
   name: 'GeneralSetting',
@@ -197,6 +197,7 @@ export default {
   },
   emits: ['update:settings'],
   setup(props, { emit }) {
+    const { setLocale, t } = useI18n();
     const languagePicker = ref(null);
     const languageMenuOpen = ref(false);
     const localSettings = ref({
@@ -226,21 +227,11 @@ export default {
     };
 
     const selectedLanguageLabel = computed(() => {
-      if (localSettings.value.language === 'en-US') {
-        return t('general.english');
-      }
-      if (localSettings.value.language === 'id-ID') {
-        return t('general.indonesian');
-      }
-      if (localSettings.value.language === 'ja-JP') {
-        return t('general.japanese');
-      }
-      if (localSettings.value.language === 'ko-KR') {
-        return t('general.korean');
-      }
-      if (localSettings.value.language === 'vi-VN') {
-        return t('general.vietnamese');
-      }
+      if (localSettings.value.language === 'en-US') return t('general.english');
+      if (localSettings.value.language === 'id-ID') return t('general.indonesian');
+      if (localSettings.value.language === 'ja-JP') return t('general.japanese');
+      if (localSettings.value.language === 'ko-KR') return t('general.korean');
+      if (localSettings.value.language === 'vi-VN') return t('general.vietnamese');
       return t('general.simplifiedChinese');
     });
 
@@ -282,7 +273,7 @@ export default {
 };
 </script>
 
-<style scoped src="./setting.css"></style>
+<style scoped src="../../assets/setting.css"></style>
 
 <style scoped>
 .general-setting-container {
@@ -602,10 +593,12 @@ export default {
 /* 隐藏 number input 的上下箭头 */
 .text-input[type="number"]::-webkit-inner-spin-button,
 .text-input[type="number"]::-webkit-outer-spin-button {
+  appearance: none;
   -webkit-appearance: none;
   margin: 0;
 }
 .text-input[type="number"] {
+  appearance: textfield;
   -moz-appearance: textfield;
 }
 

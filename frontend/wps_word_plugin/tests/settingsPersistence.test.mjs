@@ -5,13 +5,15 @@ import vm from 'node:vm';
 import * as vue from 'vue';
 
 function panel(t, file, props, backend, emit = () => {}) {
-  const source = readFileSync(new URL(`../src/components/setting/${file}.vue`, import.meta.url), 'utf8');
+  const directory = file === 'LongTermMemorySetting' ? '../../shared/components/setting' : '../src/components/setting';
+  const source = readFileSync(new URL(`${directory}/${file}.vue`, import.meta.url), 'utf8');
   const script = source.match(/<script>([\s\S]*?)<\/script>/)[1];
   const locale = vue.ref('zh-CN');
   const context = { ...vue, api: backend, locale, setLocale(value) {
     locale.value = value; 
   },
   t: key => key, onMounted() {}, setTimeout() {}, console: { error() {} } };
+  context.useI18n = () => ({ t: context.t, setLocale: context.setLocale });
   for (const match of script.matchAll(/^import (\w+) from /gm)) {
     if (!(match[1] in context)) {
       context[match[1]] = {};
@@ -21,7 +23,7 @@ function panel(t, file, props, backend, emit = () => {}) {
     .replace('export default', 'globalThis.component ='), vm.createContext(context));
   const scope = vue.effectScope();
   t.after(() => scope.stop());
-  return scope.run(() => context.component.setup(props, { emit }));
+  return scope.run(() => context.component.setup({ ...props, memoryApi: backend }, { emit }));
 }
 
 test('memory switch loads from settings, submits only on Save, and survives reopening', async t => {

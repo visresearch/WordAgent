@@ -18,7 +18,7 @@ const router = createRouter({
     {
       path: '/templates',
       name: '文档模板',
-      component: () => import('../../../shared/TemplatesPane.vue'),
+      component: () => import('../../../shared/components/TemplatesPane.vue'),
       props: () => ({ baseUrl: api.getConfig().baseURL, createDocument: createDocumentFromTemplate })
     },
     {

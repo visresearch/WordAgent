@@ -67,7 +67,7 @@
 
 <script>
 import MarkdownIt from 'markdown-it';
-import { templateEndpoint, templateRequest } from './documentTemplates.mjs';
+import { templateEndpoint, templateRequest } from '../js/documentTemplates.mjs';
 import TemplateCover from './TemplateCover.vue';
 
 const markdown = new MarkdownIt({ html: false }).disable(['image', 'link', 'autolink']);

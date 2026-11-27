@@ -99,11 +99,11 @@
 </template>
 
 <script>
-import githubIcon from '../../assets/icons/github.svg';
-import webIcon from '../../assets/icons/web.svg';
-import helpIcon from '../../assets/icons/help.svg';
-import issueIcon from '../../assets/icons/issue.svg';
-import sponsorIcon from '../../assets/icons/sponsor.svg';
+import githubIcon from '../../../../shared/assets/icons/github.svg';
+import webIcon from '../../../../shared/assets/icons/web.svg';
+import helpIcon from '../../../../shared/assets/icons/help.svg';
+import issueIcon from '../../../../shared/assets/icons/issue.svg';
+import sponsorIcon from '../../../../shared/assets/icons/sponsor.svg';
 import api from '../js/api.js';
 
 export default {

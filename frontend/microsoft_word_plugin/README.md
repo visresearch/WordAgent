@@ -85,7 +85,7 @@ Microsoft Word 与 WPS 共用同一个 Streamable HTTP 地址：
 }
 ```
 
-工具为 `read_document`、`search_document`、`edit_document`、`delete_document`、`generate_document`、`insert_break`、`create_document`。工具参数使用 `host: "word"` 指定 Microsoft Word，`host: "wps"` 指定 WPS；只有一种宿主连接时可以省略。两种宿主同时连接时必须指定，指定的宿主未连接时会返回错误。
+工具为 `read_document`、`search_document`、`edit_document`、`delete_document`、`generate_document`、`insert_break`、`adjust_document`、`create_document`。工具参数使用 `host: "word"` 指定 Microsoft Word，`host: "wps"` 指定 WPS；只有一种宿主连接时可以省略。两种宿主同时连接时必须指定，指定的宿主未连接时会返回错误。
 
 Word 的 `docId` 仅支持 `0`，代表加载项侧栏所属文档。请仅保留目标 Word 文档的侧栏；多个 Word 侧栏连接时后端会拒绝调用并提示关闭多余侧栏。先读取或搜索获得 `paraID` 再编辑，文档变更后重新读取。例如：
 
@@ -96,6 +96,8 @@ Word 的 `docId` 仅支持 `0`，代表加载项侧栏所属文档。请仅保�
 以上为 `read_document` 的参数。`edit_document` 中如使用 `rStyle` 引用，需通过其 `styles` 参数传入完整读取返回的样式字典；省略 `rStyle` 则保留现有字符格式。`generate_document` 的 `document.styles` 规则与内置 Agent 一致，`insertParaID: 0` 表示文档开头。
 
 `create_document` 会打开新文档。后续调用前请关闭旧文档侧栏，再在新文档打开加载项；原侧栏仍绑定原文档。
+
+`read_document` 返回的 `meta.pageMarginsCm` 包含以厘米计的 `top`、`bottom`、`left`、`right`。某一侧在各节中取值不同时，该侧为 `null`。`adjust_document` 将提供的边距应用到文档的所有节，例如 `{"docId":0,"pageMarginsCm":{"left":3,"right":2}}`。Word 的页边距接口需要 WordApiDesktop 1.3。
 
 内部桥接地址是 `ws://127.0.0.1:3880/api/mcp/bridge?host=word`，与 WPS 共用路径和端口。外部 Agent 应连接 `/mcp/`。
 

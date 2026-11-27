@@ -83,3 +83,11 @@ test("cell.text without cell paragraphs is not searchable", () => {
 
   assert.equal(result.matchCount, 0);
 });
+
+test("style query retains opaque Microsoft Word paragraph IDs", () => {
+  const document = { paragraphs: [{ paraID: "  word:paragraph/1  ", runs: [{ text: "Target" }] }] };
+  const result = executeStyleQuery(document, { type: "paragraph", filters: { text: "Target" } });
+
+  assert.equal(result.matchCount, 1);
+  assert.equal(result.matches[0].paragraphId, "word:paragraph/1");
+});

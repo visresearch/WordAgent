@@ -259,7 +259,7 @@
 import { ref, computed, watch } from 'vue';
 import api from '../js/api.js';
 import { t } from '../../i18n/index.js';
-import warningIcon from '../../assets/icons/warning.svg';
+import warningIcon from '../../../../shared/assets/icons/warning.svg';
 
 export default {
   name: 'DataManagementPane',
@@ -427,7 +427,7 @@ export default {
 };
 </script>
 
-<style scoped src="./setting.css"></style>
+<style scoped src="../../../../shared/assets/setting.css"></style>
 
 <style scoped>
 .data-management-container > .setting-section:last-child {

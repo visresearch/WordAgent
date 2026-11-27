@@ -99,9 +99,9 @@
 <script>
 import { onMounted, ref } from 'vue';
 import api from '../js/api.js';
-import iconDelete from '../../assets/icons/delete.svg';
-import iconFolder from '../../assets/icons/folder.svg';
-import iconSkill from '../../assets/icons/skill.svg';
+import iconDelete from '../../../../shared/assets/icons/delete.svg';
+import iconFolder from '../../../../shared/assets/icons/folder.svg';
+import iconSkill from '../../../../shared/assets/icons/skill.svg';
 import { t } from '../../i18n/index.js';
 
 export default {
@@ -244,7 +244,7 @@ export default {
 };
 </script>
 
-<style scoped src="./setting.css"></style>
+<style scoped src="../../../../shared/assets/setting.css"></style>
 
 <style scoped>
 .mcp-setting-container {

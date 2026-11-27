@@ -13,6 +13,8 @@
  * const result = await api.chat(message)
  */
 
+import { createBackendApi } from '../../../../shared/js/backendApi.mjs';
+import { adjustPageMargins, readPageMargins } from './pageMargins.js';
 import {
   cleanText,
   getParagraphParaID,
@@ -229,6 +231,7 @@ const DOCUMENT_TOOL_RESPONSES = {
   edit_document: 'edit_document_response',
   delete_document: 'delete_response',
   insert_break: 'insert_break_response',
+  adjust_document: 'adjust_document_response',
   create_document: 'create_document_response',
   save_document_template: 'save_document_template_response',
   view_document: 'view_document_response',
@@ -664,7 +667,7 @@ const wsManager = {
       if (!docData) {
         console.log('[WebSocket] 文档缓存未命中或文档不匹配，解析全文...', docId ? `docId=${docId}` : '(active)');
         // 先解析全文文档 JSON
-        docData = await parseDocumentRange(0, -1, docId);
+        docData = await parseDocumentRange(0, -1, docId, null, null, 'full', false);
         if (scope?.chatId !== this._activeChat?.chatId || this._completeCalled) return;
 
         if (docData.error) {
@@ -871,7 +874,7 @@ function chatStream(message, options = {}) {
  * @param {number|null} docId - 文档 ID，如果为 null/0 则返回活动文档
  * @returns {Object|null} - WPS Document 对象
  */
-function getDocumentById(docId) {
+function getDocumentById(docId, allowActiveFallback = true) {
   const app = window.Application;
   if (!app) {
     return null;
@@ -901,6 +904,8 @@ function getDocumentById(docId) {
   } catch (e) {
     console.warn('[getDocumentById] 遍历文档失败:', e);
   }
+
+  if (!allowActiveFallback) return null;
 
   // 没找到，返回活动文档作为后备
   console.log('[getDocumentById] 使用活动文档作为后备');
@@ -1044,7 +1049,7 @@ function resolveParaIDRangeToIndices(doc, startParaID, endParaID) {
   return { startIndex, endIndex };
 }
 
-async function parseDocumentRange(startParaIndex = 0, endParaIndex = -1, docId = 0, startParaID = null, endParaID = null, mode = 'full') {
+async function parseDocumentRange(startParaIndex = 0, endParaIndex = -1, docId = 0, startParaID = null, endParaID = null, mode = 'full', includeMeta = true) {
   return new Promise((resolve) => {
     // 使用 setTimeout 将任务推迟到下一个事件循环
     // 这样可以让 UI 有时间响应，避免卡顿
@@ -1091,9 +1096,8 @@ async function parseDocumentRange(startParaIndex = 0, endParaIndex = -1, docId =
           result = parseDocxToJSON(null, startParaIndex, endParaIndex, doc, startParaID, endParaID);
         }
 
-        // read_document / search_document 回包仅返回文档内容，不携带全局 meta。
-        // 全局 meta 在 chatStream 中通过 documentMeta 单独发送。
-
+        const pageMarginsCm = includeMeta && result && !result.error ? readPageMargins(doc) : null;
+        if (pageMarginsCm) result.meta = { ...result.meta, pageMarginsCm };
         resolve(result);
       } catch (error) {
         resolve({ error: '解析文档失败: ' + error.message });
@@ -1102,124 +1106,23 @@ async function parseDocumentRange(startParaIndex = 0, endParaIndex = -1, docId =
   });
 }
 
-/**
- * 获取可用模型列表
- *
- * @returns {Promise<Object>} - 模型列表
- */
-async function getModels() {
-  return await request('/api/chat/models', {
-    method: 'GET'
-  });
+async function adjustDocument(docId, pageMarginsCm) {
+  try {
+    if (docId == null || (typeof docId !== 'number' && typeof docId !== 'string')
+        || String(docId).trim() === '' || !Number.isInteger(Number(docId))) {
+      throw new Error('docId 必须是有效整数。');
+    }
+    const doc = getDocumentById(docId, false);
+    if (!doc) throw new Error('找不到指定的 WPS 文档。');
+    return adjustPageMargins(doc, pageMarginsCm);
+  } catch (error) {
+    return { success: false, error: error?.message || String(error) };
+  } finally {
+    wsManager.clearDocumentCache();
+  }
 }
 
 // ============== 会话管理 API ==============
-
-/**
- * 获取会话列表
- *
- * @param {Object} options - 选项
- * @param {number} options.limit - 返回数量限制
- * @returns {Promise<Object>} - 会话列表
- */
-async function getSessions(options = {}) {
-  const { limit = 50 } = options;
-  const params = new URLSearchParams({ limit: String(limit) });
-  return await request(`/api/sessions?${params}`, { method: 'GET' });
-}
-
-/**
- * 创建新会话
- *
- * @param {Object} data - 创建数据
- * @param {string} data.title - 会话标题（可选，默认"新对话"）
- * @returns {Promise<Object>} - 创建的会话
- */
-async function createSession(data = {}) {
-  return await request('/api/sessions', {
-    method: 'POST',
-    body: data
-  });
-}
-
-/**
- * 获取最新会话（含消息）
- *
- * @returns {Promise<Object>} - 最新会话及其消息
- */
-async function getLatestSession() {
-  return await request('/api/sessions/latest', { method: 'GET' });
-}
-
-/**
- * 获取会话详情（含消息）
- *
- * @param {string} sessionId - UUID 会话 ID
- * @returns {Promise<Object>} - 会话详情及消息列表
- */
-async function getSession(sessionId) {
-  return await request(`/api/sessions/${sessionId}`, { method: 'GET' });
-}
-
-/**
- * 重命名会话
- *
- * @param {string} sessionId - UUID 会话 ID
- * @param {string} title - 新标题
- * @returns {Promise<Object>} - 更新后的会话
- */
-async function renameSessionApi(sessionId, title) {
-  return await request(`/api/sessions/${sessionId}`, {
-    method: 'PATCH',
-    body: { title }
-  });
-}
-
-/**
- * 删除会话
- *
- * @param {string} sessionId - UUID 会话 ID
- * @returns {Promise<Object>} - 操作结果
- */
-async function deleteSessionApi(sessionId) {
-  return await request(`/api/sessions/${sessionId}`, { method: 'DELETE' });
-}
-
-/**
- * 获取会话消息列表
- *
- * @param {string} sessionId - UUID 会话 ID
- * @param {Object} options - 选项
- * @param {number} options.limit - 返回数量限制
- * @param {number} options.offset - 偏移量
- * @returns {Promise<Object>} - 消息列表
- */
-async function getSessionMessages(sessionId, options = {}) {
-  const { limit = 200, offset = 0 } = options;
-  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
-  return await request(`/api/sessions/${sessionId}/messages?${params}`, { method: 'GET' });
-}
-
-/**
- * 向会话添加消息
- *
- * @param {string} sessionId - UUID 会话 ID
- * @param {Object} messageData - 消息数据
- * @param {string} messageData.role - 消息角色（user/assistant）
- * @param {string} messageData.content - 消息内容
- * @param {Object} messageData.documentJson - AI 生成的文档 JSON（可选）
- * @param {Object} messageData.selectionContext - 选区上下文（可选）
- * @param {Array} messageData.contentParts - 结构化消息内容（可选）
- * @param {string} messageData.model - 使用的模型（可选）
- * @param {string} messageData.mode - 使用的模式（可选）
- * @returns {Promise<Object>} - 保存结果
- */
-async function addSessionMessage(sessionId, messageData) {
-  return await request(`/api/sessions/${sessionId}/messages`, {
-    method: 'POST',
-    body: messageData
-  });
-}
 
 /**
  * 清空所有会话及消息
@@ -1229,18 +1132,6 @@ async function addSessionMessage(sessionId, messageData) {
 async function clearAllSessions() {
   return await request('/api/sessions', {
     method: 'DELETE'
-  });
-}
-
-/**
- * 获取后端应用版本号
- *
- * @returns {Promise<Object>} - 版本响应
- */
-async function getAppVersion() {
-  return await request('/api/version', {
-    method: 'GET',
-    timeout: 5000
   });
 }
 
@@ -1268,67 +1159,6 @@ function getConfig() {
   return { ...CONFIG };
 }
 
-/**
- * 获取指定 API 提供商支持的模型列表
- * @param {Object} params - 请求参数
- * @param {string} params.baseUrl - API 基础地址
- * @param {string} params.apiKey - API 密钥
- * @param {string} [params.apiType] - API 类型（openai/anthropic）
- * @returns {Promise<Object>} - 返回模型列表
- */
-async function fetchAvailableModels({ baseUrl, apiKey, apiType = 'openai' }) {
-  try {
-    // 通过后端代理接口获取模型列表
-    const result = await request('/api/chat/providers/models', {
-      method: 'POST',
-      body: {
-        base_url: baseUrl,
-        api_key: apiKey,
-        api_type: apiType
-      }
-    });
-
-    // result.data 是后端返回的 JSON：{ success, models } 或 { success, error, models }
-    if (result.success && result.data?.success && result.data?.models) {
-      return {
-        success: true,
-        models: result.data.models
-      };
-    }
-
-    // 请求失败
-    throw new Error(result.data?.error || result.error || '获取模型列表失败');
-  } catch (error) {
-    console.error('获取模型列表失败:', error);
-    throw new Error(error.message || '获取模型列表失败');
-  }
-}
-
-/** Test the selected model using the current provider form values. */
-async function testModelConnection({ baseUrl, apiKey, apiType = 'openai', model }) {
-  const result = await request('/api/chat/providers/test-connection', {
-    method: 'POST',
-    timeout: 25000,
-    body: {
-      base_url: baseUrl,
-      api_key: apiKey,
-      api_type: apiType,
-      model
-    }
-  });
-  if (!result.success || !result.data?.success) {
-    const validationErrors = result.data?.detail;
-    const detail = Array.isArray(validationErrors)
-      ? validationErrors.map(error => `${error.loc?.at(-1) || ''}: ${error.msg}`).join('; ')
-      : validationErrors;
-    throw new Error(result.data?.error || detail || result.error || '连接测试失败');
-  }
-  if (!Number.isFinite(result.data.latency_ms) || result.data.latency_ms < 0) {
-    throw new Error('连接测试返回了无效的延迟');
-  }
-  return result.data;
-}
-
 // ============== 设置管理 API ==============
 
 /**
@@ -1352,66 +1182,6 @@ async function getSettings() {
     return { providers: [], mcpServers: [] };
   }
 }
-
-/**
- * 保存用户设置
- * @param {Object} settings - 设置数据
- * @returns {Promise<Object>} 保存结果
- */
-async function saveSettings(settings) {
-  try {
-    const response = await request('/api/settings', {
-      method: 'POST',
-      body: settings
-    });
-
-    if (!response.success) {
-      throw new Error(response.error || '保存设置失败');
-    }
-
-    return response;
-  } catch (error) {
-    console.error('保存设置异常:', error);
-    throw error;
-  }
-}
-
-/**
- * 测试 MCP 服务器连接
- * @param {Object} params - 测试参数
- * @param {string} params.name - 服务器名称
- * @param {Object} params.config - MCP 服务器 JSON 配置
- * @returns {Promise<Object>} 测试结果
- */
-async function testMcpServer({ name, config }) {
-  const response = await request('/api/settings/mcp/test', {
-    method: 'POST',
-    body: {
-      name,
-      config
-    }
-  });
-
-  if (!response.success) {
-    throw new Error(response.error || '测试 MCP 服务器连接失败');
-  }
-
-  return response.data;
-}
-
-/**
- * 获取前端图片导出目录（wence_data/project/temp）
- * @returns {Promise<Object>} { dir: string }
- */
-async function getWenceTempDir() {
-  const response = await request('/api/settings/wence-temp-dir', { method: 'GET' });
-  if (!response.success) {
-    throw new Error(response.error || '获取临时目录失败');
-  }
-  return response.data;
-}
-
-// ============== 缓存管理 API ==============
 
 /**
  * 上传文件到后端
@@ -1440,73 +1210,7 @@ async function uploadFiles(files) {
   }
 }
 
-/**
- * 扫描项目缓存目录（temp + uploads）
- * @returns {Promise<Object>} { dir, dirs, fileCount, totalSize }
- */
-async function scanCache() {
-  const response = await request('/api/settings/cache/scan', { method: 'GET' });
-  if (!response.success) {
-    throw new Error(response.error || '扫描缓存失败');
-  }
-  return response.data;
-}
-
-/**
- * 清除项目缓存目录（temp + uploads）
- * @returns {Promise<Object>} { deleted, dirs }
- */
-async function clearCache() {
-  const response = await request('/api/settings/cache/clear', { method: 'DELETE' });
-  if (!response.success) {
-    throw new Error(response.error || '清除缓存失败');
-  }
-  return response.data;
-}
-
-// ============== 长期记忆 API ==============
-
-/**
- * 获取长期记忆内容
- * @returns {Promise<string>} memory content
- */
-async function getMemory() {
-  const response = await request('/api/settings/memory', { method: 'GET' });
-  if (!response.success) {
-    throw new Error(response.error || '获取长期记忆失败');
-  }
-  return response.data.content || '';
-}
-
-/**
- * 保存长期记忆内容
- * @param {string} content - 记忆内容
- * @returns {Promise<Object>} { success }
- */
-async function saveMemory(content) {
-  const response = await request('/api/settings/memory', {
-    method: 'POST',
-    body: { content }
-  });
-  if (!response.success) {
-    throw new Error(response.error || '保存长期记忆失败');
-  }
-  return response.data;
-}
-
 // ============== Skill 管理 API ==============
-
-/**
- * 获取已下载 skill 列表
- * @returns {Promise<Array>} skills
- */
-async function getSkills() {
-  const response = await request('/api/skills', { method: 'GET' });
-  if (!response.success) {
-    throw new Error(response.data?.detail || response.error || '获取 skill 列表失败');
-  }
-  return Array.isArray(response.data?.skills) ? response.data.skills : [];
-}
 
 /**
  * 上传 skill 压缩包（zip）
@@ -1535,87 +1239,6 @@ async function uploadSkillPackage(file) {
   }
 
   return data;
-}
-
-/**
- * 设置 skill 启用状态
- * @param {string} folder
- * @param {boolean} enabled
- * @returns {Promise<Object>}
- */
-async function setSkillEnabled(folder, enabled) {
-  const response = await request(`/api/skills/${encodeURIComponent(folder)}/enabled`, {
-    method: 'PUT',
-    body: { enabled: !!enabled }
-  });
-  if (!response.success) {
-    throw new Error(response.data?.detail || response.error || '更新 skill 状态失败');
-  }
-  return response.data;
-}
-
-/**
- * 在系统文件管理器中打开 skill 文件夹
- * @param {string} folder
- * @returns {Promise<Object>}
- */
-async function openSkillFolder(folder) {
-  const response = await request(`/api/skills/${encodeURIComponent(folder)}/open`, {
-    method: 'POST'
-  });
-  if (!response.success) {
-    throw new Error(response.data?.detail || response.error || '打开 skill 文件夹失败');
-  }
-  return response.data;
-}
-
-/**
- * 删除 skill
- * @param {string} folder
- * @returns {Promise<Object>}
- */
-async function deleteSkill(folder) {
-  const response = await request(`/api/skills/${encodeURIComponent(folder)}`, {
-    method: 'DELETE'
-  });
-  if (!response.success) {
-    throw new Error(response.data?.detail || response.error || '删除 skill 失败');
-  }
-  return response.data;
-}
-
-// ============== Python 插件 API ==============
-
-async function getPlugins() {
-  const response = await request('/api/plugins');
-  if (!response.success) {
-    throw new Error(response.data?.detail || response.error);
-  }
-  return response.data;
-}
-
-async function installPlugin(source) {
-  const response = await request('/api/plugins/install', { method: 'POST', body: { source } });
-  if (!response.success) {
-    throw new Error(response.data?.detail || response.error);
-  }
-  return response.data;
-}
-
-async function removePlugin(pluginId) {
-  const response = await request(`/api/plugins/${encodeURIComponent(pluginId)}`, { method: 'DELETE' });
-  if (!response.success) {
-    throw new Error(response.data?.detail || response.error);
-  }
-  return response.data;
-}
-
-async function getPluginOperation(operationId) {
-  const response = await request(`/api/plugins/operations/${encodeURIComponent(operationId)}`);
-  if (!response.success) {
-    throw new Error(response.data?.detail || response.error);
-  }
-  return response.data;
 }
 
 /**
@@ -1653,6 +1276,36 @@ function createDocument() {
   }
 }
 
+const {
+  getModels,
+  getSessions,
+  createSession,
+  getLatestSession,
+  getSession,
+  renameSessionApi,
+  deleteSessionApi,
+  getSessionMessages,
+  addSessionMessage,
+  getAppVersion,
+  testModelConnection,
+  saveSettings,
+  fetchAvailableModels,
+  testMcpServer,
+  getWenceTempDir,
+  scanCache,
+  clearCache,
+  getMemory,
+  saveMemory,
+  getSkills,
+  setSkillEnabled,
+  openSkillFolder,
+  deleteSkill,
+  getPlugins,
+  installPlugin,
+  removePlugin,
+  getPluginOperation,
+} = createBackendApi(request);
+
 // ============== 导出 ==============
 
 export default {
@@ -1665,6 +1318,7 @@ export default {
 
   // 文档处理
   parseDocumentRange,
+  adjustDocument,
 
   // WebSocket 管理
   wsManager,
@@ -1725,6 +1379,7 @@ export {
   fetchAvailableModels,
   testModelConnection,
   parseDocumentRange,
+  adjustDocument,
   getDocumentById,
 
   wsManager,

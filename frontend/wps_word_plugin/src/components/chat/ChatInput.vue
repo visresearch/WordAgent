@@ -296,11 +296,11 @@
 </template>
 
 <script>
-import addIcon from '@/assets/icons/add.svg';
-import agentIcon from '@/assets/icons/agent.svg?url';
-import askIcon from '@/assets/icons/ask.svg?url';
-import fileIcon from '@/assets/icons/file.svg';
-import sendIcon from '@/assets/icons/send.svg';
+import addIcon from '../../../../shared/assets/icons/add.svg';
+import agentIcon from '../../../../shared/assets/icons/agent.svg?url';
+import askIcon from '../../../../shared/assets/icons/ask.svg?url';
+import fileIcon from '../../../../shared/assets/icons/file.svg';
+import sendIcon from '../../../../shared/assets/icons/send.svg';
 import { t } from '../../i18n/index.js';
 
 export default {

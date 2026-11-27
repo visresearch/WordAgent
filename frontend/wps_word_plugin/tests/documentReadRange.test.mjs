@@ -18,6 +18,7 @@ for (const [start, end, expectedIndices] of [
     globalThis.window = {
       Application: {
         ActiveDocument: {
+          PageSetup: { TopMargin: 72, BottomMargin: 72, LeftMargin: 85.05, RightMargin: 56.7 },
           Paragraphs: {
             Count: paragraphs.length,
             Item(index) { return paragraphs[index - 1]; },
@@ -30,6 +31,7 @@ for (const [start, end, expectedIndices] of [
     const result = await parseDocumentRange(start, end, 0, null, null, 'lightweight');
 
     assert.equal(result.error, undefined);
+    assert.deepEqual(result.meta.pageMarginsCm, { top: 2.54, bottom: 2.54, left: 3, right: 2 });
     assert.equal(Object.hasOwn(result, 'fields'), false);
     assert.deepEqual(result.paragraphs.map(p => p.paraIndex), expectedIndices);
     assert.deepEqual(result.paragraphs.map(p => p.paraID), expectedIndices.map(i => 101 + i));

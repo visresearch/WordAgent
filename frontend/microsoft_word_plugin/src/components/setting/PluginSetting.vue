@@ -72,7 +72,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import api from '../js/api.js';
-import iconPlugin from '../../assets/icons/plugin.svg';
+import iconPlugin from '../../../../shared/assets/icons/plugin.svg';
 import { t } from '../../i18n/index.js';
 
 const plugins = ref([]);
@@ -216,7 +216,7 @@ onMounted(async () => {
 onUnmounted(() => clearInterval(timer));
 </script>
 
-<style scoped src="./setting.css"></style>
+<style scoped src="../../../../shared/assets/setting.css"></style>
 
 <style scoped>
 .plugin-panel { display: flex; flex-direction: column; gap: 14px; }

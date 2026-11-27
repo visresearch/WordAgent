@@ -33,6 +33,7 @@ function setup(overrides = {}) {
     executeStyleQuery(doc, query) { calls.push(['search', doc, query]); return { matches: [], matchCount: 0 }; },
     deleteDocxPara: record('delete'), editDocxParagraph: record('edit'),
     insertBreakAfterParagraph: record('break'), generateDocxFromJSON: record('generate'),
+    adjustDocument: record('adjust'),
     createDocument: record('create'), wsManager: { clearDocumentCache() { calls.push(['clear']); } },
     ...overrides,
   });
@@ -42,7 +43,7 @@ function setup(overrides = {}) {
   return { context, sockets, timers, calls, plain, flush: () => vm.runInContext('workQueue', context) };
 }
 
-test('Word dispatches all seven tools with Office signatures and returns matching request IDs', async () => {
+test('Word dispatches document tools with Office signatures and returns matching request IDs', async () => {
   const h = setup();
   h.context.startMcpBridge();
   h.context.startMcpBridge();
@@ -56,6 +57,7 @@ test('Word dispatches all seven tools with Office signatures and returns matchin
   socket.request('insert_break', { paraID: 123, breakType: 'wdPageBreak' });
   socket.request('generate_document', { document: { paragraphs: [], styles: {} }, insertParaID: 123 });
   socket.request('create_document');
+  socket.request('adjust_document', { pageMarginsCm: { left: 3 } });
   await h.flush();
   const calls = h.plain(h.calls);
   assert.deepEqual(calls[0], ['parse', 2, 4, 0, 123, 456, 'lightweight']);
@@ -65,7 +67,8 @@ test('Word dispatches all seven tools with Office signatures and returns matchin
   assert.deepEqual(calls.find(c => c[0] === 'break'), ['break', 123, 'wdPageBreak']);
   assert.deepEqual(calls.find(c => c[0] === 'generate'), ['generate', { paragraphs: [], styles: {} }, 123]);
   assert.equal(calls.filter(c => c[0] === 'clear').length, 4);
-  assert.equal(socket.sent.length, 7);
+  assert.deepEqual(calls.find(c => c[0] === 'adjust'), ['adjust', 0, { left: 3 }]);
+  assert.equal(socket.sent.length, 8);
   assert.ok(socket.sent.every(r => r.result && !r.error));
   assert.equal(socket.sent[0].requestId, 'read_document');
   assert.equal(socket.sent[0].result.docId, 0);

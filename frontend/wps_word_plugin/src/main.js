@@ -1,4 +1,4 @@
-import './assets/main.css';
+import '../../shared/assets/wps.css';
 
 import { createApp } from 'vue';
 import App from './App.vue';

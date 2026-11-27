@@ -1,0 +1,6 @@
+@import './main.css';
+
+body {
+  /* Office Add-in WebView DPI 补偿，匹配 WPS 侧栏显示效果 */
+  zoom: 1.0;
+}

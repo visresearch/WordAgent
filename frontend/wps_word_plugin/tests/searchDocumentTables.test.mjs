@@ -83,3 +83,18 @@ test('cell.text without cell paragraphs is not searchable', () => {
 
   assert.equal(result.matchCount, 0);
 });
+
+test('formula runs are searchable as text and retain numeric WPS paragraph IDs', () => {
+  const document = {
+    paragraphs: [{
+      paraID: 42,
+      runs: [{ text: 'Equation ' }, { formula: 'x^2', rStyle: [null, null, true] }]
+    }]
+  };
+  const result = executeStyleQuery(document, { type: 'run', filters: { text: 'x^2', bold: true } });
+
+  assert.equal(result.matchCount, 1);
+  assert.equal(result.matches[0].text, 'x^2');
+  assert.equal(result.matches[0].paragraphId, 42);
+  assert.equal(executeQuery(document, { query: { match: { query: 'Equation x^2' } } }).matchedCount, 1);
+});

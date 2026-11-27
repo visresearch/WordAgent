@@ -1,4 +1,4 @@
-import { uploadDocumentView } from '../../../../shared/documentView.mjs';
+import { uploadDocumentView } from '../../../../shared/js/documentView.mjs';
 import api from './api.js';
 import { readOfficeDocumentFile } from './documentFiles.js';
 import { assertRevisionDocumentTarget } from './revisionPreview.mjs';

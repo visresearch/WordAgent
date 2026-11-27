@@ -336,9 +336,9 @@
 import { ref, watch, computed, nextTick } from 'vue';
 import api from '../js/api.js';
 import { t } from '../../i18n/index.js';
-import iconConnect from '../../assets/icons/connect.svg';
-import iconSetting from '../../assets/icons/setting-nav.svg';
-import iconDelete from '../../assets/icons/delete.svg';
+import iconConnect from '../../../../shared/assets/icons/connect.svg';
+import iconSetting from '../../../../shared/assets/icons/setting-nav.svg';
+import iconDelete from '../../../../shared/assets/icons/delete.svg';
 import ModelParameterDialog from './ModelParameterDialog.vue';
 
 export default {
@@ -605,7 +605,7 @@ export default {
 };
 </script>
 
-<style scoped src="./setting.css"></style>
+<style scoped src="../../../../shared/assets/setting.css"></style>
 
 <style scoped>
 .model-setting-container {

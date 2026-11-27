@@ -1,10 +1,10 @@
 /* global URLSearchParams, window, document */
 
-import "../assets/main.css";
+import "../../../shared/assets/microsoft.css";
 import { createApp } from "vue";
 import SettingPane from "../components/setting/SettingPane.vue";
 import AboutPane from "../components/about/AboutPane.vue";
-import TemplatesPane from "../../../shared/TemplatesPane.vue";
+import TemplatesPane from "../../../shared/components/TemplatesPane.vue";
 import api from "../components/js/api.js";
 import { i18n, t } from "../i18n/index.js";
 import { createTemplateDialogRequester } from "../officeDialog.mjs";

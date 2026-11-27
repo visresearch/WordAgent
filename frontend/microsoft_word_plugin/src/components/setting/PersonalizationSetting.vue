@@ -83,6 +83,7 @@
 
     <LongTermMemorySetting
       :enabled="localSettings.enableLongTermMemory"
+      :memory-api="memoryApi"
       @update:enabled="onMemoryEnabledChange"
     />
   </div>
@@ -90,8 +91,9 @@
 
 <script>
 import { computed, ref, watch } from 'vue';
+import api from '../js/api.js';
 import { t } from '../../i18n/index.js';
-import LongTermMemorySetting from './LongTermMemorySetting.vue';
+import LongTermMemorySetting from '../../../../shared/components/setting/LongTermMemorySetting.vue';
 
 export default {
   name: 'PersonalizationPane',
@@ -172,6 +174,7 @@ export default {
     };
 
     return {
+      memoryApi: api,
       localSettings,
       promptTemplates,
       onSettingChange,
@@ -183,7 +186,7 @@ export default {
 };
 </script>
 
-<style scoped src="./setting.css"></style>
+<style scoped src="../../../../shared/assets/setting.css"></style>
 
 <style scoped>
 .personalization-container {

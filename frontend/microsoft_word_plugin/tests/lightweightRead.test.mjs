@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { parseDocxToJSONLightweight } from "../src/components/js/docxJsonConverter.js";
+import { parseDocumentRange } from "../src/components/js/api.js";
 
 function mockParagraph(text, bookmarkName) {
   const contentControl = { isNullObject: true, load() {} };
@@ -35,6 +36,10 @@ test("轻量读取仅返回段落文本、位置和 paraID", async t => {
   ];
   const context = {
     document: {
+      sections: {
+        items: [{ pageSetup: { topMargin: 72, bottomMargin: 72, leftMargin: 85.05, rightMargin: 56.7, load() {} } }],
+        load() {},
+      },
       body: {
         paragraphs: {
           items,
@@ -72,4 +77,7 @@ test("轻量读取仅返回段落文本、位置和 paraID", async t => {
 
   const tail = await parseDocxToJSONLightweight(1, -1);
   assert.deepEqual(tail.paragraphs, [result.paragraphs[1]]);
+
+  const read = await parseDocumentRange(0, -1, 0, null, null, "lightweight");
+  assert.deepEqual(read.meta.pageMarginsCm, { top: 2.54, bottom: 2.54, left: 3, right: 2 });
 });

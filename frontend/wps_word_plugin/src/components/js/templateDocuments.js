@@ -1,4 +1,4 @@
-import { archiveDocumentTemplate, templateEndpoint, templateRequest } from '../../../../shared/documentTemplates.mjs';
+import { archiveDocumentTemplate, templateEndpoint, templateRequest } from '../../../../shared/js/documentTemplates.mjs';
 import api from './api.js';
 import { findWpsDocument, readWpsBinaryFile } from './documentFiles.js';
 import { parseDocxToJSON } from './docxJsonConverter.js';

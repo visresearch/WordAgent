@@ -1108,6 +1108,26 @@ export default {
         assertRevisionDocumentTarget(data.docId);
       }
 
+      if (data.type === 'adjust_document') {
+        const isCurrent = () => !msg._streamStopped;
+        const execute = async () => {
+          if (!isCurrent()) return;
+          const result = await api.adjustDocument(data.docId, data.pageMarginsCm);
+          if (!isCurrent()) return;
+          return api.wsManager.send({
+            ...result,
+            type: 'adjust_document_response',
+            chatId: data.chatId,
+            sessionId: data.sessionId,
+            docId: data.docId,
+            requestId: data.requestId
+          });
+        };
+        const operation = this._insertQueue.then(execute);
+        this._insertQueue = operation.catch(() => {});
+        return operation;
+      }
+
       if (['copy_document', 'save_document_template', 'view_document'].includes(data.type)) {
         const isCurrent = () => !msg._streamStopped;
         const capture = {

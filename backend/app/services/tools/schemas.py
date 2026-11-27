@@ -1,9 +1,28 @@
 """Document and query schemas used by agent tools."""
 
 import math
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+MarginCm = Annotated[float, Field(ge=0, allow_inf_nan=False, strict=True)]
+
+
+class PageMarginsCm(BaseModel):
+    """The page margins to set, in centimeters."""
+
+    model_config = ConfigDict(extra="forbid")
+    top: MarginCm | None = None
+    bottom: MarginCm | None = None
+    left: MarginCm | None = None
+    right: MarginCm | None = None
+
+    @model_validator(mode="after")
+    def require_a_side(self):
+        if not self.model_dump(exclude_none=True):
+            raise ValueError("Provide at least one page margin.")
+        return self
 
 
 class Run(BaseModel):

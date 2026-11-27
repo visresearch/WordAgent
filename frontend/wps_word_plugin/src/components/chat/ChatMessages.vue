@@ -292,10 +292,10 @@
 import MarkdownIt from 'markdown-it';
 import { katex } from '@mdit/plugin-katex';
 import 'katex/dist/katex.min.css';
-import '../../../../shared/chatMath.css';
-import { createChatMarkdownRenderer } from '../../../../shared/chatMarkdown.mjs';
+import '../../../../shared/assets/chatMath.css';
+import { createChatMarkdownRenderer } from '../../../../shared/js/chatMarkdown.mjs';
 import UserQuestion from './UserQuestion.vue';
-import questionIcon from '../../assets/icons/question.svg';
+import questionIcon from '../../../../shared/assets/icons/question.svg';
 import { t } from '../../i18n/index.js';
 import { getUiZoom, UI_ZOOM_EVENT } from '../../uiZoom.js';
 

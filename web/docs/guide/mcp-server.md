@@ -77,6 +77,7 @@ Codex CLI 和 IDE 扩展共享 MCP 配置；保存后重新打开会话，IDE �
 | `delete_document` | 按起止 paraID 连续删除内容及完整表格 |
 | `generate_document` | 插入带格式的结构化内容，`insertParaID: 0` 表示文档开头 |
 | `insert_break` | 在指定段落后插入换行、分页或下一页分节符 |
+| `adjust_document` | 按厘米修改文档各节的页边距，可只指定部分边 |
 | `create_document` | 创建并打开新的空白 DOCX 文档 |
 
 ### 指定 WPS 或 Microsoft Word
@@ -94,6 +95,14 @@ Codex CLI 和 IDE 扩展共享 MCP 配置；保存后重新打开会话，IDE �
 ```
 
 Microsoft Word 的 `docId` 仅支持 `0`，代表加载项侧栏所属文档。请只保留目标文档的侧栏；多个 Word 侧栏连接时，服务会要求关闭多余侧栏。WPS 的 `docId: 0` 表示当前活动文档，非零值可指定已打开的文档。
+
+`read_document` 在 `documentJson.meta.pageMarginsCm` 返回上、下、左、右四侧的厘米值。一侧在各节中取值不同时，该侧为 `null`。以下调用把页边距应用到当前 WPS 文档的所有节。
+
+```json
+{"host":"wps","docId":0,"pageMarginsCm":{"top":2.5,"bottom":2.5,"left":3,"right":2}}
+```
+
+在 `adjust_document` 中省略某一侧即可保留该侧在各节中的原值。Microsoft Word 需要 WordApiDesktop 1.3 来读取和修改页边距。
 
 ### 编辑流程与样式
 

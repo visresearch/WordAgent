@@ -1,4 +1,4 @@
-import { archiveDocumentTemplate, templateEndpoint, templateRequest } from '../../../../shared/documentTemplates.mjs';
+import { archiveDocumentTemplate, templateEndpoint, templateRequest } from '../../../../shared/js/documentTemplates.mjs';
 import api from './api.js';
 import { encodeOfficeDocument, readOfficeDocumentFile } from './documentFiles.js';
 import { assertRevisionDocumentTarget } from './revisionPreview.mjs';

@@ -257,7 +257,7 @@ async def chat_websocket(websocket: WebSocket):
                 elif msg_type in {
                     "document_response", "query_response", "create_document_response",
                     "generate_document_response", "edit_document_response", "delete_response",
-                    "insert_break_response", "save_document_template_response", "view_document_response",
+                    "insert_break_response", "adjust_document_response", "save_document_template_response", "view_document_response",
                     "copy_document_response",
                 }:
                     await submit_tool_response(current_socket.chat_id, data)
@@ -536,6 +536,7 @@ async def _run_ws_stream(
             "edit_document",
             "edit_complete",
             "insert_break",
+            "adjust_document",
             "generate_complete",
         }:
             _append_status_part(str(payload.get("content") or ""))

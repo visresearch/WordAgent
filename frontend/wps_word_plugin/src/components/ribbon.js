@@ -151,7 +151,7 @@ function GetImage(control) {
     case 'btnShowSession':
       return 'images/session.svg';
     case 'btnShowTemplates':
-      return 'images/newFromTemp.svg';
+      return 'images/template.svg';
     case 'btnShowSetting':
       return 'images/setting.svg';
     case 'btnShowAbout':
