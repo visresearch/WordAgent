@@ -52,17 +52,17 @@
             @click.prevent="openExternalLink('https://visresearch.github.io/WordAgent/')"
           >
             <img class="link-icon" :src="webIcon" alt="" />
-            <span>{{ $t('about.website') }}</span>
+            <span>{{ $t('about.docs') }}</span>
           </a>
           <a
-            href="https://visresearch.github.io/WordAgent/guide/wps-plugin.html"
+            href="https://visresearch.github.io/WordAgent/guide/about.html#qq-交流群"
             target="_blank"
             rel="noopener noreferrer"
             class="link-item"
-            @click.prevent="openExternalLink('https://visresearch.github.io/WordAgent/guide/wps-plugin.html')"
+            @click.prevent="openExternalLink($event.currentTarget.href)"
           >
             <img class="link-icon" :src="helpIcon" alt="" />
-            <span>{{ $t('about.docs') }}</span>
+            <span>{{ $t('about.qqGroup') }}</span>
           </a>
           <a
             href="https://github.com/visresearch/WordAgent/issues"

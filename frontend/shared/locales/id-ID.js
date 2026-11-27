@@ -182,10 +182,27 @@ export default {
       deleteConfirm: 'Hapus percakapan ini? Tindakan ini tidak bisa dibatalkan.'
     }
   },
+  templates: {
+    title: "Templat dokumen",
+    back: "Kembali ke galeri",
+    instructions: "Petunjuk templat",
+    copy: "Salin prompt",
+    copied: "Disalin",
+    copyFailed: "Pilih prompt dan salin secara manual.",
+    create: "Buat dari templat",
+    creating: "Sedang membuat…",
+    created: "Salinan templat telah dibuka.",
+    download: "Unduh salinan",
+    emptyTitle: "Belum ada templat",
+    emptyHint: "Buka dokumen referensi yang sudah disimpan dan gunakan Skill replikasi format dalam obrolan AI.",
+    example: "Gunakan Skill replikasi format untuk menganalisis dokumen ini dan menyimpannya sebagai templat.",
+    loadFailed: "Templat tidak dapat dimuat. {error}",
+    createFailed: "Salinan templat tidak dapat dibuka. {error}",
+  },
   about: {
     name: '文策AI', product: '文策AI', version: 'Versi', pluginType: 'Jenis add-in', wpsPlugin: 'Add-in WPS Writer', wordPlugin: 'Add-in Microsoft Word',
-    developer: 'Pengembang', developerName: 'Riyue Xingchen', links: 'Tautan', repository: 'Repositori GitHub', website: 'Situs proyek',
-    docs: 'Dokumentasi', issues: 'Laporkan masalah', sponsor: 'Sponsor pengembang', github: 'Repositori GitHub', unknownVersion: 'Versi tidak diketahui'
+    developer: 'Pengembang', developerName: 'Riyue Xingchen', links: 'Tautan', repository: 'Repositori GitHub', docs: 'Dokumentasi resmi',
+    qqGroup: 'Grup diskusi QQ', issues: 'Laporkan masalah', sponsor: 'Sponsor pengembang', github: 'Repositori GitHub', unknownVersion: 'Versi tidak diketahui'
   },
   debug: {
     title: 'Panel debug', hint: 'Tekan F12 untuk membuka developer tools', parse: 'Parse konten dokumen', parseSelection: 'Parse pilihan',

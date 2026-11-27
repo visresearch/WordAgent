@@ -55,3 +55,25 @@ test('generation applies flat heights with minimum/exact/auto rules and accepts 
     assert.deepEqual(calls, [[1, 25, 1], [2, 30, 2], [3, 0, 0]]);
   }
 });
+
+test('native table uses the supplied grid width and starts at the paragraph boundary', () => {
+  const columns = [{}, {}];
+  const table = {
+    Columns: { Item: i => columns[i - 1] },
+    Borders: {},
+    Rows: {},
+    AutoFitBehavior() {},
+    Range: { End: 36 }
+  };
+  const doc = {
+    PageSetup: { PageWidth: 600, LeftMargin: 50, RightMargin: 50 },
+    Range(start, end) { return Object.freeze({ start, end }); },
+    Tables: { Add(range) {
+      assert.deepEqual(range, { start: 8, end: 8 });
+      return table;
+    } }
+  };
+  assert.equal(generateTable(doc, { rows: 1, columns: 2, cells: [], columnWidths: [94.5, 210.8] }, 8, {}), 36);
+  assert.equal(table.PreferredWidth, 94.5 + 210.8);
+  assert.deepEqual(columns.map(column => column.Width), [94.5, 210.8]);
+});

@@ -1,9 +1,13 @@
 const DIALOG_CONFIG = Object.freeze({
   setting: Object.freeze({ height: 75, width: 65 }),
   about: Object.freeze({ height: 70, width: 48 }),
+  templates: Object.freeze({ height: 75, width: 65 }),
 });
 
 const OPEN_EXTERNAL_LINK_MESSAGE = "open-external-link";
+const CREATE_TEMPLATE_MESSAGE = "create-template-document";
+const TEMPLATE_RESULT_MESSAGE = "template-document-result";
+const TEMPLATE_ID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 
 let activeDialog = null;
 let dialogOpening = false;
@@ -85,12 +89,72 @@ export function handleDialogMessage(
   return Boolean(openWindow?.(normalizedUrl, "_blank", "noopener,noreferrer"));
 }
 
+export function createTemplateDialogRequester(office = globalThis.Office) {
+  let pending;
+  let subscribed = false;
+  return async (id) => {
+    if (!TEMPLATE_ID.test(id)) throw new Error("Invalid template ID.");
+    await office?.onReady?.();
+    const ui = office?.context?.ui;
+    if (!ui?.messageParent || !ui?.addHandlerAsync ||
+        office.context.requirements?.isSetSupported("DialogApi", "1.2") === false) {
+      throw new Error("This Word host cannot open a document from the dialog. Download the template copy instead.");
+    }
+    if (!subscribed) {
+      await new Promise((resolve, reject) => {
+        ui.addHandlerAsync(office.EventType.DialogParentMessageReceived, (event) => {
+          let result;
+          try { result = JSON.parse(event.message); } catch (error) { return; }
+          if (result?.type === TEMPLATE_RESULT_MESSAGE && pending?.id === result.id) {
+            pending.finish(result.error ? new Error(result.error) : null);
+          }
+        }, (result) => result.status === (office.AsyncResultStatus?.Succeeded ?? "succeeded")
+          ? resolve()
+          : reject(new Error(result.error?.message || "Unable to connect to the Word task pane.")));
+      });
+      subscribed = true;
+    }
+    if (pending) throw new Error("Word is already opening a template.");
+    return new Promise((resolve, reject) => {
+      const finish = (error) => {
+        clearTimeout(timer);
+        pending = null;
+        if (error) reject(error);
+        else resolve();
+      };
+      const timer = setTimeout(() => finish(new Error("Word did not confirm creation of the copy.")), 60_000);
+      pending = { id, finish };
+      try {
+        ui.messageParent(JSON.stringify({ type: CREATE_TEMPLATE_MESSAGE, id }));
+      } catch (error) {
+        finish(error);
+      }
+    });
+  };
+}
+
+async function openTemplateDocument(event, dialog, createDocumentFromTemplate) {
+  let message;
+  try { message = JSON.parse(event?.message || ""); } catch (error) { return false; }
+  if (message?.type !== CREATE_TEMPLATE_MESSAGE || !TEMPLATE_ID.test(message.id)) return false;
+
+  const result = { type: TEMPLATE_RESULT_MESSAGE, id: message.id };
+  try {
+    await createDocumentFromTemplate(message.id);
+  } catch (error) {
+    result.error = error?.message || String(error);
+  }
+  if (activeDialog === dialog) dialog.messageChild?.(JSON.stringify(result));
+  return true;
+}
+
 export function openOfficeDialog(
   view,
   {
     office = globalThis.Office,
     baseUrl = globalThis.location?.href,
     openWindow = globalThis.open,
+    createDocumentFromTemplate,
   } = {}
 ) {
   const config = DIALOG_CONFIG[view];
@@ -130,9 +194,11 @@ export function openOfficeDialog(
       const dialog = result.value;
       activeDialog = dialog;
       dialog.addEventHandler(office.EventType.DialogEventReceived, () => clearDialog(dialog));
-      dialog.addEventHandler(office.EventType.DialogMessageReceived, (event) =>
-        handleDialogMessage(event, { office, openWindow })
-      );
+      dialog.addEventHandler(office.EventType.DialogMessageReceived, async (event) => {
+        if (view === "templates" && createDocumentFromTemplate &&
+            await openTemplateDocument(event, dialog, createDocumentFromTemplate)) return;
+        handleDialogMessage(event, { office, openWindow });
+      });
     }
   );
 

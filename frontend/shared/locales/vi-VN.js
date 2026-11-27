@@ -175,10 +175,27 @@ export default {
       deleteConfirm: 'Xóa cuộc trò chuyện này? Hành động này không thể hoàn ngược.'
     }
   },
+  templates: {
+    title: "Mẫu tài liệu",
+    back: "Quay lại thư viện",
+    instructions: "Hướng dẫn sử dụng mẫu",
+    copy: "Sao chép lời nhắc",
+    copied: "Đã sao chép",
+    copyFailed: "Hãy chọn và sao chép lời nhắc theo cách thủ công.",
+    create: "Tạo tài liệu từ mẫu",
+    creating: "Đang tạo…",
+    created: "Đã mở bản sao của mẫu.",
+    download: "Tải bản sao",
+    emptyTitle: "Chưa có mẫu",
+    emptyHint: "Mở tài liệu tham khảo đã lưu và dùng kỹ năng sao chép định dạng trong cuộc trò chuyện AI để lưu thành mẫu.",
+    example: "Dùng kỹ năng sao chép định dạng để phân tích tài liệu này và lưu thành mẫu.",
+    loadFailed: "Không thể tải mẫu. {error}",
+    createFailed: "Không thể mở bản sao của mẫu. {error}",
+  },
   about: {
     name: '文策AI', product: '文策AI', version: 'Version', pluginType: 'Add-in type', wpsPlugin: 'WPS Writer add-in', wordPlugin: 'Microsoft Word add-in',
-    developer: 'Developer', developerName: 'Riyue Xingchen', links: 'Links', repository: 'GitHub repository', website: 'Project website',
-    docs: 'Documentation', issues: 'Report an issue', sponsor: 'Sponsor the author', github: 'GitHub repository', unknownVersion: 'Unknown version'
+    developer: 'Developer', developerName: 'Riyue Xingchen', links: 'Links', repository: 'GitHub repository', docs: 'Tài liệu chính thức',
+    qqGroup: 'Nhóm thảo luận QQ', issues: 'Report an issue', sponsor: 'Sponsor the author', github: 'GitHub repository', unknownVersion: 'Unknown version'
   },
   debug: {
     title: 'Bảng điều khiển gỡ lỗi', hint: 'Nhấn F12 để mở công cụ nhà phát triển', parse: 'Phân tích nội dung tài liệu', parseSelection: 'Phân tích phần chọn',

@@ -9,7 +9,7 @@ import re
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 from urllib.parse import unquote, urlparse
 from urllib.request import Request, urlopen
 
@@ -17,9 +17,11 @@ from langchain.tools import ToolRuntime
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool
 from langgraph.config import get_stream_writer
+from pydantic import Field
 
 from app.core.config import get_temp_dir, get_wence_data_dir, get_wence_project_dir
 from app.core.logging import get_logger
+from app.services.document_view import RENDER_DPI, ViewMode, view_images
 
 from .callback import (
     _current_chat_id,
@@ -28,6 +30,7 @@ from .callback import (
     is_stop_requested,
     wait_for_tool_response,
 )
+from .prompts import get_tool_description
 from .schemas import DocumentOutput, DocumentQuery, Run
 
 logger = get_logger(__name__)
@@ -1425,6 +1428,104 @@ def build_create_document(description: str):
     return create_document
 
 
+@tool(description=get_tool_description("copy_document"))
+def copy_document(
+    sourceDocID: RequiredDocIdInput,
+    start_paraID: RequiredParaIdInput,
+    end_paraID: RequiredParaIdInput,
+    targetDocID: RequiredDocIdInput,
+    insertID: RequiredParaIdInput,
+) -> dict:
+    source_id = _normalize_required_doc_id(sourceDocID)
+    target_id = _normalize_required_doc_id(targetDocID)
+    start_id = _normalize_para_id(start_paraID)
+    end_id = _normalize_para_id(end_paraID)
+    insert_id = _normalize_para_id(insertID)
+    if not start_id or not end_id or insert_id is None:
+        return {"success": False, "error": "Use source paragraph IDs for both endpoints and a target paragraph ID or 0 for insertID."}
+    chat_id = _current_chat_id.get()
+    if not chat_id or is_stop_requested(chat_id):
+        return {"success": False, "error": "An active Word or WPS chat is required to copy a document range."}
+
+    request_id = str(uuid.uuid4())
+    writer = get_stream_writer()
+    writer({"type": "status", "content": "📄 正在复制文档段落"})
+    writer({
+        "type": "copy_document",
+        "sourceDocID": source_id,
+        "start_paraID": start_id,
+        "end_paraID": end_id,
+        "targetDocID": target_id,
+        "insertID": insert_id,
+        "requestId": request_id,
+    })
+    response = _wait_for_frontend_mutation(request_id, timeout=120)
+    if response is None:
+        return {"success": None, "requiresRead": True, "error": "Insertion was not confirmed. Read the target before retrying."}
+    if not response.get("success"):
+        return {
+            "success": False,
+            "error": response.get("error") or "The editor could not copy the requested range.",
+            "requiresRead": bool(response.get("requiresRead")),
+        }
+    inserted_doc_id = _parse_int_like(response.get("documentId"))
+    if inserted_doc_id is None or (target_id != 0 and inserted_doc_id != target_id):
+        return {"success": None, "requiresRead": True, "error": "The editor did not confirm the requested target document."}
+    return {
+        "success": True,
+        "targetDocID": inserted_doc_id,
+        "documentName": response.get("documentName"),
+        "insertID": insert_id,
+        "lastParagraph": _normalize_frontend_paragraph_location(response.get("lastParagraph")),
+        "revisionCount": response.get("revisionCount", 0),
+    }
+
+
+@tool(description=get_tool_description("view_document"), response_format="content_and_artifact")
+def view_document(
+    page_start: Annotated[int, Field(ge=1, description="First physical page number (1-based, inclusive)")],
+    page_end: Annotated[int, Field(ge=1, description="Last physical page number (1-based, inclusive)")],
+    mode: Annotated[ViewMode, Field(description="single produces one PNG per page, combine stacks pages top to bottom")],
+    docId: Annotated[RequiredDocIdInput, Field(description="Document ID; 0 means the current document at render time")] = 0,
+) -> tuple[str, dict | None]:
+    if page_end < page_start:
+        return "The last page must be greater than or equal to the first page.", None
+    chat_id = _current_chat_id.get()
+    if not chat_id or is_stop_requested(chat_id):
+        return "An active Word or WPS chat is required to view document pages.", None
+
+    request_id = uuid.uuid4()
+    doc_id = _normalize_required_doc_id(docId)
+    writer = get_stream_writer()
+    writer({"type": "status", "content": f"🖼️ 正在检查渲染文档第 {page_start}–{page_end} 页"})
+    writer({
+        "type": "view_document",
+        "requestId": str(request_id),
+        "docId": doc_id,
+        "page_start": page_start,
+        "page_end": page_end,
+        "mode": mode,
+    })
+    response = _wait_for_frontend_mutation(str(request_id), timeout=120)
+    if not response or not response.get("success"):
+        detail = (response or {}).get("error") or "The add-in did not confirm the render."
+        return f"Unable to view document: {detail}", None
+
+    rendered_id = _parse_int_like(response.get("documentId"))
+    if rendered_id is None or (doc_id != 0 and rendered_id != doc_id):
+        return "The editor did not confirm the requested document as the render source.", None
+    images = view_images(request_id, page_start, page_end, mode)
+    if not all(path.is_file() for _, path in images):
+        return "The rendered page images are missing from the temporary directory.", None
+    name = response.get("documentName") or "(unnamed)"
+    result = [
+        f"Rendered {name} (documentId={rendered_id}), pages {page_start}–{page_end}, at "
+        f"{RENDER_DPI} DPI ({mode}). Saved PNG files:"
+    ]
+    result.extend(f"- {label}: {path.as_posix()}" for label, path in images)
+    return "\n".join(result), {"images": [(label, path.as_posix()) for label, path in images]}
+
+
 # endregion
 
 
@@ -1436,6 +1537,8 @@ __all__ = [
     "build_edit_document",
     "build_insert_break",
     "build_create_document",
+    "copy_document",
+    "view_document",
     # 内部实现也导出，便于子智能体或测试直接复用
     "_read_document_impl",
     "_generate_document_impl",

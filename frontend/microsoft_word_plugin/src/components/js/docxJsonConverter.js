@@ -4131,6 +4131,63 @@ async function deleteDocxPara(startParaID, endParaID = null) {
   }
 }
 
+async function copyDocxRange(startParaID, endParaID, insertID, isCurrent) {
+  const startID = normalizeParaID(startParaID);
+  const endID = normalizeParaID(endParaID);
+  const anchorID = normalizeParaID(insertID);
+  return Word.run(async (context) => {
+    const body = context.document.body;
+    const paragraphs = body.paragraphs;
+    const tables = body.tables;
+    paragraphs.load('items/uniqueLocalId');
+    tables.load('items');
+    await context.sync();
+    const ids = await resolveParagraphParaIDs(context, paragraphs.items);
+    const first = ids.indexOf(startID);
+    const last = ids.indexOf(endID);
+    const anchor = anchorID === '0' ? -1 : ids.indexOf(anchorID);
+    if (!startID || !endID || first < 0 || last < first) {
+      throw new Error('源范围的起止段落无效，请重新读取段落 ID。');
+    }
+    if (anchorID !== '0' && (!anchorID || anchor < 0)) throw new Error('未找到目标文档的插入锚点。');
+    if (first <= anchor && anchor < last) throw new Error('插入位置不能位于复制范围内部。');
+
+    const tableRanges = tables.items.map(table => {
+      const range = table.getRange('Whole');
+      const members = range.paragraphs;
+      members.load('items/uniqueLocalId');
+      return { range, members };
+    });
+    if (tableRanges.length) await context.sync();
+    let start = paragraphs.items[first].getRange('Whole');
+    let end = paragraphs.items[last].getRange('Whole');
+    let target = anchor === -1 ? body.getRange('Start') : paragraphs.items[anchor].getRange('After');
+    for (const { range, members } of tableRanges) {
+      const tableIDs = await resolveParagraphParaIDs(context, members.items);
+      const tableStart = ids.indexOf(tableIDs[0]);
+      const tableEnd = ids.indexOf(tableIDs.at(-1));
+      if (tableStart < 0 || tableEnd < tableStart) throw new Error('无法确定表格的完整范围。');
+      if (tableStart <= last && tableEnd >= first) {
+        if (first > tableStart || last < tableEnd) throw new Error('复制范围只覆盖了部分表格，请选择完整表格。');
+        if (first === tableStart) start = range;
+        if (last === tableEnd) end = range;
+      }
+      if (tableStart <= anchor && anchor <= tableEnd) {
+        if (anchor !== tableEnd) throw new Error('插入锚点位于表格内部。');
+        target = range.getRange('After');
+      }
+    }
+    const source = start.expandTo(end).getOoxml();
+    await context.sync();
+    if (!isCurrent()) return false;
+    if (!source.value) throw new Error('无法读取源范围的原生格式。');
+    const { ooxml } = removeWenceParaIDBookmarksFromOoxml(source.value);
+    target.insertOoxml(ooxml, 'Replace');
+    await context.sync();
+    return true;
+  });
+}
+
 async function findParaIndexRangeByParaIDs(startParaID, endParaID = null) {
   const startID = normalizeParaID(startParaID);
   let endID = normalizeParaID(endParaID);
@@ -4232,6 +4289,7 @@ export default {
 };
 
 export {
+  copyDocxRange,
   parseDocxToJSON,
   parseDocxToJSONLightweight,
   generateDocxFromJSON,

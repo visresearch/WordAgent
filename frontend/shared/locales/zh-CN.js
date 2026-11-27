@@ -190,10 +190,27 @@ export default {
       deleteConfirm: '确定要删除这个会话吗？此操作无法撤销。'
     }
   },
+  templates: {
+    title: "文档模板",
+    back: "返回画廊",
+    instructions: "模板使用说明",
+    copy: "复制提示词",
+    copied: "已复制",
+    copyFailed: "无法复制，请选中提示词后手动复制。",
+    create: "从模板新建",
+    creating: "正在新建…",
+    created: "已打开模板副本。",
+    download: "下载文档副本",
+    emptyTitle: "还没有文档模板",
+    emptyHint: "打开一篇已保存的参考文档，在 AI 对话中让格式复刻 Skill 分析并保存为模板。",
+    example: "请使用格式复刻 Skill 分析这份文档，并保存为模板。",
+    loadFailed: "无法加载模板。{error}",
+    createFailed: "无法打开模板副本。{error}",
+  },
   about: {
     name: '文策AI', product: '文策AI', version: '版本号', pluginType: '插件类型', wpsPlugin: 'WPS 文字加载项', wordPlugin: 'Microsoft Word 加载项',
-    developer: '开发者', developerName: '日月星辰', links: '相关链接', repository: 'GitHub 仓库', website: '项目官网',
-    docs: '使用文档', issues: '问题反馈', sponsor: '赞助作者', github: 'GitHub 仓库', unknownVersion: '未知版本'
+    developer: '开发者', developerName: '日月星辰', links: '相关链接', repository: 'GitHub 仓库', docs: '官网文档',
+    qqGroup: 'QQ交流群', issues: '问题反馈', sponsor: '赞助作者', github: 'GitHub 仓库', unknownVersion: '未知版本'
   },
   debug: {
     title: '调试面板', hint: '按 F12 可以打开调试器', parse: '文档内容解析', parseSelection: '解析选中内容',

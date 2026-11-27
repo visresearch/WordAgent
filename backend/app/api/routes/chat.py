@@ -257,7 +257,8 @@ async def chat_websocket(websocket: WebSocket):
                 elif msg_type in {
                     "document_response", "query_response", "create_document_response",
                     "generate_document_response", "edit_document_response", "delete_response",
-                    "insert_break_response",
+                    "insert_break_response", "save_document_template_response", "view_document_response",
+                    "copy_document_response",
                 }:
                     await submit_tool_response(current_socket.chat_id, data)
                 elif msg_type == "frontend_tool_progress":

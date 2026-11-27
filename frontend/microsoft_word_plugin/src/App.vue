@@ -25,6 +25,17 @@
         class="nav-btn"
         :class="{ 'nav-btn-disabled': chatState.aiBusy }"
         :aria-disabled="chatState.aiBusy ? 'true' : 'false'"
+        :title="$t('templates.title')"
+        :aria-label="$t('templates.title')"
+        @click="openDialog('templates')"
+      >
+        <img :src="templatesIcon" width="16" height="16" alt="" />
+      </button>
+      <button
+        type="button"
+        class="nav-btn"
+        :class="{ 'nav-btn-disabled': chatState.aiBusy }"
+        :aria-disabled="chatState.aiBusy ? 'true' : 'false'"
         :title="$t('nav.settings')"
         @click="openDialog('setting')"
       >
@@ -60,12 +71,14 @@
 <script>
 import robotIcon from '../assets/robot.svg';
 import sessionIcon from '../assets/session.svg';
+import templatesIcon from '../../wps_word_plugin/public/images/newFromTemp.svg';
 import settingIcon from '../assets/setting.svg';
 import aboutIcon from '../assets/about.svg';
 import debugIcon from '../assets/debug.svg';
 import { sessionState } from './sessionState.js';
 import { chatState } from './chatState.js';
 import { openOfficeDialog } from './officeDialog.mjs';
+import { createDocumentFromTemplate } from './components/js/templateDocuments.js';
 
 export default {
   name: 'App',
@@ -73,6 +86,7 @@ export default {
     return {
       robotIcon,
       sessionIcon,
+      templatesIcon,
       settingIcon,
       aboutIcon,
       debugIcon,
@@ -96,7 +110,7 @@ export default {
       if (this._navBlocked()) {
         return;
       }
-      openOfficeDialog(view);
+      openOfficeDialog(view, { createDocumentFromTemplate });
     },
     onNavAichat() {
       if (this._navBlocked()) {

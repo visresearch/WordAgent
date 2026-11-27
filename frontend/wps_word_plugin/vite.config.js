@@ -18,6 +18,7 @@ export default defineConfig({
     vue()
   ],
   resolve: {
+    dedupe: ['markdown-it'],
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url))
     }

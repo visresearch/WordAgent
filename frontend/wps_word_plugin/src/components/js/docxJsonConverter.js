@@ -257,7 +257,7 @@ function getParagraphLocationAtPosition(doc, position) {
       if (!Number.isFinite(start) || !Number.isFinite(end)) {
         continue;
       }
-      if (start <= position && position <= end) {
+      if (start <= position && position < end) {
         return getParagraphLocation(doc, paragraph, index - 1);
       }
       if (start <= position) {
@@ -2203,13 +2203,6 @@ function insertImage(doc, img, insertPos, maxWidth) {
  * @returns {number} - 新的位置
  */
 function generateTable(doc, tableData, currentPos, styles, formulas = new Map()) {
-  // 在表格前添加换行
-  if (currentPos > 0) {
-    const range = doc.Range(currentPos, currentPos);
-    range.Text = '\r';
-    currentPos += 1;
-  }
-
   const tableRange = doc.Range(currentPos, currentPos);
   const table = doc.Tables.Add(tableRange, tableData.rows, tableData.columns);
 
@@ -2217,45 +2210,8 @@ function generateTable(doc, tableData, currentPos, styles, formulas = new Map())
     table.Borders.Enable = true;
   } catch (e) {}
 
-  // 设置表格宽度
   try {
-    let pageWidth = 425;
-    try {
-      const pageSetup = doc.PageSetup;
-      pageWidth = pageSetup.PageWidth - pageSetup.LeftMargin - pageSetup.RightMargin;
-    } catch (e) {}
-
     table.AutoFitBehavior(0);
-    try {
-      table.PreferredWidthType = 3;
-      table.PreferredWidth = pageWidth;
-    } catch (e) {}
-
-    // 使用原始列宽（如果有），否则平均分配
-    if (tableData.columnWidths && tableData.columnWidths.length === tableData.columns) {
-      for (let c = 0; c < tableData.columns; c++) {
-        try {
-          if (tableData.columnWidths[c] > 0) {
-            const column = table.Columns.Item(c + 1);
-            column.PreferredWidthType = 3;
-            column.PreferredWidth = tableData.columnWidths[c];
-            column.Width = tableData.columnWidths[c];
-          }
-        } catch (e) {}
-      }
-    } else {
-      const avgWidth = pageWidth / tableData.columns;
-      for (let c = 0; c < tableData.columns; c++) {
-        try {
-          const column = table.Columns.Item(c + 1);
-          column.PreferredWidthType = 3;
-          column.PreferredWidth = avgWidth;
-          column.Width = avgWidth;
-        } catch (e) {}
-      }
-    }
-
-    // 表格对齐
     const tStyle = resolveStyle(styles, tableData.tStyle, ['center']);
     table.Rows.Alignment = getTableAlignmentValue(tStyle[0] ?? 'center');
   } catch (e) {}
@@ -2444,6 +2400,28 @@ function generateTable(doc, tableData, currentPos, styles, formulas = new Map())
     }
   }
 
+  // Use the supplied grid's total as the preferred width. Apply it after
+  // filling cells and while all native grid columns are still addressable.
+  const usableWidth = getDocumentUsableWidth(doc);
+  const widths = tableData.columnWidths?.length === tableData.columns
+    ? tableData.columnWidths.map(parsePositiveNumber)
+    : Array(tableData.columns).fill(usableWidth / tableData.columns);
+  try {
+    table.PreferredWidthType = 3;
+    table.PreferredWidth = widths.every(width => width > 0)
+      ? widths.reduce((total, width) => total + width, 0)
+      : usableWidth;
+  } catch (e) {}
+  for (const [index, width] of widths.entries()) {
+    if (width === null) continue;
+    try {
+      const column = table.Columns.Item(index + 1);
+      column.PreferredWidthType = 3;
+      column.PreferredWidth = width;
+      column.Width = width;
+    } catch (e) {}
+  }
+
   // 收集并执行合并
   const mergeTasks = [];
   for (let row = 0; row < tableData.cells.length; row++) {
@@ -2602,6 +2580,11 @@ function generateDocxFromJSON(jsonData, doc, insertParaID) {
     }
 
     const insertStartPos = currentPos;  // 记录插入起始位置
+    const originalEnd = doc.Content.End;
+    // When inserting before an unused final paragraph mark, let the final
+    // generated paragraph own that mark rather than leaving a blank behind.
+    const reuseFinalMark = originalEnd - currentPos === 1 &&
+      doc.Range(currentPos, originalEnd).Text === '\r';
     if (formulas.size) formulaInsertion = { start: insertStartPos, endBefore: doc.Content.End };
     const insertedParagraphStyles = [];
     const docUsableWidth = getDocumentUsableWidth(doc);
@@ -2611,6 +2594,7 @@ function generateDocxFromJSON(jsonData, doc, insertParaID) {
 
       if (element.type === 'paragraph') {
         const para = element.data;
+        const insertMark = i < processedElements.length - 1 || !reuseFinalMark;
 
         // 获取段落样式
         const pStyle = resolveStyle(styles, para.pStyle, DEFAULT_PSTYLE);
@@ -2620,9 +2604,11 @@ function generateDocxFromJSON(jsonData, doc, insertParaID) {
         // 处理空段落
         if (isEmptyParagraph(para)) {
           const paraStartPos = currentPos;
-          const range = doc.Range(currentPos, currentPos);
-          range.Text = '\r';
-          currentPos += 1;
+          if (insertMark) {
+            const range = doc.Range(currentPos, currentPos);
+            range.Text = '\r';
+            currentPos += 1;
+          }
           insertedParagraphStyles.push({ position: paraStartPos, pStyle: [...pStyle] });
           continue;
         }
@@ -2723,47 +2709,35 @@ function generateDocxFromJSON(jsonData, doc, insertParaID) {
         insertedParagraphStyles.push({ position: paraStartPos, pStyle: [...pStyle] });
 
         // 先建立段落边界，再设置段落格式。
-        if (i < processedElements.length - 1) {
-          const nextElement = processedElements[i + 1];
-          if (nextElement && nextElement.type !== 'table') {
-            const range = doc.Range(currentPos, currentPos);
-            range.Text = '\r';
-            currentPos += 1;
-          }
+        if (insertMark) {
+          const range = doc.Range(currentPos, currentPos);
+          range.Text = '\r';
+          currentPos += 1;
         }
       } else if (element.type === 'table') {
         currentPos = generateTable(doc, element.data, currentPos, styles, formulas);
-
-        // 表格后换行
         if (i < processedElements.length - 1) {
-          let hasContentAfter = false;
-          for (let j = i + 1; j < processedElements.length; j++) {
-            const nextEl = processedElements[j];
-            if (
-              nextEl.type === 'table' ||
-              (nextEl.type === 'paragraph' &&
-                !isEmptyParagraph(nextEl.data) &&
-                nextEl.data.runs &&
-                nextEl.data.runs.length > 0)
-            ) {
-              hasContentAfter = true;
-              break;
+          // Some WPS versions resolve a collapsed range at the table end
+          // to its final cell. Use the next body paragraph on those hosts.
+          const probe = doc.Range(currentPos, currentPos);
+          let inTable = false;
+          try {
+            inTable = [true, 1, -1].includes(probe.Information?.(12)); // wdWithInTable
+          } catch (e) {}
+          if (inTable) {
+            let nextParagraph = null;
+            for (let index = 1; index <= doc.Paragraphs.Count; index++) {
+              const range = doc.Paragraphs.Item(index).Range;
+              if (range.Start >= currentPos) {
+                if (!range.Tables?.Count) nextParagraph = range.Start;
+                break;
+              }
             }
-          }
-          if (hasContentAfter) {
-            const range = doc.Range(currentPos, currentPos);
-            range.Text = '\r';
-            currentPos += 1;
+            if (nextParagraph === null) throw new Error('无法定位表格后的段落');
+            currentPos = nextParagraph;
           }
         }
       }
-    }
-
-    // 在AI生成内容末尾追加段落分隔符，防止原文档内容黏连到AI最后一段
-    if (processedElements.length > 0) {
-      const trailingRange = doc.Range(currentPos, currentPos);
-      trailingRange.Text = '\r';
-      currentPos += 1;
     }
 
     // 段落结束符均已落定后应用 pStyle。尤其是向已有修订内容后继续
@@ -2774,7 +2748,9 @@ function generateDocxFromJSON(jsonData, doc, insertParaID) {
 
     const lastParagraph = getParagraphLocationAtPosition(
       doc,
-      Math.max(insertStartPos, currentPos - 1)
+      processedElements.at(-1)?.type === 'paragraph'
+        ? insertedParagraphStyles.at(-1).position
+        : Math.max(insertStartPos, currentPos - 1)
     );
 
     revealInsertedRange(doc, insertStartPos, currentPos);

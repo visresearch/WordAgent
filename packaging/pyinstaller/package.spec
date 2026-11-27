@@ -135,6 +135,7 @@ hiddenimports = [
     "PySide6",
     "PySide6.QtCore",
     "PySide6.QtGui",
+    "PySide6.QtPdf",
     "PySide6.QtWidgets",
     "PySide6.QtWebEngineCore",
     "PySide6.QtWebEngineWidgets",

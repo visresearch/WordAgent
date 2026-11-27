@@ -44,6 +44,8 @@ from .document_tools import (
     build_generate_document,
     build_read_document,
     build_search_document,
+    copy_document,
+    view_document,
 )
 from .file_tools import build_edit_file, build_list_file, build_read_file
 from .mcp_tools import build_mcp_tools_prompt, load_mcp_tools
@@ -102,6 +104,8 @@ __all__ = [
     "build_edit_document",
     "build_insert_break",
     "build_create_document",
+    "copy_document",
+    "view_document",
     "build_list_file",
     "build_read_file",
     "build_edit_file",

@@ -5,7 +5,7 @@ description: Replicate formatting from a reference Word document in a target whi
 
 # Document Format Replication
 
-Use a clone-first workflow. Treat the exact DocxJSON returned by `read_document(mode="full")` as the source of truth. Copy existing paragraph, run, table, image, and style structures directly; do not recreate formatting from a verbal summary when an exact exemplar is available.
+Use a native range copy when transferring existing editable content. Use a native template-file copy when the output must also inherit document-wide settings. Use the exact DocxJSON returned by `read_document(mode="full")` when a block needs to be rebuilt, and preserve its paragraph, run, table, image, and style structures.
 
 ## Trigger and non-negotiable fidelity
 
@@ -34,11 +34,15 @@ Use document metadata and the user's wording to resolve identities. Ask one conc
 
 Do not confuse the format reference with the content source. Copy fixed template material from the format reference verbatim, including institution names, cover labels, declarations, required headings, field labels, punctuation, intentional blank paragraphs, and table shells. Replace only fields that are meant to vary, such as thesis title, author, student number, major, supervisor, date, and body text.
 
-For strict replication, prefer a copy of the format reference as the target. This preserves page size, margins, sections, headers, footers, page numbering, and other page-level settings. A blank target can reproduce the structures supported by `generate_document`, but page-level settings still require a template copy or manual verification.
+To transfer an unchanged portion, find its inclusive source paragraph IDs and call `copy_document` with those IDs, the target document ID, and the target insertion anchor. Create a target first if needed. A native template-file copy is appropriate when document-wide settings such as page setup and headers must carry over. Use `generate_document` when the content needs to be rebuilt or rewritten.
 
-## 1. Analyze the reference
+## 1. Analyze and archive the reference
 
 Resolve document names to exact `docId` values from document metadata. Call `read_document` with `mode="full"` on the format reference. Read the complete cover block first, then other components in ordered chunks of no more than 50 paragraphs. Never use lightweight mode for a block that will be cloned.
+
+When creating a reusable template, call `save_document_template` after analyzing the open reference. Use the reference's exact `docId`, a recognizable name, and a self-contained Markdown guide in the user's language. Include the section order, layout, style rules, fixed text, replaceable fields, and verification checks. The tool stores the original Word file and its full DocxJSON alongside the instructions in the template gallery. When reading an existing gallery entry or editing a copy made from it, reuse its saved instructions. If archiving fails, report the reason and only claim success after the tool confirms it.
+
+If the reference is only attached or otherwise unavailable in the editor, ask the user to open that reference before archiving. In WPS, use a saved local DOC or DOCX as the reference.
 
 For every block, retain the returned objects as direct exemplars:
 
@@ -100,7 +104,7 @@ The cover is a literal-cloning task:
 2. Copy every paragraph, blank line, run, image, table, and referenced style in the same order.
 3. Keep fixed labels and institutional wording verbatim.
 4. Replace only supplied variable fields. If a required field value is missing, keep the template placeholder or ask the user; never delete the field or redesign the cover.
-5. Generate the cover as its own block.
+5. Copy the cover as its own range into the target. Use `insertID=0` when it belongs at the beginning.
 6. Re-read the generated cover in full mode and compare its structures and style arrays with the source cover. Repair any mismatch before continuing.
 
 ### Template-copy target
@@ -123,6 +127,8 @@ Use the content source only for the new thesis subject matter. Fixed text from t
 ## 4. Validate the result
 
 After each major block, re-read the target with `mode="full"`. Compare returned structures directly with the corresponding reference block, not against visual intuition or a prose style summary.
+
+When appearance matters, render the reference and target with `view_document` and check the reported document identities before comparing the images.
 
 Check at minimum:
 

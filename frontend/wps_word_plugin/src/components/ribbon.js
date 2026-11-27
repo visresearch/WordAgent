@@ -101,13 +101,15 @@ function OnAction(control) {
         }
       }
       break;
+    case 'btnShowTemplates':
     case 'btnShowSetting':
       {
         const windowId = getActiveWindowId();
-        // 使用 WPS 原生对话框显示设置界面
+        const templates = eleId === 'btnShowTemplates';
+        const route = templates ? 'templates' : 'setting';
         window.Application.ShowDialog(
-          Util.GetUrlPath() + Util.GetRouterHash() + `/setting?windowId=${windowId}`,
-          t('windows.settings'),
+          Util.GetUrlPath() + Util.GetRouterHash() + `/${route}?windowId=${windowId}`,
+          t(templates ? 'templates.title' : 'windows.settings'),
           900 * window.devicePixelRatio,
           600 * window.devicePixelRatio,
           false
@@ -148,6 +150,8 @@ function GetImage(control) {
       return 'images/robot.svg';
     case 'btnShowSession':
       return 'images/session.svg';
+    case 'btnShowTemplates':
+      return 'images/newFromTemp.svg';
     case 'btnShowSetting':
       return 'images/setting.svg';
     case 'btnShowAbout':

@@ -230,6 +230,9 @@ const DOCUMENT_TOOL_RESPONSES = {
   delete_document: 'delete_response',
   insert_break: 'insert_break_response',
   create_document: 'create_document_response',
+  save_document_template: 'save_document_template_response',
+  view_document: 'view_document_response',
+  copy_document: 'copy_document_response',
   json: 'generate_document_response'
 };
 

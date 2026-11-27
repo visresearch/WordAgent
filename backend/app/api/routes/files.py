@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from app.core.config import get_upload_dir, get_wence_project_dir
+from app.services.document_view import MAX_PDF_BYTES, ViewMode, render_document_view
 from app.services.image_storage import MAX_IMAGE_BYTES, save_image_bytes
 
 router = APIRouter()
@@ -114,6 +115,23 @@ async def save_document_image(file: UploadFile = File(...)):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"url": str(path), "project_path": f"temp/{path.name}", "saved": True}
+
+
+@router.post("/document-view/{request_id}")
+async def save_document_view(
+    request_id: uuid.UUID,
+    page_start: int = Query(ge=1),
+    page_end: int = Query(ge=1),
+    mode: ViewMode = Query(),
+    file: UploadFile = File(),
+):
+    """Rasterize the editor's PDF snapshot. Only the generated PNGs are retained."""
+    pdf = await file.read(MAX_PDF_BYTES + 1)
+    try:
+        await asyncio.to_thread(render_document_view, pdf, request_id, page_start, page_end, mode)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"success": True}
 
 
 @router.post("/upload", response_model=UploadResponse)

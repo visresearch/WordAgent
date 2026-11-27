@@ -175,10 +175,27 @@ export default {
       deleteConfirm: '이 대화를 삭제하시겠습니까? 이 작업은 취소할 수 없습니다.'
     }
   },
+  templates: {
+    title: "문서 템플릿",
+    back: "갤러리로 돌아가기",
+    instructions: "템플릿 사용 안내",
+    copy: "프롬프트 복사",
+    copied: "복사됨",
+    copyFailed: "프롬프트를 선택하고 직접 복사하세요.",
+    create: "템플릿으로 새 문서 만들기",
+    creating: "만드는 중…",
+    created: "템플릿 복사본을 열었습니다.",
+    download: "복사본 다운로드",
+    emptyTitle: "템플릿이 없습니다",
+    emptyHint: "저장된 참고 문서를 열고 AI 채팅에서 서식 복제 스킬을 사용해 템플릿으로 저장하세요.",
+    example: "서식 복제 스킬로 이 문서를 분석하고 템플릿으로 저장해 주세요.",
+    loadFailed: "템플릿을 불러올 수 없습니다. {error}",
+    createFailed: "템플릿 복사본을 열 수 없습니다. {error}",
+  },
   about: {
     name: '文策AI', product: '文策AI', version: 'Version', pluginType: 'Add-in type', wpsPlugin: 'WPS Writer add-in', wordPlugin: 'Microsoft Word add-in',
-    developer: 'Developer', developerName: 'Riyue Xingchen', links: 'Links', repository: 'GitHub repository', website: 'Project website',
-    docs: 'Documentation', issues: 'Report an issue', sponsor: 'Sponsor the author', github: 'GitHub repository', unknownVersion: 'Unknown version'
+    developer: 'Developer', developerName: 'Riyue Xingchen', links: 'Links', repository: 'GitHub repository', docs: '공식 문서',
+    qqGroup: 'QQ 커뮤니티 그룹', issues: 'Report an issue', sponsor: 'Sponsor the author', github: 'GitHub repository', unknownVersion: 'Unknown version'
   },
   debug: {
     title: '디버그 패널', hint: '개발자 도구를 열려면 F12를 누르세요', parse: '문서 내용 파싱', parseSelection: '선택 파싱',

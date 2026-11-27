@@ -1,4 +1,6 @@
 import { createRouter, createWebHashHistory } from 'vue-router';
+import api from '../components/js/api.js';
+import { createDocumentFromTemplate } from '../components/js/templateDocuments.js';
 
 const router = createRouter({
   history: createWebHashHistory(''),
@@ -12,6 +14,12 @@ const router = createRouter({
       path: '/aichat',
       name: 'AI对话',
       component: () => import('../components/chat/AIChatPane.vue')
+    },
+    {
+      path: '/templates',
+      name: '文档模板',
+      component: () => import('../../../shared/TemplatesPane.vue'),
+      props: () => ({ baseUrl: api.getConfig().baseURL, createDocument: createDocumentFromTemplate })
     },
     {
       path: '/setting',

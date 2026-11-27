@@ -2,6 +2,11 @@
 
 ## [v0.6.5]
 
+### Added
+- 支持理解和生成word公式
+- 添加视觉辅助工具view_document和复制文档工具copy_document
+- 添加提取和使用文档模版功能
+
 ### Fixed
 - 修复[wps的ribbon.js重复创建窗口](https://github.com/visresearch/WordAgent/issues/8)的bug
 - 修复mcp-server有多个加载项侧栏连接报错的bug

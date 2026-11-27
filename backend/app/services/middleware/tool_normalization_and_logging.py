@@ -13,6 +13,7 @@ from app.services.utils import normalize_tool_args
 
 _BUILTIN_TOOL_NAMES = {
     "ask_user",
+    "copy_document",
     "create_document",
     "delete_document",
     "edit_document",
@@ -26,6 +27,7 @@ _BUILTIN_TOOL_NAMES = {
     "read_file",
     "run_sub_agent",
     "search_document",
+    "view_document",
     "write_todos",
 }
 

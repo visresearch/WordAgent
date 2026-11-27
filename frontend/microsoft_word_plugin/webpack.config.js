@@ -29,6 +29,7 @@ module.exports = async (env, options) => {
     },
     resolve: {
       extensions: [".js", ".mjs", ".vue", ".json", ".html"],
+      modules: ["node_modules", require("path").resolve(__dirname, "node_modules")],
       alias: {
         "@": require("path").resolve(__dirname, "src"),
       },

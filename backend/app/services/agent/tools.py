@@ -38,6 +38,7 @@ from app.services.tools import (
     build_search_document,
     cleanup_tool_request,
     clear_stop,
+    copy_document,
     create_tool_request,
     is_stop_requested,
     # MCP
@@ -47,9 +48,11 @@ from app.services.tools import (
     unregister_stop_event,
     request_stop,
     submit_tool_response,
+    view_document,
     wait_for_tool_response,
 )
 from app.services.tools.prompts import get_tool_description
+from app.services.tools.template_tools import save_document_template
 
 # ---------------------------------------------------------------------------
 # 用本模式的 prompt 装配出工具实例
@@ -80,12 +83,15 @@ edit_file = build_edit_file(get_tool_description("edit_file"))
 AGENT_BASE_TOOLS = [
     ask_user,
     load_skill_context,
+    save_document_template,
     read_document,
+    view_document,
     search_document,
     generate_document,
     delete_document,
     edit_document,
     create_document,
+    copy_document,
     insert_break,
     python_repl,
     list_file,
@@ -96,7 +102,9 @@ AGENT_BASE_TOOLS = [
 ASK_BASE_TOOLS = [
     ask_user,
     load_skill_context,
+    save_document_template,
     read_document,
+    view_document,
     search_document,
     list_file,
     read_file,
@@ -127,14 +135,17 @@ __all__ = [
     "delete_document",
     "edit_document",
     "create_document",
+    "copy_document",
     "insert_break",
     "edit_file",
     "generate_document",
     "list_file",
     "load_skill_context",
+    "save_document_template",
     "python_repl",
     "read_file",
     "read_document",
+    "view_document",
     # "run_sub_agent",  # 单智能体模式暂时停用。
     "search_document",
     # tool sets

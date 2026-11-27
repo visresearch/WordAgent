@@ -100,6 +100,7 @@ function insertionDocument() {
       return {
         Start: start, End: end, Font: {}, Select() {}, Information: () => 1,
         Paragraphs: { Item: () => locate(start) },
+        get Text() { return doc.Content.Text.slice(start, end); },
         set Text(value) {
           const item = locate(start);
           const offset = start - item.Range.Start;
@@ -180,4 +181,16 @@ test('显式 0 在文首插入，字符串段落 ID 在对应段落后插入', (
     assert.equal(result.success, true, result.error);
     assert.equal(paragraphs[id === '1' ? 1 : 0].text, '新增\r');
   }
+});
+
+test('generation into an empty document reuses the final mark for a supplied blank paragraph', () => {
+  const { doc, paragraphs } = insertionDocument();
+  paragraphs.splice(1);
+  paragraphs[0].text = '\r';
+  const result = generateDocxFromJSON({
+    paragraphs: [{ runs: [{ text: '正文' }] }, { runs: [] }]
+  }, doc, 0);
+  assert.equal(result.success, true, result.error);
+  assert.deepEqual(paragraphs.map(item => item.text), ['正文\r', '\r']);
+  assert.equal(result.lastParagraph.paraID, paragraphs[1].ParaID);
 });

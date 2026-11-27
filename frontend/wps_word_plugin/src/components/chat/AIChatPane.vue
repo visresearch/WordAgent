@@ -74,6 +74,9 @@ import {
   settleAllDocumentRevisions
 } from '../js/revisionPreview.js';
 import api, { getDocumentById } from '../js/api.js';
+import { copyDocument } from '../js/documentCopy.js';
+import { renderDocumentView } from '../js/documentView.js';
+import { saveDocumentTemplate } from '../js/templateDocuments.js';
 import ChatMessages from './ChatMessages.vue';
 import ChatInput from './ChatInput.vue';
 import SessionPane from './SessionPane.vue';
@@ -1390,9 +1393,7 @@ export default {
         sessionId: streamSessionId,
         userResponse,
 
-        onMessage: (data) => {
-          this._handleStreamMessage(data, aiMsg, streamSessionId);
-        },
+        onMessage: (data) => this._handleStreamMessage(data, aiMsg, streamSessionId),
 
         onError: (error) => {
           console.error('请求失败:', error);
@@ -1457,6 +1458,33 @@ export default {
      */
     _handleStreamMessage(data, aiMsg, streamSessionId) {
       const msg = aiMsg;
+
+      if (['copy_document', 'save_document_template', 'view_document'].includes(data.type)) {
+        const isCurrent = () => api.wsManager._activeChat?.chatId === data.chatId
+          && !api.wsManager._stopping && !api.wsManager._completeCalled;
+        const capture = {
+          copy_document: copyDocument,
+          save_document_template: saveDocumentTemplate,
+          view_document: renderDocumentView
+        }[data.type];
+        const execute = () => capture(data, isCurrent);
+        const operation = Promise.resolve(execute());
+        return operation.then((result) => {
+          if (data.type === 'copy_document') this._refreshAIRevisionPreview();
+          if (!isCurrent()) return;
+          return api.wsManager.send({
+            type: `${data.type}_response`,
+            chatId: data.chatId,
+            sessionId: data.sessionId,
+            requestId: data.requestId,
+            documentId: result?.documentId,
+            documentName: result?.documentName,
+            lastParagraph: result?.lastParagraph,
+            revisionCount: result?.revisionCount,
+            success: true
+          });
+        });
+      }
 
       if (data.type === 'ask_user') {
         const container = this.currentSessionId === streamSessionId

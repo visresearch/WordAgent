@@ -225,6 +225,9 @@ const DOCUMENT_TOOL_RESPONSES = {
   delete_document: 'delete_response',
   insert_break: 'insert_break_response',
   create_document: 'create_document_response',
+  save_document_template: 'save_document_template_response',
+  view_document: 'view_document_response',
+  copy_document: 'copy_document_response',
   json: 'generate_document_response'
 };
 
@@ -1285,7 +1288,7 @@ function getConfig() {
  * Office.js 通过 Word.Application.createDocument 创建临时文档，
  * 再调用 DocumentCreated.open() 在 Word 中打开它。
  */
-async function createDocument() {
+async function createDocument(base64File) {
   try {
     if (typeof Word === 'undefined' || typeof Word.run !== 'function') {
       throw new Error('Microsoft Word API 不可用');
@@ -1297,7 +1300,7 @@ async function createDocument() {
         throw new Error('当前 Office.js 版本不支持创建新文档');
       }
 
-      const createdDocument = application.createDocument();
+      const createdDocument = base64File ? application.createDocument(base64File) : application.createDocument();
       await context.sync();
       if (!createdDocument || typeof createdDocument.open !== 'function') {
         throw new Error('Word 未返回可打开的新文档对象');

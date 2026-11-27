@@ -16,6 +16,7 @@ _LOCAL_BASE_PROMPT_FILES = [
 _READ_ONLY_TOOL_PROMPT_FILES = [
     "system-prompt-tool-usage-ask-user.md",
     "system-prompt-tool-usage-read-document.md",
+    "system-prompt-tool-usage-view-document.md",
     "system-prompt-tool-usage-search-document.md",
     "system-prompt-tool-usage-load-skill-context.md",
 ]
@@ -33,6 +34,7 @@ _AGENT_DOCUMENT_FOUNDATION_FILES = [
 
 _AGENT_MUTATION_TOOL_PROMPT_FILES = [
     "system-prompt-tool-usage-create-document.md",
+    "system-prompt-tool-usage-copy-document.md",
     "system-prompt-tool-usage-generate-document.md",
     "system-prompt-tool-usage-delete-document.md",
     "system-prompt-tool-usage-edit-document.md",

@@ -189,10 +189,27 @@ export default {
       deleteConfirm: 'Delete this conversation? This action cannot be undone.'
     }
   },
+  templates: {
+    title: "Document templates",
+    back: "Back to gallery",
+    instructions: "Template instructions",
+    copy: "Copy prompt",
+    copied: "Copied",
+    copyFailed: "Select the prompt and copy it manually.",
+    create: "New from template",
+    creating: "Creating…",
+    created: "A template copy is open.",
+    download: "Download a copy",
+    emptyTitle: "No templates yet",
+    emptyHint: "Open a saved reference document and use the format replication Skill in AI chat to save it as a template.",
+    example: "Use the format replication Skill to analyze this document and save it as a template.",
+    loadFailed: "Could not load the template. {error}",
+    createFailed: "Could not open the template copy. {error}",
+  },
   about: {
     name: '文策AI', product: '文策AI', version: 'Version', pluginType: 'Add-in type', wpsPlugin: 'WPS Writer add-in', wordPlugin: 'Microsoft Word add-in',
-    developer: 'Developer', developerName: 'Riyue Xingchen', links: 'Links', repository: 'GitHub repository', website: 'Project website',
-    docs: 'Documentation', issues: 'Report an issue', sponsor: 'Sponsor the author', github: 'GitHub repository', unknownVersion: 'Unknown version'
+    developer: 'Developer', developerName: 'Riyue Xingchen', links: 'Links', repository: 'GitHub repository', docs: 'Official documentation',
+    qqGroup: 'QQ discussion group', issues: 'Report an issue', sponsor: 'Sponsor the author', github: 'GitHub repository', unknownVersion: 'Unknown version'
   },
   debug: {
     title: 'Debug panel', hint: 'Press F12 to open developer tools', parse: 'Parse document content', parseSelection: 'Parse selection',

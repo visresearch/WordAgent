@@ -82,6 +82,9 @@ import {
   settleDocumentRevisions
 } from '../js/revisionPreview.mjs';
 import api from '../js/api.js';
+import { copyDocument } from '../js/documentCopy.js';
+import { renderDocumentView } from '../js/documentView.js';
+import { saveDocumentTemplate } from '../js/templateDocuments.js';
 import ChatMessages from './ChatMessages.vue';
 import ChatInput from './ChatInput.vue';
 import SessionPane from './SessionPane.vue';
@@ -1103,6 +1106,33 @@ export default {
       if (msg._streamStopped) return;
       if (['read_document', 'search_document', 'edit_document', 'delete_document', 'insert_break', 'json'].includes(data.type)) {
         assertRevisionDocumentTarget(data.docId);
+      }
+
+      if (['copy_document', 'save_document_template', 'view_document'].includes(data.type)) {
+        const isCurrent = () => !msg._streamStopped;
+        const capture = {
+          copy_document: copyDocument,
+          save_document_template: saveDocumentTemplate,
+          view_document: renderDocumentView
+        }[data.type];
+        const execute = () => capture(data, isCurrent);
+        const operation = data.type === 'copy_document' ? this._insertQueue.then(execute) : execute();
+        if (data.type === 'copy_document') this._insertQueue = operation.catch(() => {});
+        return operation.then((result) => {
+          if (data.type === 'copy_document') this._refreshRevisionPreview();
+          if (!isCurrent()) return;
+          return api.wsManager.send({
+            type: `${data.type}_response`,
+            chatId: data.chatId,
+            sessionId: data.sessionId,
+            requestId: data.requestId,
+            documentId: result?.documentId,
+            documentName: result?.documentName,
+            lastParagraph: result?.lastParagraph,
+            revisionCount: result?.revisionCount,
+            success: true
+          });
+        });
       }
 
       if (data.type === 'ask_user') {

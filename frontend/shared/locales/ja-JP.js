@@ -175,10 +175,27 @@ export default {
       deleteConfirm: 'この会話を削除しますか？ この操作は取り消せません。'
     }
   },
+  templates: {
+    title: "文書テンプレート",
+    back: "ギャラリーに戻る",
+    instructions: "テンプレートの使い方",
+    copy: "プロンプトをコピー",
+    copied: "コピーしました",
+    copyFailed: "プロンプトを選択して手動でコピーしてください。",
+    create: "テンプレートから作成",
+    creating: "作成中…",
+    created: "テンプレートのコピーを開きました。",
+    download: "コピーをダウンロード",
+    emptyTitle: "テンプレートがありません",
+    emptyHint: "保存済みの参考文書を開き、AI チャットで書式複製スキルを使ってテンプレートとして保存します。",
+    example: "書式複製スキルでこの文書を分析し、テンプレートとして保存してください。",
+    loadFailed: "テンプレートを読み込めませんでした。{error}",
+    createFailed: "テンプレートのコピーを開けませんでした。{error}",
+  },
   about: {
     name: '文策AI', product: '文策AI', version: 'Version', pluginType: 'Add-in type', wpsPlugin: 'WPS Writer add-in', wordPlugin: 'Microsoft Word add-in',
-    developer: 'Developer', developerName: 'Riyue Xingchen', links: 'Links', repository: 'GitHub repository', website: 'Project website',
-    docs: 'Documentation', issues: 'Report an issue', sponsor: 'Sponsor the author', github: 'GitHub repository', unknownVersion: 'Unknown version'
+    developer: 'Developer', developerName: 'Riyue Xingchen', links: 'Links', repository: 'GitHub repository', docs: '公式ドキュメント',
+    qqGroup: 'QQ交流グループ', issues: 'Report an issue', sponsor: 'Sponsor the author', github: 'GitHub repository', unknownVersion: 'Unknown version'
   },
   debug: {
     title: 'デバッグパネル', hint: '開発者ツールを開くにはF12を押す', parse: 'ドキュメント内容を解析', parseSelection: '選択を解析',
